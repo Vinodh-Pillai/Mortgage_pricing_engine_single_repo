@@ -1,0 +1,78 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: wcpe-dev
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: scenario-service-config
+  namespace: wcpe-dev
+data:
+  SPRING_DATASOURCE_URL: jdbc:postgresql://catalog-postgres.wcpe-dev.svc.cluster.local:5432/catalog
+  SPRING_DATASOURCE_USERNAME: catalog_app
+  SERVER_PORT: "8081"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scenario-service
+  namespace: wcpe-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: scenario-service
+  template:
+    metadata:
+      labels:
+        app: scenario-service
+    spec:
+      containers:
+        - name: scenario-service
+          image: 192.168.4.93:5000/scenario-service:0.1.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8081
+          envFrom:
+            - configMapRef:
+                name: scenario-service-config
+          env:
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: catalog-db-secret
+                  key: POSTGRES_PASSWORD
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 40
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 768Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: scenario-service
+  namespace: wcpe-dev
+spec:
+  selector:
+    app: scenario-service
+  ports:
+    - name: http
+      port: 8081
+      targetPort: http

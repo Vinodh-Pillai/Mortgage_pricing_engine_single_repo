@@ -1,0 +1,78 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: wcpe-dev
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: eligibility-service-config
+  namespace: wcpe-dev
+data:
+  SPRING_DATASOURCE_URL: jdbc:postgresql://catalog-postgres.wcpe-dev.svc.cluster.local:5432/catalog
+  SPRING_DATASOURCE_USERNAME: catalog_app
+  SERVER_PORT: "8083"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eligibility-service
+  namespace: wcpe-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: eligibility-service
+  template:
+    metadata:
+      labels:
+        app: eligibility-service
+    spec:
+      containers:
+        - name: eligibility-service
+          image: 192.168.4.93:5000/eligibility-service:0.1.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8083
+          envFrom:
+            - configMapRef:
+                name: eligibility-service-config
+          env:
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: catalog-db-secret
+                  key: POSTGRES_PASSWORD
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 40
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 768Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: eligibility-service
+  namespace: wcpe-dev
+spec:
+  selector:
+    app: eligibility-service
+  ports:
+    - name: http
+      port: 8083
+      targetPort: http

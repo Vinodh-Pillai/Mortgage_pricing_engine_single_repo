@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: catalog-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/catalog}
+    username: ${SPRING_DATASOURCE_USERNAME:catalog_app}
+    password: ${SPRING_DATASOURCE_PASSWORD:catalog_app}
+  flyway:
+    enabled: true
+    schemas: catalog
+    default-schema: catalog
+server:
+  port: 8082
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,info

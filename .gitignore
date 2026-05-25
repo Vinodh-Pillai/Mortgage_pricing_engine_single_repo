@@ -1,0 +1,25 @@
+# Gradle and build outputs
+.gradle/
+**/.gradle/
+build/
+**/build/
+
+# Local agent/runtime artifacts
+.agent-runtime/
+**/.agent-runtime/
+worker-outbox/
+**/worker-outbox/
+
+# IDE/editor files
+.idea/
+.vscode/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp

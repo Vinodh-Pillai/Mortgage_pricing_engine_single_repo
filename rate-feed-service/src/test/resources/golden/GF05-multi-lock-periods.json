@@ -1,0 +1,6 @@
+{
+  "fixtureId": "GF05-multi-lock-periods",
+  "description": "Multiple lock periods should be validated successfully",
+  "csvContent": "note_rate,lock_period,base_price,discount_points,yield_index\n6.50,30,150.00,0.50,6.75\n6.25,30,155.00,0.25,6.50\n6.50,60,145.00,0.60,6.80\n6.25,60,150.00,0.30,6.55\n6.50,90,140.00,0.70,6.85",
+  "expected": { "status": "VALIDATED", "rowCount": 5 }
+}

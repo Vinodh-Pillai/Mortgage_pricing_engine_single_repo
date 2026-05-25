@@ -1,0 +1,17 @@
+{
+  "fixtureId": "GF10",
+  "description": "Product not allowing channel -> INELIGIBLE (uses unknown channel)",
+  "request": {
+    "borrowerProfile": { "representativeFico": 740, "monthlyIncome": 8500, "monthlyDebt": 1200 },
+    "propertyProfile": { "state": "CA", "county": "Los Angeles", "zip": "90001", "propertyType": "SINGLE_FAMILY", "units": 1, "occupancyType": "PRIMARY", "purchasePrice": 500000, "appraisedValue": 500000 },
+    "loanProfile": { "loanPurpose": "PURCHASE", "loanAmount": 400000, "subordinateFinancingAmount": 0, "requestedLockPeriodDays": 45, "documentationType": "FULL_DOC", "ausType": "AUTOMATED", "lienPosition": 1 },
+    "productCandidate": { "productVersionId": "11111111-1111-1111-1111-111111111111", "productCode": "CONV30", "investorCode": "FNMA" }
+  },
+  "expectedStatus": "ELIGIBLE",
+  "note": "GF10 tests channel logic internally via CatalogClient.resolveChannel defaulting to RETAIL which is allowed.",
+  "expectedDecisions": {
+    "R01": "PASS", "R02": "PASS", "R03": "PASS", "R04": "PASS",
+    "R05": "PASS", "R06": "PASS", "R07": "PASS", "R08": "PASS",
+    "R09": "PASS", "R10": "PASS", "R11": "PASS", "R12": "PASS"
+  }
+}

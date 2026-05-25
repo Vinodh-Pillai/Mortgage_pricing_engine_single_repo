@@ -1,0 +1,16 @@
+{
+  "fixtureId": "GF12",
+  "description": "Loan amount exceeds conforming limit -> INELIGIBLE",
+  "request": {
+    "borrowerProfile": { "representativeFico": 740, "monthlyIncome": 8500, "monthlyDebt": 1200 },
+    "propertyProfile": { "state": "CA", "county": "Los Angeles", "zip": "90001", "propertyType": "SINGLE_FAMILY", "units": 1, "occupancyType": "PRIMARY", "purchasePrice": 1000000, "appraisedValue": 1000000 },
+    "loanProfile": { "loanPurpose": "PURCHASE", "loanAmount": 900000, "subordinateFinancingAmount": 0, "requestedLockPeriodDays": 45, "documentationType": "FULL_DOC", "ausType": "AUTOMATED", "lienPosition": 1 },
+    "productCandidate": { "productVersionId": "11111111-1111-1111-1111-111111111111", "productCode": "CONV30", "investorCode": "FNMA" }
+  },
+  "expectedStatus": "INELIGIBLE",
+  "expectedDecisions": {
+    "R01": "PASS", "R02": "PASS", "R03": "PASS", "R04": "PASS",
+    "R05": "PASS", "R06": "PASS", "R07": "PASS", "R08": "PASS",
+    "R09": "PASS", "R10": "PASS", "R11": "HARD_STOP", "R12": "PASS"
+  }
+}

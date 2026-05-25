@@ -1,0 +1,6 @@
+{
+  "fixtureId": "GF06-empty-file",
+  "description": "Zero data rows should be rejected",
+  "csvContent": "note_rate,lock_period,base_price,discount_points,yield_index",
+  "expected": { "status": "REJECTED", "rowCount": 0 }
+}

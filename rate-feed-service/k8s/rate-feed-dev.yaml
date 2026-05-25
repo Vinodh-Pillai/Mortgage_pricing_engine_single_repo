@@ -1,0 +1,203 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: wcpe-dev
+  labels:
+    app.kubernetes.io/part-of: world-class-pricing-engine
+    environment: dev
+  annotations:
+    wcpe.codefactory/deployment-policy: "blocked-without-explicit-non-prod-approval"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rate-feed-service-config
+  namespace: wcpe-dev
+data:
+  SPRING_PROFILES_ACTIVE: dev
+  SERVER_PORT: "8080"
+  MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info,prometheus
+  WCPE_SYNTHETIC_ONLY: "true"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rate-feed-postgres-dev-secret
+  namespace: wcpe-dev
+  annotations:
+    wcpe.codefactory/placeholder-secret: "true"
+    wcpe.codefactory/deployable-in-shared-dev: "false"
+    wcpe.codefactory/required-secret-flow: "external-secret-or-approved-non-prod-secret-injection"
+type: Opaque
+stringData:
+  POSTGRES_DB: rate_feed_dev
+  POSTGRES_USER: rate_feed_dev
+  POSTGRES_PASSWORD: synthetic-dev-password-change-me
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rate-feed-postgres-data
+  namespace: wcpe-dev
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rate-feed-postgres
+  namespace: wcpe-dev
+spec:
+  serviceName: rate-feed-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rate-feed-postgres
+  template:
+    metadata:
+      labels:
+        app: rate-feed-postgres
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          envFrom:
+            - secretRef:
+                name: rate-feed-postgres-dev-secret
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "rate_feed_dev"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: rate-feed-postgres-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rate-feed-postgres
+  namespace: wcpe-dev
+spec:
+  selector:
+    app: rate-feed-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rate-feed-service
+  namespace: wcpe-dev
+  labels:
+    app: rate-feed-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rate-feed-service
+  template:
+    metadata:
+      labels:
+        app: rate-feed-service
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: rate-feed-service
+          image: rate-feed-service:0.1.0-local
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: rate-feed-service-config
+          env:
+            - name: WCPE_AUTH_TRUSTED_DIRECT_HEADERS_ENABLED
+              value: "false"
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:postgresql://rate-feed-postgres.wcpe-dev.svc.cluster.local:5432/rate_feed_dev
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: rate-feed-postgres-dev-secret
+                  key: POSTGRES_USER
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rate-feed-postgres-dev-secret
+                  key: POSTGRES_PASSWORD
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            initialDelaySeconds: 40
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: 750m
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rate-feed-service
+  namespace: wcpe-dev
+spec:
+  type: ClusterIP
+  selector:
+    app: rate-feed-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

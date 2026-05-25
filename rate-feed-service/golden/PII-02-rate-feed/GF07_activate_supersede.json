@@ -1,0 +1,86 @@
+{
+  "fixtureId": "GF07_activate_supersede",
+  "description": "Simulate sequence: ingest sheet v1 -> activate -> ingest sheet v2 -> activate. v2 SUPERSEDES v1; v1 remains queryable for historical replay.",
+  "sequence": [
+    {
+      "step": 1,
+      "action": "ingest_sheet",
+      "sheetVersion": 1,
+      "parameters": {
+        "investorCode": "12345678-0000-0000-0000-000000000001",
+        "channelCode": "12345678-0000-0000-0000-000000000002",
+        "productCode": "MORTGAGE-30YR",
+        "effectiveAt": "2025-01-01T00:00:00Z",
+        "effectiveUntil": null
+      },
+      "expectedStatus": "PARSING"
+    },
+    {
+      "step": 2,
+      "action": "activate",
+      "sheetVersion": 1,
+      "parameters": {
+        "actor": "test-activator",
+        "correlationId": "gf07-step2"
+      },
+      "expectedStatus": "ACTIVE",
+      "expectedSupersededVersion": null,
+      "expectedSupersededSheetId": null
+    },
+    {
+      "step": 3,
+      "action": "ingest_sheet",
+      "sheetVersion": 2,
+      "parameters": {
+        "investorCode": "12345678-0000-0000-0000-000000000001",
+        "channelCode": "12345678-0000-0000-0000-000000000002",
+        "productCode": "MORTGAGE-30YR",
+        "effectiveAt": "2025-06-01T00:00:00Z",
+        "effectiveUntil": null
+      },
+      "expectedStatus": "PARSING"
+    },
+    {
+      "step": 4,
+      "action": "activate",
+      "sheetVersion": 2,
+      "parameters": {
+        "actor": "test-activator",
+        "correlationId": "gf07-step4"
+      },
+      "expectedStatus": "ACTIVE",
+      "expectedSupersededVersion": 1,
+      "expectedSupersededSheetId": "<sheetId-v1>"
+    }
+  ],
+  "expectedFinalState": {
+    "version1": {
+      "status": "SUPERSEDED",
+      "queryable": true,
+      "queryMethod": "rate_sheet_versions table",
+      "effectiveAt": "2025-01-01T00:00:00Z"
+    },
+    "version2": {
+      "status": "ACTIVE",
+      "queryable": true,
+      "effectiveAt": "2025-06-01T00:00:00Z"
+    }
+  },
+  "validationRules": [
+    "After step 4, v1 status MUST be SUPERSEDED",
+    "After step 4, v2 status MUST be ACTIVE",
+    "v1 MUST remain queryable for historical replay via asOfDate in its effective window",
+    "Resolution at 2025-03-01T00:00:00Z returns v1",
+    "Resolution at 2025-07-01T00:00:00Z returns v2"
+  ],
+  "pricePoints_v1": [
+    { "noteRate": 6.500, "lockPeriod": 30, "basePrice": 100.0, "discountPoints": 0, "yieldIndex": 205.0 },
+    { "noteRate": 7.000, "lockPeriod": 30, "basePrice": 102.0, "discountPoints": 0, "yieldIndex": 210.0 },
+    { "noteRate": 7.500, "lockPeriod": 30, "basePrice": 104.0, "discountPoints": 0, "yieldIndex": 215.0 }
+  ],
+  "pricePoints_v2": [
+    { "noteRate": 6.250, "lockPeriod": 30, "basePrice": 98.0, "discountPoints": 0, "yieldIndex": 203.0 },
+    { "noteRate": 6.750, "lockPeriod": 30, "basePrice": 100.0, "discountPoints": 0, "yieldIndex": 208.0 },
+    { "noteRate": 7.250, "lockPeriod": 30, "basePrice": 102.0, "discountPoints": 0, "yieldIndex": 213.0 }
+  ]
+}

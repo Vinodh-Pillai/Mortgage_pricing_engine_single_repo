@@ -1,0 +1,16 @@
+{
+  "fixtureId": "GF14",
+  "description": "Condo eligible -> ELIGIBLE",
+  "request": {
+    "borrowerProfile": { "representativeFico": 760, "monthlyIncome": 10000, "monthlyDebt": 2000 },
+    "propertyProfile": { "state": "NY", "county": "New York", "zip": "10001", "propertyType": "CONDO", "units": 1, "occupancyType": "PRIMARY", "purchasePrice": 550000, "appraisedValue": 550000 },
+    "loanProfile": { "loanPurpose": "PURCHASE", "loanAmount": 440000, "subordinateFinancingAmount": 0, "requestedLockPeriodDays": 45, "documentationType": "FULL_DOC", "ausType": "AUTOMATED", "lienPosition": 1 },
+    "productCandidate": { "productVersionId": "11111111-1111-1111-1111-111111111111", "productCode": "CONV30", "investorCode": "FNMA" }
+  },
+  "expectedStatus": "ELIGIBLE",
+  "expectedDecisions": {
+    "R01": "PASS", "R02": "PASS", "R03": "PASS", "R04": "PASS",
+    "R05": "PASS", "R06": "PASS", "R07": "PASS", "R08": "PASS",
+    "R09": "PASS", "R10": "PASS", "R11": "PASS", "R12": "PASS"
+  }
+}

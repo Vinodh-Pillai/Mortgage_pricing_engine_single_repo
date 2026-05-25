@@ -1,0 +1,19 @@
+{
+  "updated": "2026-05-19",
+  "principalPlannerRefresh": ".agent-runtime/current/planning/principal-planner-wcpe-continuation-pii-refresh.md",
+  "directiveToPropagate": "PII-04 conditionally closed with deferred developer remediation. PII-05 Base Pricing authorized by product owner and ready for kickoff. Route PII-05 to primary-planner for implementation chain kickoff.",
+  "globalCompletionGates": ["synthetic-data validation", "screenshots/visual evidence", "final detailed PDF documentation", "agent agreement/reviews", "non-prod deployment/runtime evidence"],
+  "projects": {
+    "scenario-service": { "pii": "PII-01", "status": "deployed_smoke_passed_hardening_remaining", "path": "projects/scenario-service", "route": "parallel_hardening", "dependencyGate": "already_deployed_no_order_change", "nextTasks": ["P01-T04", "P01-T06", "P01-T07", "P01-T08", "P01-T09", "P01-T10"] },
+    "catalog-service": { "pii": "PII-02", "status": "deployed_version_control_smoke_passed_story_hardening_remaining", "path": "projects/catalog-service", "route": "parallel_hardening", "dependencyGate": "already_deployed_no_order_change", "nextTasks": ["P02-T05", "P02-T07", "P02-T10"] },
+    "eligibility-service": { "pii": "PII-03", "status": "deployed_governed_policy_explain_smoke_passed_integration_remaining", "path": "projects/eligibility-service", "route": "parallel_hardening", "dependencyGate": "already_deployed_no_order_change", "nextTasks": ["P03-admin-policy-lifecycle", "P03-catalog-snapshot-integration", "P03-eligibility-contract-tests"] },
+    "rate-feed-service": { "pii": "PII-04", "status": "conditionally_closed_pending_developer_remediation", "path": "projects/rate-feed-service", "route": "conditional_closure_remediation_deferred", "dependencyGate": "post_pii_05_cycle", "closure_evidence": ".agent-runtime/current/evidence/pii-04-completion/pii-04-closure-recommendation.md", "nextTasks": ["developer-fix-compile-defects-DEFECT-01-through-DEFECT-04", "developer-wire-idempotency-for-4-mutation-endpoints"] },
+    "pricing-service": { "pii": "PII-05", "status": "authorized_by_product_owner_ready_for_kickoff", "path": "projects/pricing-service", "route": "critical_path_after_pii_04", "dependencyGate": "requires_pii_03_and_pii_04_runtime_evidence", "nextTasks": ["base-pricing-grid-lookup", "feed-version-traceability", "no-price-paths", "synthetic-base-pricing-validation"] },
+    "adjustment-service": { "pii": "PII-06", "status": "queued_after_pii_05", "path": "projects/adjustment-service", "route": "waterfall_after_base_pricing", "dependencyGate": "requires_pii_05_evidence", "nextTasks": ["llpa-adjustment-ledger", "edge-grid-adjustments", "synthetic-adjustment-validation"] },
+    "margin-service": { "pii": "PII-07", "status": "queued_after_pii_06", "path": "projects/margin-service", "route": "waterfall_after_adjustments", "dependencyGate": "requires_pii_06_evidence", "nextTasks": ["margin-compensation-waterfall", "channel-investor-explanations", "synthetic-margin-validation"] },
+    "quote-service": { "pii": "PII-08", "status": "queued_after_pii_07", "path": "projects/quote-service", "route": "waterfall_quote_orchestration", "dependencyGate": "requires_pii_03_05_06_07_contracts", "nextTasks": ["quote-create", "best-execution-ranking", "quote-explanation", "quote-replay-events", "synthetic-quote-validation"] }
+  },
+  "dagNext": ["PII-05-base-pricing-kickoff", "P01-hardening", "P02-hardening", "P03-hardening"],
+  "blockedUntilPii04Evidence": [],
+  "activeDecision": "PII-04 conditionally closed. PII-05 authorized for kickoff. Route PII-05 to primary-planner for implementation chain. PII-01/02/03 hardening continues in parallel."
+}

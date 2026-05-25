@@ -1,0 +1,6 @@
+{
+  "fixtureId": "GF04-out-of-range",
+  "description": "Negative basePrice should be rejected",
+  "csvContent": "note_rate,lock_period,base_price,discount_points,yield_index\n6.50,30,-50.00,0.50,6.75\n6.25,30,155.00,0.25,6.50",
+  "expected": { "status": "REJECTED", "rowCount": 2 }
+}

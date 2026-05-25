@@ -1,0 +1,12 @@
+{
+  "quoteIntent": "PURCHASE",
+  "channel": "RETAIL",
+  "scenarioName": "Smith purchase - initial quote",
+  "externalLoanId": "LOS-123456",
+  "sourceSystem": "PRICING_WORKBENCH",
+  "initialFacts": {
+    "loanPurpose": "PURCHASE",
+    "occupancyType": "PRIMARY_RESIDENCE",
+    "propertyState": "TX"
+  }
+}

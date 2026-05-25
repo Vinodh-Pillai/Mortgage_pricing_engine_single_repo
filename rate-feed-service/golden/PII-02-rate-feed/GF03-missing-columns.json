@@ -1,0 +1,6 @@
+{
+  "fixtureId": "GF03-missing-columns",
+  "description": "Missing base_price column should be rejected",
+  "csvContent": "note_rate,lock_period,discount_points,yield_index\n6.50,30,0.50,6.75\n6.25,30,0.25,6.50",
+  "expected": { "status": "REJECTED", "rowCount": 0 }
+}

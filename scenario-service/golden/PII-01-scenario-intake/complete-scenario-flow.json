@@ -1,0 +1,14 @@
+{
+  "tenantId": "018fa4f0-1a4f-7e99-a02d-1b0100010001",
+  "steps": [
+    "create draft scenario",
+    "capture borrower credit",
+    "capture loan structure",
+    "capture property",
+    "capture income assets",
+    "normalize",
+    "submit",
+    "retrieve replay package"
+  ],
+  "expectedFinalStatus": "READY_FOR_ELIGIBILITY"
+}

@@ -1,0 +1,17 @@
+{
+  "product": {
+    "productCode": "CONV30",
+    "productName": "Conventional 30 Year Fixed",
+    "productFamily": "CONVENTIONAL",
+    "allowedChannels": ["RETAIL"],
+    "allowedStates": ["TX", "CA"],
+    "effectiveFrom": "2026-05-14"
+  },
+  "investor": {
+    "investorCode": "FNMA",
+    "investorName": "Fannie Mae",
+    "channels": ["RETAIL"],
+    "productCodes": ["CONV30"],
+    "effectiveFrom": "2026-05-14"
+  }
+}
