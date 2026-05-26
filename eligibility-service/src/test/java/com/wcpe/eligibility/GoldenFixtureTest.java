@@ -7,6 +7,8 @@ import com.wcpe.eligibility.domain.hashing.Hashing;
 import com.wcpe.eligibility.domain.models.*;
 import com.wcpe.eligibility.domain.rules.*;
 import com.wcpe.eligibility.domain.ruleset.RuleEngine;
+import com.wcpe.eligibility.evaluation.RequiredFactValidator;
+import com.wcpe.eligibility.evaluation.ScopeValidator;
 import org.junit.jupiter.api.*;
 
 import java.math.BigDecimal;
@@ -38,7 +40,9 @@ class GoldenFixtureTest {
             new LoanAmountRule(catalogClient),
             new DocumentationTypeRule()
         );
-        ruleEngine = new RuleEngine(rules);
+        ScopeValidator scopeValidator = new ScopeValidator(catalogClient);
+        RequiredFactValidator factValidator = new RequiredFactValidator();
+        ruleEngine = new RuleEngine(rules, scopeValidator, factValidator, catalogClient);
         objectMapper = new ObjectMapper().findAndRegisterModules();
         goldenDir = Path.of(System.getProperty("user.dir"), "src", "test", "resources", "golden", "PII-01-eligibility-rules");
         if (!Files.exists(goldenDir)) {

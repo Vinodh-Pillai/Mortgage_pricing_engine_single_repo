@@ -6,6 +6,8 @@ import com.wcpe.eligibility.domain.models.EligibilityRequest;
 import com.wcpe.eligibility.domain.models.EligibilityResult;
 import com.wcpe.eligibility.domain.rules.*;
 import com.wcpe.eligibility.domain.ruleset.RuleEngine;
+import com.wcpe.eligibility.evaluation.RequiredFactValidator;
+import com.wcpe.eligibility.evaluation.ScopeValidator;
 import org.junit.jupiter.api.*;
 
 import java.nio.file.Files;
@@ -30,6 +32,8 @@ class ReplayDeterminismTest {
     static void setup() throws Exception {
         objectMapper = new ObjectMapper().findAndRegisterModules();
         CatalogClient catalogClient = new CatalogClient();
+        ScopeValidator scopeValidator = new ScopeValidator(catalogClient);
+        RequiredFactValidator factValidator = new RequiredFactValidator();
         List<EligibilityRule> rules = List.of(
             new FicoMinimumRule(),
             new LtvRule(),
@@ -44,7 +48,7 @@ class ReplayDeterminismTest {
             new LoanAmountRule(catalogClient),
             new DocumentationTypeRule()
         );
-        ruleEngine = new RuleEngine(rules);
+        ruleEngine = new RuleEngine(rules, scopeValidator, factValidator, catalogClient);
     }
 
     /* ---- Same EligibilityRequest + same policy_version_id produces identical resultHash ---- */
@@ -148,7 +152,7 @@ class ReplayDeterminismTest {
     public static class RequestWrapper {
         private EligibilityRequest request;
 
-        public EligibilityRequest request() { return request; }
+        public EligibilityRequest getRequest() { return request; }
         public void setRequest(EligibilityRequest request) { this.request = request; }
     }
 }

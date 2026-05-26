@@ -1,5 +1,6 @@
 package com.wcpe.eligibility.controller;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wcpe.eligibility.domain.hashing.Hashing;
 import com.wcpe.eligibility.domain.models.EligibilityRequest;
@@ -11,8 +12,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.Map;
 import java.util.UUID;
 
@@ -38,29 +37,33 @@ public class EligibilityApiController {
         // Idempotency check
         String idempotencyKey = http.getHeader("Idempotency-Key");
         if (idempotencyKey != null && !idempotencyKey.isBlank()) {
-            String requestHash = Hashing.sha256(objectMapper.writeValueAsString(request));
-
-            // Try to find existing record
             try {
-                String existingResponse = jdbcTemplate.queryForObject(
-                    "SELECT response_json::text FROM eligibility.idempotency_record WHERE tenant_id = ? AND idempotency_key = ?",
-                    String.class, tenantId, idempotencyKey
-                );
-                if (existingResponse != null) {
-                    String existingHash = jdbcTemplate.queryForObject(
-                        "SELECT request_hash FROM eligibility.idempotency_record WHERE tenant_id = ? AND idempotency_key = ?",
+                String requestHash = Hashing.sha256(objectMapper.writeValueAsString(request));
+
+                // Try to find existing record
+                try {
+                    String existingResponse = jdbcTemplate.queryForObject(
+                        "SELECT response_json::text FROM eligibility.idempotency_record WHERE tenant_id = ? AND idempotency_key = ?",
                         String.class, tenantId, idempotencyKey
                     );
-                    if (!existingHash.equals(requestHash)) {
-                        return ResponseEntity.status(HttpStatus.CONFLICT)
-                            .body(null);
+                    if (existingResponse != null) {
+                        String existingHash = jdbcTemplate.queryForObject(
+                            "SELECT request_hash FROM eligibility.idempotency_record WHERE tenant_id = ? AND idempotency_key = ?",
+                            String.class, tenantId, idempotencyKey
+                        );
+                        if (!existingHash.equals(requestHash)) {
+                            return ResponseEntity.status(HttpStatus.CONFLICT)
+                                .body(null);
+                        }
+                        // Return cached result
+                        EligibilityResult cached = objectMapper.readValue(existingResponse, EligibilityResult.class);
+                        return ResponseEntity.ok(cached);
                     }
-                    // Return cached result
-                    EligibilityResult cached = objectMapper.readValue(existingResponse, EligibilityResult.class);
-                    return ResponseEntity.ok(cached);
+                } catch (Exception e) {
+                    // No existing record, proceed with evaluation
                 }
-            } catch (Exception e) {
-                // No existing record, proceed with evaluation
+            } catch (JsonProcessingException e) {
+                // If serialization fails during idempotency check, proceed with evaluation
             }
         }
 
@@ -77,7 +80,7 @@ public class EligibilityApiController {
                     "ON CONFLICT (tenant_id, idempotency_key) DO NOTHING",
                     tenantId, idempotencyKey, requestHash, "EligibilityResult", responseJson
                 );
-            } catch (Exception e) {
+            } catch (JsonProcessingException e) {
                 // Log and continue - idempotency storage is non-critical
             }
         }
