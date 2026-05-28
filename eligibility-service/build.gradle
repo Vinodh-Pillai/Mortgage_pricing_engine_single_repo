@@ -22,4 +22,19 @@ dependencies {
   testImplementation 'org.testcontainers:junit-jupiter'
 }
 
-tasks.named('test') { useJUnitPlatform() }
+tasks.named('test') {
+  useJUnitPlatform()
+  if (System.getenv('CI') == 'true') {
+    systemProperty 'eligibility.enforceDockerTests', 'true'
+  }
+}
+
+tasks.register('dockerBackedTest', Test) {
+  description = 'Runs eligibility tests with Docker/Testcontainers availability enforced.'
+  group = 'verification'
+  testClassesDirs = sourceSets.test.output.classesDirs
+  classpath = sourceSets.test.runtimeClasspath
+  useJUnitPlatform()
+  systemProperty 'eligibility.enforceDockerTests', 'true'
+  shouldRunAfter tasks.named('test')
+}

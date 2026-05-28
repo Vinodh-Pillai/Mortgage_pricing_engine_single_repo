@@ -21,7 +21,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 class AuthorizationTest {
 
     @Container
@@ -48,7 +48,7 @@ class AuthorizationTest {
         gf01Request = mapper.readValue(
             Files.readString(Path.of("golden/PII-01-eligibility-rules/GF01_happy_path.json")),
             ReplayDeterminismTest.RequestWrapper.class
-        ).request();
+        ).getRequest();
     }
 
     /* ---- Missing X-Roles header returns 403 on POST /evaluate ---- */

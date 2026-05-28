@@ -1,5 +1,6 @@
 package com.wcpe.eligibility;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wcpe.eligibility.client.CatalogClient;
 import com.wcpe.eligibility.domain.models.EligibilityRequest;
@@ -145,10 +146,11 @@ class ReplayDeterminismTest {
         return objectMapper.readValue(
             Files.readString(Path.of(path)),
             RequestWrapper.class
-        ).request();
+        ).getRequest();
     }
 
     /** Minimal wrapper to extract the "request" field from golden fixture JSON. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class RequestWrapper {
         private EligibilityRequest request;
 

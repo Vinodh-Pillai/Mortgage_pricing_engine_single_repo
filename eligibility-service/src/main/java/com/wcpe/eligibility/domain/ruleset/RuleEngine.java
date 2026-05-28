@@ -112,14 +112,9 @@ public class RuleEngine {
         if (hasBlocking) {
             status = EligibilityStatus.INELIGIBLE;
         } else {
-            // Check for any WARNING/INSUFFICIENT_DATA that would indicate INCOMPLETE
-            // Per LLD: no status inferred from absence of failures unless explicitly declared
             boolean hasWarning = decisions.stream().anyMatch(d -> "WARNING".equals(d.severity()));
             if (hasWarning) {
-                // Warnings with no hard stop => all rules technically passed
-                // but there is insufficient data on some rules
-                // Per LLD fail-closed: this is still ELIGIBLE if all blocking rules passed
-                status = EligibilityStatus.ELIGIBLE;
+                status = EligibilityStatus.WARNING;
             } else {
                 status = EligibilityStatus.ELIGIBLE;
             }
@@ -165,11 +160,14 @@ public class RuleEngine {
                 "investorCode", investorCode,
                 "status", status.name(),
                 "decisions", decisions.stream()
-                    .map(d -> Map.of(
-                        "ruleCode", d.ruleCode(),
-                        "severity", d.severity(),
-                        "status", d.status(),
-                        "actualValue", d.actualValue()))
+                    .map(d -> {
+                        Map<String, Object> decisionHashMaterial = new LinkedHashMap<>();
+                        decisionHashMaterial.put("ruleCode", d.ruleCode());
+                        decisionHashMaterial.put("severity", d.severity());
+                        decisionHashMaterial.put("status", d.status());
+                        decisionHashMaterial.put("actualValue", d.actualValue());
+                        return decisionHashMaterial;
+                    })
                     .sorted(Comparator.comparing(m -> (String) m.get("ruleCode")))
                     .toList()
             );

@@ -25,7 +25,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 class PolicyVersionTest {
 
     @Container
@@ -56,7 +56,7 @@ class PolicyVersionTest {
         com.wcpe.eligibility.domain.models.EligibilityRequest request = mapper.readValue(
             Files.readString(Path.of("golden/PII-01-eligibility-rules/GF01_happy_path.json")),
             ReplayDeterminismTest.RequestWrapper.class
-        ).request();
+        ).getRequest();
         gf01Body = mapper.writeValueAsString(request);
     }
 

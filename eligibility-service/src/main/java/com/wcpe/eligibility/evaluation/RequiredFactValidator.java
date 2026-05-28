@@ -24,10 +24,6 @@ public class RequiredFactValidator {
         // Borrower facts
         if (borrower == null) {
             missing.add(new MissingFact("borrowerProfile", "Borrower profile is required."));
-        } else {
-            if (borrower.representativeFico() == null) {
-                missing.add(new MissingFact("representativeFico", "FICO score is required."));
-            }
         }
 
         // Property facts

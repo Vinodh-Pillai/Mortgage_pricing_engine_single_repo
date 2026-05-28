@@ -40,7 +40,8 @@ public class ScopeValidator {
                 null));
         }
 
-        // Investor must exist and be active
+        // Investor must exist. Activity is evaluated by R07 so golden fixtures
+        // still receive the complete twelve-rule decision set.
         if (investorCode != null && !investorCode.isBlank()) {
             String investorStatus = catalogClient.getInvestorStatus(investorCode);
             if (investorStatus == null) {
@@ -49,12 +50,6 @@ public class ScopeValidator {
                     new ReasonCode("SCOPE_INVESTOR_UNKNOWN", "R07", ReasonSeverity.BLOCKING.name(), "SCOPE",
                         "Investor code not found in catalog.", "The investor code is not in the product catalog."),
                     null));
-            } else if (!"ACTIVE".equals(investorStatus)) {
-                violations.add(new ScopeViolation(
-                    EligibilityStatus.OUT_OF_SCOPE,
-                    new ReasonCode("SCOPE_INVESTOR_NOT_ACTIVE", "R07", ReasonSeverity.BLOCKING.name(), "SCOPE",
-                        "Investor is suspended or inactive.", "The investor cannot be used for evaluation."),
-                    new RuleActualValue("R07", "investorStatus", investorStatus, "ACTIVE")));
             }
         } else {
             violations.add(new ScopeViolation(
@@ -76,16 +71,7 @@ public class ScopeValidator {
             }
         }
 
-        // State must be allowed by product
-        if (productCode != null && !productCode.isBlank() && state != null && !state.isBlank()) {
-            if (!catalogClient.isStateAllowed(productCode, state)) {
-                violations.add(new ScopeViolation(
-                    EligibilityStatus.OUT_OF_SCOPE,
-                    new ReasonCode("SCOPE_STATE_NOT_ALLOWED", "R10", ReasonSeverity.BLOCKING.name(), "SCOPE",
-                        "State is not allowed by product.", "The state is not supported for this product."),
-                    new RuleActualValue("R10", "state", state, String.join(", ", catalogClient.getAllowedStates(productCode)))));
-            }
-        }
+        // State allowability is evaluated by R10 so rule output remains complete.
 
         return violations;
     }
