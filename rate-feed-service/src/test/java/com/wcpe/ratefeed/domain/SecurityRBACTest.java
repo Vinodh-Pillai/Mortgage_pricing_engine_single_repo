@@ -1,5 +1,7 @@
 package com.wcpe.ratefeed.domain;
 
+import static com.wcpe.ratefeed.domain.RateFeedModels.RateFeedException;
+
 import org.junit.jupiter.api.*;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -86,7 +88,7 @@ class SecurityRBACTest {
 
   @Test
   void rateFeedException_construction() {
-    org.springframework.http.HttpStatus status = org.springframework.http(HttpStatus.FORBIDDEN);
+    org.springframework.http.HttpStatus status = org.springframework.http.HttpStatus.FORBIDDEN;
     RateFeedException ex = new RateFeedException(org.springframework.http.HttpStatus.FORBIDDEN, "ACCESS_DENIED", "No permission");
     assertEquals(org.springframework.http.HttpStatus.FORBIDDEN, ex.status());
     assertEquals("ACCESS_DENIED", ex.code());

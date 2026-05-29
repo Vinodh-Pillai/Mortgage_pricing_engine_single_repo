@@ -70,7 +70,7 @@ class CsvParserNewTest {
   void tokenizeLine_quotedField_withCommas() {
     String[] tokens = CsvParser.tokenizeLine("\"a,b\",c", ',');
     assertEquals(2, tokens.length);
-    assertEquals("a\"b\"", tokens[0].trim()); // quotes stripped by toggle logic
+    assertEquals("a,b", tokens[0].trim());
   }
 
   @Test

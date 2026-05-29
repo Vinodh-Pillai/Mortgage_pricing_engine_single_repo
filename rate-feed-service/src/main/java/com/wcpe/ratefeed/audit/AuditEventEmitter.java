@@ -38,7 +38,7 @@ public class AuditEventEmitter {
     headers.put("correlationId", correlationId);
     headers.put("occurredAt", Instant.now().toString());
 
-    jdbc.update("insert into rate_feed.outbox_event(tenant_id,event_id,aggregate_type,aggregate_id,event_type,event_version,event_key,headers,payload) values (?,?,?,?,?,?,?,?,?)",
+    jdbc.update("insert into rate_feed.outbox_event(tenant_id,event_id,aggregate_type,aggregate_id,event_type,event_version,event_key,headers_json,payload_json) values (?,?,?,?,?,?,?,?,?)",
         tenantId, UUID.randomUUID(), "RateSheet", sheetId.toString(), eventType, 1,
         sheetId + ":" + eventType, jsonb(headers), jsonb(payload));
   }

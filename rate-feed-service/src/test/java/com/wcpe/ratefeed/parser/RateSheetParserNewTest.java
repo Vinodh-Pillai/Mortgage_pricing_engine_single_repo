@@ -1,6 +1,6 @@
 package com.wcpe.ratefeed.parser;
 
-import com.wcpe.ratefeed.domain.RatePricePoint;
+import com.wcpe.ratefeed.domain.RateFeedModels.RatePricePoint;
 import com.wcpe.ratefeed.parser.RateSheetParser.ParseContext;
 import com.wcpe.ratefeed.parser.RateSheetParser.ParseResult;
 import org.junit.jupiter.api.Test;
@@ -23,6 +23,11 @@ class RateSheetParserNewTest {
 
   private final RateSheetParser parser = new RateSheetParser();
 
+  private static final UUID DETERMINISTIC_SHEET_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
+  private static final UUID DETERMINISTIC_INVESTOR_ID = UUID.fromString("00000000-0000-0000-0000-000000000002");
+  private static final UUID DETERMINISTIC_CHANNEL_ID = UUID.fromString("00000000-0000-0000-0000-000000000003");
+  private static final Instant DETERMINISTIC_EFFECTIVE_AT = Instant.parse("2026-01-01T00:00:00Z");
+
   private ParseContext createContext() {
     return new ParseContext(
         UUID.randomUUID(),
@@ -30,6 +35,16 @@ class RateSheetParserNewTest {
         UUID.randomUUID(),
         "FIXED_30YR",
         Instant.now()
+    );
+  }
+
+  private ParseContext deterministicContext() {
+    return new ParseContext(
+        DETERMINISTIC_SHEET_ID,
+        DETERMINISTIC_INVESTOR_ID,
+        DETERMINISTIC_CHANNEL_ID,
+        "FIXED_30YR",
+        DETERMINISTIC_EFFECTIVE_AT
     );
   }
 
@@ -168,10 +183,7 @@ class RateSheetParserNewTest {
   @Test
   void parse_onlyHeader_emptyPoints() {
     String csv = "note_rate,lock_period,base_price\n";
-    ParseResult result = parser.parse(csvStream(csv), createContext());
-    assertEquals(0, result.pricePoints().size());
-    assertEquals(0, result.rowCount());
-    assertNotNull(result.gridHash());
+    assertThrows(IllegalArgumentException.class, () -> parser.parse(csvStream(csv), createContext()));
   }
 
   @Test
@@ -185,8 +197,8 @@ class RateSheetParserNewTest {
   @Test
   void parse_deterministicHash_sameContent() {
     String csv = "note_rate,lock_period,base_price\n6.125,30,108.5\n";
-    ParseResult r1 = parser.parse(csvStream(csv), createContext());
-    ParseResult r2 = parser.parse(csvStream(csv), createContext());
+    ParseResult r1 = parser.parse(csvStream(csv), deterministicContext());
+    ParseResult r2 = parser.parse(csvStream(csv), deterministicContext());
     assertEquals(r1.gridHash(), r2.gridHash());
   }
 

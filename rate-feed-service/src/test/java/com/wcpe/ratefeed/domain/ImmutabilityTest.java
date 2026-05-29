@@ -11,6 +11,7 @@ import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
+import static com.wcpe.ratefeed.domain.RateFeedModels.RateSheetStatus;
 
 /**
  * Immutability tests — Active sheet cannot be modified after activation.

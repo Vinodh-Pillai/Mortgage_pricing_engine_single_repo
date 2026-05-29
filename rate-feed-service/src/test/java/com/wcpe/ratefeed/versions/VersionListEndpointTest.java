@@ -1,6 +1,6 @@
-package com.wcpe.ratefeed.versions;
+package com.wcpe.ratefeed.domain;
 
-import com.wcpe.ratefeed.domain.*;
+import com.wcpe.ratefeed.domain.RateFeedModels.RateFeedException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,27 +29,11 @@ class VersionListEndpointTest {
   @BeforeEach
   void setup() {
     RequestContext.roles("RATE_FEED_VIEW,RATE_FEED_UPLOAD,RATE_FEED_ACTIVATE");
-    when(mockJdbc.isNewTransactionManager()).thenReturn(true);
-    when(mockJdbc.query(isA(String.class), isA(org.springframework.jdbc.core.RowMapper.class), any())).thenAnswer(inv -> {
-      String sql = inv.getArgument(0);
-      if (sql.contains("COALESCE")) {
-        return 1;
-      }
+    lenient().when(mockJdbc.query(isA(String.class), isA(org.springframework.jdbc.core.RowMapper.class), any(Object[].class))).thenAnswer(inv -> {
       return new ArrayList<>();
     });
-    when(mockJdbc.queryForObject(isA(String.class), eq(Integer.class), any())).thenReturn(1);
-    service = new RateFeedService(
-        new RateFeedRepository(mockJdbc, new com.fasterxml.jackson.databind.ObjectMapper()),
-        mockJdbc,
-        new com.fasterxml.jackson.databind.ObjectMapper(),
-        new com.wcpe.ratefeed.activation.ActivationService(mockJdbc,
-            new com.wcpe.ratefeed.audit.AuditService(mockJdbc)),
-        new com.wcpe.ratefeed.activation.VersionManager(mockJdbc),
-        new com.wcpe.ratefeed.resolution.RateResolver(mockJdbc),
-        new com.wcpe.ratefeed.resolution.GridLookup(mockJdbc),
-        new com.wcpe.ratefeed.audit.AuditService(mockJdbc),
-        new com.wcpe.ratefeed.service.ReplayService(mockJdbc,
-            new com.wcpe.ratefeed.service.ReplayRepository(mockJdbc)));
+    lenient().when(mockJdbc.queryForObject(isA(String.class), eq(Integer.class), any())).thenReturn(1);
+    service = TestRateFeedServices.create(new RateFeedRepository(mockJdbc, new com.fasterxml.jackson.databind.ObjectMapper()), mockJdbc);
   }
 
   @AfterEach

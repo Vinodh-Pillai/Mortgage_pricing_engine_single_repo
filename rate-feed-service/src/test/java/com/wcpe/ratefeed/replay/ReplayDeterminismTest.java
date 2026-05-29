@@ -1,6 +1,8 @@
 package com.wcpe.ratefeed.replay;
 
 import com.wcpe.ratefeed.domain.*;
+import com.wcpe.ratefeed.domain.RateFeedModels.RatePricePoint;
+import com.wcpe.ratefeed.domain.TestRequestContexts;
 import com.wcpe.ratefeed.service.ReplayService;
 import com.wcpe.ratefeed.service.ReplayRepository;
 import org.junit.jupiter.api.AfterEach;
@@ -29,7 +31,7 @@ class ReplayDeterminismTest {
 
   @BeforeEach
   void setup() {
-    RequestContext.roles("RATE_FEED_VIEW,RATE_FEED_UPLOAD,RATE_FEED_ACTIVATE");
+    TestRequestContexts.roles("RATE_FEED_VIEW,RATE_FEED_UPLOAD,RATE_FEED_ACTIVATE");
     replayService = new ReplayService(
         mock(org.springframework.jdbc.core.JdbcTemplate.class),
         mockRepo);
@@ -37,7 +39,7 @@ class ReplayDeterminismTest {
 
   @AfterEach
   void cleanup() {
-    RequestContext.clear();
+    TestRequestContexts.clear();
   }
 
   @Test

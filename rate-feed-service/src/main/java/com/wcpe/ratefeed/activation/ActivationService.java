@@ -1,6 +1,8 @@
 package com.wcpe.ratefeed.activation;
 
 import com.wcpe.ratefeed.domain.*;
+import com.wcpe.ratefeed.domain.RateFeedModels.RateFeedException;
+import com.wcpe.ratefeed.domain.RateFeedModels.RateSheetStatus;
 import com.wcpe.ratefeed.audit.AuditService;
 import com.wcpe.ratefeed.role.RateFeedRoles;
 import org.slf4j.Logger;
@@ -261,7 +263,7 @@ public class ActivationService {
       jdbc.update(
           "INSERT INTO rate_feed.outbox_event(" +
           "tenant_id, event_id, aggregate_type, aggregate_id, " +
-          "event_type, event_version, event_key, headers, payload) " +
+          "event_type, event_version, event_key, headers_json, payload_json) " +
           "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
           sheet.tenantId(), UUID.randomUUID(), "RateSheet", sheet.sheetId(),
           "RateSheetActivated.v1", 1,

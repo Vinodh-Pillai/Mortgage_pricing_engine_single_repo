@@ -112,7 +112,7 @@ class RateFeedRepository {
       headers.put("channelId", sessionHeaders.getOrDefault("channelId", ""));
       headers.put("feedFormatId", sessionHeaders.getOrDefault("feedFormatId", ""));
     }
-    jdbc.update("insert into rate_feed.outbox_event(tenant_id,event_id,aggregate_type,aggregate_id,event_type,event_version,event_key,headers,payload) values (?,?,?,?,?,?,?,?,?)", tenantId, eventId, "RateFeedBatch", aggregateId, eventType, version, tenantId + ":" + aggregateId, jsonb(headers), jsonb(payload));
+    jdbc.update("insert into rate_feed.outbox_event(tenant_id,event_id,aggregate_type,aggregate_id,event_type,event_version,event_key,headers_json,payload_json) values (?,?,?,?,?,?,?,?,?)", tenantId, eventId, "RateFeedBatch", aggregateId, eventType, version, tenantId + ":" + aggregateId, jsonb(headers), jsonb(payload));
   }
 
   // Legacy overload for backward compat

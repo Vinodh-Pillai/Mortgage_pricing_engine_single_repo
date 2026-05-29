@@ -13,9 +13,11 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
 
+import static com.wcpe.ratefeed.domain.RateFeedModels.*;
+
 class RateFeedServiceTest {
   private final RateFeedRepository repository = mock(RateFeedRepository.class);
-  private final RateFeedService service = new RateFeedService(repository);
+  private final RateFeedService service = TestRateFeedServices.create(repository);
 
   @AfterEach
   void clearRoles() { RequestContext.clear(); }

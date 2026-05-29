@@ -3,6 +3,9 @@ package com.wcpe.ratefeed;
 import com.wcpe.ratefeed.activation.ActivationService.ActivateResult;
 import com.wcpe.ratefeed.audit.AuditService;
 import com.wcpe.ratefeed.domain.*;
+import com.wcpe.ratefeed.domain.RateFeedModels.RateFeedException;
+import com.wcpe.ratefeed.domain.RateFeedModels.RatePricePoint;
+import com.wcpe.ratefeed.domain.TestRequestContexts;
 import com.wcpe.ratefeed.activation.VersionManager;
 import com.wcpe.ratefeed.activation.SupersessionEngine;
 import com.wcpe.ratefeed.parser.RateSheetParser;
@@ -19,6 +22,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.*;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -41,11 +46,11 @@ import static org.junit.jupiter.api.Assertions.*;
  * Covers: full lifecycle, supersession, historical replay, immutability, empty ingest.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 class RateFeedIntegrationTest {
 
     @Container
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgre")
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine")
             .withDatabaseName("rate_feed")
             .withUsername("rate_feed_app")
             .withPassword("rate_feed_app");
@@ -67,22 +72,21 @@ class RateFeedIntegrationTest {
     private static final UUID CHANNEL = UUID.fromString("12345678-0000-0000-0000-000000000002");
     private static final String PRODUCT = "MORTGAGE-30YR";
 
-    static { postgres.start(); }
-
-    @BeforeAll
-    static void setupDatasourceURL() {
-        // The Spring Boot context picks up the Testcontainers URL via @Autowired JdbcTemplate
-        // which is configured by the spring.datasource.url property override.
+    @DynamicPropertySource
+    static void setupDatasourceURL(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", postgres::getJdbcUrl);
+        registry.add("spring.datasource.username", postgres::getUsername);
+        registry.add("spring.datasource.password", postgres::getPassword);
     }
 
     @BeforeEach
     void setRoles() {
-        RequestContext.roles("RATE_FEED_UPLOAD,RATE_FEED_ACTIVATE,RATE_FEED_VIEW");
+        TestRequestContexts.roles("RATE_FEED_UPLOAD,RATE_FEED_ACTIVATE,RATE_FEED_VIEW");
     }
 
     @AfterEach
     void clearRolesAndCleanup() {
-        RequestContext.clear();
+        TestRequestContexts.clear();
         // Cleanup sheets between tests
         jdbc.update("DELETE FROM rate_feed.rate_price_point WHERE sheet_id IN (SELECT sheet_id FROM rate_feed.rate_sheet)");
         jdbc.update("DELETE FROM rate_feed.rate_sheet_version WHERE sheet_id IN (SELECT sheet_id FROM rate_feed.rate_sheet)");
@@ -377,7 +381,7 @@ class RateFeedIntegrationTest {
         // Verify v1's effective_at is before the replay date (so it was effective)
         Instant v1At = jdbc.queryForObject(
                 "SELECT effective_at FROM rate_feed.rate_sheet WHERE sheet_id = ?",
-                rs -> rs.getTimestamp(1).toInstant(), v1SheetId);
+                (rs, row) -> rs.getTimestamp(1).toInstant(), v1SheetId);
         assertTrue(v1At.isBefore(replayDate) || v1At.equals(replayDate),
                 "v1 effective_at should be before replay date");
 

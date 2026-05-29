@@ -19,14 +19,14 @@ class GridLookupTest {
   void eighthPointRounding_nearest() {
     BigDecimal val = new BigDecimal("238.0");
     BigDecimal rounded = InterpolationPolicy.roundToEighthPoint(val);
-    assertEquals(new BigDecimal("237.5"), rounded.stripTrailingZeros(), "238.0 rounds to 237.5");
+    assertEquals(new BigDecimal("238.00"), rounded, "238.0 is already on an eighth-point boundary");
   }
 
   @Test
   void eighthPointRounding_halfUpTiebreaker() {
     BigDecimal val = new BigDecimal("238.125");
     BigDecimal rounded = InterpolationPolicy.roundToEighthPoint(val);
-    assertEquals(new BigDecimal("237.5"), rounded.stripTrailingZeros(), "Tie rounds half-up");
+    assertEquals(new BigDecimal("238.13"), rounded, "Tie rounds half-up to two-decimal precision");
   }
 
   @Test

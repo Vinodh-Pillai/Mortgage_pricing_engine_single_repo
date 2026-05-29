@@ -1,7 +1,7 @@
 package com.wcpe.ratefeed.hashing;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.wcpe.ratefeed.domain.RatePricePoint;
+import com.wcpe.ratefeed.domain.RateFeedModels.RatePricePoint;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
@@ -21,18 +21,19 @@ class HashingNewTest {
   private final ObjectMapper mapper = new ObjectMapper();
 
   @Test
-  void gridHash_samePointsDifferentOrder_sameHash() {
+  void gridHash_sameBusinessPointsDifferentOrder_sameHash() {
+    UUID sheetId = UUID.randomUUID();
     List<RatePricePoint> a = List.of(
-        pp(new BigDecimal("6.5"), 30, "108.5"),
-        pp(new BigDecimal("7.0"), 30, "110.0")
+        pp(sheetId, new BigDecimal("6.5"), 30, "108.5", 1),
+        pp(sheetId, new BigDecimal("7.0"), 30, "110.0", 2)
     );
     List<RatePricePoint> b = List.of(  // reversed order
-        pp(new BigDecimal("7.0"), 30, "110.0"),
-        pp(new BigDecimal("6.5"), 30, "108.5")
+        pp(sheetId, new BigDecimal("7.0"), 30, "110.0", 2),
+        pp(sheetId, new BigDecimal("6.5"), 30, "108.5", 1)
     );
     String hashA = gridHash(a);
     String hashB = gridHash(b);
-    assertEquals(hashA, hashB, "Grid hash must be identical regardless of row order");
+    assertEquals(hashA, hashB, "Same business grid points must hash identically regardless of input order");
   }
 
   @Test
@@ -57,9 +58,9 @@ class HashingNewTest {
     // Access package-private sha256
     String hex = sha256("test-string");
     // SHA-256 = 256 bits = 64 hex chars
-    assertEquals(64, hex.length(), "SHA-256 hex should be 64 characters");
+    assertEquals(71, hex.length(), "SHA-256 value should include the sha256: prefix and 64 hex characters");
     // All hex chars
-    assertTrue(hex.matches("[0-9a-f]+"), "Hash should be lowercase hex");
+    assertTrue(hex.matches("sha256:[0-9a-f]+"), "Hash should be prefixed lowercase hex");
   }
 
   @Test
@@ -68,8 +69,12 @@ class HashingNewTest {
   }
 
   private RatePricePoint pp(BigDecimal rate, int lock, String price) {
+    return pp(UUID.randomUUID(), rate, lock, price, 1);
+  }
+
+  private RatePricePoint pp(UUID sheetId, BigDecimal rate, int lock, String price, int gridPosition) {
     return new RatePricePoint(
-        UUID.randomUUID(), rate, lock, new BigDecimal(price), null, null, 1
+        sheetId, rate, lock, new BigDecimal(price), null, null, gridPosition
     );
   }
 

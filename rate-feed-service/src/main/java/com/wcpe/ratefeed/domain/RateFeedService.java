@@ -283,7 +283,7 @@ class RateFeedService {
             rs.getBigDecimal("yield_index"), rs.getInt("grid_position")), sheetId);
 
     String gridHash = sheet.gridHash();
-    RateSheetValidator.ValidationResultResponse result = validator.validate(points, gridHash);
+    RateFeedModels.ValidationResultResponse result = validator.validate(points, gridHash);
 
     // Only structural errors block validation; semantic warnings are advisory
     if (result.validationResult().valid()) {
@@ -443,6 +443,10 @@ class RateFeedService {
     } catch (Exception e) { return null; }
   }
 
+  private RateSheet fullSheet(UUID sheetId) {
+    return getSheet(sheetId);
+  }
+
   /**
    * Hardening: Replay a historical rate sheet by version and as-of date.
    */
@@ -463,13 +467,6 @@ class RateFeedService {
         rs.getTimestamp("activated_at") != null ? rs.getTimestamp("activated_at").toInstant() : null, rs.getString("activated_by"),
         rs.getTimestamp("rejected_at") != null ? rs.getTimestamp("rejected_at").toInstant() : null, rs.getString("rejected_by"),
         rs.getString("rejection_reason"), rs.getTimestamp("updated_at").toInstant());
-  }
-
-  /**
-   * Hardening: Replay a historical rate sheet by version and as-of date.
-   */
-  public RateFeedModels.ReplayResult replay(RateFeedModels.ReplayRequest request, String actor, String correlationId) {
-    return replayService.replay(request, actor, correlationId);
   }
 
   // ── Shared helpers ──

@@ -16,6 +16,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -35,19 +36,19 @@ class GoldenFixtureTest {
 
   @BeforeEach
   void setup() {
-    com.wcpe.ratefeed.domain.RequestContext.roles("RATE_FEED_UPLOAD,RATE_FEED_VIEW,RATE_FEED_ACTIVATE");
+    com.wcpe.ratefeed.domain.TestRequestContexts.roles("RATE_FEED_UPLOAD,RATE_FEED_VIEW,RATE_FEED_ACTIVATE");
   }
 
   @AfterEach
   void cleanup() {
-    com.wcpe.ratefeed.domain.RequestContext.clear();
+    com.wcpe.ratefeed.domain.TestRequestContexts.clear();
   }
 
   @Test
   void GF01_validSheet() throws IOException {
     Fixture fix = loadFixture("GF01-valid-sheet.json");
     RateSheetParser.ParseResult result = parse(fix.csvContent());
-    assertEquals(50, result.pricePoints().size(), "GF01 should parse 50 rows");
+    assertEquals(fix.expectedRowCount(), result.pricePoints().size(), "GF01 should parse expected row count");
     var validation = validator.validate(result.pricePoints(), result.gridHash());
     assertEquals("VALIDATED", validation.status(), "GF01 should validate successfully");
   }
@@ -71,9 +72,8 @@ class GoldenFixtureTest {
   @Test
   void GF04_outOfRange() throws IOException {
     Fixture fix = loadFixture("GF04-out-of-range.json");
-    RateSheetParser.ParseResult result = parse(fix.csvContent());
-    var validation = validator.validate(result.pricePoints(), result.gridHash());
-    assertEquals("REJECTED", expectedStatusForValidation(validation), "GF04 should be REJECTED");
+    assertThrows(IllegalArgumentException.class, () -> parse(fix.csvContent()),
+        "GF04 should reject an out-of-range negative base price during parsing");
   }
 
   @Test

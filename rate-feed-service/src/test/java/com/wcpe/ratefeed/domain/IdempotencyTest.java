@@ -12,6 +12,9 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
+
+import static com.wcpe.ratefeed.domain.RateFeedModels.*;
 
 /**
  * Idempotency tests — same key same request cached, different request 409.
@@ -29,17 +32,17 @@ class IdempotencyTest {
     Map<String, Object> request = Map.of("command", "test");
     String json = new ObjectMapper().writeValueAsString(Map.of("result", "cached"));
 
-    when(jdbc.queryForObject(anyString(), any(), eq(tenant), eq(key)))
+    when(jdbc.queryForObject(anyString(), any(RowMapper.class), eq(tenant), eq(key)))
         .thenThrow(org.springframework.dao.EmptyResultDataAccessException.class);
     when(jdbc.update(anyString(), (Object[]) any())).thenReturn(1);
 
     UploadSessionResponse response = repository.idempotent(tenant, key, request, UploadSessionResponse.class, () ->
         new UploadSessionResponse(UUID.randomUUID(), "url", 100, java.time.Instant.now(), Map.of(), "OPEN", "hash"));
 
-    assertNotNull(response);
+    assertThat(response).isNotNull();
 
     // Second call: cache hit -> returns cached response
-    when(jdbc.queryForObject(anyString(), any(), eq(tenant), eq(key)))
+    when(jdbc.queryForObject(anyString(), any(RowMapper.class), eq(tenant), eq(key)))
         .thenAnswer(invocation -> {
           // Simulate cache hit by returning the same result
           return response;
@@ -84,19 +87,6 @@ class IdempotencyTest {
     String key = "reused-key";
 
     // Simulate: key exists with completeUploadResponse type, now used for createSession
-    org.mockito.stubbing.Stubber stub = when(jdbc.queryForObject(anyString(), any(), any(), any()));
-    stub.thenAnswer(invocation -> {
-      // Return cached entry with different response type
-      org.mockito.stubbing.Answer<Object> ans = (ctx) -> {
-        // Simulate DB row with wrong response type
-        java.sql.ResultSet rs = mock(java.sql.ResultSet.class);
-        when(rs.getString("response_type")).thenReturn("CompleteUploadResponse");
-        when(rs.getString("request_hash")).thenReturn("some-hash");
-        return rs; // This won't work due to RowMapper; skip to conflict assertion
-      };
-      throw new java.lang.RuntimeException("test stub");
-    });
-
     // Simplified: verify that IDENTITY_CONFLICT is emitted for key reuse with different route
     // This is covered by RateFeedRepositoryTest.idempotencyConflictsWhenSameKeyIsReusedForDifferentCommandType
   }
@@ -107,8 +97,8 @@ class IdempotencyTest {
     // Covered by RateFeedRepositoryTest: idempotency identity comparison
     // Here we verify the concept: request hash is computed from request body
     ObjectMapper mapper = new ObjectMapper();
-    String hash1 = com.wcpe.ratefeed.domain.HashingTestHelper.sha256(mapper.writeValueAsString(Map.of("cmd", "A")));
-    String hash2 = com.wcpe.ratefeed.domain.HashingTestHelper.sha256(mapper.writeValueAsString(Map.of("cmd", "B")));
-    assertNotEquals(hash1, hash2, "Different requests must produce different hashes");
+    String hash1 = Hashing.sha256(mapper.writeValueAsString(Map.of("cmd", "A")));
+    String hash2 = Hashing.sha256(mapper.writeValueAsString(Map.of("cmd", "B")));
+    assertThat(hash1).isNotEqualTo(hash2);
   }
 }

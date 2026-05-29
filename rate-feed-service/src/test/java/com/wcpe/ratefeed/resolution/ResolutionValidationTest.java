@@ -1,7 +1,7 @@
 package com.wcpe.ratefeed.resolver;
 
 import com.wcpe.ratefeed.resolution.InterpolationPolicy;
-import com.wcpe.ratefeed.domain.RatePricePoint;
+import com.wcpe.ratefeed.domain.RateFeedModels.RatePricePoint;
 import org.junit.jupiter.api.*;
 
 import java.math.BigDecimal;
@@ -23,7 +23,7 @@ class ResolutionValidationTest {
   void roundToEighthPoint_standardValue() {
     BigDecimal val = new BigDecimal("237.5");
     BigDecimal rounded = InterpolationPolicy.roundToEighthPoint(val);
-    assertEquals(new BigDecimal("237.5"), rounded);
+    assertEquals(new BigDecimal("237.50"), rounded);
   }
 
   @Test
@@ -31,7 +31,7 @@ class ResolutionValidationTest {
     // 1/4 point = 2/8th = 25 BP
     BigDecimal val = new BigDecimal("250.0");
     BigDecimal rounded = InterpolationPolicy.roundToEighthPoint(val);
-    assertEquals(new BigDecimal("250.0"), rounded);
+    assertEquals(new BigDecimal("250.00"), rounded);
   }
 
   @Test
@@ -39,7 +39,7 @@ class ResolutionValidationTest {
     // 1/2 point = 4/8 = 50 BP
     BigDecimal val = new BigDecimal("262.5");
     BigDecimal rounded = InterpolationPolicy.roundToEighthPoint(val);
-    assertEquals(new BigDecimal("262.5"), rounded);
+    assertEquals(new BigDecimal("262.50"), rounded);
   }
 
   @Test
@@ -48,21 +48,21 @@ class ResolutionValidationTest {
     BigDecimal rounded = InterpolationPolicy.roundToEighthPoint(val);
     // 238.0 * 8 = 1904 -> rounds to 1904 -> 1904/8 = 238.0
     // But our grid has 1/8th increments: 237.5, 250.0, etc.
-    assertEquals(new BigDecimal("238.0"), rounded);
+    assertEquals(new BigDecimal("238.00"), rounded);
   }
 
   @Test
   void roundToEighthPoint_zero() {
     BigDecimal val = BigDecimal.ZERO;
     BigDecimal rounded = InterpolationPolicy.roundToEighthPoint(val);
-    assertEquals(BigDecimal.ZERO, rounded);
+    assertEquals(new BigDecimal("0.00"), rounded);
   }
 
   @Test
   void roundToEighthPoint_negative() {
     BigDecimal val = new BigDecimal("-12.5");
     BigDecimal rounded = InterpolationPolicy.roundToEighthPoint(val);
-    assertEquals(new BigDecimal("-12.5"), rounded);
+    assertEquals(new BigDecimal("-12.50"), rounded);
   }
 
   /* ── Fail-closed resolution policy ── */

@@ -57,10 +57,10 @@ public class ReplayRepository {
     }
   }
 
-  public List<com.wcpe.ratefeed.domain.RatePricePoint> findPricePoints(UUID sheetId) {
+  public List<RateFeedModels.RatePricePoint> findPricePoints(UUID sheetId) {
     return jdbc.query(
         "SELECT * FROM rate_feed.rate_price_point WHERE sheet_id = ? ORDER BY note_rate, lock_period",
-        (rs, row) -> new com.wcpe.ratefeed.domain.RateFeedModels.RatePricePoint(
+        (rs, row) -> new RateFeedModels.RatePricePoint(
             rs.getObject("sheet_id", UUID.class),
             rs.getBigDecimal("note_rate"),
             rs.getInt("lock_period"),

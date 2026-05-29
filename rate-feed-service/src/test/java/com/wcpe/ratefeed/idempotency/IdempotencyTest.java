@@ -1,6 +1,8 @@
 package com.wcpe.ratefeed.idempotency;
 
 import com.wcpe.ratefeed.domain.*;
+import static com.wcpe.ratefeed.domain.RateFeedModels.RateFeedException;
+import static com.wcpe.ratefeed.domain.TestRequestContexts.clear;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -14,7 +16,7 @@ class IdempotencyTest {
 
   @AfterEach
   void cleanup() {
-    RequestContext.clear();
+    clear();
   }
 
   @Test

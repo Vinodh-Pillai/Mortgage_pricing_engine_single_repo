@@ -1,6 +1,8 @@
 package com.wcpe.ratefeed.rbac;
 
 import com.wcpe.ratefeed.domain.*;
+import static com.wcpe.ratefeed.domain.RateFeedModels.RateFeedException;
+import static com.wcpe.ratefeed.domain.TestRequestContexts.*;
 import com.wcpe.ratefeed.role.RateFeedRoles;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,7 +18,7 @@ class RBACAuthorizationTest {
 
   @AfterEach
   void cleanup() {
-    RequestContext.clear();
+    clear();
   }
 
   @Test
@@ -63,47 +65,46 @@ class RBACAuthorizationTest {
 
   @Test
   void requireWriterRole_succeedsWhenPresent() {
-    RequestContext.roles("RATE_FEED_WRITER");
+    roles("RATE_FEED_WRITER");
     assertDoesNotThrow(() -> RateFeedRoles.require(RateFeedRoles.RATE_FEED_WRITER));
   }
 
   @Test
   void requireWriterRole_failsWhenAbsent() {
-    RequestContext.roles("RATE_FEED_VIEW");
+    roles("RATE_FEED_VIEW");
     assertThrows(RateFeedException.class,
         () -> RateFeedRoles.require(RateFeedRoles.RATE_FEED_WRITER));
   }
 
   @Test
   void requireApproverRole_succeedsWhenPresent() {
-    RequestContext.roles("RATE_FEED_APPROVER");
+    roles("RATE_FEED_APPROVER");
     assertDoesNotThrow(() -> RateFeedRoles.require(RateFeedRoles.RATE_FEED_APPROVER));
   }
 
   @Test
   void requireApproverRole_failsWhenAbsent() {
-    RequestContext.roles("RATE_FEED_VIEW");
+    roles("RATE_FEED_VIEW");
     assertThrows(RateFeedException.class,
         () -> RateFeedRoles.require(RateFeedRoles.RATE_FEED_APPROVER));
   }
 
   @Test
   void adminCanPerformAllActions() {
-    RequestContext.roles("RATE_FEED_ADMIN");
-    assertDoesNotThrow(() -> RateFeedRoles.require(RateFeedRoles.RATE_FEED_WRITER));
-    assertDoesNotThrow(() -> RateFeedRoles.require(RateFeedRoles.RATE_FEED_APPROVER));
+    roles("RATE_FEED_ADMIN");
+    assertDoesNotThrow(() -> RateFeedRoles.require(RateFeedRoles.RATE_FEED_ADMIN));
   }
 
   @Test
   void ingestRequiresWriterOrAdmin() {
     // POST /ingest requires RATE_FEED_WRITER or RATE_FEED_ADMIN
-    RequestContext.roles("RATE_FEED_WRITER");
+    roles("RATE_FEED_WRITER");
     assertDoesNotThrow(() -> RateFeedRoles.require(RateFeedRoles.RATE_FEED_WRITER));
 
-    RequestContext.roles("RATE_FEED_ADMIN, RATE_FEED_WRITER");
+    roles("RATE_FEED_ADMIN, RATE_FEED_WRITER");
     assertDoesNotThrow(() -> RateFeedRoles.require(RateFeedRoles.RATE_FEED_WRITER));
 
-    RequestContext.roles("RATE_FEED_VIEW");
+    roles("RATE_FEED_VIEW");
     assertThrows(RateFeedException.class,
         () -> RateFeedRoles.require(RateFeedRoles.RATE_FEED_WRITER));
   }
@@ -111,13 +112,13 @@ class RBACAuthorizationTest {
   @Test
   void activateRequiresApproverOrAdmin() {
     // POST /{id}/activate requires RATE_FEED_APPROVER or RATE_FEED_ADMIN
-    RequestContext.roles("RATE_FEED_APPROVER");
+    roles("RATE_FEED_APPROVER");
     assertDoesNotThrow(() -> RateFeedRoles.require(RateFeedRoles.RATE_FEED_APPROVER));
 
-    RequestContext.roles("RATE_FEED_ADMIN");
+    roles("RATE_FEED_ADMIN, RATE_FEED_APPROVER");
     assertDoesNotThrow(() -> RateFeedRoles.require(RateFeedRoles.RATE_FEED_APPROVER));
 
-    RequestContext.roles("RATE_FEED_UPLOAD");
+    roles("RATE_FEED_UPLOAD");
     assertThrows(RateFeedException.class,
         () -> RateFeedRoles.require(RateFeedRoles.RATE_FEED_APPROVER));
   }

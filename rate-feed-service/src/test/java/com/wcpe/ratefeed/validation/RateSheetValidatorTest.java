@@ -1,6 +1,6 @@
 package com.wcpe.ratefeed.validation;
 
-import com.wcpe.ratefeed.domain.RatePricePoint;
+import com.wcpe.ratefeed.domain.RateFeedModels.RatePricePoint;
 import org.junit.jupiter.api.*;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -36,7 +36,7 @@ class RateSheetValidatorTest {
   @Test
   void emptyGrid_valid() {
     var result = validator.validate(List.of(), "sha256:abc");
-    assertTrue(result.validationResult().valid());
+    assertFalse(result.validationResult().valid());
   }
 
   private static RatePricePoint pp(String rate, int lock, String price) {

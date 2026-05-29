@@ -12,9 +12,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.web.MockHttpServletRequest;
 
+import static com.wcpe.ratefeed.domain.RateFeedModels.*;
+
 class RateFeedControllerAuthTest {
   private final RateFeedRepository repository = mock(RateFeedRepository.class);
-  private final RateFeedService service = new RateFeedService(repository);
+  private final RateFeedService service = TestRateFeedServices.create(repository);
 
   @AfterEach
   void clearRoles() { RequestContext.clear(); }
