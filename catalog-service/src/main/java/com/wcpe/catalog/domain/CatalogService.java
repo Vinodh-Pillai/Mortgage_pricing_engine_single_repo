@@ -209,7 +209,7 @@ class CatalogService {
 
   private static void requireRole(String required, Set<String> allowed) {
     String roles = RequestContext.roles();
-    if (roles == null || roles.isEmpty()) return;
+    if (roles == null || roles.isBlank()) throw new CatalogException("ROLE_REQUIRED_" + required);
     boolean ok = Arrays.stream(roles.split(",")).map(String::trim).anyMatch(allowed::contains);
     if (!ok) throw new CatalogException("ROLE_REQUIRED_" + required);
   }

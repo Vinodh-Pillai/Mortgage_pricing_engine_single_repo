@@ -249,7 +249,7 @@ class RateFeedService {
       pos++;
     }
 
-    String resultHash = Hashing.sha256(sheetId.toString() + ":" + gridHash + ":" + Instant.now().toString());
+    String resultHash = Hashing.sha256("import:" + sheetId + ":" + version + ":" + gridHash);
 
     auditService.emit(sheetId, tenantId, "RATE_SHEET_IMPORTED", actor, correlationId, null, gridHash, version);
 

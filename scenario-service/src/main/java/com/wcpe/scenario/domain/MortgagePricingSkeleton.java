@@ -1,7 +1,6 @@
 package com.wcpe.scenario.domain;
 
 import java.util.*;
-import java.util.stream.*;
 
 record MortgagePricingRequest(
     String scenarioId,
@@ -10,22 +9,17 @@ record MortgagePricingRequest(
     PropertyInfo property
 ) {}
 
-record BorrowerInfo(boolean creditProfilePresent) {}
+record BorrowerInfo(Boolean creditProfilePresent) {}
 
-record LoanInfo(boolean loanAmountPresent) {}
+record LoanInfo(Boolean loanAmountPresent) {}
 
-record PropertyInfo(boolean propertyValuePresent) {}
+record PropertyInfo(Boolean propertyValuePresent) {}
 
 record PricingAuditMetadata(
     String ruleSourceStatus,
     String ruleVersionStatus,
     String calculationPath,
     String inputTraceId
-) {}
-
-record PricingResult(
-    String calculationStatus,
-    Object pricingResult
 ) {}
 
 record MortgagePricingResponse(
@@ -90,14 +84,20 @@ class MortgagePricingSkeleton {
 
         if (request.borrower() == null) {
             errors.add("borrower: missing required borrower object");
+        } else if (request.borrower().creditProfilePresent() == null) {
+            errors.add("borrower.creditProfilePresent: missing required structural presence flag");
         }
 
         if (request.loan() == null) {
             errors.add("loan: missing required loan object");
+        } else if (request.loan().loanAmountPresent() == null) {
+            errors.add("loan.loanAmountPresent: missing required structural presence flag");
         }
 
         if (request.property() == null) {
             errors.add("property: missing required property object");
+        } else if (request.property().propertyValuePresent() == null) {
+            errors.add("property.propertyValuePresent: missing required structural presence flag");
         }
 
         return errors;
@@ -112,9 +112,7 @@ class MortgagePricingSkeleton {
         boolean hasLoan = request.loan() != null;
         boolean hasProperty = request.property() != null;
 
-        String sid = request.scenarioId() != null ? request.scenarioId().substring(0, Math.min(8, request.scenarioId().length())) : "nosid";
-
-        return String.format("trace-skeleton-%s-%d%d%d", sid,
+        return String.format("trace-skeleton-structural-%d%d%d",
             hasBorrower ? 1 : 0, hasLoan ? 1 : 0, hasProperty ? 1 : 0);
     }
 }

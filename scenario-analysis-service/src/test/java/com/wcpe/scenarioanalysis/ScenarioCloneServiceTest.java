@@ -42,6 +42,27 @@ class ScenarioCloneServiceTest {
   }
 
   @Test
+  void cloneScenarioNormalizesInputWithoutChangingTheRequestedSourceReference() {
+    var request = new CloneScenarioRequest(" source-006 ", " variant-006 ");
+
+    var result = service.cloneScenario(request);
+
+    assertThat(request.sourceScenarioId()).isEqualTo(" source-006 ");
+    assertThat(request.variantScenarioId()).isEqualTo(" variant-006 ");
+    assertThat(result.variantScenarioId()).isEqualTo("variant-006");
+    assertThat(result.lineage().sourceScenarioId()).isEqualTo("source-006");
+  }
+
+  @Test
+  void missingCloneRequestDoesNotCreateLineage() {
+    assertThatThrownBy(() -> service.cloneScenario(null))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("clone request is required");
+
+    assertThat(repository.size()).isZero();
+  }
+
+  @Test
   void missingSourceReferenceDoesNotCreateLineage() {
     assertThatThrownBy(() -> service.cloneScenario(new CloneScenarioRequest(" ", "variant-003")))
         .isInstanceOf(IllegalArgumentException.class)

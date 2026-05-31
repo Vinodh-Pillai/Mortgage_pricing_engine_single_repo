@@ -2,7 +2,6 @@ package com.wcpe.scenario.domain;
 
 import static org.assertj.core.api.Assertions.*;
 
-import java.util.*;
 import org.junit.jupiter.api.Test;
 
 class MortgagePricingSkeletonTest {
@@ -29,7 +28,7 @@ class MortgagePricingSkeletonTest {
         assertThat(response.auditMetadata().ruleSourceStatus()).isEqualTo("unresolved");
         assertThat(response.auditMetadata().ruleVersionStatus()).isEqualTo("unavailable");
         assertThat(response.auditMetadata().calculationPath()).isEqualTo("not_started_rules_unavailable");
-        assertThat(response.auditMetadata().inputTraceId()).startsWith("trace-skeleton-");
+        assertThat(response.auditMetadata().inputTraceId()).isEqualTo("trace-skeleton-structural-111");
     }
 
     @Test
@@ -74,6 +73,28 @@ class MortgagePricingSkeletonTest {
         assertThat(response.pricingResult()).isNull();
         assertThat(response.calculationStatus()).isEqualTo("validation_failed");
         assertThat(response.validationErrors()).anyMatch(e -> e.contains("borrower"));
+    }
+
+    @Test
+    void missingStructuralPresenceFlagsReturnValidationFailed() {
+        MortgagePricingRequest request = new MortgagePricingRequest(
+            "SCN-005",
+            new BorrowerInfo(null),
+            new LoanInfo(null),
+            new PropertyInfo(null)
+        );
+
+        MortgagePricingResponse response = skeleton.evaluateMortgagePricingSkeleton(request);
+
+        assertThat(response.pricingResult()).isNull();
+        assertThat(response.calculationStatus()).isEqualTo("validation_failed");
+        assertThat(response.validationErrors())
+            .containsExactly(
+                "borrower.creditProfilePresent: missing required structural presence flag",
+                "loan.loanAmountPresent: missing required structural presence flag",
+                "property.propertyValuePresent: missing required structural presence flag"
+            );
+        assertThat(response.auditMetadata().calculationPath()).isEqualTo("not_started_validation_failed");
     }
 
     @Test

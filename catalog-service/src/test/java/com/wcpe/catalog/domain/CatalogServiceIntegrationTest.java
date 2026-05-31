@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.*;
 
 import java.time.LocalDate;
 import java.util.*;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -30,6 +30,16 @@ class CatalogServiceIntegrationTest {
   }
 
   @Autowired CatalogService service;
+
+  @BeforeEach
+  void defaultServiceRoleContext() {
+    RequestContext.roles("CATALOG_ADMIN");
+  }
+
+  @AfterEach
+  void clearServiceRoleContext() {
+    RequestContext.clear();
+  }
 
   @Test
   void addsReferencesProductAndInvestorThenPublishesCatalog() {
@@ -133,6 +143,7 @@ class CatalogServiceIntegrationTest {
   @Test
   void rbacEnforcement_wrongRoleFails() {
     UUID tenantId = UUID.randomUUID();
+    RequestContext.clear();
 
     assertThatThrownBy(() -> service.addProduct(tenantId, new ProductRequest("CONV30", "Test", "CONVENTIONAL", List.of(), List.of(), LocalDate.now(), null), "key", "actor", "corr"))
         .isInstanceOf(CatalogException.class)

@@ -1,4 +1,4 @@
-package com.wcpe.catalog;
+package com.wcpe.catalog.domain;
 
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
