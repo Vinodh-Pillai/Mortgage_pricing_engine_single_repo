@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PricingGridResponse",
+  "type": "object",
+  "required": ["fixture_id", "synthetic_base_rate", "synthetic_adjustment", "synthetic_quote_rate"],
+  "properties": {
+    "fixture_id": { "type": "string" },
+    "synthetic_base_rate": { "type": "string", "description": "Named synthetic fixture token, not a real mortgage rate" },
+    "synthetic_adjustment": { "type": "string", "description": "Named synthetic fixture token, not a real pricing adjustment" },
+    "synthetic_quote_rate": { "type": "string", "description": "Named synthetic fixture token, not a real quote rate" }
+  },
+  "additionalProperties": false
+}

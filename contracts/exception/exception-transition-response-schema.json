@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ExceptionTransitionResponse",
+  "type": "object",
+  "required": ["exceptionRequestId", "previousState", "newState", "requestedTransition", "mockBacked", "authoritativeIntegration"],
+  "properties": {
+    "exceptionRequestId": {
+      "type": "string",
+      "description": "Exception request identifier"
+    },
+    "previousState": {
+      "type": "string",
+      "description": "State before transition"
+    },
+    "newState": {
+      "type": "string",
+      "enum": ["DRAFT", "SUBMITTED", "APPROVED", "REJECTED", "CANCELLED"],
+      "description": "State after transition"
+    },
+    "requestedTransition": {
+      "type": "string",
+      "description": "Transition that was applied"
+    },
+    "mockBacked": {
+      "type": "boolean",
+      "const": true
+    },
+    "authoritativeIntegration": {
+      "type": "boolean",
+      "const": false
+    },
+    "transitionedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Timestamp of transition"
+    }
+  },
+  "additionalProperties": false
+}

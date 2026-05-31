@@ -1,0 +1,84 @@
+openapi: "3.0.3"
+info:
+  title: "Exception Service Contract (PII-11 Concession Skeleton)"
+  version: "0.1.0"
+  description: "Mock-backed concession/exception request lifecycle. No production pricing or approval behavior."
+paths:
+  /exception:
+    post:
+      summary: "Create a concession/exception request (mock-backed)"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "./exception-request-schema.json"
+      responses:
+        "200":
+          description: "Exception request created (mock-backed)"
+          content:
+            application/json:
+              schema:
+                $ref: "./exception-status-schema.json"
+        "400":
+          description: "Missing or blank placeholderQuoteReference"
+          content:
+            application/json:
+              schema:
+                $ref: "./exception-error-schema.json"
+  /exception/{exceptionRequestId}/status:
+    get:
+      summary: "Read current exception request status"
+      parameters:
+        - name: exceptionRequestId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: "Current exception request status"
+          content:
+            application/json:
+              schema:
+                $ref: "./exception-status-schema.json"
+        "404":
+          description: "Unknown exception request id"
+          content:
+            application/json:
+              schema:
+                $ref: "./exception-error-schema.json"
+  /exception/{exceptionRequestId}/transition:
+    post:
+      summary: "Request a state transition for an existing exception request"
+      parameters:
+        - name: exceptionRequestId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "./exception-transition-schema.json"
+      responses:
+        "200":
+          description: "Transition applied successfully"
+          content:
+            application/json:
+              schema:
+                $ref: "./exception-transition-response-schema.json"
+        "400":
+          description: "Invalid transition for current state"
+          content:
+            application/json:
+              schema:
+                $ref: "./exception-error-schema.json"
+        "404":
+          description: "Unknown exception request id"
+          content:
+            application/json:
+              schema:
+                $ref: "./exception-error-schema.json"

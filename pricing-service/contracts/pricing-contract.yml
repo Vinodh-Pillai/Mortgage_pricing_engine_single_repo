@@ -1,0 +1,40 @@
+openapi: "3.0.3"
+info:
+  title: "Pricing Service Contract (PII-05 Synthetic Grid)"
+  version: "0.1.0"
+  description: "Contract-first pricing API backed by synthetic grid fixtures. No production pricing behavior."
+paths:
+  /pricing/quote:
+    post:
+      summary: "Return a synthetic pricing quote for a grid fixture"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: ["fixture_id"]
+              properties:
+                fixture_id:
+                  type: string
+      responses:
+        "200":
+          description: "Synthetic pricing quote"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: ["fixture_id", "synthetic_base_rate", "synthetic_adjustment", "synthetic_quote_rate"]
+                properties:
+                  fixture_id: { type: string }
+                  synthetic_base_rate:
+                    type: string
+                    description: "Named synthetic fixture token, not a real mortgage rate"
+                  synthetic_adjustment:
+                    type: string
+                    description: "Named synthetic fixture token, not a real pricing adjustment"
+                  synthetic_quote_rate:
+                    type: string
+                    description: "Named synthetic fixture token, not a real quote rate"
+        "400":
+          description: "Missing or unsupported fixture_id"

@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ExceptionRequestStatus",
+  "type": "object",
+  "required": ["exceptionRequestId", "placeholderQuoteReference", "requestType", "state", "mockBacked", "authoritativeIntegration"],
+  "properties": {
+    "exceptionRequestId": {
+      "type": "string",
+      "description": "Service-assigned exception request identifier"
+    },
+    "placeholderQuoteReference": {
+      "type": "string",
+      "description": "Placeholder quote reference for mock-backed association"
+    },
+    "requestType": {
+      "type": "string",
+      "enum": ["CONCESSION", "EXCEPTION"],
+      "description": "Type of concession or exception request"
+    },
+    "state": {
+      "type": "string",
+      "enum": ["DRAFT", "SUBMITTED", "APPROVED", "REJECTED", "CANCELLED"],
+      "description": "Current lifecycle state"
+    },
+    "mockBacked": {
+      "type": "boolean",
+      "const": true,
+      "description": "True for all responses in this PII"
+    },
+    "authoritativeIntegration": {
+      "type": "boolean",
+      "const": false,
+      "description": "False until quote and approval contracts exist"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Request creation timestamp"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Last state change timestamp"
+    }
+  },
+  "additionalProperties": false
+}

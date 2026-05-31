@@ -14,7 +14,9 @@ worker-outbox/
 .idea/
 .vscode/
 *.iml
-
+.opencode/
+Agents.md
+opencode.jsonc
 # OS files
 .DS_Store
 Thumbs.db
