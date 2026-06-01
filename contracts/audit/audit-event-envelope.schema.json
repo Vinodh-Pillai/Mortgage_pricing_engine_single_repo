@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codefactory.local/contracts/audit/audit-event-envelope.schema.json",
+  "title": "Audit Event Envelope",
+  "description": "Generic append-only audit event envelope for future service-emitted events. This contract intentionally avoids mortgage pricing domain constants and production replay guarantees.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "eventId",
+    "eventType",
+    "sourceService",
+    "aggregateType",
+    "aggregateId",
+    "occurredAt",
+    "payload"
+  ],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable unique identity for the emitted audit event."
+    },
+    "eventType": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Source-defined event type name."
+    },
+    "sourceService": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Logical service or component that emitted the event."
+    },
+    "aggregateType": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Source-defined aggregate category for correlation and replay filtering."
+    },
+    "aggregateId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Source-defined aggregate identity."
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Timestamp when the source event occurred."
+    },
+    "recordedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Optional timestamp when the event was recorded into an audit/outbox stream."
+    },
+    "sequence": {
+      "type": ["integer", "string"],
+      "description": "Optional source ordering token for append-only consumers."
+    },
+    "correlationId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional cross-event correlation identity."
+    },
+    "causationId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional upstream event or command identity that caused this event."
+    },
+    "partitionKey": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional partitioning hint for future ordered processing."
+    },
+    "payload": {
+      "type": "object",
+      "description": "Generic event payload owned by the source service.",
+      "additionalProperties": true
+    },
+    "payloadRef": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional reference to payload content when payload is stored separately."
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Optional non-domain metadata for audit, replay, or trace tooling.",
+      "additionalProperties": true
+    }
+  }
+}

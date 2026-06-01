@@ -36,6 +36,16 @@ class AuditEmissionTest {
   }
 
   @Test
+  void auditEventEmitter_includesOptionalHashesWithoutPayloadMutationFailure() {
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    AuditEventEmitter emitter = new AuditEventEmitter(jdbc);
+
+    assertDoesNotThrow(() -> emitter.emit(UUID.randomUUID(), UUID.randomUUID(), "RATE_SHEET_ACTIVATED",
+        UUID.randomUUID(), "actor-1", "before-hash", "after-hash", 7));
+    verify(jdbc).update(anyString(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
   void auditService_emitRejection_acceptsParameters() {
     JdbcTemplate jdbc = mock(JdbcTemplate.class);
     AuditService service = new AuditService(jdbc);

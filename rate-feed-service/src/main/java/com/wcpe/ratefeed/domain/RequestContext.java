@@ -13,7 +13,10 @@ public final class RequestContext {
       return;
     }
     Set<String> parsed = new HashSet<>();
-    for (String role : roles.split(",")) parsed.add(role.trim());
+    for (String role : roles.split(",")) {
+      String normalized = role.trim().toUpperCase(Locale.ROOT);
+      if (!normalized.isBlank()) parsed.add(normalized);
+    }
     ROLES.set(parsed);
   }
 

@@ -1,0 +1,47 @@
+{
+  "auditEventEnvelope": {
+    "eventId": "evt-example-001",
+    "eventType": "example.event.recorded",
+    "sourceService": "example-service",
+    "aggregateType": "example-aggregate",
+    "aggregateId": "agg-example-001",
+    "occurredAt": "2026-06-01T00:00:00Z",
+    "recordedAt": "2026-06-01T00:00:01Z",
+    "sequence": "1",
+    "correlationId": "corr-example-001",
+    "causationId": "cause-example-001",
+    "partitionKey": "example-aggregate:agg-example-001",
+    "payload": {
+      "example": true
+    },
+    "metadata": {
+      "schemaVersion": "foundation"
+    }
+  },
+  "auditReplayManifest": {
+    "manifestId": "manifest-example-001",
+    "status": "draft",
+    "scope": {
+      "eventTypes": ["example.event.recorded"],
+      "sourceServices": ["example-service"],
+      "aggregateTypes": ["example-aggregate"],
+      "aggregateIds": ["agg-example-001"],
+      "occurredAfter": "2026-06-01T00:00:00Z",
+      "occurredBefore": "2026-06-02T00:00:00Z"
+    },
+    "eventRange": {
+      "fromEventId": "evt-example-001",
+      "toEventId": "evt-example-999",
+      "fromSequence": "1",
+      "toSequence": "999"
+    },
+    "createdAt": "2026-06-01T00:00:00Z",
+    "artifactLinks": [
+      {
+        "rel": "validation-note",
+        "href": "audit-replay-service/README.md",
+        "mediaType": "text/markdown"
+      }
+    ]
+  }
+}

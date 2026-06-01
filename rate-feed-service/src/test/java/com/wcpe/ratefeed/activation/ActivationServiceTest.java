@@ -60,6 +60,25 @@ class ActivationServiceTest {
     assertEquals(2, next);
   }
 
+  @Test
+  void supersession_recordsVersionLineageWithoutMutatingPricePoints() {
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    UUID tenantId = UUID.randomUUID();
+    UUID investorId = UUID.randomUUID();
+    UUID channelId = UUID.randomUUID();
+    UUID newSheetId = UUID.randomUUID();
+    UUID supersededSheetId = UUID.randomUUID();
+    when(jdbc.queryForList(anyString(), eq(UUID.class), any(), any(), any(), any(), any()))
+        .thenReturn(java.util.List.of(supersededSheetId));
+
+    new SupersessionEngine(jdbc).supersede(tenantId, investorId, channelId,
+        "CONFORMING_30YR", newSheetId, 3);
+
+    verify(jdbc).update(contains("UPDATE rate_feed.rate_sheet SET status = 'SUPERSEDED'"), any(Object[].class));
+    verify(jdbc).update(contains("SET superseded_by = ?"), any(Object[].class));
+    verify(jdbc, never()).update(contains("rate_feed.rate_price_point"), any(Object[].class));
+  }
+
   @SuppressWarnings("unchecked")
   private static Set<RateSheetStatus> allowedTransitions(RateSheetStatus status) {
     try {

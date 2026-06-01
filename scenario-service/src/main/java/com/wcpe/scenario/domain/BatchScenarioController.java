@@ -27,8 +27,9 @@ class BatchScenarioController {
       @RequestParam("channel") String channel,
       @RequestParam("quoteIntent") String quoteIntent,
       @RequestParam(value = "partialSuccessPolicy", defaultValue = "ALLOW_VALID_ROWS") String partialSuccessPolicy) {
-    PartialSuccessPolicy policy = PartialSuccessPolicy.ALLOW_VALID_ROWS;
-    try { policy = PartialSuccessPolicy.valueOf(partialSuccessPolicy); } catch (IllegalArgumentException ignored) {}
+    PartialSuccessPolicy parsedPolicy = PartialSuccessPolicy.ALLOW_VALID_ROWS;
+    try { parsedPolicy = PartialSuccessPolicy.valueOf(partialSuccessPolicy); } catch (IllegalArgumentException ignored) {}
+    final PartialSuccessPolicy policy = parsedPolicy;
     return withRoles(roles, () -> ResponseEntity.status(HttpStatus.ACCEPTED).body(
         service.upload(file, templateVersion, channel, quoteIntent, policy, tenantId, key, correlationId, actorId)));
   }

@@ -201,9 +201,12 @@ class RateFeedIntegrationTest {
         String beforeHash = jdbc.queryForObject(
                 "SELECT grid_hash FROM rate_feed.rate_sheet WHERE sheet_id = ?", String.class, sheetId);
 
+        int version = jdbc.queryForObject(
+                "SELECT version FROM rate_feed.rate_sheet WHERE sheet_id = ?", Integer.class, sheetId);
+
         // Supersede existing ACTIVE sheets
         SupersessionEngine engine = new SupersessionEngine(jdbc);
-        List<UUID> supersededIds = engine.supersede(TENANT, INVESTOR, CHANNEL, PRODUCT, sheetId);
+        List<UUID> supersededIds = engine.supersede(TENANT, INVESTOR, CHANNEL, PRODUCT, sheetId, version);
 
         Instant now = Instant.now();
         int rowCount = jdbc.update(
@@ -214,8 +217,6 @@ class RateFeedIntegrationTest {
         assertEquals(1, rowCount, "Sheet should transition from VALIDATED to ACTIVE");
 
         // Insert version record
-        int version = jdbc.queryForObject(
-                "SELECT version FROM rate_feed.rate_sheet WHERE sheet_id = ?", Integer.class, sheetId);
         jdbc.update(
                 "INSERT INTO rate_feed.rate_sheet_version(sheet_id, version, previous_version, created_at) VALUES (?, ?, NULL, now())",
                 sheetId, version);

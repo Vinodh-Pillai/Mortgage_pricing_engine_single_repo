@@ -33,6 +33,18 @@ public class GridLookup {
    * D-004 fix: rejects out-of-range noteRate for interpolation.
    */
   public PriceResult lookup(UUID sheetId, BigDecimal noteRate, int lockPeriod, boolean interpolate) {
+    if (noteRate == null) {
+      throw new RateFeedException(HttpStatus.BAD_REQUEST, "NOTE_RATE_REQUIRED", "noteRate is required for price lookup");
+    }
+    if (lockPeriod <= 0) {
+      throw new RateFeedException(HttpStatus.BAD_REQUEST, "LOCK_PERIOD_REQUIRED", "lockPeriod must be greater than zero for price lookup");
+    }
+    // D-004: fail closed before exact lookup or interpolation can return invalid grid data.
+    if (noteRate.compareTo(MIN_RATE) < 0 || noteRate.compareTo(MAX_RATE) > 0) {
+      throw new RateFeedException(HttpStatus.BAD_REQUEST, "RATE_OUT_OF_RANGE",
+          "noteRate " + noteRate + " is outside acceptable range [" + MIN_RATE + ", " + MAX_RATE + "]");
+    }
+
     // Exact match
     List<RatePricePoint> exact = jdbc.query(
         "SELECT * FROM rate_feed.rate_price_point WHERE sheet_id=? AND note_rate=? AND lock_period=?",
@@ -52,16 +64,9 @@ public class GridLookup {
           "No exact match for noteRate=" + noteRate + " lockPeriod=" + lockPeriod);
     }
 
-    // D-004 fix: Validate noteRate is within acceptable range before interpolation
-    if (noteRate.compareTo(MIN_RATE) < 0 || noteRate.compareTo(MAX_RATE) > 0) {
-      throw new RateFeedException(HttpStatus.BAD_REQUEST, "RATE_OUT_OF_RANGE",
-          "noteRate " + noteRate + " is outside acceptable range [" + MIN_RATE + ", " + MAX_RATE + "]. " +
-          "Interpolation cannot produce economically meaningful results for out-of-range rates.");
-    }
-
     // Interpolation: find bounding rates for same lockPeriod
     List<RatePricePoint> bounds = jdbc.query(
-        "SELECT note_rate, base_price, discount_points FROM rate_feed.rate_price_point WHERE sheet_id=? AND lock_period=? ORDER BY note_rate",
+        "SELECT note_rate, lock_period, base_price, discount_points FROM rate_feed.rate_price_point WHERE sheet_id=? AND lock_period=? ORDER BY note_rate",
         (rs, row) -> new RatePricePoint(null, rs.getBigDecimal("note_rate"), rs.getInt("lock_period"),
             rs.getBigDecimal("base_price"), rs.getBigDecimal("discount_points"), null, 0),
         sheetId, lockPeriod);

@@ -18,15 +18,21 @@
     },
     "correlationId": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Safe correlation metadata only. Credential, token, borrower, customer, account, authorization, secret, and other protected values are redacted before emission."
     },
     "cacheId": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Safe cache identifier metadata only. Protected or credential-like values are redacted before emission."
     },
     "cacheKey": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Optional safe cache key label. Raw borrower/customer identifiers, credentials, tokens, secrets, authorization values, and oversized values are redacted before emission."
     },
     "status": {
       "type": "string",
@@ -67,8 +73,10 @@
       "type": "array",
       "items": {
         "type": "string",
-        "minLength": 1
-      }
+        "minLength": 1,
+        "maxLength": 160
+      },
+      "description": "Diagnostics must be safe operational messages. Sensitive-looking or oversized free-form values are replaced with redaction diagnostics before emission."
     }
   }
 }

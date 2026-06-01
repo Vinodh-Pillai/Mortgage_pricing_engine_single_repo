@@ -4,6 +4,7 @@ import static com.wcpe.ratefeed.domain.RateFeedModels.RateFeedException;
 
 import org.junit.jupiter.api.*;
 import static org.junit.jupiter.api.Assertions.*;
+import com.wcpe.ratefeed.role.RateFeedRoles;
 
 import java.util.*;
 
@@ -61,6 +62,13 @@ class SecurityRBACTest {
     assertTrue(RequestContext.hasRole("RATE_FEED_VIEW"));
   }
 
+  @Test
+  void roles_normalizeCaseForCentralizedRoleChecks() {
+    RequestContext.roles(" rate_feed_upload , rate_feed_view ");
+    assertTrue(RateFeedRoles.hasRole(RateFeedRoles.RATE_FEED_UPLOAD));
+    assertTrue(RateFeedRoles.hasRole(RateFeedRoles.RATE_FEED_VIEW));
+  }
+
   /* ── Role isolation (ThreadLocal) ── */
 
   @Test
@@ -103,6 +111,13 @@ class SecurityRBACTest {
       assertNotNull(role);
       assertFalse(role.isEmpty());
     }
+  }
+
+  @Test
+  void rbac_unknownCentralizedRoleNameRejected() {
+    IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+        () -> RateFeedRoles.validateRole("RATE_FEED_UPLOAD_"));
+    assertTrue(ex.getMessage().contains("Unknown role"));
   }
 
   /* ── requireRole enforcement (static) ── */

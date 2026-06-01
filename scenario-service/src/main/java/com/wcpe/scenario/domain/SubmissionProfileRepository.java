@@ -54,11 +54,13 @@ class SubmissionProfileRepository {
 
   @Transactional
   UUID publishProfile(UUID tenantId, UUID profileId, Instant effectiveFromUtc, Instant effectiveToUtc, String approvalToken, String changeSetRef, String actorId) {
+    SubmissionProfile profile = findProfile(tenantId, profileId);
+    if (profile == null) throw new ScenarioException(org.springframework.http.HttpStatus.NOT_FOUND, "PROFILE_NOT_FOUND", "Submission profile was not found.", List.of());
     List<SubmissionProfileVersion> current = findVersions(tenantId, profileId);
     if (current.isEmpty()) throw new ScenarioException(org.springframework.http.HttpStatus.NOT_FOUND, "PROFILE_NOT_FOUND", "Submission profile was not found.", List.of());
     SubmissionProfileVersion active = current.stream().filter(v -> v.status() == ProfileStatus.DRAFT).findFirst().orElseGet(() -> current.get(current.size() - 1));
 
-    checkOverlappingPublished(tenantId, active.channel(), active.quoteIntent(), effectiveFromUtc, effectiveToUtc);
+    checkOverlappingPublished(tenantId, profile.channel(), profile.quoteIntent(), effectiveFromUtc, effectiveToUtc);
 
     int newVersion = active.versionNumber() + 1;
     UUID newVersionId = UUID.randomUUID();
@@ -83,11 +85,19 @@ class SubmissionProfileRepository {
     }
 
     // Publish event
-    EventRecord event = new EventRecord(UUID.randomUUID(), tenantId, null, "SubmissionProfilePublished.v1", 1, UUID.randomUUID().toString(), Instant.now(), Map.of(
-        "tenantId", tenantId.toString(), "profileId", profileId.toString(), "versionId", newVersionId.toString(),
-        "versionNumber", newVersion, "channel", active.channel(), "quoteIntent", active.quoteIntent(),
-        "effectiveFromUtc", effectiveFromUtc.toString(), "effectiveToUtc", effectiveToUtc != null ? effectiveToUtc.toString() : null,
-        "checksum", checksum, "approvedBy", actorId, "changeSetRef", changeSetRef));
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("tenantId", tenantId.toString());
+    payload.put("profileId", profileId.toString());
+    payload.put("versionId", newVersionId.toString());
+    payload.put("versionNumber", newVersion);
+    payload.put("channel", profile.channel());
+    payload.put("quoteIntent", profile.quoteIntent());
+    payload.put("effectiveFromUtc", effectiveFromUtc.toString());
+    payload.put("effectiveToUtc", effectiveToUtc != null ? effectiveToUtc.toString() : null);
+    payload.put("checksum", checksum);
+    payload.put("approvedBy", actorId);
+    payload.put("changeSetRef", changeSetRef);
+    EventRecord event = new EventRecord(UUID.randomUUID(), tenantId, null, "SubmissionProfilePublished.v1", 1, UUID.randomUUID().toString(), Instant.now(), payload);
     jdbc.update("""
         insert into scenario.scenario_outbox_event (tenant_id, event_id, scenario_id, event_type, event_version, correlation_id, payload_json, occurred_at)
         values (?, ?, NULL, ?, ?, ?, ?::jsonb, ?)
@@ -101,7 +111,7 @@ class SubmissionProfileRepository {
     if (profile == null) throw new ScenarioException(org.springframework.http.HttpStatus.NOT_FOUND, "PROFILE_NOT_FOUND", "Submission profile was not found.", List.of());
     SubmissionProfileVersion latest = profile.versions().stream().max(Comparator.comparingInt(SubmissionProfileVersion::versionNumber)).orElseThrow();
     List<SubmissionProfileFieldRule> rules = findRules(tenantId, latest.versionId());
-    return new SubmissionProfileResponse(profileId, latest.versionId(), latest.status(), latest.channel(), latest.quoteIntent(), profile.profileName(),
+    return new SubmissionProfileResponse(profileId, latest.versionId(), latest.status(), profile.channel(), profile.quoteIntent(), profile.profileName(),
         latest.versionNumber(), latest.effectiveFromUtc(), latest.effectiveToUtc(), latest.checksum(), rules, Collections.emptyList(), latest.createdAtUtc());
   }
 
@@ -130,7 +140,7 @@ class SubmissionProfileRepository {
         (UUID) row.get("profile_version_id"),
         ((Number) row.get("version_number")).intValue(),
         (String) row.get("checksum"),
-        read((String) ((LinkedHashMap) row.get("rules_json")), RULES),
+        read(String.valueOf(row.get("rules_json")), RULES),
         ((Timestamp) row.get("effective_from_utc")).toInstant());
   }
 
@@ -209,12 +219,12 @@ class SubmissionProfileRepository {
   }
 
   private int nextVersion(UUID tenantId, String channel, String quoteIntent) {
-    Integer max = jdbc.queryForRowSet("""
+    Integer max = jdbc.queryForObject("""
         select max(sv.version_number) as max_ver from scenario.submission_profile p
         join scenario.submission_profile_version sv on sv.submission_profile_id = p.submission_profile_id
         where p.tenant_id = ? and p.channel = ? and p.quote_intent = ?
-        """, rs -> rs.getObject("max_ver") != null ? rs.getInt("max_ver") : 0);
-    return max + 1;
+        """, Integer.class, tenantId, channel, quoteIntent);
+    return max != null ? max + 1 : 1;
   }
 
   private static String computeChecksum(List<SubmissionProfileFieldRule> rules) {

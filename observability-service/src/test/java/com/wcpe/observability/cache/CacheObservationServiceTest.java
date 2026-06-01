@@ -92,6 +92,52 @@ class CacheObservationServiceTest {
   }
 
   @Test
+  void sensitiveMetadataAndDiagnosticsAreRedactedBeforeObservationIsReturned() {
+    CacheObservation observation = service.observe(new CacheObservationInput(
+        "obs-sensitive",
+        "borrower-12345",
+        "customer-cache",
+        "token=abc123",
+        CacheObservationStatus.DEGRADED,
+        now,
+        FreshnessMetadata.absent(),
+        List.of(
+            "password=secret-value",
+            "customer name Jane Doe",
+            "safe diagnostic")));
+
+    assertEquals("REDACTED", observation.correlationId());
+    assertEquals("REDACTED", observation.cacheId());
+    assertEquals("REDACTED", observation.cacheKey());
+    assertTrue(observation.diagnostics().contains("safe diagnostic"));
+    assertTrue(observation.diagnostics().contains("diagnostic redacted: sensitive value omitted"));
+    assertFalse(observation.diagnostics().stream().anyMatch(value -> value.contains("secret-value")));
+    assertFalse(observation.diagnostics().stream().anyMatch(value -> value.contains("Jane Doe")));
+  }
+
+  @Test
+  void oversizedMetadataAndDiagnosticsAreNormalizedAtTheSafeBoundary() {
+    String oversizedMetadata = "corr-" + "x".repeat(70);
+    String oversizedDiagnostic = "diagnostic-" + "x".repeat(170);
+
+    CacheObservation observation = service.observe(new CacheObservationInput(
+        "obs-oversized",
+        oversizedMetadata,
+        "cache-safe",
+        null,
+        CacheObservationStatus.STALE,
+        now,
+        FreshnessMetadata.absent(),
+        List.of(oversizedDiagnostic)));
+
+    assertEquals("REDACTED", observation.correlationId());
+    assertEquals("cache-safe", observation.cacheId());
+    assertTrue(observation.diagnostics().contains("correlationId contained unsafe metadata; redacted"));
+    assertTrue(observation.diagnostics().contains("diagnostic redacted: value exceeded safe length"));
+    assertFalse(observation.diagnostics().contains(oversizedDiagnostic));
+  }
+
+  @Test
   void negativeFreshnessAgeIsRejected() {
     assertThrows(IllegalArgumentException.class,
         () -> new FreshnessMetadata(FreshnessSource.FIXTURE, "fixture", -1L));

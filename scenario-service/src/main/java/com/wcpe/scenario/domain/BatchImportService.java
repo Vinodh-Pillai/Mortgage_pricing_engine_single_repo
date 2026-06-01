@@ -39,7 +39,7 @@ class BatchImportService {
     String fileHash = Hashing.sha256(file.getOriginalFilename() + ":" + file.getSize() + ":" + System.currentTimeMillis());
     // Parse CSV to count rows
     List<String[]> parsedRows = parseCsv(file);
-    validateHeaders(parsedRows.isEmpty() ? List.of() : parsedRows.get(0));
+    validateHeaders(parsedRows.isEmpty() ? new String[0] : parsedRows.get(0));
     int dataRows = Math.max(0, parsedRows.size() - 1);
     UUID jobId = importRepository.createJob(tenantId, file.getOriginalFilename(), fileHash,
         templateVersion, channel, quoteIntent, policy, submittedBy, dataRows);
@@ -113,6 +113,10 @@ class BatchImportService {
     }
     fields.add(current.toString().trim());
     return fields.toArray(String[]::new);
+  }
+
+  String[] parseLine(String line) {
+    return parseCsvLine(line);
   }
 
   private void processRows(UUID tenantId, UUID jobId, List<String[]> rows, String channel, String quoteIntent,
@@ -227,7 +231,10 @@ class BatchImportService {
 
   private static boolean isCsvInjection(String value) {
     if (value == null || value.isEmpty()) return false;
-    return value.length() > 0 && Arrays.stream(CSV_INJECTION_PREFIXES).anyMatch(p -> value.startsWith(String.valueOf(p)));
+    for (char prefix : CSV_INJECTION_PREFIXES) {
+      if (value.charAt(0) == prefix) return true;
+    }
+    return false;
   }
 
   private static void requireRole(String required, Set<String> allowed) {

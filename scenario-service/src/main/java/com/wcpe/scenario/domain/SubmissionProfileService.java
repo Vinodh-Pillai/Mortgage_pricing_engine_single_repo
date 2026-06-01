@@ -60,7 +60,7 @@ class SubmissionProfileService {
       if (latest != null) {
         List<SubmissionProfileFieldRule> rules = repositoryRules(tenantId, latest);
         responses.add(new SubmissionProfileResponse(p.profileId(), latest.versionId(), latest.status(),
-            latest.channel(), latest.quoteIntent(), p.profileName(), latest.versionNumber(),
+            p.channel(), p.quoteIntent(), p.profileName(), latest.versionNumber(),
             latest.effectiveFromUtc(), latest.effectiveToUtc(), latest.checksum(), rules,
             Collections.emptyList(), latest.createdAtUtc()));
       }

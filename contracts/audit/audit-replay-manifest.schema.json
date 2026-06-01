@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codefactory.local/contracts/audit/audit-replay-manifest.schema.json",
+  "title": "Audit Replay Manifest",
+  "description": "Foundation-only replay manifest stub describing replay scope and evidence links without implementing or promising production replay execution.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifestId",
+    "status",
+    "scope",
+    "eventRange",
+    "createdAt"
+  ],
+  "properties": {
+    "manifestId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable unique identity for the replay manifest."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "available", "running", "completed", "failed", "cancelled"],
+      "description": "Non-domain lifecycle status for a future replay request or replay evidence package."
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Filters that describe which events a future replay process would inspect.",
+      "properties": {
+        "eventTypes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "sourceServices": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "aggregateTypes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "aggregateIds": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "occurredAfter": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "occurredBefore": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "eventRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Event bounds for future replay tooling.",
+      "properties": {
+        "fromEventId": { "type": "string", "minLength": 1 },
+        "toEventId": { "type": "string", "minLength": 1 },
+        "fromSequence": { "type": ["integer", "string"] },
+        "toSequence": { "type": ["integer", "string"] },
+        "fromRecordedAt": { "type": "string", "format": "date-time" },
+        "toRecordedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Manifest creation timestamp."
+    },
+    "completedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Optional timestamp for future replay completion evidence."
+    },
+    "artifactLinks": {
+      "type": "array",
+      "description": "Optional links or local artifact references associated with manifest evidence.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rel", "href"],
+        "properties": {
+          "rel": { "type": "string", "minLength": 1 },
+          "href": { "type": "string", "minLength": 1 },
+          "mediaType": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "notes": {
+      "type": "string",
+      "description": "Optional operator or validation note."
+    }
+  }
+}

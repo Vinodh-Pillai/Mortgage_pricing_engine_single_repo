@@ -40,10 +40,6 @@ record ScenarioResponse(UUID scenarioId, int scenarioVersion, ScenarioStatus sta
     Set<String> completedSections, int blockingIssueCount, int warningIssueCount, Map<String, Object> derivedFields, UUID auditPackageId,
     String replayHash, List<ValidationIssue> validationIssues) {}
 
-record ReplayPackage(UUID scenarioId, int scenarioVersion, String schemaVersion, boolean redactionApplied, ScenarioStatus status,
-    List<VersionManifest> versionManifest, Map<String, Object> rawInputSnapshot, Map<String, Object> normalizedSnapshot,
-    List<ValidationIssue> validationIssues, List<EventRecord> eventReferences, UUID auditPackageId) {}
-
 record VersionManifest(int version, String reason, String hash, Instant createdAtUtc) {}
 
 record EventRecord(UUID eventId, UUID tenantId, UUID scenarioId, String eventType, int eventVersion, String correlationId,

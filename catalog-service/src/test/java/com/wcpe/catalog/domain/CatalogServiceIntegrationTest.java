@@ -77,6 +77,32 @@ class CatalogServiceIntegrationTest {
   }
 
   @Test
+  void resolveReturnsDeterministicModuleLocalSnapshotForPublishedCatalog() {
+    UUID tenantId = UUID.randomUUID();
+    publishResolvableCatalog(tenantId);
+
+    ProductConfigSnapshot snapshot = service.resolve(tenantId, new ResolveCatalogRequest(LocalDate.now(), "RETAIL", "TX", "CONVENTIONAL", "FNMA", "PURCHASE", null, null, null, null), "resolve-ok", "actor-2", "corr-1");
+
+    assertThat(snapshot.snapshotHash()).isNotBlank();
+    assertThat(snapshot.products()).extracting(ProductDefinition::productFamily).containsExactly("CONVENTIONAL");
+    assertThat(snapshot.investors()).extracting(InvestorProgram::investorCode).containsExactly("FNMA");
+    assertThat(service.snapshot(tenantId, snapshot.snapshotId()).snapshotHash()).isEqualTo(snapshot.snapshotHash());
+  }
+
+  @Test
+  void resolveRejectsUnknownProductFamilyAndInvestorCodeExplicitly() {
+    UUID tenantId = UUID.randomUUID();
+    publishResolvableCatalog(tenantId);
+
+    assertThatThrownBy(() -> service.resolve(tenantId, new ResolveCatalogRequest(LocalDate.now(), "RETAIL", "TX", "JUMBO", "FNMA", "PURCHASE", null, null, null, null), "bad-product", "actor-2", "corr-1"))
+        .isInstanceOf(CatalogException.class)
+        .hasMessage("UNKNOWN_PRODUCT_FAMILY");
+    assertThatThrownBy(() -> service.resolve(tenantId, new ResolveCatalogRequest(LocalDate.now(), "RETAIL", "TX", "CONVENTIONAL", "GNMA", "PURCHASE", null, null, null, null), "bad-investor", "actor-2", "corr-1"))
+        .isInstanceOf(CatalogException.class)
+        .hasMessage("UNKNOWN_INVESTOR_CODE");
+  }
+
+  @Test
   void idempotencyReplaysSameRequestAndRejectsDifferentPayload() {
     UUID tenantId = UUID.randomUUID();
     ProductRequest first = new ProductRequest("CONV30", "Conventional 30 Year Fixed", "CONVENTIONAL", List.of("RETAIL"), List.of("TX"), LocalDate.now(), null);
@@ -89,6 +115,17 @@ class CatalogServiceIntegrationTest {
     assertThatThrownBy(() -> service.addProduct(tenantId, different, "same-key", "actor", "corr"))
         .isInstanceOf(CatalogException.class)
         .hasMessage("IDEMPOTENCY_CONFLICT");
+  }
+
+  private void publishResolvableCatalog(UUID tenantId) {
+    service.addReference(tenantId, "CHANNEL", new ReferenceCatalogRequest("RETAIL", "Retail", "CHANNEL", Map.of(), LocalDate.now(), null), "ch-" + tenantId, "actor-1", "corr-1");
+    service.addReference(tenantId, "LOAN_PURPOSE", new ReferenceCatalogRequest("PURCHASE", "Purchase", "PURPOSE", Map.of(), LocalDate.now(), null), "lp-" + tenantId, "actor-1", "corr-1");
+    service.addProduct(tenantId, new ProductRequest("CONV30", "Conventional 30 Year Fixed", "CONVENTIONAL", List.of("RETAIL"), List.of("TX", "CA"), LocalDate.now(), null), "prod-" + tenantId, "actor-1", "corr-1");
+    service.addInvestor(tenantId, new InvestorRequest("FNMA", "Fannie Mae", List.of("RETAIL"), List.of("CONV30"), LocalDate.now(), null), "inv-" + tenantId, "actor-1", "corr-1");
+    service.validate(tenantId, new LifecycleActionRequest("valid"), "val-" + tenantId, "actor-1", "corr-1");
+    service.submitApproval(tenantId, new LifecycleActionRequest("submit"), "sub-" + tenantId, "actor-1", "corr-1");
+    service.approve(tenantId, new LifecycleActionRequest("approve"), "app-" + tenantId, "actor-2", "corr-1");
+    service.publish(tenantId, new PublishCatalogRequest("initial catalog", LocalDate.now()), "pub-" + tenantId, "actor-2", "corr-1");
   }
 
   @Test

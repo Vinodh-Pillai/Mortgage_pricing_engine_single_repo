@@ -326,6 +326,7 @@ class RateFeedService {
     if (investorId == null) throw validation("INVESTOR_REQUIRED", "investorId is required for resolution.");
     if (channelId == null) throw validation("CHANNEL_REQUIRED", "channelId is required for resolution.");
     if (productCode == null || productCode.isBlank()) throw validation("PRODUCT_CODE_REQUIRED", "productCode is required for resolution.");
+    if (lockPeriod <= 0) throw validation("LOCK_PERIOD_REQUIRED", "lockPeriod must be greater than zero for resolution.");
     if (resolutionTimestamp == null) throw validation("RESOLUTION_TIMESTAMP_REQUIRED", "resolutionTimestamp is required.");
 
     var resolved = rateResolver.resolve(tenantId, investorId, channelId, productCode, lockPeriod, resolutionTimestamp);
@@ -363,6 +364,7 @@ class RateFeedService {
     RateSheet sheet = getSheet(sheetId);
     if (sheet == null) throw new RateFeedException(HttpStatus.NOT_FOUND, "SHEET_NOT_FOUND", "Sheet not found.");
     if (sheet.version() != version) throw new RateFeedException(HttpStatus.NOT_FOUND, "VERSION_NOT_FOUND", "Version not found.");
+    if (lockPeriod <= 0) throw validation("LOCK_PERIOD_REQUIRED", "lockPeriod must be greater than zero for price lookup.");
 
     GridLookup.PriceResult res = gridLookup.lookup(sheetId, noteRate, lockPeriod, interpolate);
     return new RateFeedModels.PriceLookupResponse(noteRate, lockPeriod, res.basePrice(), res.discountPoints(),

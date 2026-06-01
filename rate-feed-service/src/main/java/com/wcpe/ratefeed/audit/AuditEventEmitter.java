@@ -21,11 +21,10 @@ public class AuditEventEmitter {
    */
    public void emit(UUID tenantId, UUID sheetId, String eventType, UUID correlationId,
                    String actorId, String gridHashBefore, String gridHashAfter, int version) {
-    Map<String, Object> payload = Map.of(
-        "sheetId", sheetId.toString(),
-        "version", version,
-        "eventTimestamp", Instant.now().toString()
-    );
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("sheetId", sheetId.toString());
+    payload.put("version", version);
+    payload.put("eventTimestamp", Instant.now().toString());
     if (gridHashBefore != null) payload.put("gridHashBefore", gridHashBefore);
     if (gridHashAfter != null) payload.put("gridHashAfter", gridHashAfter);
 

@@ -69,7 +69,7 @@ public class ActivationService {
     SupersessionEngine engine = new SupersessionEngine(jdbc);
     List<UUID> supersededIds = engine.supersede(
         sheet.tenantId(), sheet.investorId(), sheet.channelId(),
-        sheet.productCode(), sheetId);
+        sheet.productCode(), sheetId, sheet.version());
 
     // V-004: record activation with separate before/after hashes
     Instant now = Instant.now();

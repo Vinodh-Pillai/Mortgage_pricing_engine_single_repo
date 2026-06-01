@@ -162,6 +162,7 @@ class CatalogRepository {
   ProductConfigSnapshot resolve(UUID tenantId, ResolveCatalogRequest request) {
     LocalDate asOf = request.asOfDate() == null ? LocalDate.now() : request.asOfDate();
     CatalogResponse activeCatalog = active(tenantId);
+    validateResolveIdentifiers(activeCatalog, request, asOf);
     List<ProductDefinition> products = activeCatalog.products().stream().filter(p -> active(p.effectiveFrom(), p.effectiveTo(), asOf)).filter(p -> request.channel() == null || p.allowedChannels().contains(request.channel())).filter(p -> request.stateCode() == null || p.allowedStates().contains(request.stateCode())).filter(p -> request.productFamily() == null || p.productFamily().equals(request.productFamily())).toList();
     List<InvestorProgram> investors = activeCatalog.investors().stream().filter(i -> active(i.effectiveFrom(), i.effectiveTo(), asOf)).filter(i -> request.channel() == null || i.channels().contains(request.channel())).filter(i -> request.investorCode() == null || i.investorCode().equals(request.investorCode())).toList();
     List<ReferenceEntry> refs = activeCatalog.references().stream().filter(r -> active(r.effectiveFrom(), r.effectiveTo(), asOf)).filter(r -> matchesReferenceRequest(r, request)).toList();
@@ -172,6 +173,15 @@ class CatalogRepository {
     UUID snapshotId = jdbc.queryForObject("insert into catalog.product_config_snapshot(snapshot_id,tenant_id,catalog_id,snapshot_hash,request_json,snapshot_json,as_of_date,created_at) values (?,?,?,?,?::jsonb,?::jsonb,?,now()) on conflict (tenant_id,snapshot_hash) do update set snapshot_hash=excluded.snapshot_hash returning snapshot_id",
         UUID.class, UUID.randomUUID(), tenantId, activeCatalog.catalogId(), snapshotHash, json(request), json(Map.of("products", products, "investors", investors, "references", refs, "markets", markets)), java.sql.Date.valueOf(asOf));
     return new ProductConfigSnapshot(snapshotId, tenantId, snapshotHash, asOf, products, investors, refs, markets);
+  }
+
+  private static void validateResolveIdentifiers(CatalogResponse activeCatalog, ResolveCatalogRequest request, LocalDate asOf) {
+    if (request.productFamily() != null && activeCatalog.products().stream().filter(p -> active(p.effectiveFrom(), p.effectiveTo(), asOf)).noneMatch(p -> p.productFamily().equals(request.productFamily()))) {
+      throw new CatalogException("UNKNOWN_PRODUCT_FAMILY");
+    }
+    if (request.investorCode() != null && activeCatalog.investors().stream().filter(i -> active(i.effectiveFrom(), i.effectiveTo(), asOf)).noneMatch(i -> i.investorCode().equals(request.investorCode()))) {
+      throw new CatalogException("UNKNOWN_INVESTOR_CODE");
+    }
   }
 
   UUID activeCatalogId(UUID tenantId) {

@@ -3,7 +3,6 @@ package com.wcpe.ratefeed.activation;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
-import java.time.Instant;
 import java.util.*;
 
 /**
@@ -20,7 +19,7 @@ public class SupersessionEngine {
   }
 
   public List<UUID> supersede(UUID tenantId, UUID investorId, UUID channelId,
-                               String productCode, UUID newSheetId) {
+                               String productCode, UUID newSheetId, int newVersion) {
     // Find all ACTIVE sheets for same dimensions, excluding the new sheet
     var ids = jdbc.queryForList(
         "SELECT sheet_id FROM rate_feed.rate_sheet " +
@@ -40,6 +39,15 @@ public class SupersessionEngine {
           "updated_at = now() " +
           "WHERE tenant_id = ? AND sheet_id IN (" + placeholders + ")",
           params.toArray());
+
+      List<Object> lineageParams = new ArrayList<>();
+      lineageParams.add(newVersion);
+      lineageParams.addAll(ids);
+      jdbc.update(
+          "UPDATE rate_feed.rate_sheet_version " +
+          "SET superseded_by = ? " +
+          "WHERE sheet_id IN (" + placeholders + ")",
+          lineageParams.toArray());
     }
 
     return ids;

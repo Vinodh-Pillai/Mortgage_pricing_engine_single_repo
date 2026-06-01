@@ -1,0 +1,20 @@
+plugins {
+  id 'java'
+}
+
+group = 'com.wcpe'
+version = '0.1.0'
+
+java {
+  toolchain {
+    languageVersion = JavaLanguageVersion.of(17)
+  }
+}
+
+dependencies {
+  testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+}
+
+tasks.named('test') {
+  useJUnitPlatform()
+}
