@@ -17,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
 
+import static org.hamcrest.Matchers.contains;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -81,14 +82,11 @@ class EligibilityServiceIntegrationTest {
                 .content(gf04Body))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.status").value("INELIGIBLE"))
-            .andExpect(jsonPath("$.decisions").isArray());
-
-        // R01 should be HARD_STOP for FICO
-        mockMvc.perform(post("/api/v1/tenants/11111111-1111-1111-1111-111111111111/evaluate")
-                .contentType(MediaType.APPLICATION_JSON)
-                .header("X-Roles", "ELIGIBILITY_EVALUATOR")
-                .content(gf04Body))
-            .andExpect(status().isOk());
+            .andExpect(jsonPath("$.decisions").isArray())
+            .andExpect(jsonPath("$.decisions[?(@.ruleCode == 'R01' && @.severity == 'HARD_STOP' && @.status == 'INELIGIBLE' && @.reasonCode == 'FC01')].ruleCode")
+                .value(contains("R01")))
+            .andExpect(jsonPath("$.decisions[?(@.ruleCode == 'R01' && @.severity == 'HARD_STOP' && @.status == 'INELIGIBLE' && @.reasonCode == 'FC01')].reasonCode")
+                .value(contains("FC01")));
     }
 
     @Test

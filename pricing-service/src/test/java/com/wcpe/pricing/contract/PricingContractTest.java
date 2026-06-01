@@ -34,10 +34,8 @@ class PricingContractTest {
 
     private static JsonSchema loadSchema(String filename) throws Exception {
         InputStream is = Files.newInputStream(contractsDir.resolve(filename));
-        SchemaValidatorsConfig config = new SchemaValidatorsConfig();
-        config.setDefaultJsonSchemaVersions(JsonSchemaVersion.JSON_SCHEMA_SPEC_CURRENT);
-        return JsonSchemaFactory.getInstance(SchemaVersion.DRAFT_2019_09)
-                .getSchema(is, config);
+        return JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V201909)
+                .getSchema(is);
     }
 
     private static void assertValid(JsonSchema schema, String json) throws Exception {

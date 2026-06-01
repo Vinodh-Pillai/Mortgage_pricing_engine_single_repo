@@ -8,9 +8,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 class CatalogService {
-  private static final Set<String> WRITER_ROLES = Set.of("CATALOG_WRITER", "CATALOG_ADMIN");
-  private static final Set<String> APPROVER_ROLES = Set.of("CATALOG_APPROVER", "CATALOG_ADMIN");
-  private static final Set<String> PUBLISHER_ROLES = Set.of("CATALOG_PUBLISHER", "CATALOG_ADMIN");
+  private static final Set<String> WRITER_ROLES = Set.of("CATALOG_WRITER", "CATALOG_MANAGER", "CATALOG_ADMIN");
+  private static final Set<String> APPROVER_ROLES = Set.of("CATALOG_APPROVER", "CATALOG_MANAGER", "CATALOG_ADMIN");
+  private static final Set<String> PUBLISHER_ROLES = Set.of("CATALOG_PUBLISHER", "CATALOG_MANAGER", "CATALOG_ADMIN");
   private final CatalogRepository repository;
   private final AuthorizationService authorizationService;
 

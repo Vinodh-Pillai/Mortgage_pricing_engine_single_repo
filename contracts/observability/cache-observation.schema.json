@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wcpe.example/contracts/observability/cache-observation.schema.json",
+  "title": "CacheObservation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "observationId",
+    "correlationId",
+    "cacheId",
+    "status",
+    "diagnostics"
+  ],
+  "properties": {
+    "observationId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "correlationId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "cacheId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "cacheKey": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "HEALTHY",
+        "STALE",
+        "DEGRADED",
+        "UNAVAILABLE"
+      ]
+    },
+    "observedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "freshness": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": [
+            "INPUT",
+            "FIXTURE",
+            "CONFIGURATION",
+            "ABSENT"
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "observedAgeMillis": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

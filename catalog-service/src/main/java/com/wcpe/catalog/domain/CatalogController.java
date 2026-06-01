@@ -125,13 +125,19 @@ class CatalogController {
   }
 
   @GetMapping("/config-snapshots/{snapshotId}")
-  ProductConfigSnapshot snapshot(@PathVariable UUID tenantId, @PathVariable UUID snapshotId) { return service.snapshot(tenantId, snapshotId); }
+  ProductConfigSnapshot snapshot(@PathVariable UUID tenantId, @PathVariable UUID snapshotId, HttpServletRequest http) {
+    String roles = http.getHeader("X-Roles"); authorizationService.authorize("READ_CATALOG", roles); return service.snapshot(tenantId, snapshotId);
+  }
 
   @GetMapping("/events")
-  List<CatalogEvent> events(@PathVariable UUID tenantId) { return service.events(tenantId); }
+  List<CatalogEvent> events(@PathVariable UUID tenantId, HttpServletRequest http) {
+    String roles = http.getHeader("X-Roles"); authorizationService.authorize("READ_CATALOG", roles); return service.events(tenantId);
+  }
 
   @GetMapping("/audit")
-  List<CatalogAuditRecord> audit(@PathVariable UUID tenantId) { return service.audit(tenantId); }
+  List<CatalogAuditRecord> audit(@PathVariable UUID tenantId, HttpServletRequest http) {
+    String roles = http.getHeader("X-Roles"); authorizationService.authorize("READ_CATALOG", roles); return service.audit(tenantId);
+  }
 
   @GetMapping("/versions")
   List<CatalogVersionControlRecord> versions(@PathVariable UUID tenantId, HttpServletRequest http) {
@@ -139,17 +145,20 @@ class CatalogController {
   }
 
   @GetMapping("/investors")
-  InvestorListResponse listInvestors(@PathVariable UUID tenantId, @RequestParam(required = false) String status) {
+  InvestorListResponse listInvestors(@PathVariable UUID tenantId, @RequestParam(required = false) String status, HttpServletRequest http) {
+    String roles = http.getHeader("X-Roles"); authorizationService.authorize("READ_CATALOG", roles);
     return new InvestorListResponse(domainRepository.listInvestors(tenantId, status), domainRepository.listInvestors(tenantId, status).size());
   }
 
   @GetMapping("/products")
-  ProductListResponse listProductsDomain(@PathVariable UUID tenantId, @RequestParam(required = false) String status) {
+  ProductListResponse listProductsDomain(@PathVariable UUID tenantId, @RequestParam(required = false) String status, HttpServletRequest http) {
+    String roles = http.getHeader("X-Roles"); authorizationService.authorize("READ_CATALOG", roles);
     return new ProductListResponse(domainRepository.listProducts(tenantId, status), domainRepository.listProducts(tenantId, status).size());
   }
 
   @GetMapping("/channels")
-  ChannelListResponse listChannelsDomain(@PathVariable UUID tenantId, @RequestParam(required = false) String status) {
+  ChannelListResponse listChannelsDomain(@PathVariable UUID tenantId, @RequestParam(required = false) String status, HttpServletRequest http) {
+    String roles = http.getHeader("X-Roles"); authorizationService.authorize("READ_CATALOG", roles);
     return new ChannelListResponse(domainRepository.listChannels(tenantId, status), domainRepository.listChannels(tenantId, status).size());
   }
 
