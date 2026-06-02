@@ -12,7 +12,8 @@ public enum RuleType {
     R09("R09", "CHANNEL_ALLOWED", "Channel must be allowed by product"),
     R10("R10", "STATE_ALLOWED", "State must be allowed by product"),
     R11("R11", "LOAN_AMOUNT_LIMIT", "Loan amount must be within conforming limit"),
-    R12("R12", "DOCUMENTATION_TYPE", "Documentation type must be acceptable");
+    R12("R12", "DOCUMENTATION_TYPE", "Documentation type must be acceptable"),
+    R13("R13", "FICO_LTV_MATRIX", "FICO/LTV cross-product matrix must be satisfied");
 
     private final String code;
     private final String name;

@@ -2,8 +2,10 @@ package com.wcpe.eligibility.config;
 
 import com.wcpe.eligibility.client.CatalogClient;
 import com.wcpe.eligibility.domain.rules.*;
+import com.wcpe.eligibility.repository.FicoLtvMatrixRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 @Configuration
 public class CatalogClientConfig {
@@ -71,5 +73,16 @@ public class CatalogClientConfig {
     @Bean
     public EligibilityRule documentationTypeRule() {
         return new DocumentationTypeRule();
+    }
+
+    @Bean
+    public FicoLtvMatrixRepository ficoLtvMatrixRepository(JdbcTemplate jdbc) {
+        return new FicoLtvMatrixRepository(jdbc);
+    }
+
+    @Bean
+    public EligibilityRule ficoLtvMatrixRule(FicoLtvMatrixProperties properties,
+                                              FicoLtvMatrixRepository repository) {
+        return new FicoLtvMatrixRule(properties, repository);
     }
 }

@@ -5,7 +5,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wcpe.eligibility.domain.hashing.Hashing;
 import com.wcpe.eligibility.domain.models.EligibilityRequest;
 import com.wcpe.eligibility.domain.models.EligibilityResult;
+import com.wcpe.eligibility.domain.models.FicoLtvEvaluationResult;
+import com.wcpe.eligibility.domain.models.FicoLtvMatrixEvaluationRequest;
 import com.wcpe.eligibility.service.EligibilityApplicationService;
+import com.wcpe.eligibility.service.FicoLtvMatrixService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -21,11 +24,14 @@ public class EligibilityApiController {
     private final EligibilityApplicationService service;
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final FicoLtvMatrixService ficoLtvMatrixService;
 
-    public EligibilityApiController(EligibilityApplicationService service, JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
+    public EligibilityApiController(EligibilityApplicationService service, JdbcTemplate jdbcTemplate, ObjectMapper objectMapper,
+                                     FicoLtvMatrixService ficoLtvMatrixService) {
         this.service = service;
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
+        this.ficoLtvMatrixService = ficoLtvMatrixService;
     }
 
     @PostMapping("/evaluate")
@@ -86,6 +92,20 @@ public class EligibilityApiController {
         }
 
         return ResponseEntity.status(HttpStatus.OK).body(result);
+    }
+
+    @PostMapping("/eligibility/evaluations/fico-ltv-matrix")
+    ResponseEntity<FicoLtvEvaluationResult> evaluateFicoLtvMatrix(
+            @PathVariable UUID tenantId,
+            @RequestBody FicoLtvMatrixEvaluationRequest request) {
+
+        if (request.facts() == null || request.facts().representativeFico() == null) {
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body(null);
+        }
+
+        FicoLtvEvaluationResult result = ficoLtvMatrixService.evaluate(request);
+        return ResponseEntity.ok(result);
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
