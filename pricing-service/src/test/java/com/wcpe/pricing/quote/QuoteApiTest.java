@@ -166,9 +166,10 @@ class QuoteApiTest {
     }
 
     @Test
-    void durableRepositoryRejectsUnsafeQuoteIdsOnSaveWithoutWritingOutsideStorage() {
+    void durableRepositoryRejectsUnsafeQuoteIdsOnSaveWithoutWritingOutsideStorage() throws IOException {
+        String escapeName = "quote-escape-" + quoteStorageDirectory.getFileName();
         QuoteResponse unsafe = new QuoteResponse(
-                "../quote-escape",
+                "../" + escapeName,
                 "tenant-a",
                 "scenario-tenant-a",
                 1,
@@ -176,11 +177,14 @@ class QuoteApiTest {
                 "audit-corr-012",
                 "corr-012",
                 List.of());
-        Path outsideStoragePath = quoteStorageDirectory.getParent().resolve("quote-escape.quote");
+        Path outsideStoragePath = quoteStorageDirectory.getParent().resolve(escapeName + ".quote");
 
         assertThrows(QuotePersistenceException.class, () -> repository.save(unsafe));
 
         assertFalse(Files.exists(outsideStoragePath));
+        try (var files = Files.list(quoteStorageDirectory)) {
+            assertEquals(0, files.count());
+        }
     }
 
     private void assertNoAdapterOrRepositoryWrites() throws IOException {
