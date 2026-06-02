@@ -1,13 +1,14 @@
-package com.wcpe.ratefeed.resolver;
+package com.wcpe.ratefeed.resolution;
 
+import com.wcpe.ratefeed.domain.RateFeedModels.RateFeedException;
 import com.wcpe.ratefeed.resolution.InterpolationPolicy;
-import com.wcpe.ratefeed.domain.RateFeedModels.RatePricePoint;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.junit.jupiter.api.*;
 
 import java.math.BigDecimal;
-import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 /**
  * Resolution tests:
@@ -107,5 +108,17 @@ class ResolutionValidationTest {
     // This is fail-closed behavior
     boolean defaultInterpolate = false;
     assertFalse(defaultInterpolate, "Default interpolation must be false (fail-closed)");
+  }
+
+  @Test
+  void gridLookup_outOfRangeNoteRate_failsBeforeDatabaseLookup() {
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    GridLookup lookup = new GridLookup(jdbc);
+
+    RateFeedException ex = assertThrows(RateFeedException.class,
+        () -> lookup.lookup(java.util.UUID.randomUUID(), new BigDecimal("25.001"), 30, true));
+
+    assertEquals("RATE_OUT_OF_RANGE", ex.code());
+    verifyNoInteractions(jdbc);
   }
 }

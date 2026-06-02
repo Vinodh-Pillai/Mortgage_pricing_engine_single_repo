@@ -141,6 +141,11 @@ class RBACAuthorizationTest {
     }
 
     @Test
+    void test03a_approve_allows_CATALOG_MANAGER() {
+        submitAndApprove(tenantId, "CATALOG_MANAGER", "actor-manager-approve");
+    }
+
+    @Test
     void test03b_approve_REJECTED_for_write_Role() {
         prepareForApproval(tenantId);
         String roles = "CATALOG_WRITER";
@@ -174,6 +179,26 @@ class RBACAuthorizationTest {
         headers.setContentType(MediaType.APPLICATION_JSON);
 
         PublishCatalogRequest body = new PublishCatalogRequest("initial", LocalDate.now());
+        HttpEntity<PublishCatalogRequest> entity = new HttpEntity<>(body, headers);
+
+        ResponseEntity<CatalogResponse> resp = restTemplate.postForEntity(
+                "/api/v1/tenants/" + tid + "/product-catalog/versions/current/actions/publish",
+                entity, CatalogResponse.class);
+
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(resp.getBody().status()).isEqualTo(CatalogStatus.PUBLISHED);
+    }
+
+    @Test
+    void test04a_publish_allows_CATALOG_MANAGER() {
+        UUID tid = UUID.randomUUID();
+        seedMinimalCatalog(tid);
+        bringToApproved(tid);
+        HttpHeaders headers = headers("CATALOG_MANAGER");
+        headers.set("X-Actor-Id", "actor-manager-publish");
+        headers.set("Idempotency-Key", "pub-" + UUID.randomUUID());
+
+        PublishCatalogRequest body = new PublishCatalogRequest("manager publish", LocalDate.now());
         HttpEntity<PublishCatalogRequest> entity = new HttpEntity<>(body, headers);
 
         ResponseEntity<CatalogResponse> resp = restTemplate.postForEntity(
@@ -343,6 +368,25 @@ class RBACAuthorizationTest {
     }
 
     @Test
+    void test09a_write_flow_allows_CATALOG_MANAGER() {
+        HttpHeaders headers = headers("CATALOG_MANAGER");
+        headers.set("X-Actor-Id", "actor-manager-write");
+        headers.set("Idempotency-Key", "prod-" + UUID.randomUUID());
+
+        ProductRequest body = new ProductRequest("CONV30M", "Conventional 30yr Manager", "CONVENTIONAL",
+                List.of("RETAIL"), List.of("TX"), LocalDate.now(), null);
+        HttpEntity<ProductRequest> entity = new HttpEntity<>(body, headers);
+
+        ResponseEntity<CatalogResponse> resp = restTemplate.postForEntity(
+                "/api/v1/tenants/" + UUID.randomUUID() + "/product-catalog/conventional-products/drafts",
+                entity, CatalogResponse.class);
+
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(resp.getBody()).isNotNull();
+        assertThat(resp.getBody().products()).hasSize(1);
+    }
+
+    @Test
     void test10_getVersions_requires_CATALOG_READER() {
         String roles = "CATALOG_READER";
         HttpHeaders headers = new HttpHeaders();
@@ -354,6 +398,61 @@ class RBACAuthorizationTest {
                 HttpMethod.GET, new HttpEntity<>(headers), List.class);
 
         assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
+    @Test
+    void test10b_getVersions_REJECTED_without_READ_CATALOG() {
+        ResponseEntity<String> resp = restTemplate.exchange(
+                "/api/v1/tenants/" + tenantId + "/product-catalog/versions",
+                HttpMethod.GET, new HttpEntity<>(headers("NONE")), String.class);
+
+        assertThat(resp.getStatusCode()).isIn(HttpStatus.UNAUTHORIZED, HttpStatus.FORBIDDEN,
+                HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
+    @Test
+    void test10c_snapshot_requires_READ_CATALOG() {
+        UUID tid = UUID.randomUUID();
+        ProductConfigSnapshot snapshot = publishedSnapshot(tid);
+
+        ResponseEntity<ProductConfigSnapshot> allowed = restTemplate.exchange(
+                "/api/v1/tenants/" + tid + "/product-catalog/config-snapshots/" + snapshot.snapshotId(),
+                HttpMethod.GET, new HttpEntity<>(headers("CATALOG_READER")), ProductConfigSnapshot.class);
+        ResponseEntity<String> rejected = restTemplate.exchange(
+                "/api/v1/tenants/" + tid + "/product-catalog/config-snapshots/" + snapshot.snapshotId(),
+                HttpMethod.GET, new HttpEntity<>(headers("NONE")), String.class);
+
+        assertThat(allowed.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(rejected.getStatusCode()).isIn(HttpStatus.UNAUTHORIZED, HttpStatus.FORBIDDEN,
+                HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
+    @Test
+    void test10d_events_requires_READ_CATALOG() {
+        ResponseEntity<List> allowed = restTemplate.exchange(
+                "/api/v1/tenants/" + tenantId + "/product-catalog/events",
+                HttpMethod.GET, new HttpEntity<>(headers("CATALOG_READER")), List.class);
+        ResponseEntity<String> rejected = restTemplate.exchange(
+                "/api/v1/tenants/" + tenantId + "/product-catalog/events",
+                HttpMethod.GET, new HttpEntity<>(headers("NONE")), String.class);
+
+        assertThat(allowed.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(rejected.getStatusCode()).isIn(HttpStatus.UNAUTHORIZED, HttpStatus.FORBIDDEN,
+                HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
+    @Test
+    void test10e_audit_requires_READ_CATALOG() {
+        ResponseEntity<List> allowed = restTemplate.exchange(
+                "/api/v1/tenants/" + tenantId + "/product-catalog/audit",
+                HttpMethod.GET, new HttpEntity<>(headers("CATALOG_READER")), List.class);
+        ResponseEntity<String> rejected = restTemplate.exchange(
+                "/api/v1/tenants/" + tenantId + "/product-catalog/audit",
+                HttpMethod.GET, new HttpEntity<>(headers("NONE")), String.class);
+
+        assertThat(allowed.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(rejected.getStatusCode()).isIn(HttpStatus.UNAUTHORIZED, HttpStatus.FORBIDDEN,
+                HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
     @Test
@@ -403,6 +502,30 @@ class RBACAuthorizationTest {
     }
 
     // ---- HELPERS ----
+
+    HttpHeaders headers(String roles) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-Roles", roles);
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        return headers;
+    }
+
+    ProductConfigSnapshot publishedSnapshot(UUID tid) {
+        seedMinimalCatalog(tid);
+        bringToPublished(tid);
+        HttpHeaders headers = headers("CATALOG_READER");
+        headers.set("X-Actor-Id", "actor-reader");
+        headers.set("Idempotency-Key", "snap-" + UUID.randomUUID());
+        ResolveCatalogRequest request = new ResolveCatalogRequest(LocalDate.now(), "RETAIL", "TX",
+                "CONVENTIONAL", "FNMA", null, null, null, null, null);
+        ResponseEntity<ProductConfigSnapshot> response = restTemplate.postForEntity(
+                "/api/v1/tenants/" + tid + "/product-catalog/config-snapshots/resolve",
+                new HttpEntity<>(request, headers), ProductConfigSnapshot.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isNotNull();
+        return response.getBody();
+    }
 
     void seedCatalogData() {
         HttpHeaders wHeaders = new HttpHeaders();

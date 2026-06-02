@@ -46,6 +46,18 @@ class AuditEmissionTest {
   }
 
   @Test
+  void auditEventEmitter_databaseFailureIsObservable() {
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    when(jdbc.update(anyString(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+        .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("outbox unavailable"));
+    AuditEventEmitter emitter = new AuditEventEmitter(jdbc);
+
+    assertThrows(org.springframework.dao.DataAccessResourceFailureException.class,
+        () -> emitter.emit(UUID.randomUUID(), UUID.randomUUID(), "RATE_SHEET_ACTIVATED",
+            UUID.randomUUID(), "actor-1", null, "after-hash", 1));
+  }
+
+  @Test
   void auditService_emitRejection_acceptsParameters() {
     JdbcTemplate jdbc = mock(JdbcTemplate.class);
     AuditService service = new AuditService(jdbc);

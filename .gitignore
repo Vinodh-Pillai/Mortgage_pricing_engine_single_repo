@@ -20,7 +20,7 @@ opencode.jsonc
 # OS files
 .DS_Store
 Thumbs.db
-
+**/.agent-archive/
 # Logs and temporary files
 *.log
 *.tmp

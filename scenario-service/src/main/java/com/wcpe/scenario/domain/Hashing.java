@@ -10,7 +10,7 @@ public final class Hashing {
     try {
       byte[] hash = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
       StringBuilder builder = new StringBuilder("sha256:");
-      for (byte b : hash) builder.append(String.format("%02x", b));
+      for (byte b : hash) builder.append(String.format("%02x", b & 0xff));
       return builder.toString();
     } catch (Exception ex) {
       throw new IllegalStateException(ex);

@@ -65,7 +65,7 @@ class ScenarioReplayPackageAssemblerTest {
     String input = "tenant:abc:scenario:def:version:1";
     String hash = Hashing.sha256(input);
     assertTrue(hash.startsWith("sha256:"));
-    assertEquals(hash.length(), 79); // "sha256:" + 64 hex chars
+    assertEquals(71, hash.length()); // "sha256:" + 64 hex chars
   }
 
   @Test

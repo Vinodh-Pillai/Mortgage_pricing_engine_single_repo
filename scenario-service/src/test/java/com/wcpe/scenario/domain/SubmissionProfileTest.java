@@ -13,39 +13,30 @@ class SubmissionProfileValidatorTest {
         "WHOLESALE", "PURCHASE", "Test Profile", Instant.now(), null,
         List.of(new SubmissionProfileFieldRule("UNKNOWN_SECTION", "some.path", "always()",
             FieldSeverity.BLOCKING, "Required", "Hint")));
-    try {
-      SubmissionProfileService service = mockService();
-      service.createDraft(UUID.randomUUID(), "key1", "corr1", "actor", request);
-    } catch (ScenarioException ex) {
-      assertEquals("VALIDATION_FAILED", ex.code());
-      assertTrue(ex.fieldErrors().stream().anyMatch(i -> i.code().equals("UNKNOWN_SECTION")));
-    }
+    ScenarioException ex = assertThrows(ScenarioException.class,
+        () -> mockService().createDraft(UUID.randomUUID(), "key1", "corr1", "actor", request));
+    assertEquals("VALIDATION_FAILED", ex.code());
+    assertTrue(ex.fieldErrors().stream().anyMatch(i -> i.code().equals("UNKNOWN_SECTION")));
   }
 
   @Test
   void rejectsMissingChannel() {
     CreateSubmissionProfileRequest request = new CreateSubmissionProfileRequest(
         "", "PURCHASE", "Test Profile", Instant.now(), null, List.of());
-    try {
-      SubmissionProfileService service = mockService();
-      service.createDraft(UUID.randomUUID(), "key1", "corr1", "actor", request);
-    } catch (ScenarioException ex) {
-      assertEquals("VALIDATION_FAILED", ex.code());
-      assertTrue(ex.fieldErrors().stream().anyMatch(i -> i.code().equals("INVALID_CHANNEL")));
-    }
+    ScenarioException ex = assertThrows(ScenarioException.class,
+        () -> mockService().createDraft(UUID.randomUUID(), "key1", "corr1", "actor", request));
+    assertEquals("VALIDATION_FAILED", ex.code());
+    assertTrue(ex.fieldErrors().stream().anyMatch(i -> i.code().equals("INVALID_CHANNEL")));
   }
 
   @Test
   void rejectsMissingProfileName() {
     CreateSubmissionProfileRequest request = new CreateSubmissionProfileRequest(
         "WHOLESALE", "PURCHASE", "", Instant.now(), null, List.of());
-    try {
-      SubmissionProfileService service = mockService();
-      service.createDraft(UUID.randomUUID(), "key1", "corr1", "actor", request);
-    } catch (ScenarioException ex) {
-      assertEquals("VALIDATION_FAILED", ex.code());
-      assertTrue(ex.fieldErrors().stream().anyMatch(i -> i.code().equals("INVALID_PROFILE_NAME")));
-    }
+    ScenarioException ex = assertThrows(ScenarioException.class,
+        () -> mockService().createDraft(UUID.randomUUID(), "key1", "corr1", "actor", request));
+    assertEquals("VALIDATION_FAILED", ex.code());
+    assertTrue(ex.fieldErrors().stream().anyMatch(i -> i.code().equals("INVALID_PROFILE_NAME")));
   }
 
   @Test
@@ -54,31 +45,25 @@ class SubmissionProfileValidatorTest {
     Instant to = from.minusSeconds(60);
     CreateSubmissionProfileRequest request = new CreateSubmissionProfileRequest(
         "WHOLESALE", "PURCHASE", "Test", from, to, List.of());
-    try {
-      SubmissionProfileService service = mockService();
-      service.createDraft(UUID.randomUUID(), "key1", "corr1", "actor", request);
-    } catch (ScenarioException ex) {
-      assertEquals("VALIDATION_FAILED", ex.code());
-      assertTrue(ex.fieldErrors().stream().anyMatch(i -> i.code().equals("INVALID_DATE_RANGE")));
-    }
+    ScenarioException ex = assertThrows(ScenarioException.class,
+        () -> mockService().createDraft(UUID.randomUUID(), "key1", "corr1", "actor", request));
+    assertEquals("VALIDATION_FAILED", ex.code());
+    assertTrue(ex.fieldErrors().stream().anyMatch(i -> i.code().equals("INVALID_DATE_RANGE")));
   }
 
   @Test
   void rejectsEmptyRules() {
     CreateSubmissionProfileRequest request = new CreateSubmissionProfileRequest(
         "WHOLESALE", "PURCHASE", "Test", Instant.now(), null, List.of());
-    try {
-      SubmissionProfileService service = mockService();
-      service.createDraft(UUID.randomUUID(), "key1", "corr1", "actor", request);
-    } catch (ScenarioException ex) {
-      assertEquals("VALIDATION_FAILED", ex.code());
-      assertTrue(ex.fieldErrors().stream().anyMatch(i -> i.code().equals("EMPTY_RULES")));
-    }
+    ScenarioException ex = assertThrows(ScenarioException.class,
+        () -> mockService().createDraft(UUID.randomUUID(), "key1", "corr1", "actor", request));
+    assertEquals("VALIDATION_FAILED", ex.code());
+    assertTrue(ex.fieldErrors().stream().anyMatch(i -> i.code().equals("EMPTY_RULES")));
   }
 
   private SubmissionProfileService mockService() {
-    // No actual DB needed — validation fails before hitting repository
-    return null;
+    RequestContext.roles("SCENARIO_ADMIN");
+    return new SubmissionProfileService(null, null);
   }
 }
 
