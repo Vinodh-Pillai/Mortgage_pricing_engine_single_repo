@@ -1,0 +1,55 @@
+{
+  "fixtureId": "conventional_csv_upload_batch_v1",
+  "description": "Golden fixture for PII-04-S01: conventional CSV rate sheet upload creates batch in UPLOADED status",
+  "input": {
+    "tenantId": "00000000-0000-0000-0000-000000000100",
+    "investorId": "00000000-0000-0000-0000-000000000201",
+    "channelId": "00000000-0000-0000-0000-000000000202",
+    "feedFormatId": "00000000-0000-0000-0000-000000000203",
+    "sourceType": "MANUAL_UPLOAD",
+    "effectiveAt": "2026-06-01T12:00:00Z",
+    "timezone": "America/New_York",
+    "fileName": "RateSheet.csv",
+    "contentType": "text/csv",
+    "contentLengthBytes": 1024,
+    "fileSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "storageObjectId": "local://synthetic/rate-sheet.csv",
+    "scanStatus": "CLEAN",
+    "scanResultId": "scan-result-1",
+    "idempotencyKey": "golden-upload-key-v1",
+    "actorId": "test-actor",
+    "correlationId": "golden-corr-v1"
+  },
+  "expected": {
+    "uploadSessionStatus": "OPEN",
+    "batchStatus": "UPLOADED",
+    "batchFields": {
+      "tenantId": "00000000-0000-0000-0000-000000000100",
+      "investorId": "00000000-0000-0000-0000-000000000201",
+      "channelId": "00000000-0000-0000-0000-000000000202",
+      "feedFormatId": "00000000-0000-0000-0000-000000000203",
+      "sourceType": "MANUAL_UPLOAD",
+      "status": "UPLOADED",
+      "effectiveAt": "2026-06-01T12:00:00Z",
+      "timezone": "America/New_York",
+      "fileSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fileName": "RateSheet.csv",
+      "contentType": "text/csv"
+    },
+    "outboxEvent": {
+      "eventType": "RateSheetUploaded.v1",
+      "payloadFields": {
+        "batchId": "present",
+        "uploadSessionId": "present",
+        "effectiveAt": "2026-06-01T12:00:00Z",
+        "fileSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "status": "UPLOADED"
+      }
+    },
+    "auditEvent": {
+      "eventType": "RATE_SHEET_UPLOADED",
+      "aggregateType": "RateFeedBatch"
+    }
+  },
+  "resultHash": "sha256:golden_fixture_conventional_csv_upload_batch_v1"
+}

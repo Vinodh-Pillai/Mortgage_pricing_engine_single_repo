@@ -277,6 +277,26 @@ public final class RateFeedModels {
   public record ReplayRequest(UUID investorId, UUID channelId, String productCode, int lockPeriod, Instant asOfDate, Integer sheetVersion) {}
   public record ReplayResult(UUID replayId, UUID sheetId, int version, String inputHash, String outputHash, List<RatePricePoint> pricePoints, int pointCount, String status, Instant replayedAt) {}
 
+  // ── PII-04-S01: Batch list endpoint ────────────────────────────────────────
+
+  public record BatchListSummary(
+    UUID batchId,
+    UUID investorId,
+    UUID channelId,
+    UUID feedFormatId,
+    String sourceType,
+    Instant effectiveAt,
+    String timezone,
+    String status,
+    String fileName,
+    String uploadedBy,
+    Instant createdAt,
+    Integer rowCount,
+    Integer errorCount
+  ) {}
+
+  public record BatchListResponse(List<BatchListSummary> batches, int count) {}
+
   // ── Exception class ─────────────────────────────────────────────────────────
 
   public static final class RateFeedException extends RuntimeException {

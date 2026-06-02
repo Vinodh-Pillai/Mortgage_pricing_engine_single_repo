@@ -7,8 +7,14 @@ import com.wcpe.eligibility.domain.models.EligibilityRequest;
 import com.wcpe.eligibility.domain.models.EligibilityResult;
 import com.wcpe.eligibility.domain.models.FicoLtvEvaluationResult;
 import com.wcpe.eligibility.domain.models.FicoLtvMatrixEvaluationRequest;
+import com.wcpe.eligibility.domain.models.OccupancyPurposeEvaluationRequest;
+import com.wcpe.eligibility.domain.models.OccupancyPurposeEvaluationResult;
+import com.wcpe.eligibility.domain.models.PropertyTypeEvaluationRequest;
+import com.wcpe.eligibility.domain.models.PropertyTypeEvaluationResult;
 import com.wcpe.eligibility.service.EligibilityApplicationService;
 import com.wcpe.eligibility.service.FicoLtvMatrixService;
+import com.wcpe.eligibility.service.OccupancyPurposeRuleService;
+import com.wcpe.eligibility.service.PropertyTypeRuleService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -25,13 +31,19 @@ public class EligibilityApiController {
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final FicoLtvMatrixService ficoLtvMatrixService;
+    private final OccupancyPurposeRuleService occupancyPurposeRuleService;
+    private final PropertyTypeRuleService propertyTypeRuleService;
 
     public EligibilityApiController(EligibilityApplicationService service, JdbcTemplate jdbcTemplate, ObjectMapper objectMapper,
-                                     FicoLtvMatrixService ficoLtvMatrixService) {
+                                       FicoLtvMatrixService ficoLtvMatrixService,
+                                       OccupancyPurposeRuleService occupancyPurposeRuleService,
+                                       PropertyTypeRuleService propertyTypeRuleService) {
         this.service = service;
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.ficoLtvMatrixService = ficoLtvMatrixService;
+        this.occupancyPurposeRuleService = occupancyPurposeRuleService;
+        this.propertyTypeRuleService = propertyTypeRuleService;
     }
 
     @PostMapping("/evaluate")
@@ -105,6 +117,59 @@ public class EligibilityApiController {
         }
 
         FicoLtvEvaluationResult result = ficoLtvMatrixService.evaluate(request);
+        return ResponseEntity.ok(result);
+    }
+
+    @PostMapping("/eligibility/evaluations/occupancy-purpose")
+    ResponseEntity<OccupancyPurposeEvaluationResult> evaluateOccupancyPurpose(
+            @PathVariable UUID tenantId,
+            @RequestBody OccupancyPurposeEvaluationRequest request) {
+
+        if (request.facts() == null) {
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body(null);
+        }
+
+        if (request.facts().loanPurpose() == null || request.facts().loanPurpose().isBlank()) {
+            OccupancyPurposeEvaluationResult result = occupancyPurposeRuleService.evaluate(tenantId, request);
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(result);
+        }
+
+        if (!"PURCHASE".equals(request.facts().loanPurpose())) {
+            OccupancyPurposeEvaluationResult result = occupancyPurposeRuleService.evaluate(tenantId, request);
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(result);
+        }
+
+        if (request.facts().occupancyType() == null || request.facts().occupancyType().isBlank()) {
+            OccupancyPurposeEvaluationResult result = occupancyPurposeRuleService.evaluate(tenantId, request);
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(result);
+        }
+
+        OccupancyPurposeEvaluationResult result = occupancyPurposeRuleService.evaluate(tenantId, request);
+        return ResponseEntity.ok(result);
+    }
+
+    @PostMapping("/eligibility/evaluations/property-type")
+    ResponseEntity<PropertyTypeEvaluationResult> evaluatePropertyType(
+            @PathVariable UUID tenantId,
+            @RequestBody PropertyTypeEvaluationRequest request) {
+
+        if (request.facts() == null) {
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body(null);
+        }
+
+        if (request.facts().propertyType() == null || request.facts().propertyType().isBlank()) {
+            PropertyTypeEvaluationResult result = propertyTypeRuleService.evaluate(tenantId, request);
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(result);
+        }
+
+        if (request.facts().units() < 1 || request.facts().units() > 4) {
+            PropertyTypeEvaluationResult result = propertyTypeRuleService.evaluate(tenantId, request);
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(result);
+        }
+
+        PropertyTypeEvaluationResult result = propertyTypeRuleService.evaluate(tenantId, request);
         return ResponseEntity.ok(result);
     }
 

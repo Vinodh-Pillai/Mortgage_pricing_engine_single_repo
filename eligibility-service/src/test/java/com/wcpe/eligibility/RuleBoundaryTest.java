@@ -97,6 +97,21 @@ class RuleBoundaryTest {
         assertEquals("INELIGIBLE", d.status());
     }
 
+    @Test void ltv_missing_data_warning() {
+        BigDecimal loan = new BigDecimal("250000");
+        EligibilityRequest req = new EligibilityRequest(
+            new BorrowerProfile(740, new BigDecimal("8500"), new BigDecimal("1200")),
+            new PropertyProfile("CA", "Los Angeles", "90001", "SINGLE_FAMILY", 1, "PRIMARY", null, new BigDecimal("300000")),
+            new LoanProfile("PURCHASE", loan, BigDecimal.ZERO, 45, "FULL_DOC", "AUTOMATED", 1),
+            new ProductCandidate(UUID.randomUUID(), PRODUCT, INVESTOR)
+        );
+        RuleDecision d = ltvRule.evaluate(req, PRODUCT, INVESTOR);
+        assertEquals("WARNING", d.severity());
+        assertEquals("INSUFFICIENT_DATA", d.status());
+        assertEquals("LT02", d.reasonCode());
+        assertEquals("Loan amount or purchase price is missing.", d.message());
+    }
+
     @Test void dti_042_eligible() {
         BigDecimal income = new BigDecimal("1000");
         BigDecimal debt = new BigDecimal("420");

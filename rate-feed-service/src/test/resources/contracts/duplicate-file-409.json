@@ -1,0 +1,25 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/tenants/{tenantId}/rate-feed-uploads/sessions/{uploadSessionId}/complete",
+    "headers": {
+      "Idempotency-Key": "contract-duplicate-hash-409",
+      "X-Actor-Id": "contract-actor",
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "fileSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "storageObjectId": "local://synthetic/rate-sheet-dup.csv",
+      "scanResultId": "scan-result-2",
+      "scanStatus": "CLEAN"
+    }
+  },
+  "expected": {
+    "status": 409,
+    "body": {
+      "code": "DUPLICATE_FILE_HASH",
+      "message": "A batch already exists for this file hash, feed format, and effective timestamp.",
+      "correlationId": "string"
+    }
+  }
+}

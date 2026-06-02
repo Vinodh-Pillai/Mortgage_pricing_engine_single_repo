@@ -411,6 +411,45 @@ class RateFeedService {
   }
 
   /**
+   * PII-04-S01: List rate feed batches for the tenant.
+   * Supports optional filters for status, investorId, channelId.
+   * Read-only users (RATE_FEED_VIEW) can list but cannot upload.
+   */
+  public RateFeedModels.BatchListResponse listBatches(UUID tenantId, UUID investorId, UUID channelId, String status) {
+    RateFeedRoles.require(RateFeedRoles.RATE_FEED_VIEW);
+    StringBuilder sql = new StringBuilder(
+        "SELECT batch_id, investor_id, channel_id, feed_format_id, source_type, effective_at, timezone, status, file_name, uploaded_by, created_at " +
+        "FROM rate_feed.rate_feed_batch WHERE tenant_id=");
+    List<Object> params = new ArrayList<>();
+
+    sql.append("?");
+    params.add(tenantId);
+    if (investorId != null) { sql.append(" AND investor_id=?"); params.add(investorId); }
+    if (channelId != null) { sql.append(" AND channel_id=?"); params.add(channelId); }
+    if (status != null && !status.isBlank()) { sql.append(" AND status=?"); params.add(status); }
+    sql.append(" ORDER BY created_at DESC");
+
+    List<RateFeedModels.BatchListSummary> summaries = jdbc.query(sql.toString(),
+        (rs, row) -> new RateFeedModels.BatchListSummary(
+            rs.getObject("batch_id", UUID.class),
+            rs.getObject("investor_id", UUID.class),
+            rs.getObject("channel_id", UUID.class),
+            rs.getObject("feed_format_id", UUID.class),
+            rs.getString("source_type"),
+            rs.getTimestamp("effective_at") != null ? rs.getTimestamp("effective_at").toInstant() : null,
+            rs.getString("timezone"),
+            rs.getString("status"),
+            rs.getString("file_name"),
+            rs.getString("uploaded_by"),
+            rs.getTimestamp("created_at") != null ? rs.getTimestamp("created_at").toInstant() : null,
+            null, // rowCount - not stored on batch table; available on associated sheet after parsing
+            null  // errorCount - not stored on batch table
+        ), params.toArray());
+
+    return new RateFeedModels.BatchListResponse(summaries, summaries.size());
+  }
+
+  /**
    * Hardening: Version list endpoint — query by optional filters.
    */
   public RateFeedModels.SheetVersionsResponse listVersions(UUID investorId, UUID channelId, String productCode) {

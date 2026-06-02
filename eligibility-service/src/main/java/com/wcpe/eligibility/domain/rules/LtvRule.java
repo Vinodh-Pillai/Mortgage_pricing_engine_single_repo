@@ -25,7 +25,7 @@ public class LtvRule implements EligibilityRule {
             return new RuleDecision(
                 UUID.randomUUID(), productCode, investorCode,
                 "R02", "LTV_MAXIMUM", "WARNING", "INSUFFICIENT_DATA",
-                "LT01", "Loan amount or purchase price is missing.",
+                "LT02", "Loan amount or purchase price is missing.",
                 null, MAX_LTV.toPlainString(),
                 Map.of("ruleSetVersion", 3, "deterministic", true)
             );

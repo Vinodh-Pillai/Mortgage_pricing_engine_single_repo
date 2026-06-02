@@ -1,0 +1,28 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/tenants/{tenantId}/rate-feed-uploads/sessions/{uploadSessionId}/complete",
+    "headers": {
+      "Idempotency-Key": "contract-complete-upload-201",
+      "X-Actor-Id": "contract-actor",
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "fileSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "storageObjectId": "local://synthetic/rate-sheet.csv",
+      "scanResultId": "scan-result-1",
+      "scanStatus": "CLEAN"
+    }
+  },
+  "expected": {
+    "status": 201,
+    "body": {
+      "batchId": "uuid",
+      "status": "UPLOADED",
+      "rawFileId": "uuid",
+      "parserCommandId": "uuid",
+      "links": { "batch": "/api/v1/tenants/{tenantId}/rate-feed-batches/{batchId}" },
+      "resultHash": "sha256:..."
+    }
+  }
+}

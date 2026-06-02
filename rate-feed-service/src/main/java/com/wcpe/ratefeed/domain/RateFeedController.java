@@ -50,6 +50,18 @@ class RateFeedController {
     return withAuthorizedHeaders(headers(http), RateFeedRoles.RATE_FEED_VIEW, () -> service.batch(tenantId, batchId));
   }
 
+  // ── PII-04-S01: Batch list endpoint ──
+
+  @GetMapping("/rate-feed-batches")
+  ResponseEntity<RateFeedModels.BatchListResponse> listBatches(@PathVariable UUID tenantId,
+      @RequestParam(required = false) UUID investorId,
+      @RequestParam(required = false) UUID channelId,
+      @RequestParam(required = false) String status,
+      HttpServletRequest http) {
+    return withAuthorizedHeaders(headers(http), RateFeedRoles.RATE_FEED_VIEW,
+        () -> ResponseEntity.ok(service.listBatches(tenantId, investorId, channelId, status)));
+  }
+
   // ── G-001: Import rate sheet CSV ──
 
   @PostMapping(value = "/rate-sheets/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
