@@ -1,0 +1,18 @@
+{
+  "story_id": "PII-04-S05",
+  "profile_required": true,
+  "status": "NORMALIZED",
+  "entries": [
+    {
+      "sourceRowId": 2,
+      "canonicalProductKey": "CONV-30",
+      "ratePercent": "6.500000",
+      "pricePoints": "99.12500",
+      "lockPeriodDays": 30,
+      "severity": "INFO",
+      "mappingRefs": {
+        "profileVersion": "30000000-0000-0000-0000-000000000001"
+      }
+    }
+  ]
+}

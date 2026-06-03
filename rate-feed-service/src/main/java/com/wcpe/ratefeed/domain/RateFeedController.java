@@ -68,6 +68,24 @@ class RateFeedController {
         () -> ResponseEntity.ok(service.parseResults(tenantId, batchId, severity, page, size)));
   }
 
+  @PostMapping("/rate-feed-batches/{batchId}/normalize")
+  ResponseEntity<RateFeedModels.NormalizeBatchResponse> normalizeBatch(@PathVariable UUID tenantId, @PathVariable UUID batchId,
+      @RequestBody RateFeedModels.NormalizeBatchRequest request, HttpServletRequest http) {
+    Headers h = headers(http);
+    return withAuthorizedHeaders(h, RateFeedRoles.RATE_FEED_NORMALIZE,
+        () -> ResponseEntity.status(HttpStatus.ACCEPTED).body(service.normalizeBatch(tenantId, batchId, request, h.idempotencyKey(), h.actorId(), h.correlationId())));
+  }
+
+  @GetMapping("/rate-feed-batches/{batchId}/normalized-entries")
+  ResponseEntity<RateFeedModels.NormalizedEntryPage> normalizedEntries(@PathVariable UUID tenantId, @PathVariable UUID batchId,
+      @RequestParam(required = false) String severity,
+      @RequestParam(defaultValue = "0") int page,
+      @RequestParam(defaultValue = "50") int size,
+      HttpServletRequest http) {
+    return withAuthorizedHeaders(headers(http), RateFeedRoles.RATE_FEED_VIEW,
+        () -> ResponseEntity.ok(service.normalizedEntries(tenantId, batchId, severity, page, size)));
+  }
+
   @PostMapping("/rate-sheet-versions")
   ResponseEntity<RateFeedModels.RateSheetVersionCreatedResponse> createRateSheetVersion(@PathVariable UUID tenantId,
       @RequestBody RateFeedModels.CreateRateSheetVersionRequest request, HttpServletRequest http) {

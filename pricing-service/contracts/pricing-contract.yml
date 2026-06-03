@@ -4,6 +4,75 @@ info:
   version: "0.1.0"
   description: "Contract-first pricing API backed by synthetic grid fixtures. No production pricing behavior."
 paths:
+  /api/v1/tenants/{tenantId}/pricing/rounding-policies:
+    post:
+      summary: "Create a draft tenant-scoped rounding policy version"
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RoundingPolicyDraftRequest"
+      responses:
+        "201":
+          description: "Draft rounding policy created"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoundingPolicyVersion"
+        "400": { description: "ROUNDING_INCREMENT_INVALID or ROUNDING_SCALE_UNSUPPORTED" }
+        "403": { description: "TENANT_ACCESS_DENIED" }
+  /api/v1/tenants/{tenantId}/pricing/rounding-policies/{versionId}/publish:
+    post:
+      summary: "Publish a validated rounding policy version"
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: versionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: "Rounding policy published"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoundingPolicyVersion"
+        "409": { description: "ROUNDING_POLICY_AMBIGUOUS" }
+        "422": { description: "Policy not validated or separation of duties failure" }
+  /api/v1/tenants/{tenantId}/pricing/rounding-policies/resolve:
+    get:
+      summary: "Resolve active rounding policy metadata for an output context"
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: context
+          in: query
+          required: true
+          schema: { type: string }
+        - name: asOf
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: "Resolved rounding policy metadata"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoundingPolicyResolution"
+        "404": { description: "ROUNDING_POLICY_MISSING" }
+        "409": { description: "ROUNDING_POLICY_AMBIGUOUS" }
   /pricing/quote:
     post:
       summary: "Return a synthetic pricing quote for a grid fixture"
@@ -38,3 +107,64 @@ paths:
                     description: "Named synthetic fixture token, not a real quote rate"
         "400":
           description: "Missing or unsupported fixture_id"
+components:
+  schemas:
+    RoundingPolicyDraftRequest:
+      type: object
+      required: ["tenant_id", "scope", "effective_from", "schema_version", "rules"]
+      properties:
+        tenant_id: { type: string }
+        scope: { type: string }
+        product_code: { type: string, nullable: true }
+        investor_code: { type: string, nullable: true }
+        channel_code: { type: string, nullable: true }
+        effective_from: { type: string, format: date }
+        effective_to: { type: string, format: date, nullable: true }
+        schema_version: { type: integer }
+        rules:
+          type: array
+          items:
+            $ref: "#/components/schemas/RoundingRule"
+    RoundingRule:
+      type: object
+      required: ["rule_id", "output_context", "unit", "scale", "rounding_mode", "increment", "precedence"]
+      properties:
+        rule_id: { type: string }
+        output_context: { type: string }
+        unit:
+          type: string
+          enum: ["NOTE_RATE", "PRICE", "POINTS", "BPS", "MONEY", "PERCENT"]
+        scale: { type: integer, minimum: 0 }
+        rounding_mode: { type: string }
+        increment: { type: string, pattern: "^[0-9]+(\\.[0-9]+)?$" }
+        precedence: { type: integer, minimum: 0 }
+        reason_code: { type: string }
+    RoundingPolicyVersion:
+      type: object
+      required: ["id", "tenant_id", "version_number", "status", "scope", "effective_from", "rules", "audit_reference", "correlation_id"]
+      properties:
+        id: { type: string }
+        tenant_id: { type: string }
+        version_number: { type: integer }
+        status: { type: string, enum: ["DRAFT", "PUBLISHED", "SUSPENDED"] }
+        scope: { type: string }
+        effective_from: { type: string, format: date }
+        effective_to: { type: string, format: date, nullable: true }
+        audit_reference: { type: string }
+        correlation_id: { type: string }
+        rules:
+          type: array
+          items:
+            $ref: "#/components/schemas/RoundingRule"
+    RoundingPolicyResolution:
+      type: object
+      required: ["policy_version_id", "version_number", "rule_id", "output_context", "unit", "scale", "rounding_mode", "increment"]
+      properties:
+        policy_version_id: { type: string }
+        version_number: { type: integer }
+        rule_id: { type: string }
+        output_context: { type: string }
+        unit: { type: string }
+        scale: { type: integer }
+        rounding_mode: { type: string }
+        increment: { type: string }

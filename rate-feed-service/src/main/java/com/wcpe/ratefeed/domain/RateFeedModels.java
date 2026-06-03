@@ -309,6 +309,22 @@ public final class RateFeedModels {
   public record ParsedFieldResult(int rowNumber, String fieldName, String rawValue, String normalizedCandidate, String severity, String errorCode, String message) {}
   public record ParseResultPage(List<ParsedFieldResult> rows, int page, int size, long total) {}
 
+  public record NormalizeBatchRequest(String expectedParseResultHash, UUID normalizationProfileId) {}
+  public record NormalizeBatchResponse(UUID normalizationJobId, String status) {}
+  public record NormalizedEntryResponse(
+    UUID entryId,
+    UUID batchId,
+    int sourceRowId,
+    String canonicalProductKey,
+    BigDecimal ratePercent,
+    BigDecimal pricePoints,
+    int lockPeriodDays,
+    String severity,
+    String message,
+    String mappingVersion
+  ) {}
+  public record NormalizedEntryPage(List<NormalizedEntryResponse> entries, int page, int size, long total) {}
+
   public record CreateRateSheetVersionRequest(
     UUID batchId,
     String productKey,

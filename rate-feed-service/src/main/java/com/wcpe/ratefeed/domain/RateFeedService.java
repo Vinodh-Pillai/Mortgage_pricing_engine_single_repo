@@ -519,6 +519,137 @@ class RateFeedService {
   }
 
   @Transactional
+  public RateFeedModels.NormalizeBatchResponse normalizeBatch(UUID tenantId, UUID batchId, RateFeedModels.NormalizeBatchRequest request, String idempotencyKey, String actor, String correlationId) {
+    RateFeedRoles.require(RateFeedRoles.RATE_FEED_NORMALIZE);
+    validateNormalizeRequest(request);
+    Map<String, Object> idempotencyIdentity = new LinkedHashMap<>();
+    idempotencyIdentity.put("command", "normalizeRateFeedBatch");
+    idempotencyIdentity.put("batchId", batchId);
+    idempotencyIdentity.put("body", request);
+    return repository.idempotent(tenantId, idempotencyKey, idempotencyIdentity, RateFeedModels.NormalizeBatchResponse.class,
+        () -> doNormalizeBatch(tenantId, batchId, request, actor(actor), correlation(correlationId), idempotencyKey));
+  }
+
+  private RateFeedModels.NormalizeBatchResponse doNormalizeBatch(UUID tenantId, UUID batchId, RateFeedModels.NormalizeBatchRequest request, String actor, String correlationId, String idempotencyKey) {
+    RateFeedRepository.BatchParseSource batch = repository.batchParseSource(tenantId, batchId);
+    if (!"PARSED".equals(batch.status())) throw new RateFeedException(HttpStatus.CONFLICT, "BATCH_NOT_PARSED", "Batch must be parsed before normalization.");
+    String parseHash = latestParseResultHash(tenantId, batchId);
+    if (request.expectedParseResultHash() != null && !request.expectedParseResultHash().isBlank() && !request.expectedParseResultHash().equals(parseHash)) {
+      throw new RateFeedException(HttpStatus.CONFLICT, "STALE_PARSE_HASH", "expectedParseResultHash does not match the latest parse result.");
+    }
+
+    UUID jobId = UUID.randomUUID();
+    Instant startedAt = Instant.now();
+    String profileVersion = request.normalizationProfileId().toString();
+    jdbc.update("insert into rate_feed.rate_feed_normalization_job(tenant_id,normalization_job_id,batch_id,profile_id,profile_version,status,started_at,idempotency_key) values (?,?,?,?,?,?,?,?)",
+        tenantId, jobId, batchId, request.normalizationProfileId(), profileVersion, "RUNNING", Timestamp.from(startedAt), idempotencyKey);
+
+    List<NormalizedCandidate> candidates = normalizeParsedRows(tenantId, batchId, profileVersion);
+    int errors = (int) candidates.stream().filter(candidate -> "ERROR".equals(candidate.severity())).count();
+    int warnings = (int) candidates.stream().filter(candidate -> "WARNING".equals(candidate.severity())).count();
+    String status = errors == 0 ? "NORMALIZED" : "NORMALIZATION_FAILED";
+    String resultHash = Hashing.sha256(repository.json(candidates.stream().map(NormalizedCandidate::hashMaterial).toList()));
+
+    jdbc.update("delete from rate_feed.normalized_rate_sheet_entry where tenant_id=? and batch_id=?", tenantId, batchId);
+    for (NormalizedCandidate candidate : candidates) {
+      if ("ERROR".equals(candidate.severity())) continue;
+      jdbc.update("insert into rate_feed.normalized_rate_sheet_entry(tenant_id,entry_id,batch_id,source_row_id,investor_id,channel_id,canonical_product_key,program_key,lock_period_days,rate_percent,price_points,adjustment_type,adjustment_value,adjustment_unit,effective_at,dimensions,raw_attributes,mapping_refs,severity,message,created_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          tenantId, candidate.entryId(), batchId, candidate.sourceRowNumber(), batch.investorId(), batch.channelId(), candidate.canonicalProductKey(), candidate.programKey(), candidate.lockPeriodDays(), candidate.ratePercent(), candidate.pricePoints(), candidate.adjustmentType(), candidate.adjustmentValue(), candidate.adjustmentUnit(), Timestamp.from(startedAt), repository.jsonb(candidate.dimensions()), repository.jsonb(candidate.rawAttributes()), repository.jsonb(candidate.mappingRefs()), candidate.severity(), candidate.message(), Timestamp.from(startedAt));
+    }
+    jdbc.update("update rate_feed.rate_feed_normalization_job set status=?, completed_at=now(), entry_count=?, error_count=?, warning_count=?, result_hash=? where tenant_id=? and normalization_job_id=?",
+        status, candidates.size() - errors, errors, warnings, resultHash, tenantId, jobId);
+    jdbc.update("update rate_feed.rate_feed_batch set status=?, updated_at=now(), result_hash=? where tenant_id=? and batch_id=?", status, resultHash, tenantId, batchId);
+
+    String eventType = errors == 0 ? "RateSheetNormalized.v1" : "RateSheetNormalizationFailed.v1";
+    repository.outbox(tenantId, batchId, eventType, 1, actor, correlationId, parseHeaders(batch),
+        Map.of("batchId", batchId, "normalizationJobId", jobId, "profileId", request.normalizationProfileId(), "profileVersion", profileVersion, "entryCount", candidates.size() - errors, "errorCount", errors, "warningCount", warnings, "resultHash", resultHash));
+    repository.audit(tenantId, batchId, errors == 0 ? "RATE_SHEET_NORMALIZED" : "RATE_SHEET_NORMALIZATION_FAILED", "RateFeedBatch", actor, correlationId, parseHash, resultHash,
+        Map.of("batchId", batchId, "normalizationJobId", jobId, "status", status, "profileId", request.normalizationProfileId(), "entryCount", candidates.size() - errors, "errorCount", errors, "warningCount", warnings));
+    return new RateFeedModels.NormalizeBatchResponse(jobId, status);
+  }
+
+  public RateFeedModels.NormalizedEntryPage normalizedEntries(UUID tenantId, UUID batchId, String severity, int page, int size) {
+    RateFeedRoles.require(RateFeedRoles.RATE_FEED_VIEW);
+    int boundedPage = Math.max(page, 0);
+    int boundedSize = Math.min(Math.max(size, 1), 200);
+    String normalizedSeverity = severity == null || severity.isBlank() ? null : severity.trim().toUpperCase(Locale.ROOT);
+    List<Object> params = new ArrayList<>(List.of(tenantId, batchId));
+    String where = " where tenant_id=? and batch_id=?";
+    if (normalizedSeverity != null) { where += " and severity=?"; params.add(normalizedSeverity); }
+    Long total = jdbc.queryForObject("select count(*) from rate_feed.normalized_rate_sheet_entry" + where, Long.class, params.toArray());
+    params.add(boundedSize);
+    params.add(boundedPage * boundedSize);
+    List<RateFeedModels.NormalizedEntryResponse> entries = jdbc.query("select entry_id,batch_id,source_row_id,canonical_product_key,rate_percent,price_points,lock_period_days,severity,message,mapping_refs ->> 'profileVersion' as mapping_version from rate_feed.normalized_rate_sheet_entry" + where + " order by source_row_id, created_at limit ? offset ?",
+        (rs, row) -> new RateFeedModels.NormalizedEntryResponse(rs.getObject("entry_id", UUID.class), rs.getObject("batch_id", UUID.class), rs.getInt("source_row_id"), rs.getString("canonical_product_key"), rs.getBigDecimal("rate_percent"), rs.getBigDecimal("price_points"), rs.getInt("lock_period_days"), rs.getString("severity"), rs.getString("message"), rs.getString("mapping_version")), params.toArray());
+    return new RateFeedModels.NormalizedEntryPage(entries, boundedPage, boundedSize, total == null ? 0 : total);
+  }
+
+  private void validateNormalizeRequest(RateFeedModels.NormalizeBatchRequest request) {
+    if (request == null) throw validation("REQUEST_BODY_REQUIRED", "Request body is required.");
+    if (request.normalizationProfileId() == null) throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "NORMALIZATION_PROFILE_NOT_FOUND", "normalizationProfileId is required for governed normalization.");
+    rejectFormulaMetadata("expectedParseResultHash", request.expectedParseResultHash());
+  }
+
+  private String latestParseResultHash(UUID tenantId, UUID batchId) {
+    try {
+      String hash = jdbc.queryForObject("select result_hash from rate_feed.rate_feed_parse_job where tenant_id=? and batch_id=? order by completed_at desc nulls last, started_at desc limit 1", String.class, tenantId, batchId);
+      return hash == null ? "" : hash;
+    } catch (Exception ex) { return ""; }
+  }
+
+  private List<NormalizedCandidate> normalizeParsedRows(UUID tenantId, UUID batchId, String profileVersion) {
+    List<ParsedField> fields = jdbc.query("select source_row_number,field_name,raw_value,candidate_value,source_column,severity,error_code,message from rate_feed.rate_feed_parsed_field where tenant_id=? and batch_id=? order by source_row_number, source_column",
+        (rs, row) -> new ParsedField(rs.getInt("source_row_number"), rs.getString("field_name"), rs.getString("raw_value"), rs.getString("candidate_value"), rs.getInt("source_column"), rs.getString("severity"), rs.getString("error_code"), rs.getString("message")), tenantId, batchId);
+    Map<Integer, List<ParsedField>> byRow = new TreeMap<>();
+    for (ParsedField field : fields) byRow.computeIfAbsent(field.sourceRowNumber(), ignored -> new ArrayList<>()).add(field);
+    if (byRow.isEmpty()) throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "BATCH_NOT_PARSED", "Parsed batch contains no field rows.");
+    List<NormalizedCandidate> candidates = new ArrayList<>();
+    for (Map.Entry<Integer, List<ParsedField>> row : byRow.entrySet()) candidates.add(normalizeParsedRow(row.getKey(), row.getValue(), profileVersion));
+    return candidates;
+  }
+
+  private NormalizedCandidate normalizeParsedRow(int sourceRow, List<ParsedField> fields, String profileVersion) {
+    Map<String, ParsedField> byName = new LinkedHashMap<>();
+    Map<String, String> raw = new LinkedHashMap<>();
+    for (ParsedField field : fields) {
+      byName.put(field.fieldName(), field);
+      raw.put(field.fieldName(), field.rawValue());
+      if ("ERROR".equals(field.severity())) return NormalizedCandidate.error(sourceRow, "Parsed row contains blocking field errors.", raw, profileVersion);
+    }
+    try {
+      String productKey = requiredCandidate(byName, "canonical_product_key");
+      BigDecimal rate = new BigDecimal(requiredCandidate(byName, "note_rate"));
+      BigDecimal price = new BigDecimal(requiredCandidate(byName, "base_price"));
+      int lockPeriod = Integer.parseInt(requiredCandidate(byName, "lock_period"));
+      String programKey = optionalCandidate(byName, "program_key");
+      BigDecimal adjustmentValue = optionalDecimal(byName, "adjustment_value");
+      String adjustmentType = optionalCandidate(byName, "adjustment_type");
+      String adjustmentUnit = optionalCandidate(byName, "adjustment_unit");
+      return NormalizedCandidate.success(sourceRow, productKey, programKey, lockPeriod, rate, price, adjustmentType, adjustmentValue, adjustmentUnit, raw, profileVersion);
+    } catch (RuntimeException ex) {
+      return NormalizedCandidate.error(sourceRow, ex.getMessage(), raw, profileVersion);
+    }
+  }
+
+  private static String requiredCandidate(Map<String, ParsedField> fields, String fieldName) {
+    String value = optionalCandidate(fields, fieldName);
+    if (value == null || value.isBlank()) throw new IllegalArgumentException("Missing governed mapping for " + fieldName + ".");
+    return value;
+  }
+
+  private static String optionalCandidate(Map<String, ParsedField> fields, String fieldName) {
+    ParsedField field = fields.get(fieldName);
+    if (field == null) return null;
+    String value = field.candidateValue() == null || field.candidateValue().isBlank() ? field.rawValue() : field.candidateValue();
+    return value == null || value.isBlank() ? null : value;
+  }
+
+  private static BigDecimal optionalDecimal(Map<String, ParsedField> fields, String fieldName) {
+    String value = optionalCandidate(fields, fieldName);
+    return value == null ? null : new BigDecimal(value);
+  }
+
+  @Transactional
   public RateFeedModels.RateSheetVersionCreatedResponse createRateSheetVersion(UUID tenantId, RateFeedModels.CreateRateSheetVersionRequest request, String idempotencyKey, String actor, String correlationId) {
     RateFeedRoles.require(RateFeedRoles.RATE_FEED_WRITER);
     validateCreateRateSheetVersionRequest(request);
@@ -933,6 +1064,27 @@ class RateFeedService {
 
   private record ParsedCsv(int rowCount, List<ParsedField> fields) {}
   private record ParsedField(int sourceRowNumber, String fieldName, String rawValue, String candidateValue, int sourceColumn, String severity, String errorCode, String message) {}
+  private record NormalizedCandidate(UUID entryId, int sourceRowNumber, String canonicalProductKey, String programKey, int lockPeriodDays, BigDecimal ratePercent, BigDecimal pricePoints, String adjustmentType, BigDecimal adjustmentValue, String adjustmentUnit, String severity, String message, Map<String, String> rawAttributes, Map<String, Object> mappingRefs) {
+    static NormalizedCandidate success(int sourceRowNumber, String productKey, String programKey, int lockPeriodDays, BigDecimal ratePercent, BigDecimal pricePoints, String adjustmentType, BigDecimal adjustmentValue, String adjustmentUnit, Map<String, String> rawAttributes, String profileVersion) {
+      return new NormalizedCandidate(UUID.randomUUID(), sourceRowNumber, productKey, programKey, lockPeriodDays, ratePercent, pricePoints, adjustmentType, adjustmentValue, adjustmentUnit, "INFO", "normalized", Map.copyOf(rawAttributes), Map.of("profileVersion", profileVersion));
+    }
+    static NormalizedCandidate error(int sourceRowNumber, String message, Map<String, String> rawAttributes, String profileVersion) {
+      return new NormalizedCandidate(UUID.randomUUID(), sourceRowNumber, null, null, 0, null, null, null, null, null, "ERROR", message, Map.copyOf(rawAttributes), Map.of("profileVersion", profileVersion));
+    }
+    Map<String, Object> dimensions() { return Map.of("sourceRow", sourceRowNumber); }
+    Map<String, Object> hashMaterial() {
+      Map<String, Object> material = new LinkedHashMap<>();
+      material.put("sourceRow", sourceRowNumber);
+      material.put("canonicalProductKey", canonicalProductKey);
+      material.put("lockPeriodDays", lockPeriodDays);
+      material.put("ratePercent", ratePercent == null ? null : ratePercent.toPlainString());
+      material.put("pricePoints", pricePoints == null ? null : pricePoints.toPlainString());
+      material.put("severity", severity);
+      material.put("message", message);
+      material.put("mappingRefs", mappingRefs);
+      return material;
+    }
+  }
 
   /**
    * Hardening: Version list endpoint — query by optional filters.

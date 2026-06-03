@@ -24,6 +24,7 @@ public final class RateFeedRoles {
   // ── Canonical role names ─────────────────────────────────────────────
   public static final String RATE_FEED_UPLOAD   = "RATE_FEED_UPLOAD";
   public static final String RATE_FEED_PARSE    = "RATE_FEED_PARSE";
+  public static final String RATE_FEED_NORMALIZE = "RATE_FEED_NORMALIZE";
   public static final String RATE_FEED_ACTIVATE = "RATE_FEED_ACTIVATE";
   public static final String RATE_FEED_VIEW     = "RATE_FEED_VIEW";
   public static final String RATE_FEED_WRITER   = "RATE_FEED_WRITER";
@@ -33,6 +34,7 @@ public final class RateFeedRoles {
   private static final Set<String> ALL_ROLES = Set.of(
       RATE_FEED_UPLOAD,
       RATE_FEED_PARSE,
+      RATE_FEED_NORMALIZE,
       RATE_FEED_ACTIVATE,
       RATE_FEED_VIEW,
       RATE_FEED_WRITER,
