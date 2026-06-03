@@ -97,6 +97,38 @@ class RateFeedController {
         () -> ResponseEntity.ok(service.resolveRateSheetVersion(tenantId, investorId, channelId, productKey, asOf)));
   }
 
+  @PostMapping("/rate-sheet-versions/{versionId}/submit-approval")
+  ResponseEntity<RateFeedModels.PublishWorkflowStateResponse> submitApproval(@PathVariable UUID tenantId, @PathVariable UUID versionId,
+      @RequestBody RateFeedModels.SubmitApprovalRequest request, HttpServletRequest http) {
+    Headers h = headers(http);
+    return withAuthorizedHeaders(h, RateFeedRoles.RATE_FEED_WRITER,
+        () -> ResponseEntity.ok(service.submitApproval(tenantId, versionId, request, h.idempotencyKey(), h.actorId(), h.correlationId())));
+  }
+
+  @PostMapping("/rate-sheet-versions/{versionId}/approval-decisions")
+  ResponseEntity<RateFeedModels.PublishWorkflowStateResponse> approvalDecision(@PathVariable UUID tenantId, @PathVariable UUID versionId,
+      @RequestBody RateFeedModels.ApprovalDecisionRequest request, HttpServletRequest http) {
+    Headers h = headers(http);
+    return withAuthorizedHeaders(h, RateFeedRoles.RATE_FEED_APPROVER,
+        () -> ResponseEntity.ok(service.decideApproval(tenantId, versionId, request, h.idempotencyKey(), h.actorId(), h.correlationId())));
+  }
+
+  @PostMapping("/rate-sheet-versions/{versionId}/publish")
+  ResponseEntity<RateFeedModels.PublishWorkflowStateResponse> publishVersion(@PathVariable UUID tenantId, @PathVariable UUID versionId,
+      @RequestBody RateFeedModels.PublishRateSheetRequest request, HttpServletRequest http) {
+    Headers h = headers(http);
+    return withAuthorizedHeaders(h, RateFeedRoles.RATE_FEED_ACTIVATE,
+        () -> ResponseEntity.ok(service.publishVersion(tenantId, versionId, request, h.idempotencyKey(), h.actorId(), h.correlationId())));
+  }
+
+  @PostMapping("/rate-sheet-versions/{versionId}/rollback")
+  ResponseEntity<RateFeedModels.PublishWorkflowStateResponse> rollbackVersion(@PathVariable UUID tenantId, @PathVariable UUID versionId,
+      @RequestBody RateFeedModels.RollbackRateSheetRequest request, HttpServletRequest http) {
+    Headers h = headers(http);
+    return withAuthorizedHeaders(h, RateFeedRoles.RATE_FEED_ACTIVATE,
+        () -> ResponseEntity.ok(service.rollbackVersion(tenantId, versionId, request, h.idempotencyKey(), h.actorId(), h.correlationId())));
+  }
+
   // ── PII-04-S01: Batch list endpoint ──
 
   @GetMapping("/rate-feed-batches")

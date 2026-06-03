@@ -26,14 +26,19 @@ public final class RateFeedModels {
   }
 
   public enum RateSheetStatus {
-    DRAFT, PARSING, VALIDATED, ACTIVE, SUPERSEDED, REJECTED;
+    DRAFT, PARSING, VALIDATED, PENDING_APPROVAL, APPROVED, SCHEDULED, ACTIVE, PUBLISHED, SUPERSEDED, REJECTED, ROLLBACK_PUBLISHED;
 
     Set<RateSheetStatus> allowedTransitions() {
       return switch (this) {
         case DRAFT -> Set.of(PARSING);
         case PARSING -> Set.of(VALIDATED, REJECTED);
-        case VALIDATED -> Set.of(ACTIVE, REJECTED);
+        case VALIDATED -> Set.of(PENDING_APPROVAL, ACTIVE, REJECTED);
+        case PENDING_APPROVAL -> Set.of(APPROVED, REJECTED);
+        case APPROVED -> Set.of(SCHEDULED, PUBLISHED, ACTIVE, REJECTED);
+        case SCHEDULED -> Set.of(PUBLISHED, ACTIVE, REJECTED);
         case ACTIVE -> Set.of(SUPERSEDED);
+        case PUBLISHED -> Set.of(SUPERSEDED, ROLLBACK_PUBLISHED);
+        case ROLLBACK_PUBLISHED -> Set.of(SUPERSEDED);
         case SUPERSEDED -> Set.of();
         case REJECTED -> Set.of();
       };
@@ -43,6 +48,8 @@ public final class RateFeedModels {
     boolean canActivate() { return this == VALIDATED; }
     boolean canReject() { return this == VALIDATED || this == PARSING; }
   }
+
+  public enum PublishWorkflowDecision { APPROVE, REJECT }
 
   // ── Existing records (unchanged) ────────────────────────────────────────────
 
@@ -347,6 +354,27 @@ public final class RateFeedModels {
     Instant effectiveTo,
     String status,
     String resultHash
+  ) {}
+
+  public record SubmitApprovalRequest(String changeSummary, Instant effectiveFrom, Instant effectiveTo) {}
+  public record ApprovalDecisionRequest(PublishWorkflowDecision decision, String reasonCode, String comment) {}
+  public record PublishRateSheetRequest(Instant publishAt, String expectedValidationResultHash, String expectedVersionHash) {}
+  public record RollbackRateSheetRequest(UUID targetVersionId, String reasonCode, String comment) {}
+  public record PublishWorkflowStateResponse(
+    UUID rateSheetVersionId,
+    String status,
+    String approvalStatus,
+    String submittedBy,
+    String approvedBy,
+    Instant submittedAt,
+    Instant approvedAt,
+    Instant publishedAt,
+    UUID targetVersionId,
+    String eventType,
+    String auditAction,
+    String cacheInvalidationCommandId,
+    String resultHash,
+    List<ValidationWarningDetail> warnings
   ) {}
 
   // ── Exception class ─────────────────────────────────────────────────────────

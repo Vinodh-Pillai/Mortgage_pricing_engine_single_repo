@@ -42,7 +42,8 @@ class EligibilityCacheHealthApiContractTest {
             mock(),
             mock(),
             mock(),
-            cacheService
+            cacheService,
+            mock()
         )).build();
 
         mockMvc.perform(get("/api/v1/tenants/11111111-1111-1111-1111-111111111111/eligibility/cache/health")

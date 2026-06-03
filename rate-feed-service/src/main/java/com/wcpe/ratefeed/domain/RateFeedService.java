@@ -598,12 +598,138 @@ class RateFeedService {
     requireUuid("CHANNEL_REQUIRED", "channelId is required for resolution.", channelId);
     if (productKey == null || productKey.isBlank()) throw validation("PRODUCT_KEY_REQUIRED", "productKey is required for resolution.");
     if (asOf == null) throw validation("AS_OF_REQUIRED", "asOf is required for resolution.");
-    List<RateFeedModels.RateSheetVersionResolveResponse> matches = jdbc.query("select sheet_id,version,investor_id,channel_id,product_code,effective_at,effective_until,status,result_hash from rate_feed.rate_sheet where tenant_id=? and investor_id=? and channel_id=? and product_code=? and status='ACTIVE' and effective_at <= ? and (effective_until is null or effective_until > ?) order by version desc",
+    List<RateFeedModels.RateSheetVersionResolveResponse> matches = jdbc.query("select sheet_id,version,investor_id,channel_id,product_code,effective_at,effective_until,status,result_hash from rate_feed.rate_sheet where tenant_id=? and investor_id=? and channel_id=? and product_code=? and status in ('ACTIVE','PUBLISHED','ROLLBACK_PUBLISHED') and effective_at <= ? and (effective_until is null or effective_until > ?) order by version desc",
         (rs, row) -> new RateFeedModels.RateSheetVersionResolveResponse(rs.getObject("sheet_id", UUID.class), rs.getInt("version"), rs.getObject("investor_id", UUID.class), rs.getObject("channel_id", UUID.class), rs.getString("product_code"), rs.getTimestamp("effective_at").toInstant(), rs.getTimestamp("effective_until") == null ? null : rs.getTimestamp("effective_until").toInstant(), rs.getString("status"), rs.getString("result_hash")),
         tenantId, investorId, channelId, productKey, Timestamp.from(asOf), Timestamp.from(asOf));
     if (matches.isEmpty()) throw new RateFeedException(HttpStatus.NOT_FOUND, "VERSION_NOT_FOUND", "No active published rate sheet version matched the resolution request.");
     if (matches.size() > 1) throw new RateFeedException(HttpStatus.CONFLICT, "AMBIGUOUS_ACTIVE_VERSION", "Multiple active published rate sheet versions matched the resolution request.");
     return matches.get(0);
+  }
+
+  @Transactional
+  public RateFeedModels.PublishWorkflowStateResponse submitApproval(UUID tenantId, UUID versionId, RateFeedModels.SubmitApprovalRequest request, String idempotencyKey, String actor, String correlationId) {
+    RateFeedRoles.require(RateFeedRoles.RATE_FEED_WRITER);
+    Map<String, Object> identity = new LinkedHashMap<>();
+    identity.put("command", "submitRateSheetApproval");
+    identity.put("versionId", versionId);
+    identity.put("body", request);
+    return repository.idempotent(tenantId, idempotencyKey, identity, RateFeedModels.PublishWorkflowStateResponse.class,
+        () -> doSubmitApproval(tenantId, versionId, request, actor(actor), correlation(correlationId)));
+  }
+
+  private RateFeedModels.PublishWorkflowStateResponse doSubmitApproval(UUID tenantId, UUID versionId, RateFeedModels.SubmitApprovalRequest request, String actor, String correlationId) {
+    if (request == null) throw validation("REQUEST_BODY_REQUIRED", "Request body is required.");
+    if (request.changeSummary() == null || request.changeSummary().isBlank()) throw validation("CHANGE_SUMMARY_REQUIRED", "changeSummary is required.");
+    rejectFormulaMetadata("changeSummary", request.changeSummary());
+    RateSheet sheet = tenantSheetForUpdate(tenantId, versionId);
+    if (sheet.status() != RateSheetStatus.VALIDATED) throw new RateFeedException(HttpStatus.CONFLICT, "VALIDATION_NOT_PASSED", "Only VALIDATED rate sheet versions can be submitted for approval.");
+    String resultHash = workflowHash("submit", tenantId, versionId, actor, sheet.resultHash());
+    jdbc.update("update rate_feed.rate_sheet set status='PENDING_APPROVAL', submitted_by=?, submitted_at=now(), workflow_change_summary=?, updated_at=now() where tenant_id=? and sheet_id=?",
+        actor, safeText(request.changeSummary()), tenantId, versionId);
+    insertDecision(tenantId, versionId, "SUBMIT_APPROVAL", "SUBMITTED", "SUBMIT_APPROVAL", request.changeSummary(), actor, RateFeedRoles.RATE_FEED_WRITER, correlationId);
+    repository.outbox(tenantId, versionId, "RateSheetApprovalRequested.v1", 1, actor, correlationId, workflowHeaders(sheet), workflowPayload(tenantId, versionId, "PENDING_APPROVAL", resultHash, null));
+    repository.audit(tenantId, versionId, "RATE_SHEET_APPROVAL_REQUESTED", "RateSheetVersion", actor, correlationId, sheet.resultHash(), resultHash, workflowPayload(tenantId, versionId, "PENDING_APPROVAL", resultHash, null));
+    return workflowState(tenantId, versionId, "RateSheetApprovalRequested.v1", "RATE_SHEET_APPROVAL_REQUESTED", null, resultHash, List.of());
+  }
+
+  @Transactional
+  public RateFeedModels.PublishWorkflowStateResponse decideApproval(UUID tenantId, UUID versionId, RateFeedModels.ApprovalDecisionRequest request, String idempotencyKey, String actor, String correlationId) {
+    RateFeedRoles.require(RateFeedRoles.RATE_FEED_APPROVER);
+    Map<String, Object> identity = new LinkedHashMap<>();
+    identity.put("command", "decideRateSheetApproval");
+    identity.put("versionId", versionId);
+    identity.put("body", request);
+    return repository.idempotent(tenantId, idempotencyKey, identity, RateFeedModels.PublishWorkflowStateResponse.class,
+        () -> doDecideApproval(tenantId, versionId, request, actor(actor), correlation(correlationId)));
+  }
+
+  private RateFeedModels.PublishWorkflowStateResponse doDecideApproval(UUID tenantId, UUID versionId, RateFeedModels.ApprovalDecisionRequest request, String actor, String correlationId) {
+    if (request == null) throw validation("REQUEST_BODY_REQUIRED", "Request body is required.");
+    if (request.decision() == null) throw validation("DECISION_REQUIRED", "decision is required.");
+    if (request.reasonCode() == null || request.reasonCode().isBlank()) throw validation("REASON_CODE_REQUIRED", "reasonCode is required.");
+    rejectFormulaMetadata("reasonCode", request.reasonCode());
+    rejectFormulaMetadata("comment", request.comment());
+    RateSheet sheet = tenantSheetForUpdate(tenantId, versionId);
+    if (sheet.status() != RateSheetStatus.PENDING_APPROVAL) throw new RateFeedException(HttpStatus.CONFLICT, "APPROVAL_REQUIRED", "Rate sheet version must be pending approval before a decision can be recorded.");
+    String submitter = workflowActor(tenantId, versionId, "submitted_by");
+    if (actor.equals(submitter)) throw new RateFeedException(HttpStatus.FORBIDDEN, "SOD_VIOLATION", "Submitter cannot approve or reject their own rate sheet version.");
+    String status = request.decision() == RateFeedModels.PublishWorkflowDecision.APPROVE ? "APPROVED" : "REJECTED";
+    String resultHash = workflowHash("approval", tenantId, versionId, actor, request.decision().name(), sheet.resultHash());
+    jdbc.update("update rate_feed.rate_sheet set status=?, approval_status=?, approved_by=?, approved_at=now(), rejected_at=case when ?='REJECTED' then now() else rejected_at end, rejected_by=case when ?='REJECTED' then ? else rejected_by end, rejection_reason=case when ?='REJECTED' then ? else rejection_reason end, updated_at=now() where tenant_id=? and sheet_id=?",
+        status, request.decision().name(), actor, status, status, actor, status, safeText(request.reasonCode()), tenantId, versionId);
+    insertDecision(tenantId, versionId, "APPROVAL_DECISION", request.decision().name(), request.reasonCode(), request.comment(), actor, RateFeedRoles.RATE_FEED_APPROVER, correlationId);
+    repository.outbox(tenantId, versionId, "RateSheetApprovalDecided.v1", 1, actor, correlationId, workflowHeaders(sheet), workflowPayload(tenantId, versionId, status, resultHash, request.reasonCode()));
+    repository.audit(tenantId, versionId, "RATE_SHEET_APPROVAL_DECIDED", "RateSheetVersion", actor, correlationId, sheet.resultHash(), resultHash, workflowPayload(tenantId, versionId, status, resultHash, request.reasonCode()));
+    return workflowState(tenantId, versionId, "RateSheetApprovalDecided.v1", "RATE_SHEET_APPROVAL_DECIDED", null, resultHash, List.of());
+  }
+
+  @Transactional
+  public RateFeedModels.PublishWorkflowStateResponse publishVersion(UUID tenantId, UUID versionId, RateFeedModels.PublishRateSheetRequest request, String idempotencyKey, String actor, String correlationId) {
+    RateFeedRoles.require(RateFeedRoles.RATE_FEED_ACTIVATE);
+    Map<String, Object> identity = new LinkedHashMap<>();
+    identity.put("command", "publishRateSheetVersion");
+    identity.put("versionId", versionId);
+    identity.put("body", request);
+    return repository.idempotent(tenantId, idempotencyKey, identity, RateFeedModels.PublishWorkflowStateResponse.class,
+        () -> doPublishVersion(tenantId, versionId, request, actor(actor), correlation(correlationId)));
+  }
+
+  private RateFeedModels.PublishWorkflowStateResponse doPublishVersion(UUID tenantId, UUID versionId, RateFeedModels.PublishRateSheetRequest request, String actor, String correlationId) {
+    if (request == null) throw validation("REQUEST_BODY_REQUIRED", "Request body is required.");
+    RateSheet sheet = tenantSheetForUpdate(tenantId, versionId);
+    if (sheet.status() != RateSheetStatus.APPROVED) throw new RateFeedException(HttpStatus.CONFLICT, "APPROVAL_REQUIRED", "Rate sheet version must be approved before publish.");
+    String submitter = workflowActor(tenantId, versionId, "submitted_by");
+    if (actor.equals(submitter)) throw new RateFeedException(HttpStatus.FORBIDDEN, "SOD_VIOLATION", "Submitter cannot publish their own rate sheet version.");
+    if (request.expectedValidationResultHash() == null || !request.expectedValidationResultHash().equals(sheet.gridHash())) throw new RateFeedException(HttpStatus.CONFLICT, "STALE_VERSION_HASH", "expectedValidationResultHash does not match the validated rate sheet grid hash.");
+    if (request.expectedVersionHash() == null || !request.expectedVersionHash().equals(sheet.resultHash())) throw new RateFeedException(HttpStatus.CONFLICT, "STALE_VERSION_HASH", "expectedVersionHash does not match the current rate sheet version hash.");
+    Instant publishAt = request.publishAt() == null ? Instant.now() : request.publishAt();
+    if (publishAt.isAfter(Instant.now().plus(Duration.ofSeconds(30)))) throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "SCHEDULER_UNAVAILABLE", "Future publication requires scheduler infrastructure that is not available in this service slice.");
+    ensureNoActiveOverlap(tenantId, sheet);
+    return publishSheet(tenantId, sheet, versionId, null, actor, correlationId, "RateSheetPublished.v1", "RATE_SHEET_PUBLISHED", "PUBLISHED");
+  }
+
+  @Transactional
+  public RateFeedModels.PublishWorkflowStateResponse rollbackVersion(UUID tenantId, UUID versionId, RateFeedModels.RollbackRateSheetRequest request, String idempotencyKey, String actor, String correlationId) {
+    RateFeedRoles.require(RateFeedRoles.RATE_FEED_ACTIVATE);
+    Map<String, Object> identity = new LinkedHashMap<>();
+    identity.put("command", "rollbackRateSheetVersion");
+    identity.put("versionId", versionId);
+    identity.put("body", request);
+    return repository.idempotent(tenantId, idempotencyKey, identity, RateFeedModels.PublishWorkflowStateResponse.class,
+        () -> doRollbackVersion(tenantId, versionId, request, actor(actor), correlation(correlationId)));
+  }
+
+  private RateFeedModels.PublishWorkflowStateResponse doRollbackVersion(UUID tenantId, UUID versionId, RateFeedModels.RollbackRateSheetRequest request, String actor, String correlationId) {
+    if (request == null) throw validation("REQUEST_BODY_REQUIRED", "Request body is required.");
+    requireUuid("TARGET_VERSION_REQUIRED", "targetVersionId is required.", request.targetVersionId());
+    if (request.reasonCode() == null || request.reasonCode().isBlank()) throw validation("REASON_CODE_REQUIRED", "reasonCode is required.");
+    rejectFormulaMetadata("reasonCode", request.reasonCode());
+    rejectFormulaMetadata("comment", request.comment());
+    RateSheet current = tenantSheetForUpdate(tenantId, versionId);
+    if (!Set.of(RateSheetStatus.PUBLISHED, RateSheetStatus.ACTIVE, RateSheetStatus.ROLLBACK_PUBLISHED).contains(current.status())) throw new RateFeedException(HttpStatus.CONFLICT, "APPROVAL_REQUIRED", "Rollback must start from the current published rate sheet version.");
+    RateSheet target = tenantSheetForUpdate(tenantId, request.targetVersionId());
+    if (!sameCoverage(current, target)) throw new RateFeedException(HttpStatus.CONFLICT, "PUBLISH_WINDOW_CONFLICT", "Rollback target must match the current investor/channel/product coverage.");
+    if (!Set.of(RateSheetStatus.PUBLISHED, RateSheetStatus.ACTIVE, RateSheetStatus.SUPERSEDED, RateSheetStatus.ROLLBACK_PUBLISHED).contains(target.status())) throw new RateFeedException(HttpStatus.CONFLICT, "APPROVAL_REQUIRED", "Rollback target must be a previously published version.");
+    insertDecision(tenantId, request.targetVersionId(), "ROLLBACK", "APPROVED", request.reasonCode(), request.comment(), actor, RateFeedRoles.RATE_FEED_ACTIVATE, correlationId);
+    return publishSheet(tenantId, target, current.sheetId(), current.sheetId(), actor, correlationId, "RateSheetRollbackPublished.v1", "RATE_SHEET_ROLLBACK_PUBLISHED", "ROLLBACK_PUBLISHED");
+  }
+
+  private RateFeedModels.PublishWorkflowStateResponse publishSheet(UUID tenantId, RateSheet sheet, UUID commandVersionId, UUID rollbackFromVersionId, String actor, String correlationId, String eventType, String auditAction, String status) {
+    String cacheCommandId = UUID.randomUUID().toString();
+    String resultHash = workflowHash(eventType, tenantId, sheet.sheetId(), actor, sheet.gridHash(), sheet.resultHash(), cacheCommandId);
+    jdbc.update("update rate_feed.rate_sheet set status='SUPERSEDED', effective_until=coalesce(effective_until, ?), updated_at=now() where tenant_id=? and investor_id=? and channel_id=? and product_code=? and sheet_id<>? and status in ('ACTIVE','PUBLISHED','ROLLBACK_PUBLISHED')",
+        Timestamp.from(Instant.now()), tenantId, sheet.investorId(), sheet.channelId(), sheet.productCode(), sheet.sheetId());
+    jdbc.update("update rate_feed.rate_sheet set status=?, activated_at=now(), activated_by=?, updated_at=now() where tenant_id=? and sheet_id=?", status, actor, tenantId, sheet.sheetId());
+    jdbc.update("delete from rate_feed.published_rate_sheet_read_model where tenant_id=? and investor_id=? and channel_id=? and status='ACTIVE'", tenantId, sheet.investorId(), sheet.channelId());
+    jdbc.update("insert into rate_feed.published_rate_sheet_read_model(tenant_id,version_id,investor_id,channel_id,effective_from,effective_to,status,coverage_hash,published_at,published_by,cache_invalidation_command_id) values (?,?,?,?,?,?,?,?,now(),?,?)",
+        tenantId, sheet.sheetId(), sheet.investorId(), sheet.channelId(), Timestamp.from(sheet.effectiveAt()), sheet.effectiveUntil() == null ? null : Timestamp.from(sheet.effectiveUntil()), "ACTIVE", sheet.gridHash(), actor, cacheCommandId);
+    Map<String, Object> payload = workflowPayload(tenantId, sheet.sheetId(), status, resultHash, null);
+    payload.put("cacheInvalidationCommandId", cacheCommandId);
+    payload.put("rollbackFromVersionId", rollbackFromVersionId);
+    repository.outbox(tenantId, sheet.sheetId(), eventType, 1, actor, correlationId, workflowHeaders(sheet), payload);
+    repository.audit(tenantId, sheet.sheetId(), auditAction, "RateSheetVersion", actor, correlationId, sheet.resultHash(), resultHash, payload);
+    List<RateFeedModels.ValidationWarningDetail> warnings = List.of(new RateFeedModels.ValidationWarningDetail("CACHE_INVALIDATION_ACK_UNAVAILABLE", "External cache invalidation acknowledgement infrastructure is not available in this local service slice; command ID was recorded."));
+    return workflowState(tenantId, sheet.sheetId(), eventType, auditAction, cacheCommandId, resultHash, warnings);
   }
 
   private List<RatePricePoint> parsedPricePoints(UUID tenantId, UUID batchId) {
@@ -620,6 +746,75 @@ class RateFeedService {
       points.add(new RatePricePoint(null, new BigDecimal(fields.get("note_rate")), Integer.parseInt(fields.get("lock_period")), new BigDecimal(fields.get("base_price")), nullableDecimal(fields.get("discount_points")), nullableDecimal(fields.get("yield_index")), position++));
     }
     return points;
+  }
+
+  private RateSheet tenantSheetForUpdate(UUID tenantId, UUID sheetId) {
+    try {
+      return jdbc.queryForObject("select * from rate_feed.rate_sheet where tenant_id=? and sheet_id=? for update", new Object[]{tenantId, sheetId}, sheetMapper());
+    } catch (Exception ex) {
+      throw new RateFeedException(HttpStatus.NOT_FOUND, "VERSION_NOT_FOUND", "Rate sheet version was not found for this tenant.");
+    }
+  }
+
+  private String workflowActor(UUID tenantId, UUID versionId, String column) {
+    try {
+      String value = jdbc.queryForObject("select " + column + " from rate_feed.rate_sheet where tenant_id=? and sheet_id=?", String.class, tenantId, versionId);
+      return value == null || value.isBlank() ? "" : value;
+    } catch (Exception ex) {
+      return "";
+    }
+  }
+
+  private void ensureNoActiveOverlap(UUID tenantId, RateSheet sheet) {
+    Instant upper = sheet.effectiveUntil() == null ? Instant.parse("9999-12-31T23:59:59Z") : sheet.effectiveUntil();
+    Integer count = jdbc.queryForObject("select count(*) from rate_feed.rate_sheet where tenant_id=? and investor_id=? and channel_id=? and product_code=? and sheet_id<>? and status in ('ACTIVE','PUBLISHED','ROLLBACK_PUBLISHED') and effective_at < ? and coalesce(effective_until, timestamp with time zone '9999-12-31 23:59:59Z') > ?",
+        Integer.class, tenantId, sheet.investorId(), sheet.channelId(), sheet.productCode(), sheet.sheetId(), Timestamp.from(upper), Timestamp.from(sheet.effectiveAt()));
+    if (count != null && count > 0) throw new RateFeedException(HttpStatus.CONFLICT, "PUBLISH_WINDOW_CONFLICT", "Another published rate sheet overlaps this effective window.");
+  }
+
+  private static boolean sameCoverage(RateSheet left, RateSheet right) {
+    return Objects.equals(left.investorId(), right.investorId()) && Objects.equals(left.channelId(), right.channelId()) && Objects.equals(left.productCode(), right.productCode());
+  }
+
+  private void insertDecision(UUID tenantId, UUID versionId, String decisionType, String decision, String reasonCode, String comment, String actor, String actorRole, String correlationId) {
+    jdbc.update("insert into rate_feed.rate_sheet_workflow_decision(tenant_id,decision_id,version_id,decision_type,decision,reason_code,comment_redacted,actor_id,actor_role,correlation_id) values (?,?,?,?,?,?,?,?,?,?)",
+        tenantId, UUID.randomUUID(), versionId, decisionType, decision, reasonCode, safeText(comment), actor, actorRole, correlationId);
+  }
+
+  private RateFeedModels.PublishWorkflowStateResponse workflowState(UUID tenantId, UUID versionId, String eventType, String auditAction, String cacheCommandId, String resultHash, List<RateFeedModels.ValidationWarningDetail> warnings) {
+    return jdbc.queryForObject("select sheet_id,status,approval_status,submitted_by,approved_by,submitted_at,approved_at,activated_at from rate_feed.rate_sheet where tenant_id=? and sheet_id=?",
+        (rs, row) -> new RateFeedModels.PublishWorkflowStateResponse(
+            rs.getObject("sheet_id", UUID.class), rs.getString("status"), rs.getString("approval_status"), rs.getString("submitted_by"), rs.getString("approved_by"),
+            rs.getTimestamp("submitted_at") == null ? null : rs.getTimestamp("submitted_at").toInstant(),
+            rs.getTimestamp("approved_at") == null ? null : rs.getTimestamp("approved_at").toInstant(),
+            rs.getTimestamp("activated_at") == null ? null : rs.getTimestamp("activated_at").toInstant(),
+            null, eventType, auditAction, cacheCommandId, resultHash, warnings), tenantId, versionId);
+  }
+
+  private Map<String, String> workflowHeaders(RateSheet sheet) {
+    return Map.of("investorId", sheet.investorId().toString(), "channelId", sheet.channelId().toString(), "feedFormatId", "rate-sheet-version");
+  }
+
+  private Map<String, Object> workflowPayload(UUID tenantId, UUID versionId, String status, String resultHash, String reasonCode) {
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("id", versionId);
+    payload.put("tenantId", tenantId);
+    payload.put("status", status);
+    payload.put("version", 1);
+    payload.put("summary", status);
+    payload.put("sourceRefs", Map.of("rateSheetVersionId", versionId));
+    payload.put("reasonCode", reasonCode);
+    payload.put("resultHash", resultHash);
+    return payload;
+  }
+
+  private String workflowHash(Object... values) {
+    return Hashing.sha256(repository.json(Arrays.asList(values)));
+  }
+
+  private static String safeText(String value) {
+    if (value == null) return null;
+    return value.replaceAll("[\\p{Cntrl}&&[^\\r\\n\\t]]", "").trim();
   }
 
   private static BigDecimal nullableDecimal(String value) {

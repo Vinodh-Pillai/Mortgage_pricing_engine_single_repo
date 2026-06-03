@@ -6,6 +6,7 @@ import com.wcpe.eligibility.domain.hashing.Hashing;
 import com.wcpe.eligibility.cache.EligibilityCacheHealth;
 import com.wcpe.eligibility.domain.extension.UnsupportedProductFamilyException;
 import com.wcpe.eligibility.domain.models.EligibilityRequest;
+import com.wcpe.eligibility.domain.models.EligibilityExplanationResponse;
 import com.wcpe.eligibility.domain.models.EligibilityResult;
 import com.wcpe.eligibility.domain.models.FicoLtvEvaluationResult;
 import com.wcpe.eligibility.domain.models.FicoLtvMatrixEvaluationRequest;
@@ -17,6 +18,7 @@ import com.wcpe.eligibility.domain.models.PropertyTypeEvaluationRequest;
 import com.wcpe.eligibility.domain.models.PropertyTypeEvaluationResult;
 import com.wcpe.eligibility.service.EligibilityApplicationService;
 import com.wcpe.eligibility.cache.EligibilityCacheService;
+import com.wcpe.eligibility.service.EligibilityExplanationService;
 import com.wcpe.eligibility.service.FicoLtvMatrixService;
 import com.wcpe.eligibility.service.InvestorOverlayRuleService;
 import com.wcpe.eligibility.service.OccupancyPurposeRuleService;
@@ -28,7 +30,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @RestController
 @RequestMapping("/api/v1/tenants/{tenantId}")
@@ -41,13 +46,15 @@ public class EligibilityApiController {
     private final PropertyTypeRuleService propertyTypeRuleService;
     private final InvestorOverlayRuleService investorOverlayRuleService;
     private final EligibilityCacheService eligibilityCacheService;
+    private final EligibilityExplanationService eligibilityExplanationService;
 
     public EligibilityApiController(EligibilityApplicationService service, JdbcTemplate jdbcTemplate, ObjectMapper objectMapper,
                                          FicoLtvMatrixService ficoLtvMatrixService,
                                          OccupancyPurposeRuleService occupancyPurposeRuleService,
-                                         PropertyTypeRuleService propertyTypeRuleService,
-                                         InvestorOverlayRuleService investorOverlayRuleService,
-                                         EligibilityCacheService eligibilityCacheService) {
+                                          PropertyTypeRuleService propertyTypeRuleService,
+                                          InvestorOverlayRuleService investorOverlayRuleService,
+                                          EligibilityCacheService eligibilityCacheService,
+                                          EligibilityExplanationService eligibilityExplanationService) {
         this.service = service;
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
@@ -56,6 +63,27 @@ public class EligibilityApiController {
         this.propertyTypeRuleService = propertyTypeRuleService;
         this.investorOverlayRuleService = investorOverlayRuleService;
         this.eligibilityCacheService = eligibilityCacheService;
+        this.eligibilityExplanationService = eligibilityExplanationService;
+    }
+
+    @GetMapping("/quotes/{quoteId}/options/{quoteOptionId}/eligibility-explanation")
+    ResponseEntity<EligibilityExplanationResponse> getEligibilityExplanation(
+            @PathVariable UUID tenantId,
+            @PathVariable UUID quoteId,
+            @PathVariable UUID quoteOptionId,
+            @RequestHeader(value = "X-Actor-Id", required = false) String actorId,
+            @RequestHeader(value = "X-Permissions", required = false) String permissions,
+            @RequestHeader(value = "X-Roles", required = false) String roles,
+            @RequestHeader(value = "X-Correlation-Id", required = false) String correlationId) {
+        EligibilityExplanationResponse response = eligibilityExplanationService.getExplanation(
+            tenantId,
+            quoteId,
+            quoteOptionId,
+            actorId,
+            parsePermissions(permissions, roles),
+            correlationId
+        );
+        return ResponseEntity.ok(response);
     }
 
     @GetMapping("/eligibility/cache/health")
@@ -228,5 +256,24 @@ public class EligibilityApiController {
             "allowedValues", java.util.List.of("CONVENTIONAL_PURCHASE"),
             "remediation", "Use conventional purchase in this increment."
         ));
+    }
+
+    @ExceptionHandler(EligibilityExplanationService.AccessDeniedException.class)
+    ResponseEntity<Map<String, Object>> explanationAccessDenied() {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("code", "ACCESS_DENIED"));
+    }
+
+    @ExceptionHandler(EligibilityExplanationService.ExplanationNotFoundException.class)
+    ResponseEntity<Map<String, Object>> explanationNotFound() {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("code", "QUOTE_OPTION_NOT_FOUND"));
+    }
+
+    private Set<String> parsePermissions(String permissions, String roles) {
+        return Stream.of(permissions, roles)
+            .filter(value -> value != null && !value.isBlank())
+            .flatMap(value -> Stream.of(value.split(",")))
+            .map(String::trim)
+            .filter(value -> !value.isBlank())
+            .collect(Collectors.toSet());
     }
 }

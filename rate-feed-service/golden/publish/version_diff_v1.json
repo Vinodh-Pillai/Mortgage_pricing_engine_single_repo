@@ -1,0 +1,15 @@
+{
+  "versionDiff": {
+    "fromVersionId": "prior-published-version-id",
+    "toVersionId": "approved-version-id",
+    "comparedFields": [
+      "investorId",
+      "channelId",
+      "productCode",
+      "effectiveWindow",
+      "gridHash"
+    ],
+    "pricingValuesIncluded": false,
+    "hashOnlyComparison": true
+  }
+}

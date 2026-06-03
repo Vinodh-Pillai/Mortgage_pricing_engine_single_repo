@@ -1,6 +1,8 @@
 package com.wcpe.eligibility.repository;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.wcpe.eligibility.domain.models.EligibilityExplanationResponse;
 import com.wcpe.eligibility.domain.models.EligibilityResult;
 import com.wcpe.eligibility.domain.models.ProductFamily;
 import com.wcpe.eligibility.domain.models.QuoteType;
@@ -12,6 +14,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 @Repository
@@ -51,6 +54,42 @@ public class EligibilityPersistRepository {
         ));
     }
 
+    public Optional<EligibilityExplanationResponse> findEligibilityExplanation(UUID tenantId, UUID quoteId, UUID quoteOptionId) {
+        List<EligibilityExplanationResponse> rows = jdbc.query(
+            "select quote_id, quote_option_id, scenario_id, scenario_version, product_code, investor_code, eligibility_status, " +
+                "summary_json::text, rules_json::text, audit_package_id, result_hash, rule_version_graph_hash " +
+                "from eligibility.eligibility_explanation_read_model " +
+                "where tenant_id = ? and quote_id = ? and quote_option_id = ?",
+            (rs, rowNum) -> new EligibilityExplanationResponse(
+                rs.getObject("quote_id", UUID.class),
+                rs.getObject("quote_option_id", UUID.class),
+                rs.getObject("scenario_id", UUID.class),
+                rs.getInt("scenario_version"),
+                rs.getString("product_code"),
+                rs.getString("investor_code"),
+                rs.getString("eligibility_status"),
+                readJson(rs.getString("summary_json"), EligibilityExplanationResponse.Summary.class),
+                readJson(rs.getString("rules_json"), new TypeReference<List<EligibilityExplanationResponse.Rule>>() {}),
+                new EligibilityExplanationResponse.Audit(
+                    rs.getObject("audit_package_id", UUID.class),
+                    rs.getString("result_hash"),
+                    rs.getString("rule_version_graph_hash")
+                )
+            ),
+            tenantId, quoteId, quoteOptionId
+        );
+        return rows.stream().findFirst();
+    }
+
+    public void auditExplanationViewed(UUID tenantId, UUID quoteOptionId, String actorId, String correlationId, String resultHash) {
+        audit(tenantId, quoteOptionId, "ELIGIBILITY_EXPLANATION_VIEWED", resultHash, Map.of(
+            "actorId", actorId == null || actorId.isBlank() ? "unknown" : actorId,
+            "quoteOptionId", quoteOptionId.toString(),
+            "sensitivityLevel", "SENSITIVE",
+            "correlationId", correlationId == null || correlationId.isBlank() ? "not-provided" : correlationId
+        ));
+    }
+
     void audit(UUID tenantId, UUID aggregateId, String action, String replayHash, Object payload) {
         jdbc.update(
             "insert into eligibility.audit_record(tenant_id,audit_id,aggregate_id,action,replay_hash,payload_json,occurred_at) values (?,?,?,?,?,?::jsonb,?)",
@@ -61,6 +100,22 @@ public class EligibilityPersistRepository {
     String json(Object value) {
         try {
             return mapper.writeValueAsString(value);
+        } catch (Exception ex) {
+            throw new IllegalStateException(ex);
+        }
+    }
+
+    <T> T readJson(String value, Class<T> type) {
+        try {
+            return mapper.readValue(value, type);
+        } catch (Exception ex) {
+            throw new IllegalStateException(ex);
+        }
+    }
+
+    <T> T readJson(String value, TypeReference<T> type) {
+        try {
+            return mapper.readValue(value, type);
         } catch (Exception ex) {
             throw new IllegalStateException(ex);
         }
