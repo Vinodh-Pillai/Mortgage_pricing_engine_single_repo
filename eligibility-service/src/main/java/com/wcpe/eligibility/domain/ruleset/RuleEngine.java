@@ -125,6 +125,10 @@ public class RuleEngine {
             fixtureVersion, evaluatedAt, tenantId);
     }
 
+    public String currentRuleVersionGraphHash() {
+        return "3";
+    }
+
     private EligibilityResult buildResult(UUID evaluationId, String scenarioId, EligibilityStatus status,
                                            List<RuleDecision> decisions,
                                            EligibilityRequest request, String productCode, String investorCode,

@@ -94,6 +94,15 @@ class RateFeedRepository {
     }
   }
 
+  BatchParseSource batchParseSource(UUID tenantId, UUID batchId) {
+    try {
+      return jdbc.queryForObject("select batch_id,investor_id,channel_id,feed_format_id,status,file_sha256 from rate_feed.rate_feed_batch where tenant_id=? and batch_id=?", (rs, row) -> new BatchParseSource(
+          rs.getObject("batch_id", UUID.class), rs.getObject("investor_id", UUID.class), rs.getObject("channel_id", UUID.class), rs.getObject("feed_format_id", UUID.class), rs.getString("status"), rs.getString("file_sha256")), tenantId, batchId);
+    } catch (EmptyResultDataAccessException ex) {
+      throw new RateFeedException(HttpStatus.NOT_FOUND, "BATCH_NOT_FOUND", "Rate feed batch was not found.");
+    }
+  }
+
   // V-003 fix: outbox accepts sessionHeaders with actual session values
   void outbox(UUID tenantId, UUID aggregateId, String eventType, int version, String actor, String correlationId, Map<String, String> sessionHeaders, Object payload) {
     UUID eventId = UUID.randomUUID();
@@ -138,4 +147,5 @@ class RateFeedRepository {
   }
 
   record UploadSessionRow(UUID uploadSessionId, UUID investorId, UUID channelId, UUID feedFormatId, String sourceType, Instant effectiveAt, String timezone, String fileName, String contentType, long contentLengthBytes, UUID supersedesBatchId, String status, Instant expiresAt, String createdBy, String correlationId) {}
+  record BatchParseSource(UUID batchId, UUID investorId, UUID channelId, UUID feedFormatId, String status, String fileSha256) {}
 }

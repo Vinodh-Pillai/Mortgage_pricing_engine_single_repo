@@ -3,16 +3,22 @@ package com.wcpe.eligibility.controller;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wcpe.eligibility.domain.hashing.Hashing;
+import com.wcpe.eligibility.cache.EligibilityCacheHealth;
+import com.wcpe.eligibility.domain.extension.UnsupportedProductFamilyException;
 import com.wcpe.eligibility.domain.models.EligibilityRequest;
 import com.wcpe.eligibility.domain.models.EligibilityResult;
 import com.wcpe.eligibility.domain.models.FicoLtvEvaluationResult;
 import com.wcpe.eligibility.domain.models.FicoLtvMatrixEvaluationRequest;
+import com.wcpe.eligibility.domain.models.InvestorOverlayEvaluationRequest;
+import com.wcpe.eligibility.domain.models.InvestorOverlayEvaluationResult;
 import com.wcpe.eligibility.domain.models.OccupancyPurposeEvaluationRequest;
 import com.wcpe.eligibility.domain.models.OccupancyPurposeEvaluationResult;
 import com.wcpe.eligibility.domain.models.PropertyTypeEvaluationRequest;
 import com.wcpe.eligibility.domain.models.PropertyTypeEvaluationResult;
 import com.wcpe.eligibility.service.EligibilityApplicationService;
+import com.wcpe.eligibility.cache.EligibilityCacheService;
 import com.wcpe.eligibility.service.FicoLtvMatrixService;
+import com.wcpe.eligibility.service.InvestorOverlayRuleService;
 import com.wcpe.eligibility.service.OccupancyPurposeRuleService;
 import com.wcpe.eligibility.service.PropertyTypeRuleService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -33,20 +39,55 @@ public class EligibilityApiController {
     private final FicoLtvMatrixService ficoLtvMatrixService;
     private final OccupancyPurposeRuleService occupancyPurposeRuleService;
     private final PropertyTypeRuleService propertyTypeRuleService;
+    private final InvestorOverlayRuleService investorOverlayRuleService;
+    private final EligibilityCacheService eligibilityCacheService;
 
     public EligibilityApiController(EligibilityApplicationService service, JdbcTemplate jdbcTemplate, ObjectMapper objectMapper,
-                                       FicoLtvMatrixService ficoLtvMatrixService,
-                                       OccupancyPurposeRuleService occupancyPurposeRuleService,
-                                       PropertyTypeRuleService propertyTypeRuleService) {
+                                         FicoLtvMatrixService ficoLtvMatrixService,
+                                         OccupancyPurposeRuleService occupancyPurposeRuleService,
+                                         PropertyTypeRuleService propertyTypeRuleService,
+                                         InvestorOverlayRuleService investorOverlayRuleService,
+                                         EligibilityCacheService eligibilityCacheService) {
         this.service = service;
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.ficoLtvMatrixService = ficoLtvMatrixService;
         this.occupancyPurposeRuleService = occupancyPurposeRuleService;
         this.propertyTypeRuleService = propertyTypeRuleService;
+        this.investorOverlayRuleService = investorOverlayRuleService;
+        this.eligibilityCacheService = eligibilityCacheService;
     }
 
-    @PostMapping("/evaluate")
+    @GetMapping("/eligibility/cache/health")
+    public ResponseEntity<EligibilityCacheHealth> cacheHealth(
+            @PathVariable UUID tenantId,
+            @RequestParam(defaultValue = "CONVENTIONAL") String productFamily,
+            @RequestParam(defaultValue = "CONVENTIONAL_PURCHASE") String quoteType) {
+        return ResponseEntity.ok(eligibilityCacheService.health(tenantId, productFamily, quoteType));
+    }
+
+    @PostMapping("/eligibility/evaluations/investor-overlays")
+    ResponseEntity<InvestorOverlayEvaluationResult> evaluateInvestorOverlays(
+            @PathVariable UUID tenantId,
+            @RequestBody InvestorOverlayEvaluationRequest request) {
+
+        InvestorOverlayEvaluationResult result = investorOverlayRuleService.evaluate(tenantId, request);
+        if (result.decisions().stream().anyMatch(d -> d.reasonCode() != null && d.reasonCode().startsWith("UNSUPPORTED_OVERLAY"))) {
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(result);
+        }
+        if (result.decisions().stream().anyMatch(d -> "BASE_DECISION_NOT_ELIGIBLE".equals(d.reasonCode()))) {
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(result);
+        }
+        if (result.decisions().stream().anyMatch(d -> "OVERLAY_CONFLICT".equals(d.reasonCode()))) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(result);
+        }
+        if (result.decisions().stream().anyMatch(d -> "OVERLAY_SET_NOT_CONFIGURED".equals(d.reasonCode()))) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(result);
+        }
+        return ResponseEntity.ok(result);
+    }
+
+    @PostMapping({"/evaluate", "/quotes"})
     ResponseEntity<EligibilityResult> evaluate(
             @PathVariable UUID tenantId,
             @RequestBody EligibilityRequest request,
@@ -176,5 +217,16 @@ public class EligibilityApiController {
     @ExceptionHandler(IllegalArgumentException.class)
     ResponseEntity<Map<String, Object>> badRequest(IllegalArgumentException ex) {
         return ResponseEntity.badRequest().body(Map.of("code", "INVALID_REQUEST", "message", ex.getMessage()));
+    }
+
+    @ExceptionHandler(UnsupportedProductFamilyException.class)
+    ResponseEntity<Map<String, Object>> unsupportedProductFamily(UnsupportedProductFamilyException ex) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(Map.of(
+            "type", "https://pricing/errors/product-family-not-enabled",
+            "code", "PRODUCT_FAMILY_NOT_ENABLED_FOR_SLICE",
+            "message", ex.quoteType() + " is not enabled in PII-03.",
+            "allowedValues", java.util.List.of("CONVENTIONAL_PURCHASE"),
+            "remediation", "Use conventional purchase in this increment."
+        ));
     }
 }

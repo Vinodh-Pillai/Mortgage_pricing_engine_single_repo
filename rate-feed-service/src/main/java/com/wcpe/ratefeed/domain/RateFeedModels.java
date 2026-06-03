@@ -297,6 +297,58 @@ public final class RateFeedModels {
 
   public record BatchListResponse(List<BatchListSummary> batches, int count) {}
 
+  public record ParseBatchRequest(String parseMode, String expectedFileSha256, String csvContent) {}
+  public record ParseBatchResponse(UUID parseJobId, UUID batchId, String status) {}
+  public record ParsedFieldResult(int rowNumber, String fieldName, String rawValue, String normalizedCandidate, String severity, String errorCode, String message) {}
+  public record ParseResultPage(List<ParsedFieldResult> rows, int page, int size, long total) {}
+
+  public record CreateRateSheetVersionRequest(
+    UUID batchId,
+    String productKey,
+    String versionLabel,
+    Instant effectiveFrom,
+    Instant effectiveTo,
+    String lineageReasonCode,
+    UUID parentVersionId,
+    String notes
+  ) {}
+
+  public record RateSheetVersionCreatedResponse(
+    UUID rateSheetVersionId,
+    int versionNumber,
+    String status,
+    List<ValidationWarningDetail> conflicts
+  ) {}
+
+  public record RateSheetVersionSummary(
+    UUID rateSheetVersionId,
+    int versionNumber,
+    String versionLabel,
+    String status,
+    UUID investorId,
+    UUID channelId,
+    String productKey,
+    Instant effectiveFrom,
+    Instant effectiveTo,
+    UUID batchId,
+    Instant createdAt,
+    String resultHash
+  ) {}
+
+  public record RateSheetVersionListResponse(List<RateSheetVersionSummary> versions, int count) {}
+
+  public record RateSheetVersionResolveResponse(
+    UUID rateSheetVersionId,
+    int versionNumber,
+    UUID investorId,
+    UUID channelId,
+    String productKey,
+    Instant effectiveFrom,
+    Instant effectiveTo,
+    String status,
+    String resultHash
+  ) {}
+
   // ── Exception class ─────────────────────────────────────────────────────────
 
   public static final class RateFeedException extends RuntimeException {

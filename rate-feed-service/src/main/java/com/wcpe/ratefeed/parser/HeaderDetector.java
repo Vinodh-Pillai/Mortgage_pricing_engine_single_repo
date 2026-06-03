@@ -39,7 +39,10 @@ public final class HeaderDetector {
       String raw = headerTokens[i].trim();
       if (raw.isEmpty()) continue;
       String canonical = resolveCanonical(raw);
-      if (canonical != null && found.add(canonical)) {
+      if (canonical != null) {
+        if (!found.add(canonical)) {
+          throw new IllegalArgumentException("HeaderDuplicateMappedField: '" + canonical + "' is mapped by more than one header.");
+        }
         mapping.put(i, canonical);
       }
     }

@@ -3,7 +3,10 @@ package com.wcpe.ratefeed.domain;
 import com.wcpe.ratefeed.activation.ActivationService;
 import com.wcpe.ratefeed.activation.VersionManager;
 import com.wcpe.ratefeed.audit.AuditService;
+import com.wcpe.ratefeed.parser.CsvParser;
+import com.wcpe.ratefeed.parser.HeaderDetector;
 import com.wcpe.ratefeed.parser.RateSheetParser;
+import com.wcpe.ratefeed.parser.TypeCoercer;
 import com.wcpe.ratefeed.validation.RateSheetValidator;
 import com.wcpe.ratefeed.resolution.GridLookup;
 import com.wcpe.ratefeed.resolution.RateResolver;
@@ -13,6 +16,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.*;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.*;
 import java.util.*;
@@ -448,6 +452,292 @@ class RateFeedService {
 
     return new RateFeedModels.BatchListResponse(summaries, summaries.size());
   }
+
+  @Transactional
+  public RateFeedModels.ParseBatchResponse parseBatch(UUID tenantId, UUID batchId, RateFeedModels.ParseBatchRequest request, String idempotencyKey, String actor, String correlationId) {
+    RateFeedRoles.require(RateFeedRoles.RATE_FEED_PARSE);
+    if (request == null) throw validation("REQUEST_BODY_REQUIRED", "Request body is required.");
+    Map<String, Object> idempotencyIdentity = new LinkedHashMap<>();
+    idempotencyIdentity.put("command", "parseRateFeedBatch");
+    idempotencyIdentity.put("batchId", batchId);
+    idempotencyIdentity.put("body", request);
+    return repository.idempotent(tenantId, idempotencyKey, idempotencyIdentity, RateFeedModels.ParseBatchResponse.class,
+        () -> doParseBatch(tenantId, batchId, request, actor(actor), correlation(correlationId), idempotencyKey));
+  }
+
+  private RateFeedModels.ParseBatchResponse doParseBatch(UUID tenantId, UUID batchId, RateFeedModels.ParseBatchRequest request, String actor, String correlationId, String idempotencyKey) {
+    RateFeedRepository.BatchParseSource batch = repository.batchParseSource(tenantId, batchId);
+    String mode = Optional.ofNullable(request.parseMode()).orElse("INITIAL").trim().toUpperCase(Locale.ROOT);
+    if (!Set.of("INITIAL", "REPARSE_FAILED").contains(mode)) throw validation("INVALID_PARSE_MODE", "parseMode must be INITIAL or REPARSE_FAILED.");
+    if ("INITIAL".equals(mode) && !"UPLOADED".equals(batch.status())) throw new RateFeedException(HttpStatus.CONFLICT, "BATCH_NOT_UPLOADED", "Batch must be UPLOADED for initial parse.");
+    if ("REPARSE_FAILED".equals(mode) && !"PARSE_FAILED".equals(batch.status())) throw new RateFeedException(HttpStatus.CONFLICT, "BATCH_NOT_PARSE_FAILED", "Only failed parses can be reparsed.");
+    if (request.expectedFileSha256() != null && !request.expectedFileSha256().equalsIgnoreCase(batch.fileSha256())) throw validation("SOURCE_FILE_HASH_MISMATCH", "expectedFileSha256 does not match the uploaded batch.");
+
+    UUID parseJobId = UUID.randomUUID();
+    jdbc.update("insert into rate_feed.rate_feed_parse_job(tenant_id,parse_job_id,batch_id,mapping_version,status,started_at,idempotency_key) values (?,?,?,?,?,?,?)",
+        tenantId, parseJobId, batchId, batch.feedFormatId().toString(), "PARSING", Timestamp.from(Instant.now()), idempotencyKey);
+    jdbc.update("update rate_feed.rate_feed_batch set status='PARSING', updated_at=now() where tenant_id=? and batch_id=?", tenantId, batchId);
+
+    try {
+      ParsedCsv parsed = parseCsvContent(request.csvContent());
+      persistParsedRows(tenantId, batchId, parsed);
+      int blockingErrors = (int) parsed.fields().stream().filter(f -> "ERROR".equals(f.severity())).count();
+      int warnings = (int) parsed.fields().stream().filter(f -> "WARNING".equals(f.severity())).count();
+      String finalStatus = blockingErrors == 0 ? "PARSED" : "PARSE_FAILED";
+      String resultHash = Hashing.sha256(repository.json(Map.of("batchId", batchId, "parseJobId", parseJobId, "rowCount", parsed.rowCount(), "errorCount", blockingErrors, "warningCount", warnings)));
+      jdbc.update("update rate_feed.rate_feed_parse_job set status=?, completed_at=now(), row_count=?, error_count=?, warning_count=?, result_hash=? where tenant_id=? and parse_job_id=?",
+          finalStatus, parsed.rowCount(), blockingErrors, warnings, resultHash, tenantId, parseJobId);
+      jdbc.update("update rate_feed.rate_feed_batch set status=?, updated_at=now(), result_hash=? where tenant_id=? and batch_id=?", finalStatus, resultHash, tenantId, batchId);
+      emitParseEvidence(tenantId, batchId, parseJobId, batch, finalStatus, resultHash, actor, correlationId, parsed.rowCount(), blockingErrors, warnings);
+      return new RateFeedModels.ParseBatchResponse(parseJobId, batchId, finalStatus);
+    } catch (RuntimeException ex) {
+      String resultHash = Hashing.sha256(repository.json(Map.of("batchId", batchId, "parseJobId", parseJobId, "error", Optional.ofNullable(ex.getMessage()).orElse(ex.getClass().getSimpleName()))));
+      jdbc.update("update rate_feed.rate_feed_parse_job set status='PARSE_FAILED', completed_at=now(), error_count=1, warning_count=0, result_hash=? where tenant_id=? and parse_job_id=?", resultHash, tenantId, parseJobId);
+      jdbc.update("update rate_feed.rate_feed_batch set status='PARSE_FAILED', updated_at=now(), result_hash=? where tenant_id=? and batch_id=?", resultHash, tenantId, batchId);
+      repository.outbox(tenantId, batchId, "RateSheetParseFailed.v1", 1, actor, correlationId,
+          parseHeaders(batch), Map.of("batchId", batchId, "parseJobId", parseJobId, "mappingVersion", batch.feedFormatId().toString(), "errorReportId", parseJobId, "message", Optional.ofNullable(ex.getMessage()).orElse("parse failed"), "resultHash", resultHash));
+      repository.audit(tenantId, batchId, "RATE_SHEET_PARSE_FAILED", "RateFeedBatch", actor, correlationId, null, resultHash,
+          Map.of("batchId", batchId, "parseJobId", parseJobId, "message", Optional.ofNullable(ex.getMessage()).orElse("parse failed")));
+      return new RateFeedModels.ParseBatchResponse(parseJobId, batchId, "PARSE_FAILED");
+    }
+  }
+
+  public RateFeedModels.ParseResultPage parseResults(UUID tenantId, UUID batchId, String severity, int page, int size) {
+    RateFeedRoles.require(RateFeedRoles.RATE_FEED_VIEW);
+    int boundedPage = Math.max(page, 0);
+    int boundedSize = Math.min(Math.max(size, 1), 200);
+    String normalizedSeverity = severity == null || severity.isBlank() ? null : severity.trim().toUpperCase(Locale.ROOT);
+    List<Object> params = new ArrayList<>(List.of(tenantId, batchId));
+    String where = " where tenant_id=? and batch_id=?";
+    if (normalizedSeverity != null) { where += " and severity=?"; params.add(normalizedSeverity); }
+    Long total = jdbc.queryForObject("select count(*) from rate_feed.rate_feed_parsed_field" + where, Long.class, params.toArray());
+    params.add(boundedSize);
+    params.add(boundedPage * boundedSize);
+    List<RateFeedModels.ParsedFieldResult> rows = jdbc.query("select source_row_number,field_name,raw_value,candidate_value,severity,error_code,message from rate_feed.rate_feed_parsed_field" + where + " order by source_row_number, source_column limit ? offset ?",
+        (rs, row) -> new RateFeedModels.ParsedFieldResult(rs.getInt("source_row_number"), rs.getString("field_name"), rs.getString("raw_value"), rs.getString("candidate_value"), rs.getString("severity"), rs.getString("error_code"), rs.getString("message")), params.toArray());
+    return new RateFeedModels.ParseResultPage(rows, boundedPage, boundedSize, total == null ? 0 : total);
+  }
+
+  @Transactional
+  public RateFeedModels.RateSheetVersionCreatedResponse createRateSheetVersion(UUID tenantId, RateFeedModels.CreateRateSheetVersionRequest request, String idempotencyKey, String actor, String correlationId) {
+    RateFeedRoles.require(RateFeedRoles.RATE_FEED_WRITER);
+    validateCreateRateSheetVersionRequest(request);
+    Map<String, Object> idempotencyIdentity = new LinkedHashMap<>();
+    idempotencyIdentity.put("command", "createRateSheetVersion");
+    idempotencyIdentity.put("body", request);
+    return repository.idempotent(tenantId, idempotencyKey, idempotencyIdentity, RateFeedModels.RateSheetVersionCreatedResponse.class,
+        () -> doCreateRateSheetVersion(tenantId, request, actor(actor), correlation(correlationId)));
+  }
+
+  private RateFeedModels.RateSheetVersionCreatedResponse doCreateRateSheetVersion(UUID tenantId, RateFeedModels.CreateRateSheetVersionRequest request, String actor, String correlationId) {
+    validateCreateRateSheetVersionRequest(request);
+    RateFeedRepository.BatchParseSource batch = repository.batchParseSource(tenantId, request.batchId());
+    if (!"PARSED".equals(batch.status())) throw new RateFeedException(HttpStatus.CONFLICT, "BATCH_NOT_NORMALIZED", "Batch must be parsed before a draft version can be created.");
+    List<RatePricePoint> points = parsedPricePoints(tenantId, request.batchId());
+    if (points.isEmpty()) throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "BATCH_NOT_NORMALIZED", "Parsed batch has no normalized rate rows.");
+
+    int version = versionManager.nextVersion(tenantId, batch.investorId(), batch.channelId(), request.productKey());
+    UUID sheetId = UUID.randomUUID();
+    String gridHash = Hashing.sha256(repository.json(points.stream().map(p -> List.of(p.noteRate(), p.lockPeriod(), p.basePrice(), Optional.ofNullable(p.discountPoints()).orElse(BigDecimal.ZERO), Optional.ofNullable(p.yieldIndex()).orElse(BigDecimal.ZERO))).toList()));
+    if (!gridHash.startsWith("sha256:")) gridHash = "sha256:" + gridHash;
+    String resultHash = Hashing.sha256(repository.json(Map.of("tenantId", tenantId, "batchId", request.batchId(), "sheetId", sheetId, "version", version, "lineageReasonCode", request.lineageReasonCode())));
+
+    jdbc.update("insert into rate_feed.rate_sheet(sheet_id,tenant_id,investor_id,channel_id,product_code,version,status,effective_at,effective_until,file_sha256,grid_hash,row_count,result_hash,created_by,version_label,source_batch_id,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,now())",
+        sheetId, tenantId, batch.investorId(), batch.channelId(), request.productKey(), version, "DRAFT", Timestamp.from(request.effectiveFrom()),
+        request.effectiveTo() == null ? null : Timestamp.from(request.effectiveTo()), batch.fileSha256(), gridHash, points.size(), resultHash, actor, request.versionLabel(), request.batchId());
+    int position = 0;
+    for (RatePricePoint point : points) {
+      jdbc.update("insert into rate_feed.rate_price_point(sheet_id,note_rate,lock_period,base_price,discount_points,yield_index,grid_position) values (?,?,?,?,?,?,?)",
+          sheetId, point.noteRate(), point.lockPeriod(), point.basePrice(), point.discountPoints(), point.yieldIndex(), position++);
+    }
+    jdbc.update("insert into rate_feed.rate_sheet_version(sheet_id,version,previous_version,delta_summary,created_at) values (?,?,?,?,now())",
+        sheetId, version, null, repository.jsonb(versionDelta(request, batch, resultHash)));
+    jdbc.update("insert into rate_feed.rate_sheet_version_lineage(tenant_id,version_id,parent_version_id,lineage_reason_code,created_at) values (?,?,?,?,now())",
+        tenantId, sheetId, request.parentVersionId(), request.lineageReasonCode());
+    repository.outbox(tenantId, sheetId, "RateSheetVersionCreated.v1", 1, actor, correlationId,
+        Map.of("investorId", batch.investorId().toString(), "channelId", batch.channelId().toString(), "feedFormatId", batch.feedFormatId().toString()),
+        versionDelta(request, batch, resultHash));
+    repository.audit(tenantId, sheetId, "RATE_SHEET_VERSION_CREATED", "RateSheetVersion", actor, correlationId, null, resultHash, versionDelta(request, batch, resultHash));
+
+    return new RateFeedModels.RateSheetVersionCreatedResponse(sheetId, version, "DRAFT", draftOverlapWarnings(tenantId, batch.investorId(), batch.channelId(), request.productKey(), request.effectiveFrom(), request.effectiveTo(), sheetId));
+  }
+
+  private void validateCreateRateSheetVersionRequest(RateFeedModels.CreateRateSheetVersionRequest request) {
+    if (request == null) throw validation("REQUEST_BODY_REQUIRED", "Request body is required.");
+    requireUuid("BATCH_REQUIRED", "batchId is required.", request.batchId());
+    if (request.productKey() == null || request.productKey().isBlank()) throw validation("PRODUCT_KEY_REQUIRED", "productKey is required for deterministic version resolution.");
+    if (request.effectiveFrom() == null) throw validation("EFFECTIVE_FROM_REQUIRED", "effectiveFrom is required.");
+    if (request.effectiveTo() != null && !request.effectiveTo().isAfter(request.effectiveFrom())) throw validation("INVALID_EFFECTIVE_WINDOW", "effectiveTo must be after effectiveFrom.");
+    if (request.lineageReasonCode() == null || request.lineageReasonCode().isBlank()) throw validation("VERSION_LINEAGE_REQUIRED", "lineageReasonCode is required.");
+    rejectFormulaMetadata("productKey", request.productKey());
+    rejectFormulaMetadata("versionLabel", request.versionLabel());
+    rejectFormulaMetadata("lineageReasonCode", request.lineageReasonCode());
+    rejectFormulaMetadata("notes", request.notes());
+  }
+
+  public RateFeedModels.RateSheetVersionListResponse listRateSheetVersions(UUID tenantId, UUID investorId, UUID channelId, Instant asOf) {
+    RateFeedRoles.require(RateFeedRoles.RATE_FEED_VIEW);
+    StringBuilder sql = new StringBuilder("select rs.sheet_id,rs.version,rs.version_label,rs.status,rs.investor_id,rs.channel_id,rs.product_code,rs.effective_at,rs.effective_until,rs.source_batch_id,rs.created_at,rs.result_hash from rate_feed.rate_sheet rs where rs.tenant_id=?");
+    List<Object> params = new ArrayList<>();
+    params.add(tenantId);
+    if (investorId != null) { sql.append(" and rs.investor_id=?"); params.add(investorId); }
+    if (channelId != null) { sql.append(" and rs.channel_id=?"); params.add(channelId); }
+    if (asOf != null) { sql.append(" and rs.effective_at <= ? and (rs.effective_until is null or rs.effective_until > ?)"); params.add(Timestamp.from(asOf)); params.add(Timestamp.from(asOf)); }
+    sql.append(" order by rs.created_at desc, rs.version desc");
+    List<RateFeedModels.RateSheetVersionSummary> versions = jdbc.query(sql.toString(), (rs, row) -> new RateFeedModels.RateSheetVersionSummary(
+        rs.getObject("sheet_id", UUID.class), rs.getInt("version"), rs.getString("version_label"), rs.getString("status"),
+        rs.getObject("investor_id", UUID.class), rs.getObject("channel_id", UUID.class), rs.getString("product_code"),
+        rs.getTimestamp("effective_at").toInstant(), rs.getTimestamp("effective_until") == null ? null : rs.getTimestamp("effective_until").toInstant(),
+        rs.getObject("source_batch_id", UUID.class), rs.getTimestamp("created_at").toInstant(), rs.getString("result_hash")), params.toArray());
+    return new RateFeedModels.RateSheetVersionListResponse(versions, versions.size());
+  }
+
+  public RateFeedModels.RateSheetVersionResolveResponse resolveRateSheetVersion(UUID tenantId, UUID investorId, UUID channelId, String productKey, Instant asOf) {
+    RateFeedRoles.require(RateFeedRoles.RATE_FEED_VIEW);
+    requireUuid("INVESTOR_REQUIRED", "investorId is required for resolution.", investorId);
+    requireUuid("CHANNEL_REQUIRED", "channelId is required for resolution.", channelId);
+    if (productKey == null || productKey.isBlank()) throw validation("PRODUCT_KEY_REQUIRED", "productKey is required for resolution.");
+    if (asOf == null) throw validation("AS_OF_REQUIRED", "asOf is required for resolution.");
+    List<RateFeedModels.RateSheetVersionResolveResponse> matches = jdbc.query("select sheet_id,version,investor_id,channel_id,product_code,effective_at,effective_until,status,result_hash from rate_feed.rate_sheet where tenant_id=? and investor_id=? and channel_id=? and product_code=? and status='ACTIVE' and effective_at <= ? and (effective_until is null or effective_until > ?) order by version desc",
+        (rs, row) -> new RateFeedModels.RateSheetVersionResolveResponse(rs.getObject("sheet_id", UUID.class), rs.getInt("version"), rs.getObject("investor_id", UUID.class), rs.getObject("channel_id", UUID.class), rs.getString("product_code"), rs.getTimestamp("effective_at").toInstant(), rs.getTimestamp("effective_until") == null ? null : rs.getTimestamp("effective_until").toInstant(), rs.getString("status"), rs.getString("result_hash")),
+        tenantId, investorId, channelId, productKey, Timestamp.from(asOf), Timestamp.from(asOf));
+    if (matches.isEmpty()) throw new RateFeedException(HttpStatus.NOT_FOUND, "VERSION_NOT_FOUND", "No active published rate sheet version matched the resolution request.");
+    if (matches.size() > 1) throw new RateFeedException(HttpStatus.CONFLICT, "AMBIGUOUS_ACTIVE_VERSION", "Multiple active published rate sheet versions matched the resolution request.");
+    return matches.get(0);
+  }
+
+  private List<RatePricePoint> parsedPricePoints(UUID tenantId, UUID batchId) {
+    List<Map<String, Object>> rows = jdbc.queryForList("select row_id,field_name,candidate_value from rate_feed.rate_feed_parsed_field where tenant_id=? and batch_id=? and severity <> 'ERROR' order by source_row_number, source_column", tenantId, batchId);
+    Map<UUID, Map<String, String>> byRow = new LinkedHashMap<>();
+    for (Map<String, Object> row : rows) {
+      UUID rowId = (UUID) row.get("row_id");
+      byRow.computeIfAbsent(rowId, ignored -> new LinkedHashMap<>()).put((String) row.get("field_name"), (String) row.get("candidate_value"));
+    }
+    List<RatePricePoint> points = new ArrayList<>();
+    int position = 0;
+    for (Map<String, String> fields : byRow.values()) {
+      if (!fields.containsKey("note_rate") || !fields.containsKey("lock_period") || !fields.containsKey("base_price")) continue;
+      points.add(new RatePricePoint(null, new BigDecimal(fields.get("note_rate")), Integer.parseInt(fields.get("lock_period")), new BigDecimal(fields.get("base_price")), nullableDecimal(fields.get("discount_points")), nullableDecimal(fields.get("yield_index")), position++));
+    }
+    return points;
+  }
+
+  private static BigDecimal nullableDecimal(String value) {
+    return value == null || value.isBlank() ? null : new BigDecimal(value);
+  }
+
+  private Map<String, Object> versionDelta(RateFeedModels.CreateRateSheetVersionRequest request, RateFeedRepository.BatchParseSource batch, String resultHash) {
+    Map<String, Object> delta = new LinkedHashMap<>();
+    delta.put("batchId", request.batchId());
+    delta.put("investorId", batch.investorId());
+    delta.put("channelId", batch.channelId());
+    delta.put("feedFormatId", batch.feedFormatId());
+    delta.put("productKey", request.productKey());
+    delta.put("effectiveFrom", request.effectiveFrom());
+    delta.put("effectiveTo", request.effectiveTo());
+    delta.put("lineageReasonCode", request.lineageReasonCode());
+    delta.put("resultHash", resultHash);
+    return delta;
+  }
+
+  private List<RateFeedModels.ValidationWarningDetail> draftOverlapWarnings(UUID tenantId, UUID investorId, UUID channelId, String productKey, Instant effectiveFrom, Instant effectiveTo, UUID excludedSheetId) {
+    Instant upper = effectiveTo == null ? Instant.parse("9999-12-31T23:59:59Z") : effectiveTo;
+    Integer count = jdbc.queryForObject("select count(*) from rate_feed.rate_sheet where tenant_id=? and investor_id=? and channel_id=? and product_code=? and sheet_id<>? and status='DRAFT' and effective_at < ? and coalesce(effective_until, timestamp with time zone '9999-12-31 23:59:59Z') > ?",
+        Integer.class, tenantId, investorId, channelId, productKey, excludedSheetId, Timestamp.from(upper), Timestamp.from(effectiveFrom));
+    if (count == null || count == 0) return List.of();
+    return List.of(new RateFeedModels.ValidationWarningDetail("EFFECTIVE_WINDOW_OVERLAP", "Draft effective window overlaps another draft version."));
+  }
+
+  private ParsedCsv parseCsvContent(String csvContent) {
+    if (csvContent == null || csvContent.isBlank()) throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "SOURCE_FILE_UNAVAILABLE", "Uploaded raw file content is not available to the local parser.");
+    byte[] bytes = csvContent.getBytes(StandardCharsets.UTF_8);
+    for (byte b : bytes) if (b == 0) throw validation("CSV_ENCODING_UNSUPPORTED", "CSV contains binary content.");
+    List<String> lines = csvContent.lines().toList();
+    if (lines.isEmpty()) throw validation("EMPTY_RATE_SHEET", "CSV file is empty.");
+    char delimiter = CsvParser.detectDelimiter(lines);
+    String[] headers = CsvParser.tokenizeLine(lines.get(0), delimiter);
+    Map<Integer, String> headerMap = HeaderDetector.mapHeaders(headers);
+    List<ParsedField> fields = new ArrayList<>();
+    int rowCount = 0;
+    for (int lineIndex = 1; lineIndex < lines.size(); lineIndex++) {
+      String line = lines.get(lineIndex);
+      if (line.isBlank()) continue;
+      rowCount++;
+      String[] cells = CsvParser.tokenizeLine(line, delimiter);
+      if (cells.length > headers.length + 25) {
+        fields.add(new ParsedField(lineIndex + 1, "row", line, null, cells.length, "ERROR", "CSV_ROW_TOO_WIDE", "Row has more cells than the mapped header allows."));
+        continue;
+      }
+      for (Map.Entry<Integer, String> mapping : headerMap.entrySet()) {
+        String raw = mapping.getKey() < cells.length ? cells[mapping.getKey()].trim() : "";
+        fields.add(parsedField(lineIndex + 1, mapping.getValue(), raw, mapping.getKey() + 1));
+      }
+    }
+    if (rowCount == 0) throw validation("EMPTY_RATE_SHEET", "CSV file has no data rows.");
+    return new ParsedCsv(rowCount, fields);
+  }
+
+  private ParsedField parsedField(int sourceRow, String fieldName, String raw, int sourceColumn) {
+    if (isFormula(raw)) return new ParsedField(sourceRow, fieldName, raw, null, sourceColumn, "ERROR", "FORMULA_INJECTION_RISK", "Cell starts with a spreadsheet formula character.");
+    if (raw == null || raw.isBlank()) {
+      if (Set.of("discount_points", "yield_index").contains(fieldName)) {
+        return new ParsedField(sourceRow, fieldName, raw, null, sourceColumn, "INFO", null, null);
+      }
+      return new ParsedField(sourceRow, fieldName, raw, null, sourceColumn, "ERROR", "REQUIRED_CELL_BLANK", "Mapped required cell is blank.");
+    }
+    try {
+      String candidate = switch (fieldName) {
+        case "note_rate" -> TypeCoercer.coerceRate(raw, sourceRow).toPlainString();
+        case "lock_period" -> Integer.toString(TypeCoercer.coerceLockPeriod(raw, sourceRow));
+        case "base_price" -> TypeCoercer.coerceBasePrice(raw, sourceRow).toPlainString();
+        case "discount_points" -> Optional.ofNullable(TypeCoercer.coerceNullableOptionalDiscountPoints(raw, sourceRow)).map(BigDecimal::toPlainString).orElse(null);
+        case "yield_index" -> Optional.ofNullable(TypeCoercer.coerceNullableYieldIndex(raw, sourceRow)).map(BigDecimal::toPlainString).orElse(null);
+        default -> raw;
+      };
+      return new ParsedField(sourceRow, fieldName, raw, candidate, sourceColumn, "INFO", null, null);
+    } catch (RuntimeException ex) {
+      return new ParsedField(sourceRow, fieldName, raw, null, sourceColumn, "ERROR", "CSV_VALUE_INVALID", ex.getMessage());
+    }
+  }
+
+  private void persistParsedRows(UUID tenantId, UUID batchId, ParsedCsv parsed) {
+    jdbc.update("delete from rate_feed.rate_feed_parsed_field where tenant_id=? and batch_id=?", tenantId, batchId);
+    jdbc.update("delete from rate_feed.rate_feed_raw_row where tenant_id=? and batch_id=?", tenantId, batchId);
+    Map<Integer, List<ParsedField>> byRow = new TreeMap<>();
+    for (ParsedField field : parsed.fields()) byRow.computeIfAbsent(field.sourceRowNumber(), ignored -> new ArrayList<>()).add(field);
+    for (Map.Entry<Integer, List<ParsedField>> row : byRow.entrySet()) {
+      UUID rowId = UUID.randomUUID();
+      Map<String, String> rawCells = new LinkedHashMap<>();
+      for (ParsedField field : row.getValue()) rawCells.put(field.fieldName(), field.rawValue());
+      jdbc.update("insert into rate_feed.rate_feed_raw_row(tenant_id,batch_id,row_id,source_row_number,raw_row_sha256,raw_cells) values (?,?,?,?,?,?)",
+          tenantId, batchId, rowId, row.getKey(), Hashing.sha256(repository.json(rawCells)), repository.jsonb(rawCells));
+      for (ParsedField field : row.getValue()) {
+        jdbc.update("insert into rate_feed.rate_feed_parsed_field(tenant_id,batch_id,row_id,field_name,raw_value,candidate_value,source_column,severity,error_code,message,source_row_number) values (?,?,?,?,?,?,?,?,?,?,?)",
+            tenantId, batchId, rowId, field.fieldName(), field.rawValue(), field.candidateValue(), field.sourceColumn(), field.severity(), field.errorCode(), field.message(), field.sourceRowNumber());
+      }
+    }
+  }
+
+  private void emitParseEvidence(UUID tenantId, UUID batchId, UUID parseJobId, RateFeedRepository.BatchParseSource batch, String finalStatus, String resultHash, String actor, String correlationId, int rowCount, int errorCount, int warningCount) {
+    String eventType = "PARSED".equals(finalStatus) ? "RateSheetParsed.v1" : "RateSheetParseFailed.v1";
+    repository.outbox(tenantId, batchId, eventType, 1, actor, correlationId, parseHeaders(batch),
+        Map.of("batchId", batchId, "parseJobId", parseJobId, "mappingVersion", batch.feedFormatId().toString(), "rowCount", rowCount, "errorCount", errorCount, "warningCount", warningCount, "resultHash", resultHash, "errorReportId", parseJobId));
+    repository.audit(tenantId, batchId, "RATE_SHEET_" + finalStatus, "RateFeedBatch", actor, correlationId, null, resultHash,
+        Map.of("batchId", batchId, "parseJobId", parseJobId, "status", finalStatus, "rowCount", rowCount, "errorCount", errorCount, "warningCount", warningCount));
+  }
+
+  private Map<String, String> parseHeaders(RateFeedRepository.BatchParseSource batch) {
+    return Map.of("investorId", batch.investorId().toString(), "channelId", batch.channelId().toString(), "feedFormatId", batch.feedFormatId().toString());
+  }
+
+  private static boolean isFormula(String value) {
+    if (value == null || value.isBlank()) return false;
+    char first = value.stripLeading().charAt(0);
+    return first == '=' || first == '+' || first == '-' || first == '@' || first == '\t' || first == '\r' || first == '\n';
+  }
+
+  private record ParsedCsv(int rowCount, List<ParsedField> fields) {}
+  private record ParsedField(int sourceRowNumber, String fieldName, String rawValue, String candidateValue, int sourceColumn, String severity, String errorCode, String message) {}
 
   /**
    * Hardening: Version list endpoint — query by optional filters.

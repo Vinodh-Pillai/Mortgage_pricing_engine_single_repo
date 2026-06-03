@@ -1,0 +1,12 @@
+{
+  "tenantId": "00000000-0000-0000-0000-000000000100",
+  "investorId": "10000000-0000-0000-0000-000000000001",
+  "channelId": "10000000-0000-0000-0000-000000000002",
+  "productKey": "CONV-30",
+  "asOf": "2026-01-15T00:00:00Z",
+  "expected": {
+    "status": "ACTIVE",
+    "candidateCount": 1,
+    "failClosedWhenCandidateCountIsNotOne": true
+  }
+}

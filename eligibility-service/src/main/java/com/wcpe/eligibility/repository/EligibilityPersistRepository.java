@@ -2,6 +2,8 @@ package com.wcpe.eligibility.repository;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wcpe.eligibility.domain.models.EligibilityResult;
+import com.wcpe.eligibility.domain.models.ProductFamily;
+import com.wcpe.eligibility.domain.models.QuoteType;
 import com.wcpe.eligibility.domain.models.RuleDecision;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -9,6 +11,7 @@ import org.springframework.stereotype.Repository;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Repository
@@ -37,6 +40,15 @@ public class EligibilityPersistRepository {
         }
 
         audit(tenantId, result.evaluationId(), "ELIGIBILITY_EVALUATED", result.resultHash(), result);
+    }
+
+    public void auditUnsupportedProductFamilyAttempt(UUID tenantId, ProductFamily productFamily, QuoteType quoteType) {
+        UUID auditId = UUID.randomUUID();
+        audit(tenantId, auditId, "UNSUPPORTED_PRODUCT_FAMILY_ATTEMPT", null, Map.of(
+            "requestedFamily", productFamily.name(),
+            "quoteType", quoteType.name(),
+            "reasonCode", "PRODUCT_FAMILY_NOT_ENABLED_FOR_SLICE"
+        ));
     }
 
     void audit(UUID tenantId, UUID aggregateId, String action, String replayHash, Object payload) {

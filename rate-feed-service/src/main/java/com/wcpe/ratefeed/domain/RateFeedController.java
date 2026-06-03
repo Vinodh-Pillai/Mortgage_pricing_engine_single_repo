@@ -50,6 +50,53 @@ class RateFeedController {
     return withAuthorizedHeaders(headers(http), RateFeedRoles.RATE_FEED_VIEW, () -> service.batch(tenantId, batchId));
   }
 
+  @PostMapping("/rate-feed-batches/{batchId}/parse")
+  ResponseEntity<RateFeedModels.ParseBatchResponse> parseBatch(@PathVariable UUID tenantId, @PathVariable UUID batchId,
+      @RequestBody RateFeedModels.ParseBatchRequest request, HttpServletRequest http) {
+    Headers h = headers(http);
+    return withAuthorizedHeaders(h, RateFeedRoles.RATE_FEED_PARSE,
+        () -> ResponseEntity.status(HttpStatus.ACCEPTED).body(service.parseBatch(tenantId, batchId, request, h.idempotencyKey(), h.actorId(), h.correlationId())));
+  }
+
+  @GetMapping("/rate-feed-batches/{batchId}/parse-results")
+  ResponseEntity<RateFeedModels.ParseResultPage> parseResults(@PathVariable UUID tenantId, @PathVariable UUID batchId,
+      @RequestParam(required = false) String severity,
+      @RequestParam(defaultValue = "0") int page,
+      @RequestParam(defaultValue = "50") int size,
+      HttpServletRequest http) {
+    return withAuthorizedHeaders(headers(http), RateFeedRoles.RATE_FEED_VIEW,
+        () -> ResponseEntity.ok(service.parseResults(tenantId, batchId, severity, page, size)));
+  }
+
+  @PostMapping("/rate-sheet-versions")
+  ResponseEntity<RateFeedModels.RateSheetVersionCreatedResponse> createRateSheetVersion(@PathVariable UUID tenantId,
+      @RequestBody RateFeedModels.CreateRateSheetVersionRequest request, HttpServletRequest http) {
+    Headers h = headers(http);
+    return withAuthorizedHeaders(h, RateFeedRoles.RATE_FEED_WRITER,
+        () -> ResponseEntity.status(HttpStatus.CREATED).body(service.createRateSheetVersion(tenantId, request, h.idempotencyKey(), h.actorId(), h.correlationId())));
+  }
+
+  @GetMapping("/rate-sheet-versions")
+  ResponseEntity<RateFeedModels.RateSheetVersionListResponse> listRateSheetVersions(@PathVariable UUID tenantId,
+      @RequestParam(required = false) UUID investorId,
+      @RequestParam(required = false) UUID channelId,
+      @RequestParam(required = false) Instant asOf,
+      HttpServletRequest http) {
+    return withAuthorizedHeaders(headers(http), RateFeedRoles.RATE_FEED_VIEW,
+        () -> ResponseEntity.ok(service.listRateSheetVersions(tenantId, investorId, channelId, asOf)));
+  }
+
+  @GetMapping("/rate-sheet-versions/resolve")
+  ResponseEntity<RateFeedModels.RateSheetVersionResolveResponse> resolveRateSheetVersion(@PathVariable UUID tenantId,
+      @RequestParam UUID investorId,
+      @RequestParam UUID channelId,
+      @RequestParam String productKey,
+      @RequestParam Instant asOf,
+      HttpServletRequest http) {
+    return withAuthorizedHeaders(headers(http), RateFeedRoles.RATE_FEED_VIEW,
+        () -> ResponseEntity.ok(service.resolveRateSheetVersion(tenantId, investorId, channelId, productKey, asOf)));
+  }
+
   // ── PII-04-S01: Batch list endpoint ──
 
   @GetMapping("/rate-feed-batches")

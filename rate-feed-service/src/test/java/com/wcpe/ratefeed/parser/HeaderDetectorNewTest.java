@@ -74,6 +74,18 @@ class HeaderDetectorNewTest {
   }
 
   @Test
+  void mapHeaders_duplicateCanonicalHeader_throws() {
+    String[] headers = {"note_rate", "lock_period", "base_price", "note_rate"};
+    assertThrows(IllegalArgumentException.class, () -> HeaderDetector.mapHeaders(headers));
+  }
+
+  @Test
+  void mapHeaders_ambiguousAliasToSameCanonical_throws() {
+    String[] headers = {"note_rate", "rate", "lock_period", "base_price"};
+    assertThrows(IllegalArgumentException.class, () -> HeaderDetector.mapHeaders(headers));
+  }
+
+  @Test
   void mapHeaders_headerAbsent_throws() {
     String[] headers = {"foo", "bar", "baz"}; // no recognized headers
     assertThrows(IllegalArgumentException.class, () -> HeaderDetector.mapHeaders(headers));
