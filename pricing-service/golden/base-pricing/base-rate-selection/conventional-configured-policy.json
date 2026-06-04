@@ -1,0 +1,103 @@
+{
+  "fixture_id": "base-rate-selection-conventional-configured-policy",
+  "description": "Happy path: tenant requests base rate selection with product, investor, channel, and lock period. The pricing engine resolves the published grid and returns the selected base rate and price.",
+  "correlation_id": "00000000-0000-0000-0000-000000000001",
+  "actor_id": "00000000-0000-0000-0000-000000000002",
+  "tenant_id": "tenant-alpha",
+  "request": {
+    "correlation_id": "00000000-0000-0000-0000-000000000001",
+    "actor_id": "00000000-0000-0000-0000-000000000002",
+    "tenant_id": "tenant-alpha",
+    "scenario_id": "00000000-0000-0000-0000-000000000010",
+    "scenario_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "product_code": "CONVENTIONAL_30_FIXED",
+    "investor_code": "INVESTOR_FANNIE_MAE",
+    "channel_code": "DIRECT_OWN",
+    "lock_period_days": 45,
+    "as_of": "2026-06-01T00:00:00Z",
+    "selection_policy_id": "policy-configured-conventional-v1"
+  },
+  "expected_response": {
+    "correlation_id": "00000000-0000-0000-0000-000000000001",
+    "tenant_id": "tenant-alpha",
+    "selection_id": "00000000-0000-0000-0000-000000000020",
+    "grid_version_id": "00000000-0000-0000-0000-000000000030",
+    "selected_note_rate": "6.12500",
+    "selected_base_price": "187.50000",
+    "lock_period_days": 45,
+    "as_of": "2026-06-01T00:00:00Z",
+    "candidate_rates": [
+      {
+        "rank": 1,
+        "note_rate": "6.12500",
+        "base_price": "187.50000",
+        "investor_code": "INVESTOR_FANNIE_MAE",
+        "channel_code": "DIRECT_OWN",
+        "selected": true,
+        "selection_reason": "policy_configured_primary_match"
+      },
+      {
+        "rank": 2,
+        "note_rate": "6.25000",
+        "base_price": "165.00000",
+        "investor_code": "INVESTOR_FANNIE_MAE",
+        "channel_code": "DIRECT_OWN",
+        "selected": false,
+        "selection_reason": "policy_configured_fallback"
+      },
+      {
+        "rank": 3,
+        "note_rate": "6.37500",
+        "base_price": "142.50000",
+        "investor_code": "INVESTOR_FANNIE_MAE",
+        "channel_code": "DIRECT_OWN",
+        "selected": false,
+        "selection_reason": "policy_configured_fallback"
+      }
+    ],
+    "ledger": [
+      {
+        "step": "grid_resolution",
+        "description": "Resolved published grid version for effective window",
+        "inputs": {
+          "product_code": "CONVENTIONAL_30_FIXED",
+          "investor_code": "INVESTOR_FANNIE_MAE",
+          "channel_code": "DIRECT_OWN",
+          "lock_period_days": 45,
+          "as_of": "2026-06-01T00:00:00Z"
+        },
+        "output": {
+          "grid_version_id": "00000000-0000-0000-0000-000000000030"
+        },
+        "status": "ok"
+      },
+      {
+        "step": "policy_application",
+        "description": "Applied configured selection policy to candidate grid entries",
+        "inputs": {
+          "policy_id": "policy-configured-conventional-v1",
+          "candidate_count": 3
+        },
+        "output": {
+          "selection_policy_id": "policy-configured-conventional-v1"
+        },
+        "status": "ok"
+      },
+      {
+        "step": "rate_selection",
+        "description": "Selected base rate and price from ranked candidates",
+        "inputs": {
+          "candidate_rank": 1
+        },
+        "output": {
+          "selected_note_rate": "6.12500",
+          "selected_base_price": "187.50000"
+        },
+        "status": "ok"
+      }
+    ],
+    "warnings": [],
+    "result_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "status": "COMPLETED"
+  }
+}

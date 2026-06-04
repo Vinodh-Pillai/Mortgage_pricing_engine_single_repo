@@ -1,0 +1,56 @@
+{
+  "fixture_id": "base-rate-selection-ambiguous-version",
+  "description": "Error path: multiple published grid versions have overlapping effective windows and conflict for the given as_of timestamp. The engine refuses to silently pick one and returns a structured error requiring manual resolution.",
+  "correlation_id": "00000000-0000-0000-0000-000000000050",
+  "actor_id": "00000000-0000-0000-0000-000000000002",
+  "tenant_id": "tenant-alpha",
+  "request": {
+    "correlation_id": "00000000-0000-0000-0000-000000000050",
+    "actor_id": "00000000-0000-0000-0000-000000000002",
+    "tenant_id": "tenant-alpha",
+    "scenario_id": "00000000-0000-0000-0000-000000000010",
+    "scenario_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "product_code": "CONVENTIONAL_30_FIXED",
+    "investor_code": "INVESTOR_FANNIE_MAE",
+    "channel_code": "DIRECT_OWN",
+    "lock_period_days": 30,
+    "as_of": "2026-06-01T00:00:00Z",
+    "selection_policy_id": "policy-configured-conventional-v1"
+  },
+  "expected_response": {
+    "correlation_id": "00000000-0000-0000-0000-000000000050",
+    "tenant_id": "tenant-alpha",
+    "selection_id": null,
+    "grid_version_id": null,
+    "selected_note_rate": null,
+    "selected_base_price": null,
+    "lock_period_days": 30,
+    "as_of": "2026-06-01T00:00:00Z",
+    "candidate_rates": [],
+    "ledger": [
+      {
+        "step": "grid_resolution",
+        "description": "Attempted to resolve published grid version for effective window",
+        "inputs": {
+          "product_code": "CONVENTIONAL_30_FIXED",
+          "investor_code": "INVESTOR_FANNIE_MAE",
+          "channel_code": "DIRECT_OWN",
+          "lock_period_days": 30,
+          "as_of": "2026-06-01T00:00:00Z"
+        },
+        "output": {
+          "conflicting_grid_versions": [
+            "00000000-0000-0000-0000-000000000060",
+            "00000000-0000-0000-0000-000000000061"
+          ]
+        },
+        "status": "error"
+      }
+    ],
+    "warnings": [],
+    "result_hash": null,
+    "status": "ERROR",
+    "error_code": "PRICING_GRID_AMBIGUOUS",
+    "error_message": "Multiple published pricing grid versions conflict for the given effective window (as_of: 2026-06-01T00:00:00Z). Grid versions 00000000-0000-0000-0000-000000000060 and 00000000-0000-0000-0000-000000000061 both claim to be effective for product CONVENTIONAL_30_FIXED, investor INVESTOR_FANNIE_MAE, channel DIRECT_OWN, lock period 30 days. Manual resolution is required before base rate selection can proceed."
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "fixture_id": "base-rate-selection-lock-period-unsupported",
+  "description": "Error path: the requested lock period does not exist in any published grid version for the given product, investor, and channel. The engine returns a structured error instead of a selection.",
+  "correlation_id": "00000000-0000-0000-0000-000000000040",
+  "actor_id": "00000000-0000-0000-0000-000000000002",
+  "tenant_id": "tenant-alpha",
+  "request": {
+    "correlation_id": "00000000-0000-0000-0000-000000000040",
+    "actor_id": "00000000-0000-0000-0000-000000000002",
+    "tenant_id": "tenant-alpha",
+    "scenario_id": "00000000-0000-0000-0000-000000000010",
+    "scenario_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "product_code": "CONVENTIONAL_30_FIXED",
+    "investor_code": "INVESTOR_FANNIE_MAE",
+    "channel_code": "DIRECT_OWN",
+    "lock_period_days": 120,
+    "as_of": "2026-06-01T00:00:00Z",
+    "selection_policy_id": "policy-configured-conventional-v1"
+  },
+  "expected_response": {
+    "correlation_id": "00000000-0000-0000-0000-000000000040",
+    "tenant_id": "tenant-alpha",
+    "selection_id": null,
+    "grid_version_id": null,
+    "selected_note_rate": null,
+    "selected_base_price": null,
+    "lock_period_days": 120,
+    "as_of": "2026-06-01T00:00:00Z",
+    "candidate_rates": [],
+    "ledger": [
+      {
+        "step": "grid_resolution",
+        "description": "Resolved published grid version for effective window",
+        "inputs": {
+          "product_code": "CONVENTIONAL_30_FIXED",
+          "investor_code": "INVESTOR_FANNIE_MAE",
+          "channel_code": "DIRECT_OWN",
+          "lock_period_days": 120,
+          "as_of": "2026-06-01T00:00:00Z"
+        },
+        "output": {
+          "grid_version_id": null
+        },
+        "status": "error"
+      }
+    ],
+    "warnings": [],
+    "result_hash": null,
+    "status": "ERROR",
+    "error_code": "LOCK_PERIOD_UNSUPPORTED",
+    "error_message": "The lock period of 120 days is not supported in any published pricing grid for product CONVENTIONAL_30_FIXED, investor INVESTOR_FANNIE_MAE, channel DIRECT_OWN, as of 2026-06-01T00:00:00Z. Available lock periods differ from the requested value."
+  }
+}

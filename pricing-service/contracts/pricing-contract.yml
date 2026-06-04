@@ -73,6 +73,46 @@ paths:
                 $ref: "#/components/schemas/RoundingPolicyResolution"
         "404": { description: "ROUNDING_POLICY_MISSING" }
         "409": { description: "ROUNDING_POLICY_AMBIGUOUS" }
+  /api/v1/tenants/{tenantId}/pricing/base-rate-selections:
+    post:
+      summary: "Select base rate candidates from versioned pricing grid"
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string }
+        - name: X-Correlation-Id
+          in: header
+          required: false
+          schema: { type: string }
+        - name: If-Pricing-Version
+          in: header
+          required: false
+          schema: { type: string }
+          description: "Optional header for replay/pinned pricing"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BaseRateSelectionRequest"
+      responses:
+        "200":
+          description: "Base rate selection result"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BaseRateSelectionResponse"
+        "400": { description: "VALIDATION_FAILED" }
+        "401": { description: "UNAUTHENTICATED" }
+        "403": { description: "TENANT_ACCESS_DENIED or TENANT_FORBIDDEN" }
+        "409": { description: "VERSION_CONFLICT, IDEMPOTENCY_CONFLICT, or PRICING_VERSION_STALE" }
+        "422": { description: "PRICING_GRID_NOT_FOUND, PRICING_GRID_AMBIGUOUS, LOCK_PERIOD_UNSUPPORTED, NOTE_RATE_UNAVAILABLE" }
+        "503": { description: "DEPENDENCY_UNAVAILABLE" }
   /pricing/quote:
     post:
       summary: "Return a synthetic pricing quote for a grid fixture"
@@ -168,3 +208,66 @@ components:
         scale: { type: integer }
         rounding_mode: { type: string }
         increment: { type: string }
+    BaseRateSelectionRequest:
+      type: object
+      required: ["scenario_id", "scenario_hash", "product_code", "investor_code", "channel_code", "lock_period_days", "as_of"]
+      properties:
+        scenario_id: { type: string }
+        scenario_hash: { type: string }
+        product_code: { type: string }
+        investor_code: { type: string }
+        channel_code: { type: string }
+        lock_period_days: { type: integer }
+        as_of: { type: string, format: date-time }
+        requested_note_rate:
+          type: string
+          description: "Optional BigDecimal value for requested note rate"
+          nullable: true
+        selection_policy_id:
+          type: string
+          nullable: true
+    BaseRateSelectionResponse:
+      type: object
+      required: ["selection_id", "grid_version_id", "selected_note_rate", "selected_base_price", "candidate_rates", "lock_period_days", "as_of", "ledger", "warnings", "result_hash"]
+      properties:
+        selection_id: { type: string }
+        grid_version_id: { type: string }
+        selected_note_rate: { type: string }
+        selected_base_price: { type: string }
+        candidate_rates:
+          type: array
+          items:
+            $ref: "#/components/schemas/CandidateRate"
+        lock_period_days: { type: integer }
+        as_of: { type: string, format: date-time }
+        ledger:
+          type: array
+          items:
+            $ref: "#/components/schemas/LedgerEntry"
+        warnings:
+          type: array
+          items: { type: string }
+        result_hash: { type: string }
+    CandidateRate:
+      type: object
+      required: ["note_rate", "base_price", "rank", "reason_code"]
+      properties:
+        note_rate: { type: string }
+        base_price: { type: string }
+        rank: { type: integer }
+        reason_code: { type: string }
+    LedgerEntry:
+      type: object
+      required: ["step", "detail", "value", "reason_code"]
+      properties:
+        step: { type: string }
+        detail: { type: string }
+        value: { type: string }
+        reason_code: { type: string }
+    BaseRateSelectionError:
+      type: object
+      required: ["error_code", "error_message", "correlation_id"]
+      properties:
+        error_code: { type: string }
+        error_message: { type: string }
+        correlation_id: { type: string }
