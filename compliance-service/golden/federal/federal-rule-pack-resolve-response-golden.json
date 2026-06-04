@@ -1,0 +1,15 @@
+{
+  "requestId": "request-123",
+  "tenantId": "tenant-a",
+  "status": "RESOLVED",
+  "resolution": {
+    "rulePackCode": "FED-APR",
+    "version": 3,
+    "rulePackHash": "rule-pack-hash-v3",
+    "citations": ["12 CFR 1026"],
+    "executableRuleRefs": ["apr-rule-ref-v3"]
+  },
+  "failClosedReasons": [],
+  "outboxEventType": "federal_compliance_rule_shell.completed.v1",
+  "correlationId": "correlation-789"
+}

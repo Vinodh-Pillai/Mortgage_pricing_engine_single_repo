@@ -1,0 +1,54 @@
+openapi: 3.0.3
+info:
+  title: Lock Service PII-10-S01 Contract
+  version: 0.1.0
+paths:
+  /api/v1/tenants/{tenantId}/locks/requests:
+    post:
+      summary: Request a tenant-scoped rate lock from a priced quote.
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-Correlation-Id
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        '201':
+          description: Lock request accepted as REQUESTED or PENDING_APPROVAL.
+        '403':
+          description: Tenant access denied.
+        '409':
+          description: Idempotency conflict or duplicate active quote lock.
+        '422':
+          description: Tenant policy/configuration or lock eligibility was not satisfied.
+  /api/v1/tenants/{tenantId}/locks/{lockId}:
+    get:
+      summary: Read a tenant-scoped rate lock.
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: lockId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tenant-scoped lock record.
+        '404':
+          description: Lock not found for tenant.

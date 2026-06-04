@@ -1,0 +1,7 @@
+{
+  "tenantId": "11111111-1111-1111-1111-111111111111",
+  "requestId": "REQ-STALE",
+  "quoteFresh": false,
+  "expectedError": "POLICY_NOT_SATISFIED",
+  "expectedSideEffect": "no_committed_lock"
+}

@@ -1,0 +1,5 @@
+{
+  "story_id": "PII-08-S01",
+  "fixture": "quote-create-idempotent-replay",
+  "idempotency_behavior": "same tenant and key returns the original quote; changed request input fails with DUPLICATE_IDEMPOTENCY_CONFLICT"
+}

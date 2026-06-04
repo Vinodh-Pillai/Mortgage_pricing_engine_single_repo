@@ -78,6 +78,129 @@ public final class ExceptionModels {
     String requestId
   ) {}
 
+  public enum ConcessionRequestStatus {
+    SUBMITTED, NEEDS_ELIGIBILITY_EXCEPTION, APPROVED_PENDING_APPLICATION
+  }
+
+  public enum ApprovalDecisionType {
+    APPROVE
+  }
+
+  public enum ConcessionUnit {
+    BASIS_POINTS, PRICE_POINTS, FEE_AMOUNT
+  }
+
+  public record ConcessionAmount(
+    ConcessionUnit unit,
+    String value,
+    String currency
+  ) {}
+
+  public record ConcessionEvidenceRef(
+    String evidenceUri,
+    String evidenceType,
+    String checksum
+  ) {}
+
+  public record ApprovalRouteSnapshot(
+    String authorityMatrixVersionId,
+    List<String> approverGroups,
+    String sla,
+    boolean ambiguous
+  ) {}
+
+  public record ApprovalConditions(
+    String expiresAt,
+    Map<String, String> conditions
+  ) {}
+
+  public record ConflictAttestation(
+    boolean noConflict,
+    String attestationText
+  ) {}
+
+  public record ApproveConcessionRequest(
+    UUID tenantId,
+    String concessionRequestId,
+    String routeStepId,
+    ApprovalDecisionType decision,
+    String reasonCode,
+    String comment,
+    ApprovalConditions conditions,
+    ConflictAttestation conflictAttestation,
+    String authorityMatrixVersionId,
+    String actorId,
+    List<String> actorRoleRefs,
+    String idempotencyKey,
+    String correlationId,
+    int expectedRequestVersion
+  ) {}
+
+  public record ConcessionApprovalResponse(
+    UUID tenantId,
+    String concessionRequestId,
+    String decisionId,
+    ConcessionRequestStatus previousStatus,
+    ConcessionRequestStatus newStatus,
+    String completedStep,
+    String nextStep,
+    int aggregateVersion,
+    String auditRef,
+    String outboxEventType,
+    String eventHash,
+    String correlationId,
+    Instant decidedAt
+  ) {}
+
+  public record PricingConcessionRequestCreate(
+    UUID tenantId,
+    String quoteId,
+    String scenarioId,
+    String lockId,
+    ConcessionAmount requestedAmount,
+    String reasonCode,
+    String narrative,
+    List<ConcessionEvidenceRef> evidenceRefs,
+    String expiration,
+    String actorId,
+    String idempotencyKey,
+    String correlationId,
+    String concessionPolicyVersionId,
+    String reasonCodeVersionId,
+    String quoteSnapshotHash,
+    ApprovalRouteSnapshot approvalRouteSnapshot,
+    boolean eligibilityExceptionRequired
+  ) {}
+
+  public record PricingConcessionRequestStatus(
+    UUID tenantId,
+    String concessionRequestId,
+    String quoteId,
+    String scenarioId,
+    String lockId,
+    ConcessionRequestStatus status,
+    ConcessionAmount requestedAmount,
+    String reasonCode,
+    String commentsRedacted,
+    List<ConcessionEvidenceRef> evidenceRefs,
+    String concessionPolicyVersionId,
+    String authorityMatrixVersionId,
+    String reasonCodeVersionId,
+    String quoteSnapshotHash,
+    String approvalRouteHash,
+    List<String> nextApproverGroups,
+    String sla,
+    String idempotencyKey,
+    String actorId,
+    String correlationId,
+    String auditRef,
+    String outboxEventType,
+    String requestHash,
+    int version,
+    Instant createdAt,
+    Instant updatedAt
+  ) {}
+
   // ── Internal request record (used by repository/service) ────────────────────
 
   public record ExceptionRequestRecord(
@@ -87,5 +210,56 @@ public final class ExceptionModels {
     ExceptionState state,
     Instant createdAt,
     Instant updatedAt
+  ) {}
+
+  public record PricingConcessionRequestRecord(
+    UUID tenantId,
+    String concessionRequestId,
+    String quoteId,
+    String scenarioId,
+    String lockId,
+    ConcessionRequestStatus status,
+    ConcessionAmount requestedAmount,
+    String reasonCode,
+    String commentsRedacted,
+    List<ConcessionEvidenceRef> evidenceRefs,
+    String concessionPolicyVersionId,
+    String authorityMatrixVersionId,
+    String reasonCodeVersionId,
+    String quoteSnapshotHash,
+    String approvalRouteHash,
+    List<String> nextApproverGroups,
+    String sla,
+    String idempotencyKey,
+    String actorId,
+    String correlationId,
+    String auditRef,
+    String outboxEventType,
+    String requestHash,
+    int version,
+    Instant createdAt,
+    Instant updatedAt
+  ) {}
+
+  public record ApprovalDecisionRecord(
+    UUID tenantId,
+    String decisionId,
+    String concessionRequestId,
+    String routeStepId,
+    ApprovalDecisionType decision,
+    String decisionReasonCode,
+    String decisionCommentRedacted,
+    ApprovalConditions conditions,
+    String authorityMatrixVersionId,
+    String actorId,
+    List<String> actorRoleRefs,
+    ConflictAttestation conflictAttestation,
+    String idempotencyKey,
+    String correlationId,
+    String auditRef,
+    String outboxEventType,
+    String eventHash,
+    int aggregateVersion,
+    Instant createdAt
   ) {}
 }

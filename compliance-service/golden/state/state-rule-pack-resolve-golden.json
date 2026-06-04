@@ -1,0 +1,19 @@
+{
+  "requestId": "request-123",
+  "tenantId": "tenant-a",
+  "stateCode": "CA",
+  "status": "RESOLVED",
+  "resolution": {
+    "stateCode": "CA",
+    "rulePackCode": "STATE-HIGH-COST",
+    "version": 2,
+    "rulePackHash": "state-rule-pack-hash-v2",
+    "citations": ["citation-ref-ca-2026"],
+    "thresholdConfigRefs": ["threshold-config-ca-2026"],
+    "federalRulePackRefs": ["federal-precedence-fed-apr-v3"],
+    "executableRuleRefs": ["ca-rule-ref-v2"]
+  },
+  "failClosedReasons": [],
+  "outboxEventType": "state_compliance_shell.completed.v1",
+  "correlationId": "correlation-789"
+}

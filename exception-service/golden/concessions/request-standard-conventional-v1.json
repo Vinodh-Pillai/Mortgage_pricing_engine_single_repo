@@ -1,0 +1,22 @@
+{
+  "story_id": "PII-11-S01",
+  "fixture": "request-standard-conventional-v1",
+  "tenant_id": "11111111-1111-1111-1111-111111111111",
+  "quote_id": "QUOTE-PII11",
+  "scenario_id": "SCENARIO-PII11",
+  "requested_amount": {
+    "unit": "BASIS_POINTS",
+    "value": "-12.500"
+  },
+  "reason_code": "RETENTION_REQUEST",
+  "policy_version_id": "POLICY-V1",
+  "authority_matrix_version_id": "MATRIX-V1",
+  "reason_code_version_id": "REASON-V1",
+  "expected_status": "SUBMITTED",
+  "expected_event_type": "pricing.concession.requested.v1",
+  "expected_redactions": [
+    "email",
+    "ssn"
+  ],
+  "notes": "Business values are fixture identifiers only; no threshold, investor, tenant, or pricing policy limits are encoded."
+}

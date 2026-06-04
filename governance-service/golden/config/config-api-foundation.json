@@ -1,0 +1,28 @@
+{
+  "endpoint": "POST /api/v1/tenants/{tenantId}/governance/configurations",
+  "permission": "admin.config.write",
+  "request": {
+    "tenantId": "11111111-1111-1111-1111-111111111111",
+    "idempotencyKey": "idem-PII-12-S01-001",
+    "actorId": "admin-editor-1",
+    "artifactType": "pricing-rule-set",
+    "displayName": "Conventional baseline rules",
+    "schemaVersion": "2026.06",
+    "payload": {
+      "sourceRef": "fixture-only",
+      "ruleSetName": "tenant-configured-rule-set"
+    },
+    "context": {
+      "product": "conventional",
+      "channel": "retail"
+    },
+    "effectiveStart": "2026-06-04T00:00:00Z",
+    "changeSummary": "Create draft tenant configuration artifact",
+    "correlationId": "corr-PII-12-S01-001"
+  },
+  "expected": {
+    "status": "DRAFT",
+    "eventType": "ConfigVersionDrafted.v1",
+    "auditAction": "CONFIG_API_FOUNDATION_COMPLETED"
+  }
+}

@@ -12,9 +12,9 @@ CREATE TABLE scenario_analysis.what_if_variant (
     notes TEXT,
     pricing_as_of TIMESTAMPTZ,
     variant_version INT NOT NULL DEFAULT 1,
-    input_hash VARCHAR(64),
-    result_hash VARCHAR(64),
-    idempotency_key_hash VARCHAR(64) UNIQUE,
+    input_hash VARCHAR(80),
+    result_hash VARCHAR(80),
+    idempotency_key_hash VARCHAR(64),
     created_by VARCHAR(128) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -58,7 +58,7 @@ CREATE TABLE scenario_analysis.what_if_outbox (
 );
 
 CREATE INDEX idx_variant_tenant_status ON scenario_analysis.what_if_variant(tenant_id, status, updated_at DESC);
-CREATE INDEX idx_variant_idempotency ON scenario_analysis.what_if_variant(idempotency_key_hash);
+CREATE UNIQUE INDEX idx_variant_tenant_idempotency ON scenario_analysis.what_if_variant(tenant_id, idempotency_key_hash) WHERE idempotency_key_hash IS NOT NULL;
 CREATE INDEX idx_variant_change_variant ON scenario_analysis.what_if_variant_change(tenant_id, variant_id);
 CREATE INDEX idx_snapshot_variant ON scenario_analysis.what_if_input_snapshot(tenant_id, variant_id);
 CREATE INDEX idx_outbox_variant_status ON scenario_analysis.what_if_outbox(tenant_id, variant_id, status);

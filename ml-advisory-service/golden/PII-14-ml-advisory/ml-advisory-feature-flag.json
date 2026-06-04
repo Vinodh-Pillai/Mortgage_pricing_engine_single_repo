@@ -1,0 +1,15 @@
+{
+  "storyId": "PII-14-S01",
+  "tenantId": "11111111-1111-1111-1111-111111111111",
+  "advisoryType": "PRICING",
+  "channel": "retail",
+  "productFamily": "conventional",
+  "defaultMode": "DISABLED",
+  "enabledMode": "SHADOW_ONLY",
+  "visibleModeRequiresModelStatus": "APPROVED_FOR_ADVISORY",
+  "eventTypes": [
+    "MlAdvisoryControlChanged.v1",
+    "MlAdvisoryKillSwitchChanged.v1"
+  ],
+  "cacheKeyPattern": "tenant:{tenantId}:ml-advisory:control:{scopeHash}:v{version}"
+}

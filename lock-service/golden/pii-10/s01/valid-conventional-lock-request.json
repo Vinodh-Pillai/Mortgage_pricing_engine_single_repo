@@ -1,0 +1,11 @@
+{
+  "tenantId": "11111111-1111-1111-1111-111111111111",
+  "requestId": "REQ-001",
+  "quoteId": "QUOTE-PII10",
+  "loanId": "LOAN-PII10",
+  "scenarioHash": "scenario-hash-v1",
+  "pricingResultHash": "pricing-hash-v1",
+  "lockPolicyVersionId": "lock-policy-v1",
+  "complianceEvidenceRef": "compliance-evidence-v1",
+  "expectedEventType": "lock.requested.v1"
+}

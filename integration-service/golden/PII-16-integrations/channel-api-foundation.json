@@ -1,0 +1,26 @@
+{
+  "storyId": "PII-16-S01",
+  "basePath": "/api/v1/tenants/{tenantId}/channels",
+  "events": [
+    "integration.channel-client.registered.v1",
+    "integration.channel-client.updated.v1"
+  ],
+  "successResponse": {
+    "id": "deterministic-channel-id",
+    "status": "DRAFT",
+    "version": 1,
+    "resultSummary": "registered",
+    "validationMessages": [],
+    "auditRef": "audit:{tenantId}:{channelId}:1",
+    "replayRef": "event:{tenantId}:{channelId}:1",
+    "correlationId": "corr-PII-16-S01"
+  },
+  "errorEnvelope": {
+    "code": "422",
+    "reason": "POLICY_NOT_SATISFIED",
+    "message": "Allowed product references must be tenant-governed IDs",
+    "fieldErrors": [],
+    "correlationId": "corr-PII-16-S01",
+    "retryable": false
+  }
+}

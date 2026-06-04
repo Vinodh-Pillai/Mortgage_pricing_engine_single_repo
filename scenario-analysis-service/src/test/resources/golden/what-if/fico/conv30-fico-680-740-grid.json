@@ -1,0 +1,32 @@
+{
+  "baselineFico": 720,
+  "rows": [
+    {
+      "fico": 680,
+      "ficoBucket": "FICO_680",
+      "eligibility": "NOT_PRICED",
+      "deltas": {
+        "ficoDelta": -40,
+        "priceDeltaBps": null,
+        "rateDeltaBps": null,
+        "pointsDeltaBps": null,
+        "paymentDeltaCents": null,
+        "miDeltaCents": null
+      }
+    },
+    {
+      "fico": 740,
+      "ficoBucket": "FICO_740",
+      "eligibility": "NOT_PRICED",
+      "deltas": {
+        "ficoDelta": 20,
+        "priceDeltaBps": null,
+        "rateDeltaBps": null,
+        "pointsDeltaBps": null,
+        "paymentDeltaCents": null,
+        "miDeltaCents": null
+      }
+    }
+  ],
+  "disclaimer": "Pricing deltas are unavailable until the pricing client supports synthetic FICO overrides. This output is non-binding and is not borrower-facing adverse-action language."
+}

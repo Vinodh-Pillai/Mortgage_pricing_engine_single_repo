@@ -1,0 +1,24 @@
+{
+  "storyId": "PII-11-S02",
+  "eventType": "concession.request.approved.v1",
+  "tenantId": "11111111-1111-1111-1111-111111111111",
+  "concessionRequestId": "PCR-1",
+  "decisionId": "APD-1",
+  "previousStatus": "SUBMITTED",
+  "newStatus": "APPROVED_PENDING_APPLICATION",
+  "completedStep": "approval-route-step-1",
+  "nextStep": null,
+  "authorityMatrixVersionId": "MATRIX-V1",
+  "actorId": "approval-manager-1",
+  "actorRoleRefs": [
+    "pricing-desk-manager"
+  ],
+  "conditionHashInput": {
+    "expiresAt": "2026-07-31",
+    "conditions": {
+      "condition": "documented approval evidence"
+    }
+  },
+  "containsRawBorrowerPii": false,
+  "pricingApplied": false
+}

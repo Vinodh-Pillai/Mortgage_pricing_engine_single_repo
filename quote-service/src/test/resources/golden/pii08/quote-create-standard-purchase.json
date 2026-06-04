@@ -1,0 +1,7 @@
+{
+  "story_id": "PII-08-S01",
+  "fixture": "quote-create-standard-purchase",
+  "status": "READY",
+  "ranking_policy_version": "rank-v1",
+  "notes": "Fixture uses explicit mock upstream candidate values and configured ranking order only."
+}

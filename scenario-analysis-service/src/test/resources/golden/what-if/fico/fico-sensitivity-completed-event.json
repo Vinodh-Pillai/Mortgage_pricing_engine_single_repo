@@ -1,0 +1,13 @@
+{
+  "eventType": "whatif.sensitivity.completed.v1",
+  "eventVersion": 1,
+  "sourceService": "scenario-analysis-service",
+  "key": "tenantId:analysisId",
+  "payloadFields": [
+    "analysisId",
+    "runId",
+    "tenantId",
+    "status",
+    "resultHash"
+  ]
+}

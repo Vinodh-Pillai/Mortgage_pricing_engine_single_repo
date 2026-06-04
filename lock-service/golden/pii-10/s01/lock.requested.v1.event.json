@@ -1,0 +1,25 @@
+{
+  "eventType": "lock.requested.v1",
+  "eventVersion": "1",
+  "eventKey": "tenantId:lockId",
+  "requiredHeaders": [
+    "tenantId",
+    "eventId",
+    "eventType",
+    "eventVersion",
+    "sourceService",
+    "actorId",
+    "correlationId",
+    "causationId",
+    "idempotencyKey",
+    "occurredAt"
+  ],
+  "payloadFields": [
+    "lockId",
+    "tenantId",
+    "status",
+    "version",
+    "policyVersion",
+    "snapshotHash"
+  ]
+}

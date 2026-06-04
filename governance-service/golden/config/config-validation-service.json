@@ -1,0 +1,18 @@
+{
+  "storyId": "PII-12-S02",
+  "endpoint": "/api/v1/tenants/{tenantId}/admin/config-artifacts/{artifactId}/versions/{versionId}/validation-runs",
+  "eventType": "ConfigValidationCompleted.v1",
+  "blockingResponse": {
+    "status": "BLOCKED",
+    "publishEligible": false,
+    "validationMessages": [
+      {
+        "severity": "ERROR",
+        "code": "REQUIRED_FIELD_MISSING",
+        "jsonPath": "$.payload.sourceRef",
+        "messageKey": "governance.config.required-field",
+        "blocking": true
+      }
+    ]
+  }
+}

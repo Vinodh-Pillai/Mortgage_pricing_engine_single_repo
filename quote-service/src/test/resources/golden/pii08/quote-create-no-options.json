@@ -1,0 +1,6 @@
+{
+  "story_id": "PII-08-S01",
+  "fixture": "quote-create-no-options",
+  "status": "NO_OPTIONS",
+  "notes": "No options means upstream returned no eligible configured candidates; no product or investor policy is hard-coded."
+}

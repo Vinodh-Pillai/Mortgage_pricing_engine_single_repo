@@ -1,0 +1,24 @@
+{
+  "storyId": "PII-07-S01",
+  "policyType": "COMPANY",
+  "scope": {
+    "productFamily": "CONVENTIONAL",
+    "channel": "RETAIL",
+    "state": "*",
+    "purpose": "PURCHASE"
+  },
+  "rules": [
+    {
+      "unit": "BPS",
+      "amountRef": "cfg.companyMarginBps",
+      "minRef": "cfg.companyMarginMinBps",
+      "maxRef": "cfg.companyMarginMaxBps",
+      "reasonCode": "COMPANY_MARGIN"
+    }
+  ],
+  "expectedBehavior": [
+    "Configuration references are symbolic and tenant-governed.",
+    "Missing configuration fails closed with MARGIN_CONFIG_UNAVAILABLE.",
+    "Publishing emits MarginPolicyPublished.v1-equivalent outbox data and audit evidence."
+  ]
+}
