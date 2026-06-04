@@ -1,0 +1,19 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/scenario_analysis
+    username: wcpe
+    password: wcpe
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        default_schema: scenario_analysis
+  flyway:
+    enabled: true
+    schemas: scenario_analysis
+    locations: classpath:db/migration
+server:
+  port: 8082

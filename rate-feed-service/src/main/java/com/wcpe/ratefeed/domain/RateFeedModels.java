@@ -393,6 +393,49 @@ public final class RateFeedModels {
     List<ValidationWarningDetail> warnings
   ) {}
 
+  // ── PII-04-S06: Validation job request/response records ──
+
+  public enum ValidationFindingSeverity { BLOCKER, WARNING, INFO }
+
+  public enum ValidationJobStatus { RUNNING, PASSED, PASSED_WITH_WARNINGS, FAILED, STALE }
+
+  public record ValidateBatchRequest(String expectedNormalizationHash, UUID validationProfileId) {}
+
+  public record ValidateBatchResponse(UUID validationJobId, String status) {}
+
+  public record ValidationFindingRecord(
+    UUID findingId,
+    UUID entryId,
+    ValidationFindingSeverity severity,
+    String ruleCode,
+    String ruleVersion,
+    String fieldName,
+    String messageCode,
+    Map<String, Object> messageParams,
+    String remediationCode,
+    Integer sourceRowNumber,
+    Instant createdAt
+  ) {}
+
+  public record ValidationReportResponse(
+    UUID validationJobId,
+    UUID batchId,
+    String status,
+    String profileVersion,
+    Instant startedAt,
+    Instant completedAt,
+    int blockingErrorCount,
+    int warningCount,
+    String resultHash,
+    List<ValidationFindingRecord> findings
+  ) {}
+
+  public record ValidationProfileConfig(
+    String profileId,
+    String profileVersion,
+    Map<String, Object> ruleConfigs
+  ) {}
+
   // ── Exception class ─────────────────────────────────────────────────────────
 
   public static final class RateFeedException extends RuntimeException {

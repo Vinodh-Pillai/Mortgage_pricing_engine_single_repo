@@ -12,7 +12,8 @@
     "aggregateType",
     "aggregateId",
     "occurredAt",
-    "payload"
+    "payload",
+    "correlationId"
   ],
   "properties": {
     "eventId": {
