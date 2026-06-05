@@ -42,3 +42,35 @@ create table quote_option (
 );
 
 create index ix_quote_option_tenant_quote on quote_option (tenant_id, quote_id);
+
+create table comparison_view_config (
+    tenant_id uuid not null,
+    view_id varchar(128) not null,
+    view_version varchar(80) not null,
+    columns_json jsonb not null,
+    visibility_predicates_json jsonb not null,
+    sort_policy varchar(128),
+    max_compare_count integer not null,
+    effective_from timestamptz not null,
+    effective_to timestamptz,
+    approval_ref varchar(160) not null,
+    constraint pk_comparison_view_config primary key (tenant_id, view_id, view_version)
+);
+
+create table quote_comparison_export (
+    tenant_id uuid not null,
+    export_id uuid primary key,
+    quote_id uuid not null references quote (quote_id),
+    view_id varchar(128) not null,
+    view_version varchar(80) not null,
+    row_option_ids uuid[] not null,
+    format varchar(40) not null,
+    redaction_profile varchar(128) not null,
+    storage_ref varchar(256) not null,
+    created_by varchar(128) not null,
+    created_at timestamptz not null,
+    idempotency_key varchar(160) not null,
+    constraint uq_quote_comparison_export_idempotency unique (tenant_id, idempotency_key)
+);
+
+create index ix_quote_comparison_export_tenant_quote on quote_comparison_export (tenant_id, quote_id);

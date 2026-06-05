@@ -1,15 +1,15 @@
 package com.wcpe.pricing.baserate;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.networknt.schema.*;
 import com.wcpe.pricing.baserate.BaseRateSelectionApi.*;
 import org.junit.jupiter.api.*;
 
-import java.io.InputStream;
-import java.nio.file.Files;
+import java.math.BigDecimal;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -20,7 +20,6 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("BaseRate Selection Contract")
 class BaseRateSelectionContractTest {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
     private static Path contractsDir;
 
     private InMemoryBaseRateSelectionRepository repository;
@@ -46,29 +45,20 @@ class BaseRateSelectionContractTest {
 
         repository.addGridRow(new BasePricingGridRow(
                 UUID.randomUUID(), TENANT_A, gridId, 30,
-                new BigDecimal("SYNTH_6.12500"), new BigDecimal("SYNTH_100.00000"),
-                Set.of(), "synth-row-hash", java.time.Instant.parse("2026-01-01T00:00:00Z")));
+                new BigDecimal("6.12500"), new BigDecimal("100.00000"),
+                Map.of(), "synth-row-hash", java.time.Instant.parse("2026-01-01T00:00:00Z")));
 
         BaseRateSelectionResponse response = api.selectRate(
                 TENANT_A,
                 validWriteHeaders(),
                 validRequest());
 
-        // Serialise the response payload
-        String responseJson = MAPPER.writeValueAsString(response);
-
-        // Verify it contains the expected top-level fields from the contract response schema
-        assertTrue(responseJson.contains("\"selectionId\""));
-        assertTrue(responseJson.contains("\"gridVersionId\""));
-        assertTrue(responseJson.contains("\"selectedNoteRate\""));
-        assertTrue(responseJson.contains("\"selectedBasePrice\""));
-        assertTrue(responseJson.contains("\"candidateRates\""));
-        assertTrue(responseJson.contains("\"lockPeriodDays\""));
-        assertTrue(responseJson.contains("\"ledger\""));
-        assertTrue(responseJson.contains("\"warnings\""));
-        assertTrue(responseJson.contains("\"resultHash\""));
-
         assertNotNull(response.selectionId());
+        assertEquals(gridId, response.gridVersionId());
+        assertNotNull(response.selectedNoteRate());
+        assertNotNull(response.selectedBasePrice());
+        assertEquals(30, response.lockPeriodDays());
+        assertNotNull(response.asOf());
         assertNotNull(response.resultHash());
         assertTrue(response.ledger().size() >= 3);
         assertTrue(response.candidateRates().size() >= 1);

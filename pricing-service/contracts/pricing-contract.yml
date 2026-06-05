@@ -113,6 +113,147 @@ paths:
         "409": { description: "VERSION_CONFLICT, IDEMPOTENCY_CONFLICT, or PRICING_VERSION_STALE" }
         "422": { description: "PRICING_GRID_NOT_FOUND, PRICING_GRID_AMBIGUOUS, LOCK_PERIOD_UNSUPPORTED, NOTE_RATE_UNAVAILABLE" }
         "503": { description: "DEPENDENCY_UNAVAILABLE" }
+  /api/v1/tenants/{tenantId}/pricing/base-grids/imports:
+    post:
+      summary: "Import a draft base pricing grid version from approved synthetic/configured source data"
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BaseGridImportRequest"
+      responses:
+        "202":
+          description: "Draft grid import accepted"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BaseGridImportResponse"
+        "400": { description: "GRID_DUPLICATE_ROW, GRID_SCALE_INVALID, or VALIDATION_FAILED" }
+        "403": { description: "TENANT_ACCESS_DENIED" }
+        "422": { description: "POLICY_NOT_SATISFIED or GRID_CATALOG_REF_MISSING" }
+  /api/v1/tenants/{tenantId}/pricing/base-grids/{versionId}/validate:
+    post:
+      summary: "Validate a draft base pricing grid version"
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: versionId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: "Grid validation result"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BaseGridValidationResult"
+        "400": { description: "GRID_DUPLICATE_ROW or GRID_SCALE_INVALID" }
+  /api/v1/tenants/{tenantId}/pricing/base-grids/{versionId}/publish:
+    post:
+      summary: "Publish a validated base pricing grid version"
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: versionId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: "Published grid version"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BaseGridPublishResponse"
+        "409": { description: "GRID_EFFECTIVE_WINDOW_OVERLAP" }
+        "422": { description: "GRID_NOT_APPROVED" }
+  /api/v1/tenants/{tenantId}/pricing/base-grids/lookup:
+    get:
+      summary: "Return exactly one published base pricing grid row"
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: productCode
+          in: query
+          required: true
+          schema: { type: string }
+        - name: investorCode
+          in: query
+          required: true
+          schema: { type: string }
+        - name: channelCode
+          in: query
+          required: true
+          schema: { type: string }
+        - name: lockPeriodDays
+          in: query
+          required: true
+          schema: { type: integer }
+        - name: noteRate
+          in: query
+          required: true
+          schema: { type: string }
+        - name: asOf
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+        - name: bucketHash
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: "Published row found"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BaseGridLookupResponse"
+        "409": { description: "GRID_LOOKUP_AMBIGUOUS" }
+        "422": { description: "GRID_LOOKUP_NOT_FOUND" }
+  /api/v1/tenants/{tenantId}/pricing/final-prices:
+    post:
+      summary: "Calculate deterministic final price from selected base rate and versioned pricing configuration"
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinalPriceRequest"
+      responses:
+        "200":
+          description: "Final price result with deterministic ledger and version graph"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinalPriceResponse"
+        "409": { description: "IDEMPOTENCY_CONFLICT" }
+        "422": { description: "BASE_RATE_SELECTION_REQUIRED, ADJUSTMENT_CONFIG_MISSING, ADJUSTMENT_CONFLICT, CAP_FLOOR_BLOCKED, ROUNDING_POLICY_MISSING, or SCENARIO_FACT_MISSING" }
   /pricing/quote:
     post:
       summary: "Return a synthetic pricing quote for a grid fixture"
@@ -271,3 +412,143 @@ components:
         error_code: { type: string }
         error_message: { type: string }
         correlation_id: { type: string }
+    BaseGridImportRequest:
+      type: object
+      required: ["product_code", "investor_code", "channel_code", "effective_from", "source_type", "source_digest", "approval_workflow_configured", "allowed_lock_period_days", "rows"]
+      properties:
+        product_code: { type: string }
+        investor_code: { type: string }
+        channel_code: { type: string }
+        effective_from: { type: string, format: date-time }
+        effective_to: { type: string, format: date-time, nullable: true }
+        source_type: { type: string }
+        source_digest: { type: string }
+        approval_workflow_configured: { type: boolean }
+        allowed_lock_period_days:
+          type: array
+          items: { type: integer }
+        allowed_bucket_dimensions:
+          type: array
+          items: { type: string }
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/BaseGridRowDraft"
+    BaseGridRowDraft:
+      type: object
+      required: ["lock_period_days", "note_rate", "base_price"]
+      properties:
+        lock_period_days: { type: integer }
+        note_rate: { type: string }
+        base_price: { type: string }
+        bucket_key:
+          type: object
+          additionalProperties: { type: string }
+    BaseGridImportResponse:
+      type: object
+      required: ["import_id", "grid_version_id", "status", "row_count", "validation_messages", "audit_ref", "correlation_id"]
+      properties:
+        import_id: { type: string, format: uuid }
+        grid_version_id: { type: string, format: uuid }
+        status: { type: string }
+        row_count: { type: integer }
+        validation_messages:
+          type: array
+          items: { type: string }
+        audit_ref: { type: string }
+        correlation_id: { type: string }
+    BaseGridValidationResult:
+      type: object
+      required: ["grid_version_id", "status", "validation_messages", "audit_ref", "correlation_id"]
+      properties:
+        grid_version_id: { type: string, format: uuid }
+        status: { type: string }
+        validation_messages:
+          type: array
+          items: { type: string }
+        audit_ref: { type: string }
+        correlation_id: { type: string }
+    BaseGridPublishResponse:
+      type: object
+      required: ["grid_version_id", "status", "row_count", "audit_ref", "correlation_id"]
+      properties:
+        grid_version_id: { type: string, format: uuid }
+        status: { type: string }
+        row_count: { type: integer }
+        audit_ref: { type: string }
+        correlation_id: { type: string }
+    BaseGridLookupResponse:
+      type: object
+      required: ["grid_version_id", "row_id", "lock_period_days", "note_rate", "base_price", "row_hash", "bucket_key_hash", "correlation_id"]
+      properties:
+        grid_version_id: { type: string, format: uuid }
+        row_id: { type: string, format: uuid }
+        lock_period_days: { type: integer }
+        note_rate: { type: string }
+        base_price: { type: string }
+        row_hash: { type: string }
+        bucket_key_hash: { type: string }
+        correlation_id: { type: string }
+    FinalPriceRequest:
+      type: object
+      required: ["selection_id", "scenario_id", "scenario_hash", "pricing_config_version_refs", "as_of"]
+      properties:
+        selection_id: { type: string, format: uuid }
+        scenario_id: { type: string }
+        scenario_hash: { type: string }
+        pricing_config_version_refs:
+          type: array
+          items: { type: string }
+        as_of: { type: string, format: date-time }
+        quote_request_id: { type: string, nullable: true }
+        dry_run: { type: boolean }
+    FinalPriceResponse:
+      type: object
+      required: ["final_price_id", "selected_note_rate", "lock_period_days", "base_price", "adjustments", "subtotal", "cap_floor_results", "rounded_final_price", "ledger", "version_graph", "result_hash"]
+      properties:
+        final_price_id: { type: string, format: uuid }
+        selected_note_rate: { type: string }
+        lock_period_days: { type: integer }
+        base_price: { type: string }
+        adjustments:
+          type: array
+          items: { $ref: "#/components/schemas/FinalPriceAdjustment" }
+        subtotal: { type: string }
+        cap_floor_results:
+          type: array
+          items: { type: object }
+        rounded_final_price: { type: string }
+        ledger:
+          type: array
+          items: { $ref: "#/components/schemas/FinalPriceLedgerEntry" }
+        version_graph:
+          type: object
+          required: ["refs", "hash"]
+          properties:
+            refs:
+              type: array
+              items: { type: string }
+            hash: { type: string }
+        result_hash: { type: string }
+    FinalPriceAdjustment:
+      type: object
+      required: ["rule_id", "version_ref", "reason_code", "amount", "input_value", "output_value"]
+      properties:
+        rule_id: { type: string }
+        version_ref: { type: string }
+        reason_code: { type: string }
+        amount: { type: string }
+        input_value: { type: string }
+        output_value: { type: string }
+    FinalPriceLedgerEntry:
+      type: object
+      required: ["ordinal", "step", "input_value", "operation", "output_value", "config_ref", "reason_code"]
+      properties:
+        ordinal: { type: integer }
+        step: { type: string }
+        input_value: { type: string, nullable: true }
+        operation: { type: string }
+        output_value: { type: string, nullable: true }
+        config_ref: { type: string, nullable: true }
+        reason_code: { type: string }
+        rounding_mode: { type: string, nullable: true }

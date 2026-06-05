@@ -1,0 +1,35 @@
+{
+  "story_id": "PII-12-S03",
+  "service": "governance-service",
+  "capability": "admin-governance",
+  "lifecycle_statuses": [
+    "DRAFT",
+    "VALIDATED",
+    "SUBMITTED",
+    "APPROVED",
+    "REJECTED",
+    "PUBLISHED",
+    "SCHEDULED",
+    "SUSPENDED",
+    "SUPERSEDED",
+    "EXPIRED",
+    "ARCHIVED",
+    "ROLLBACK_DRAFT"
+  ],
+  "events": [
+    "ConfigSubmittedForApproval.v1",
+    "ConfigApprovalDecisionRecorded.v1",
+    "ConfigVersionPublished.v1",
+    "ConfigVersionSuspended.v1",
+    "ConfigRollbackInitiated.v1"
+  ],
+  "fail_closed_errors": [
+    "POLICY_NOT_SATISFIED",
+    "VALIDATION_STALE",
+    "APPROVAL_REQUIRED",
+    "SOD_VIOLATION",
+    "PUBLISH_WINDOW_OVERLAP",
+    "VERSION_CONFLICT",
+    "IDEMPOTENCY_CONFLICT"
+  ]
+}

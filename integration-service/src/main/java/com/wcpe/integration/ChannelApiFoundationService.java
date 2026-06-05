@@ -259,7 +259,7 @@ public final class ChannelApiFoundationService {
 
   private boolean isAllowedTransition(ChannelStatus from, ChannelStatus to) {
     return switch (from) {
-      case DRAFT -> to == ChannelStatus.ACTIVE || to == ChannelStatus.SUSPENDED || to == ChannelStatus.DECOMMISSIONED;
+      case DRAFT -> to == ChannelStatus.ACTIVE;
       case ACTIVE -> to == ChannelStatus.SUSPENDED || to == ChannelStatus.DECOMMISSIONED;
       case SUSPENDED -> to == ChannelStatus.ACTIVE || to == ChannelStatus.DECOMMISSIONED;
       case DECOMMISSIONED -> false;

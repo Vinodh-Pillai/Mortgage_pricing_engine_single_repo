@@ -42,3 +42,23 @@ create table lock_audit_snapshots (
   payload_json jsonb not null,
   created_at timestamptz not null
 );
+
+create table lock_freshness_checks (
+  check_id varchar(64) primary key,
+  tenant_id uuid not null,
+  quote_id varchar(128) not null,
+  scenario_hash varchar(128) not null,
+  policy_version varchar(128) not null,
+  decision varchar(40) not null,
+  reason_codes jsonb not null,
+  evaluated_at timestamptz not null,
+  expires_at timestamptz not null,
+  result_hash varchar(128) not null,
+  created_by varchar(128) not null,
+  correlation_id varchar(128) not null,
+  constraint lock_freshness_checks_tenant_check unique (tenant_id, check_id),
+  constraint lock_freshness_checks_decision check (decision in ('FRESH', 'EXPIRES_SOON', 'STALE', 'POLICY_SUSPENDED', 'CONFIG_ERROR', 'UNKNOWN'))
+);
+
+create index lock_freshness_checks_tenant_quote_evaluated_idx on lock_freshness_checks (tenant_id, quote_id, evaluated_at desc);
+create index lock_freshness_checks_tenant_result_hash_idx on lock_freshness_checks (tenant_id, result_hash);

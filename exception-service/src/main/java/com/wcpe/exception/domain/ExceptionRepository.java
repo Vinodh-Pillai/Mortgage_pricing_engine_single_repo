@@ -16,9 +16,13 @@ public class ExceptionRepository {
   private final ConcurrentHashMap<String, String> concessionIdempotencyIndex = new ConcurrentHashMap<>();
   private final ConcurrentHashMap<String, ExceptionModels.ApprovalDecisionRecord> approvalStore = new ConcurrentHashMap<>();
   private final ConcurrentHashMap<String, String> approvalIdempotencyIndex = new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<String, ExceptionModels.ConcessionApplicationRecord> applicationStore = new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<String, String> applicationIdempotencyIndex = new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<String, String> applicationTargetIndex = new ConcurrentHashMap<>();
   private final AtomicLong sequence = new AtomicLong(0);
   private final AtomicLong concessionSequence = new AtomicLong(0);
   private final AtomicLong approvalSequence = new AtomicLong(0);
+  private final AtomicLong applicationSequence = new AtomicLong(0);
 
   public ExceptionModels.ExceptionRequestRecord create(ExceptionModels.ExceptionRequestCreate request) {
     String id = "EXC-" + sequence.incrementAndGet();
@@ -79,6 +83,7 @@ public class ExceptionRepository {
       request.reasonCode(),
       commentsRedacted,
       List.copyOf(request.evidenceRefs()),
+      request.expiration(),
       request.concessionPolicyVersionId(),
       route.authorityMatrixVersionId(),
       request.reasonCodeVersionId(),
@@ -155,6 +160,7 @@ public class ExceptionRepository {
       request.reasonCode(),
       request.commentsRedacted(),
       request.evidenceRefs(),
+      request.expiration(),
       request.concessionPolicyVersionId(),
       request.authorityMatrixVersionId(),
       request.reasonCodeVersionId(),
@@ -173,6 +179,101 @@ public class ExceptionRepository {
       now
     ));
     return decision;
+  }
+
+  public Optional<ExceptionModels.ConcessionApplicationRecord> findApplicationByIdempotencyKey(
+    UUID tenantId,
+    String idempotencyKey
+  ) {
+    String applicationId = applicationIdempotencyIndex.get(applicationIdempotencyIndexKey(tenantId, idempotencyKey));
+    if (applicationId == null) {
+      return Optional.empty();
+    }
+    return Optional.ofNullable(applicationStore.get(applicationId));
+  }
+
+  public Optional<ExceptionModels.ConcessionApplicationRecord> findApplicationByTarget(
+    UUID tenantId,
+    String concessionRequestId,
+    ExceptionModels.ApplicationTarget target
+  ) {
+    String applicationId = applicationTargetIndex.get(applicationTargetIndexKey(tenantId, concessionRequestId, target));
+    if (applicationId == null) {
+      return Optional.empty();
+    }
+    return Optional.ofNullable(applicationStore.get(applicationId));
+  }
+
+  public ExceptionModels.ConcessionApplicationRecord applyConcession(
+    ExceptionModels.PricingConcessionRequestRecord request,
+    ExceptionModels.ApplyApprovedConcessionRequest command,
+    String pricingLedgerEntryId,
+    String afterPriceHash,
+    String replayHash,
+    String outboxEventType
+  ) {
+    String applicationId = "APP-" + applicationSequence.incrementAndGet();
+    Instant now = Instant.now();
+    ExceptionModels.ApplicationTarget target = command.target();
+    ExceptionModels.ConcessionApplicationRecord record = new ExceptionModels.ConcessionApplicationRecord(
+      request.tenantId(),
+      applicationId,
+      request.concessionRequestId(),
+      target.targetType(),
+      target.quoteId(),
+      target.lockId(),
+      request.requestedAmount(),
+      pricingLedgerEntryId,
+      command.expectedLedgerHash(),
+      afterPriceHash,
+      command.pricingRuleVersionId(),
+      command.policyVersionId(),
+      command.precedence().precedenceConfigVersionId(),
+      command.precedence().scale(),
+      command.precedence().roundingMode(),
+      ExceptionModels.ConcessionRequestStatus.APPLIED,
+      command.idempotencyKey(),
+      command.actorId(),
+      command.correlationId(),
+      "AUDIT-" + applicationId,
+      outboxEventType,
+      replayHash,
+      request.version() + 1,
+      now
+    );
+    applicationStore.put(applicationId, record);
+    applicationIdempotencyIndex.put(applicationIdempotencyIndexKey(request.tenantId(), command.idempotencyKey()), applicationId);
+    applicationTargetIndex.put(applicationTargetIndexKey(request.tenantId(), request.concessionRequestId(), target), applicationId);
+    concessionStore.put(request.concessionRequestId(), new ExceptionModels.PricingConcessionRequestRecord(
+      request.tenantId(),
+      request.concessionRequestId(),
+      request.quoteId(),
+      request.scenarioId(),
+      request.lockId(),
+      ExceptionModels.ConcessionRequestStatus.APPLIED,
+      request.requestedAmount(),
+      request.reasonCode(),
+      request.commentsRedacted(),
+      request.evidenceRefs(),
+      request.expiration(),
+      request.concessionPolicyVersionId(),
+      request.authorityMatrixVersionId(),
+      request.reasonCodeVersionId(),
+      request.quoteSnapshotHash(),
+      request.approvalRouteHash(),
+      request.nextApproverGroups(),
+      request.sla(),
+      request.idempotencyKey(),
+      request.actorId(),
+      request.correlationId(),
+      request.auditRef(),
+      request.outboxEventType(),
+      request.requestHash(),
+      request.version() + 1,
+      request.createdAt(),
+      now
+    ));
+    return record;
   }
 
   public Optional<ExceptionModels.ExceptionRequestRecord> transition(String id, ExceptionModels.ExceptionState target) {
@@ -206,9 +307,13 @@ public class ExceptionRepository {
     concessionIdempotencyIndex.clear();
     approvalStore.clear();
     approvalIdempotencyIndex.clear();
+    applicationStore.clear();
+    applicationIdempotencyIndex.clear();
+    applicationTargetIndex.clear();
     sequence.set(0);
     concessionSequence.set(0);
     approvalSequence.set(0);
+    applicationSequence.set(0);
   }
 
   private static String concessionIdempotencyIndexKey(UUID tenantId, String idempotencyKey) {
@@ -217,5 +322,18 @@ public class ExceptionRepository {
 
   private static String approvalIdempotencyIndexKey(UUID tenantId, String idempotencyKey) {
     return tenantId + ":" + idempotencyKey;
+  }
+
+  private static String applicationIdempotencyIndexKey(UUID tenantId, String idempotencyKey) {
+    return tenantId + ":" + idempotencyKey;
+  }
+
+  private static String applicationTargetIndexKey(
+    UUID tenantId,
+    String concessionRequestId,
+    ExceptionModels.ApplicationTarget target
+  ) {
+    return tenantId + ":" + concessionRequestId + ":" + target.targetType() + ":"
+      + Objects.toString(target.quoteId(), "") + ":" + Objects.toString(target.lockId(), "");
   }
 }

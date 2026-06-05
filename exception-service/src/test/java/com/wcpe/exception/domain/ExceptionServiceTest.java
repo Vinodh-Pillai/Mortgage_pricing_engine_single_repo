@@ -361,6 +361,200 @@ class ExceptionServiceTest {
     assertEquals("IDEMPOTENCY_CONFLICT", error.code());
   }
 
+  @Test
+  void applyApprovedConcessionAppendsDeterministicLedgerAuditAndEvent() {
+    ExceptionModels.PricingConcessionRequestStatus created = service.createPricingConcession(concessionRequest(
+      "IDEMP-014",
+      "clean narrative",
+      false,
+      false
+    ));
+    service.approveConcession(approvalRequest(
+      created.concessionRequestId(),
+      "APPROVAL-IDEMP-008",
+      "pricing-desk-manager",
+      "approval-manager-1",
+      created.version()
+    ));
+
+    ExceptionModels.ConcessionApplicationResponse applied = service.applyApprovedConcession(applyRequest(
+      created.concessionRequestId(),
+      "APPLY-IDEMP-001",
+      2,
+      "quote-hash-v1",
+      true
+    ));
+
+    assertEquals(ExceptionModels.ConcessionRequestStatus.APPLIED, applied.status());
+    assertEquals(ExceptionModels.ApplicationTargetType.QUOTE, applied.targetType());
+    assertEquals("QUOTE-PII11", applied.quoteId());
+    assertTrue(applied.pricingLedgerEntryId().startsWith("LEDGER-"));
+    assertEquals("ledger-hash-before-v1", applied.beforePriceHash());
+    assertNotEquals(applied.beforePriceHash(), applied.afterPriceHash());
+    assertEquals("PRICING-RULE-V1", applied.pricingRuleVersionId());
+    assertEquals("POLICY-V1", applied.policyVersionId());
+    assertEquals("PRECEDENCE-V1", applied.precedenceConfigVersionId());
+    assertEquals("ConcessionAppliedToQuote.v1", applied.outboxEventType());
+    assertTrue(applied.auditRef().startsWith("AUDIT-APP-"));
+    assertNotNull(applied.replayHash());
+    assertEquals(ExceptionModels.ConcessionRequestStatus.APPLIED, service.pricingConcessionStatus(
+      "11111111-1111-1111-1111-111111111111",
+      created.concessionRequestId()
+    ).status());
+  }
+
+  @Test
+  void applyApprovedConcessionRejectsUnapprovedRequest() {
+    ExceptionModels.PricingConcessionRequestStatus created = service.createPricingConcession(concessionRequest(
+      "IDEMP-015",
+      "clean narrative",
+      false,
+      false
+    ));
+
+    ExceptionServiceException error = assertThrows(
+      ExceptionServiceException.class,
+      () -> service.applyApprovedConcession(applyRequest(
+        created.concessionRequestId(),
+        "APPLY-IDEMP-002",
+        created.version(),
+        "quote-hash-v1",
+        true
+      ))
+    );
+
+    assertEquals("REQUEST_NOT_APPROVED", error.code());
+  }
+
+  @Test
+  void applyApprovedConcessionRejectsChangedQuoteHash() {
+    ExceptionModels.PricingConcessionRequestStatus created = approvedConcession("IDEMP-016", "APPROVAL-IDEMP-009");
+
+    ExceptionServiceException error = assertThrows(
+      ExceptionServiceException.class,
+      () -> service.applyApprovedConcession(applyRequest(
+        created.concessionRequestId(),
+        "APPLY-IDEMP-003",
+        2,
+        "quote-hash-changed",
+        true
+      ))
+    );
+
+    assertEquals("QUOTE_HASH_CHANGED", error.code());
+  }
+
+  @Test
+  void applyApprovedConcessionRejectsUnresolvedEligibilityException() {
+    ExceptionModels.PricingConcessionRequestStatus created = approvedConcession("IDEMP-017", "APPROVAL-IDEMP-010");
+
+    ExceptionServiceException error = assertThrows(
+      ExceptionServiceException.class,
+      () -> service.applyApprovedConcession(applyRequest(
+        created.concessionRequestId(),
+        "APPLY-IDEMP-004",
+        2,
+        "quote-hash-v1",
+        false
+      ))
+    );
+
+    assertEquals("ELIGIBILITY_EXCEPTION_UNRESOLVED", error.code());
+  }
+
+  @Test
+  void applyApprovedConcessionIsIdempotentForSameTarget() {
+    ExceptionModels.PricingConcessionRequestStatus created = approvedConcession("IDEMP-018", "APPROVAL-IDEMP-011");
+    ExceptionModels.ApplyApprovedConcessionRequest request = applyRequest(
+      created.concessionRequestId(),
+      "APPLY-IDEMP-005",
+      2,
+      "quote-hash-v1",
+      true
+    );
+
+    ExceptionModels.ConcessionApplicationResponse first = service.applyApprovedConcession(request);
+    ExceptionModels.ConcessionApplicationResponse replayed = service.applyApprovedConcession(request);
+
+    assertEquals(first.applicationId(), replayed.applicationId());
+    assertEquals(first.replayHash(), replayed.replayHash());
+  }
+
+  @Test
+  void applyApprovedConcessionRejectsSecondApplicationToSameTarget() {
+    ExceptionModels.PricingConcessionRequestStatus created = approvedConcession("IDEMP-019", "APPROVAL-IDEMP-012");
+    service.applyApprovedConcession(applyRequest(
+      created.concessionRequestId(),
+      "APPLY-IDEMP-006",
+      2,
+      "quote-hash-v1",
+      true
+    ));
+
+    ExceptionServiceException error = assertThrows(
+      ExceptionServiceException.class,
+      () -> service.applyApprovedConcession(applyRequest(
+        created.concessionRequestId(),
+        "APPLY-IDEMP-007",
+        3,
+        "quote-hash-v1",
+        true
+      ))
+    );
+
+    assertEquals("REQUEST_NOT_APPROVED", error.code());
+  }
+
+  @Test
+  void applyApprovedConcessionFailsClosedWhenPrecedenceConfigMissing() {
+    ExceptionModels.PricingConcessionRequestStatus created = approvedConcession("IDEMP-020", "APPROVAL-IDEMP-013");
+    ExceptionModels.ApplyApprovedConcessionRequest invalid = new ExceptionModels.ApplyApprovedConcessionRequest(
+      UUID.fromString("11111111-1111-1111-1111-111111111111"),
+      created.concessionRequestId(),
+      new ExceptionModels.ApplicationTarget(
+        ExceptionModels.ApplicationTargetType.QUOTE,
+        "QUOTE-PII11",
+        null,
+        "quote-hash-v1",
+        null
+      ),
+      2,
+      "quote-hash-v1",
+      "ledger-hash-before-v1",
+      "PRICING-RULE-V1",
+      "POLICY-V1",
+      new ExceptionModels.ApplicationPrecedence(" ", 8, "HALF_UP"),
+      true,
+      "pricing-desk-user-1",
+      "APPLY-IDEMP-008",
+      "corr-apply-pii11"
+    );
+
+    ExceptionServiceException error = assertThrows(
+      ExceptionServiceException.class,
+      () -> service.applyApprovedConcession(invalid)
+    );
+
+    assertEquals("POLICY_NOT_SATISFIED", error.code());
+  }
+
+  private ExceptionModels.PricingConcessionRequestStatus approvedConcession(String requestIdempotencyKey, String approvalIdempotencyKey) {
+    ExceptionModels.PricingConcessionRequestStatus created = service.createPricingConcession(concessionRequest(
+      requestIdempotencyKey,
+      "clean narrative",
+      false,
+      false
+    ));
+    service.approveConcession(approvalRequest(
+      created.concessionRequestId(),
+      approvalIdempotencyKey,
+      "pricing-desk-manager",
+      "approval-manager-1",
+      created.version()
+    ));
+    return created;
+  }
+
   private static ExceptionModels.PricingConcessionRequestCreate concessionRequest(
     String idempotencyKey,
     String narrative,
@@ -415,6 +609,36 @@ class ExceptionServiceTest {
       idempotencyKey,
       "corr-approval-pii11",
       expectedRequestVersion
+    );
+  }
+
+  private static ExceptionModels.ApplyApprovedConcessionRequest applyRequest(
+    String concessionRequestId,
+    String idempotencyKey,
+    int expectedRequestVersion,
+    String currentQuoteSnapshotHash,
+    boolean eligibilityExceptionsResolved
+  ) {
+    return new ExceptionModels.ApplyApprovedConcessionRequest(
+      UUID.fromString("11111111-1111-1111-1111-111111111111"),
+      concessionRequestId,
+      new ExceptionModels.ApplicationTarget(
+        ExceptionModels.ApplicationTargetType.QUOTE,
+        "QUOTE-PII11",
+        null,
+        currentQuoteSnapshotHash,
+        null
+      ),
+      expectedRequestVersion,
+      "quote-hash-v1",
+      "ledger-hash-before-v1",
+      "PRICING-RULE-V1",
+      "POLICY-V1",
+      new ExceptionModels.ApplicationPrecedence("PRECEDENCE-V1", 8, "HALF_UP"),
+      eligibilityExceptionsResolved,
+      "pricing-desk-user-1",
+      idempotencyKey,
+      "corr-apply-pii11"
     );
   }
 }

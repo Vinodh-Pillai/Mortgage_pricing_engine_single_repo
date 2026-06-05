@@ -502,6 +502,105 @@ class RateFeedService {
     }
   }
 
+  @Transactional
+  public RateFeedModels.OcrExtractionResponse startOcrExtraction(UUID tenantId, UUID batchId, RateFeedModels.StartOcrExtractionRequest request,
+      String idempotencyKey, String actor, String correlationId) {
+    RateFeedRoles.require(RateFeedRoles.RATE_FEED_UPLOAD);
+    validateStartOcrExtraction(request);
+    Map<String, Object> idempotencyIdentity = new LinkedHashMap<>();
+    idempotencyIdentity.put("command", "startOcrExtraction");
+    idempotencyIdentity.put("batchId", batchId);
+    idempotencyIdentity.put("body", request);
+    return repository.idempotent(tenantId, idempotencyKey, idempotencyIdentity, RateFeedModels.OcrExtractionResponse.class,
+        () -> doStartOcrExtraction(tenantId, batchId, request, actor(actor), correlation(correlationId), idempotencyKey));
+  }
+
+  private RateFeedModels.OcrExtractionResponse doStartOcrExtraction(UUID tenantId, UUID batchId, RateFeedModels.StartOcrExtractionRequest request,
+      String actor, String correlationId, String idempotencyKey) {
+    RateFeedRepository.BatchParseSource batch = repository.batchParseSource(tenantId, batchId);
+    if (!request.expectedFileSha256().equalsIgnoreCase(batch.fileSha256())) throw validation("SOURCE_FILE_HASH_MISMATCH", "expectedFileSha256 does not match the uploaded batch.");
+    if (!Set.of("UPLOADED", "PARSE_FAILED", "OCR_FAILED", "OCR_REJECTED").contains(batch.status())) {
+      throw new RateFeedException(HttpStatus.CONFLICT, "BATCH_NOT_OCR_READY", "Batch must be uploaded or retryable before OCR extraction starts.");
+    }
+    UUID extractionId = UUID.randomUUID();
+    Instant now = Instant.now();
+    String resultHash = Hashing.sha256(repository.json(Map.of("batchId", batchId, "ocrExtractionId", extractionId, "ocrProfileId", request.ocrProfileId(), "status", "OCR_REVIEW_REQUIRED")));
+    jdbc.update("insert into rate_feed.ocr_extraction(tenant_id,ocr_extraction_id,batch_id,ocr_profile_id,engine_version,status,page_count,min_confidence,review_required,created_at,result_hash,idempotency_key) values (?,?,?,?,?,?,?,?,?,?,?,?)",
+        tenantId, extractionId, batchId, request.ocrProfileId(), "local-adapter-contract-v1", "OCR_REVIEW_REQUIRED", 0, null, true, Timestamp.from(now), resultHash, idempotencyKey);
+    jdbc.update("update rate_feed.rate_feed_batch set status='OCR_REVIEW_REQUIRED', updated_at=now(), result_hash=? where tenant_id=? and batch_id=?", resultHash, tenantId, batchId);
+    repository.outbox(tenantId, batchId, "RateSheetOcrExtracted.v1", 1, actor, correlationId, parseHeaders(batch),
+        Map.of("batchId", batchId, "ocrExtractionId", extractionId, "ocrProfileId", request.ocrProfileId(), "status", "OCR_REVIEW_REQUIRED", "resultHash", resultHash));
+    repository.audit(tenantId, extractionId, "RATE_SHEET_OCR_EXTRACTED", "OcrExtraction", actor, correlationId, null, resultHash,
+        Map.of("batchId", batchId, "ocrExtractionId", extractionId, "reviewRequired", true));
+    return new RateFeedModels.OcrExtractionResponse(extractionId, batchId, "OCR_REVIEW_REQUIRED", resultHash);
+  }
+
+  @Transactional
+  public RateFeedModels.OcrCellReviewResponse reviewOcrCell(UUID tenantId, UUID ocrExtractionId, UUID cellId, RateFeedModels.ReviewOcrCellRequest request,
+      String actor, String correlationId) {
+    RateFeedRoles.require(RateFeedRoles.RATE_FEED_OCR_REVIEW);
+    if (request == null) throw validation("REQUEST_BODY_REQUIRED", "Request body is required.");
+    if (request.reviewedText() == null || request.reviewedText().isBlank()) throw validation("OCR_REVIEW_VALUE_REQUIRED", "reviewedText is required.");
+    rejectFormulaMetadata("reviewedText", request.reviewedText());
+    String resultHash = Hashing.sha256(repository.json(Map.of("ocrExtractionId", ocrExtractionId, "cellId", cellId, "reviewedText", request.reviewedText())));
+    int rows = jdbc.update("update rate_feed.ocr_extracted_cell set reviewed_text=?, reviewed_by=?, reviewed_at=now(), status='REVIEWED' where tenant_id=? and ocr_extraction_id=? and cell_id=?",
+        request.reviewedText(), actor(actor), tenantId, ocrExtractionId, cellId);
+    if (rows == 0) throw new RateFeedException(HttpStatus.NOT_FOUND, "OCR_CELL_NOT_FOUND", "OCR cell was not found.");
+    jdbc.update("update rate_feed.ocr_extraction set status='OCR_REVIEW_REQUIRED', result_hash=?, updated_at=now() where tenant_id=? and ocr_extraction_id=?", resultHash, tenantId, ocrExtractionId);
+    repository.audit(tenantId, ocrExtractionId, "RATE_SHEET_OCR_CELL_REVIEWED", "OcrExtraction", actor(actor), correlation(correlationId), null, resultHash,
+        Map.of("ocrExtractionId", ocrExtractionId, "cellId", cellId));
+    return new RateFeedModels.OcrCellReviewResponse(ocrExtractionId, cellId, "REVIEWED", resultHash);
+  }
+
+  @Transactional
+  public RateFeedModels.OcrApprovalResponse approveOcrExtraction(UUID tenantId, UUID ocrExtractionId, RateFeedModels.ApproveOcrExtractionRequest request,
+      String actor, String correlationId) {
+    RateFeedRoles.require(RateFeedRoles.RATE_FEED_OCR_REVIEW);
+    Map<String, Object> extraction = ocrExtraction(tenantId, ocrExtractionId);
+    String currentHash = Objects.toString(extraction.get("result_hash"), "");
+    if (request != null && request.expectedResultHash() != null && !request.expectedResultHash().isBlank() && !request.expectedResultHash().equals(currentHash)) {
+      throw new RateFeedException(HttpStatus.CONFLICT, "STALE_OCR_RESULT_HASH", "expectedResultHash does not match the latest OCR extraction result.");
+    }
+    UUID batchId = (UUID) extraction.get("batch_id");
+    List<OcrCellForApproval> cells = ocrCellsForApproval(tenantId, ocrExtractionId);
+    if (cells.isEmpty() || cells.stream().anyMatch(cell -> cell.reviewedText() == null || cell.reviewedText().isBlank() || !Set.of("REVIEWED", "ACCEPTED").contains(cell.status()))) {
+      throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "OCR_REVIEW_REQUIRED", "All OCR cells must be human reviewed before approval.");
+    }
+    String parserHandoff = "local://synthetic/ocr/" + ocrExtractionId + ".csv";
+    String csvHash = Hashing.sha256(cells.stream()
+        .sorted(Comparator.comparingInt(OcrCellForApproval::rowIndex).thenComparingInt(OcrCellForApproval::columnIndex))
+        .map(cell -> cell.rowIndex() + "," + cell.columnIndex() + "," + cell.reviewedText())
+        .reduce("", (left, right) -> left + "\n" + right));
+    String resultHash = Hashing.sha256(repository.json(Map.of("ocrExtractionId", ocrExtractionId, "batchId", batchId, "parserHandoff", parserHandoff, "csvHash", csvHash)));
+    jdbc.update("update rate_feed.ocr_extraction set status='APPROVED', completed_at=now(), review_required=false, result_hash=?, updated_at=now() where tenant_id=? and ocr_extraction_id=?",
+        resultHash, tenantId, ocrExtractionId);
+    jdbc.update("update rate_feed.rate_feed_batch set status='OCR_APPROVED', updated_at=now(), result_hash=? where tenant_id=? and batch_id=?", resultHash, tenantId, batchId);
+    repository.outbox(tenantId, batchId, "RateSheetOcrReviewApproved.v1", 1, actor(actor), correlation(correlationId), null,
+        Map.of("batchId", batchId, "ocrExtractionId", ocrExtractionId, "parserHandoffArtifact", parserHandoff, "cellCount", cells.size(), "resultHash", resultHash));
+    repository.audit(tenantId, ocrExtractionId, "RATE_SHEET_OCR_REVIEW_APPROVED", "OcrExtraction", actor(actor), correlation(correlationId), currentHash, resultHash,
+        Map.of("batchId", batchId, "ocrExtractionId", ocrExtractionId, "parserHandoffArtifact", parserHandoff, "cellCount", cells.size()));
+    return new RateFeedModels.OcrApprovalResponse(ocrExtractionId, batchId, "APPROVED", parserHandoff, resultHash);
+  }
+
+  private void validateStartOcrExtraction(RateFeedModels.StartOcrExtractionRequest request) {
+    if (request == null) throw validation("REQUEST_BODY_REQUIRED", "Request body is required.");
+    if (request.expectedFileSha256() == null || !request.expectedFileSha256().matches("^[0-9a-fA-F]{64}$")) throw validation("INVALID_FILE_HASH", "expectedFileSha256 must be a 64 character SHA-256 hex value.");
+    if (request.ocrProfileId() == null) throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "OCR_PROFILE_NOT_FOUND", "ocrProfileId is required for governed local OCR.");
+  }
+
+  private Map<String, Object> ocrExtraction(UUID tenantId, UUID ocrExtractionId) {
+    try {
+      return jdbc.queryForMap("select ocr_extraction_id,batch_id,status,result_hash from rate_feed.ocr_extraction where tenant_id=? and ocr_extraction_id=?", tenantId, ocrExtractionId);
+    } catch (Exception ex) {
+      throw new RateFeedException(HttpStatus.NOT_FOUND, "OCR_EXTRACTION_NOT_FOUND", "OCR extraction was not found.");
+    }
+  }
+
+  private List<OcrCellForApproval> ocrCellsForApproval(UUID tenantId, UUID ocrExtractionId) {
+    return jdbc.query("select cell_id,row_index,column_index,raw_text,reviewed_text,status from rate_feed.ocr_extracted_cell where tenant_id=? and ocr_extraction_id=? order by page_number,row_index,column_index",
+        (rs, row) -> new OcrCellForApproval(rs.getObject("cell_id", UUID.class), rs.getInt("row_index"), rs.getInt("column_index"), rs.getString("raw_text"), rs.getString("reviewed_text"), rs.getString("status")), tenantId, ocrExtractionId);
+  }
+
   public RateFeedModels.ParseResultPage parseResults(UUID tenantId, UUID batchId, String severity, int page, int size) {
     RateFeedRoles.require(RateFeedRoles.RATE_FEED_VIEW);
     int boundedPage = Math.max(page, 0);
@@ -582,6 +681,143 @@ class RateFeedService {
     List<RateFeedModels.NormalizedEntryResponse> entries = jdbc.query("select entry_id,batch_id,source_row_id,canonical_product_key,rate_percent,price_points,lock_period_days,severity,message,mapping_refs ->> 'profileVersion' as mapping_version from rate_feed.normalized_rate_sheet_entry" + where + " order by source_row_id, created_at limit ? offset ?",
         (rs, row) -> new RateFeedModels.NormalizedEntryResponse(rs.getObject("entry_id", UUID.class), rs.getObject("batch_id", UUID.class), rs.getInt("source_row_id"), rs.getString("canonical_product_key"), rs.getBigDecimal("rate_percent"), rs.getBigDecimal("price_points"), rs.getInt("lock_period_days"), rs.getString("severity"), rs.getString("message"), rs.getString("mapping_version")), params.toArray());
     return new RateFeedModels.NormalizedEntryPage(entries, boundedPage, boundedSize, total == null ? 0 : total);
+  }
+
+  @Transactional
+  public RateFeedModels.ValidateBatchResponse validateBatch(UUID tenantId, UUID batchId, RateFeedModels.ValidateBatchRequest request, String idempotencyKey, String actor, String correlationId) {
+    RateFeedRoles.require(RateFeedRoles.RATE_FEED_VALIDATE);
+    validateBatchRequest(request);
+    Map<String, Object> idempotencyIdentity = new LinkedHashMap<>();
+    idempotencyIdentity.put("command", "validateRateFeedBatch");
+    idempotencyIdentity.put("batchId", batchId);
+    idempotencyIdentity.put("body", request);
+    return repository.idempotent(tenantId, idempotencyKey, idempotencyIdentity, RateFeedModels.ValidateBatchResponse.class,
+        () -> doValidateBatch(tenantId, batchId, request, actor(actor), correlation(correlationId), idempotencyKey));
+  }
+
+  private RateFeedModels.ValidateBatchResponse doValidateBatch(UUID tenantId, UUID batchId, RateFeedModels.ValidateBatchRequest request, String actor, String correlationId, String idempotencyKey) {
+    RateFeedRepository.BatchParseSource batch = repository.batchParseSource(tenantId, batchId);
+    if (!"NORMALIZED".equals(batch.status())) throw new RateFeedException(HttpStatus.CONFLICT, "BATCH_NOT_NORMALIZED", "Batch must be normalized before validation.");
+    String normalizationHash = latestNormalizationResultHash(tenantId, batchId);
+    if (!request.expectedNormalizationHash().equals(normalizationHash)) {
+      throw new RateFeedException(HttpStatus.CONFLICT, "STALE_NORMALIZATION_HASH", "expectedNormalizationHash does not match the latest normalization result.");
+    }
+
+    UUID jobId = UUID.randomUUID();
+    Instant startedAt = Instant.now();
+    String profileVersion = request.validationProfileId().toString();
+    jdbc.update("insert into rate_feed.rate_feed_validation_job(tenant_id,validation_job_id,batch_id,profile_id,profile_version,status,started_at,idempotency_key) values (?,?,?,?,?,?,?,?)",
+        tenantId, jobId, batchId, request.validationProfileId(), profileVersion, "RUNNING", Timestamp.from(startedAt), idempotencyKey);
+
+    List<ValidationCandidate> entries = validationCandidates(tenantId, batchId);
+    if (entries.isEmpty()) throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "BATCH_NOT_NORMALIZED", "Normalized batch contains no entries to validate.");
+    List<ValidationFindingDraft> findings = validationFindings(entries, profileVersion);
+    int blockers = (int) findings.stream().filter(f -> f.severity() == RateFeedModels.ValidationFindingSeverity.BLOCKER).count();
+    int warnings = (int) findings.stream().filter(f -> f.severity() == RateFeedModels.ValidationFindingSeverity.WARNING).count();
+    String status = blockers > 0 ? "FAILED" : (warnings > 0 ? "PASSED_WITH_WARNINGS" : "PASSED");
+    String resultHash = Hashing.sha256(repository.json(Map.of(
+        "batchId", batchId,
+        "profileVersion", profileVersion,
+        "status", status,
+        "findings", findings.stream().map(ValidationFindingDraft::hashMaterial).toList())));
+
+    jdbc.update("delete from rate_feed.rate_feed_validation_finding where tenant_id=? and batch_id=?", tenantId, batchId);
+    for (ValidationFindingDraft finding : findings) {
+      jdbc.update("insert into rate_feed.rate_feed_validation_finding(tenant_id,finding_id,validation_job_id,batch_id,entry_id,severity,rule_code,rule_version,field_name,message_code,message_params,remediation_code,source_row_number,created_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          tenantId, UUID.randomUUID(), jobId, batchId, finding.entryId(), finding.severity().name(), finding.ruleCode(), finding.ruleVersion(), finding.fieldName(), finding.messageCode(), repository.jsonb(finding.messageParams()), finding.remediationCode(), finding.sourceRowNumber(), Timestamp.from(startedAt));
+    }
+    jdbc.update("update rate_feed.rate_feed_validation_job set status=?, completed_at=now(), blocking_error_count=?, warning_count=?, result_hash=? where tenant_id=? and validation_job_id=?",
+        status, blockers, warnings, resultHash, tenantId, jobId);
+    jdbc.update("update rate_feed.rate_feed_batch set status=?, updated_at=now(), result_hash=? where tenant_id=? and batch_id=?",
+        status.equals("FAILED") ? "VALIDATION_FAILED" : "VALIDATION_PASSED", resultHash, tenantId, batchId);
+
+    String eventType = status.equals("FAILED") ? "RateSheetValidationFailed.v1" : "RateSheetValidationPassed.v1";
+    repository.outbox(tenantId, batchId, eventType, 1, actor, correlationId, parseHeaders(batch),
+        Map.of("batchId", batchId, "validationJobId", jobId, "profileId", request.validationProfileId(), "profileVersion", profileVersion, "status", status, "blockingErrorCount", blockers, "warningCount", warnings, "resultHash", resultHash));
+    repository.audit(tenantId, batchId, status.equals("FAILED") ? "RATE_SHEET_VALIDATION_FAILED" : "RATE_SHEET_VALIDATION_PASSED", "RateFeedBatch", actor, correlationId, normalizationHash, resultHash,
+        Map.of("batchId", batchId, "validationJobId", jobId, "profileId", request.validationProfileId(), "status", status, "blockingErrorCount", blockers, "warningCount", warnings, "resultHash", resultHash));
+    return new RateFeedModels.ValidateBatchResponse(jobId, status);
+  }
+
+  public RateFeedModels.ValidationReportResponse validationReport(UUID tenantId, UUID batchId) {
+    RateFeedRoles.require(RateFeedRoles.RATE_FEED_VIEW);
+    RateFeedModels.ValidationReportResponse report = latestValidationReport(tenantId, batchId);
+    if (report == null) throw new RateFeedException(HttpStatus.NOT_FOUND, "VALIDATION_REPORT_NOT_FOUND", "Validation report was not found for this batch.");
+    return report;
+  }
+
+  private void validateBatchRequest(RateFeedModels.ValidateBatchRequest request) {
+    if (request == null) throw validation("REQUEST_BODY_REQUIRED", "Request body is required.");
+    if (request.expectedNormalizationHash() == null || request.expectedNormalizationHash().isBlank()) throw validation("NORMALIZATION_HASH_REQUIRED", "expectedNormalizationHash is required.");
+    rejectFormulaMetadata("expectedNormalizationHash", request.expectedNormalizationHash());
+    if (request.validationProfileId() == null) throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "VALIDATION_PROFILE_NOT_FOUND", "validationProfileId is required for governed validation.");
+  }
+
+  private String latestNormalizationResultHash(UUID tenantId, UUID batchId) {
+    try {
+      String hash = jdbc.queryForObject("select result_hash from rate_feed.rate_feed_normalization_job where tenant_id=? and batch_id=? order by completed_at desc nulls last, started_at desc limit 1", String.class, tenantId, batchId);
+      return hash == null ? "" : hash;
+    } catch (Exception ex) { return ""; }
+  }
+
+  private List<ValidationCandidate> validationCandidates(UUID tenantId, UUID batchId) {
+    return jdbc.query("select entry_id,source_row_id,canonical_product_key,lock_period_days,rate_percent,price_points,adjustment_type,adjustment_value,adjustment_unit,severity,message from rate_feed.normalized_rate_sheet_entry where tenant_id=? and batch_id=? order by source_row_id, created_at",
+        (rs, row) -> new ValidationCandidate(rs.getObject("entry_id", UUID.class), rs.getInt("source_row_id"), rs.getString("canonical_product_key"), rs.getInt("lock_period_days"), rs.getBigDecimal("rate_percent"), rs.getBigDecimal("price_points"), rs.getString("adjustment_type"), rs.getBigDecimal("adjustment_value"), rs.getString("adjustment_unit"), rs.getString("severity"), rs.getString("message")), tenantId, batchId);
+  }
+
+  private List<ValidationFindingDraft> validationFindings(List<ValidationCandidate> entries, String profileVersion) {
+    List<ValidationFindingDraft> findings = new ArrayList<>();
+    Map<String, ValidationCandidate> seen = new LinkedHashMap<>();
+    for (ValidationCandidate entry : entries) {
+      if (entry.canonicalProductKey() == null || entry.canonicalProductKey().isBlank()) {
+        findings.add(ValidationFindingDraft.blocker(entry, "REQUIRED_CANONICAL_FIELD", profileVersion, "canonical_product_key", "CANONICAL_PRODUCT_REQUIRED", "MAP_CANONICAL_PRODUCT"));
+      }
+      if (entry.lockPeriodDays() <= 0) {
+        findings.add(ValidationFindingDraft.blocker(entry, "REQUIRED_CANONICAL_FIELD", profileVersion, "lock_period_days", "LOCK_PERIOD_REQUIRED", "MAP_LOCK_PERIOD"));
+      }
+      if (entry.ratePercent() == null) {
+        findings.add(ValidationFindingDraft.blocker(entry, "REQUIRED_CANONICAL_FIELD", profileVersion, "rate_percent", "RATE_REQUIRED", "MAP_RATE"));
+      }
+      if (entry.pricePoints() == null) {
+        findings.add(ValidationFindingDraft.blocker(entry, "REQUIRED_CANONICAL_FIELD", profileVersion, "price_points", "PRICE_REQUIRED", "MAP_PRICE"));
+      }
+      if (partialAdjustment(entry)) {
+        findings.add(ValidationFindingDraft.blocker(entry, "ADJUSTMENT_DIMENSION_COMPLETE", profileVersion, "adjustment", "ADJUSTMENT_DIMENSION_INCOMPLETE", "COMPLETE_ADJUSTMENT_DIMENSION"));
+      }
+      if ("WARNING".equals(entry.severity())) {
+        findings.add(ValidationFindingDraft.warning(entry, "NORMALIZATION_WARNING", profileVersion, "normalized_entry", "NORMALIZED_ENTRY_WARNING", "REVIEW_NORMALIZATION_WARNING"));
+      }
+      String duplicateKey = entry.canonicalProductKey() + "|" + entry.lockPeriodDays() + "|" + valueKey(entry.ratePercent()) + "|" + valueKey(entry.pricePoints());
+      ValidationCandidate prior = seen.putIfAbsent(duplicateKey, entry);
+      if (prior != null) {
+        findings.add(ValidationFindingDraft.blocker(entry, "DUPLICATE_CANONICAL_ENTRY", profileVersion, "canonical_product_key", "DUPLICATE_CANONICAL_ENTRY", "REMOVE_DUPLICATE_ENTRY"));
+      }
+    }
+    return findings;
+  }
+
+  private static boolean partialAdjustment(ValidationCandidate entry) {
+    int populated = 0;
+    if (entry.adjustmentType() != null && !entry.adjustmentType().isBlank()) populated++;
+    if (entry.adjustmentValue() != null) populated++;
+    if (entry.adjustmentUnit() != null && !entry.adjustmentUnit().isBlank()) populated++;
+    return populated > 0 && populated < 3;
+  }
+
+  private static String valueKey(BigDecimal value) {
+    return value == null ? "" : value.stripTrailingZeros().toPlainString();
+  }
+
+  private RateFeedModels.ValidationReportResponse latestValidationReport(UUID tenantId, UUID batchId) {
+    try {
+      return jdbc.queryForObject("select validation_job_id,batch_id,status,profile_version,started_at,completed_at,blocking_error_count,warning_count,result_hash from rate_feed.rate_feed_validation_job where tenant_id=? and batch_id=? order by completed_at desc nulls last, started_at desc limit 1",
+          (rs, row) -> {
+            UUID jobId = rs.getObject("validation_job_id", UUID.class);
+            List<RateFeedModels.ValidationFindingRecord> findings = jdbc.query("select finding_id,entry_id,severity,rule_code,rule_version,field_name,message_code,message_params::text,remediation_code,source_row_number,created_at from rate_feed.rate_feed_validation_finding where tenant_id=? and validation_job_id=? order by severity, source_row_number, rule_code",
+                (frs, frow) -> new RateFeedModels.ValidationFindingRecord(frs.getObject("finding_id", UUID.class), frs.getObject("entry_id", UUID.class), RateFeedModels.ValidationFindingSeverity.valueOf(frs.getString("severity")), frs.getString("rule_code"), frs.getString("rule_version"), frs.getString("field_name"), frs.getString("message_code"), repository.read(frs.getString("message_params"), Map.class), frs.getString("remediation_code"), (Integer) frs.getObject("source_row_number"), frs.getTimestamp("created_at").toInstant()), tenantId, jobId);
+            return new RateFeedModels.ValidationReportResponse(jobId, rs.getObject("batch_id", UUID.class), rs.getString("status"), rs.getString("profile_version"), rs.getTimestamp("started_at").toInstant(), rs.getTimestamp("completed_at") == null ? null : rs.getTimestamp("completed_at").toInstant(), rs.getInt("blocking_error_count"), rs.getInt("warning_count"), rs.getString("result_hash"), findings);
+          }, tenantId, batchId);
+    } catch (Exception ex) { return null; }
   }
 
   private void validateNormalizeRequest(RateFeedModels.NormalizeBatchRequest request) {
@@ -1064,6 +1300,31 @@ class RateFeedService {
 
   private record ParsedCsv(int rowCount, List<ParsedField> fields) {}
   private record ParsedField(int sourceRowNumber, String fieldName, String rawValue, String candidateValue, int sourceColumn, String severity, String errorCode, String message) {}
+  private record OcrCellForApproval(UUID cellId, int rowIndex, int columnIndex, String rawText, String reviewedText, String status) {}
+  private record ValidationCandidate(UUID entryId, int sourceRowNumber, String canonicalProductKey, int lockPeriodDays, BigDecimal ratePercent, BigDecimal pricePoints, String adjustmentType, BigDecimal adjustmentValue, String adjustmentUnit, String severity, String message) {}
+  private record ValidationFindingDraft(UUID entryId, RateFeedModels.ValidationFindingSeverity severity, String ruleCode, String ruleVersion, String fieldName, String messageCode, Map<String, Object> messageParams, String remediationCode, Integer sourceRowNumber) {
+    static ValidationFindingDraft blocker(ValidationCandidate entry, String ruleCode, String ruleVersion, String fieldName, String messageCode, String remediationCode) {
+      return finding(entry, RateFeedModels.ValidationFindingSeverity.BLOCKER, ruleCode, ruleVersion, fieldName, messageCode, remediationCode);
+    }
+    static ValidationFindingDraft warning(ValidationCandidate entry, String ruleCode, String ruleVersion, String fieldName, String messageCode, String remediationCode) {
+      return finding(entry, RateFeedModels.ValidationFindingSeverity.WARNING, ruleCode, ruleVersion, fieldName, messageCode, remediationCode);
+    }
+    private static ValidationFindingDraft finding(ValidationCandidate entry, RateFeedModels.ValidationFindingSeverity severity, String ruleCode, String ruleVersion, String fieldName, String messageCode, String remediationCode) {
+      return new ValidationFindingDraft(entry.entryId(), severity, ruleCode, ruleVersion, fieldName, messageCode, Map.of("sourceRowNumber", entry.sourceRowNumber()), remediationCode, entry.sourceRowNumber());
+    }
+    Map<String, Object> hashMaterial() {
+      Map<String, Object> material = new LinkedHashMap<>();
+      material.put("entryId", entryId);
+      material.put("severity", severity.name());
+      material.put("ruleCode", ruleCode);
+      material.put("ruleVersion", ruleVersion);
+      material.put("fieldName", fieldName);
+      material.put("messageCode", messageCode);
+      material.put("remediationCode", remediationCode);
+      material.put("sourceRowNumber", sourceRowNumber);
+      return material;
+    }
+  }
   private record NormalizedCandidate(UUID entryId, int sourceRowNumber, String canonicalProductKey, String programKey, int lockPeriodDays, BigDecimal ratePercent, BigDecimal pricePoints, String adjustmentType, BigDecimal adjustmentValue, String adjustmentUnit, String severity, String message, Map<String, String> rawAttributes, Map<String, Object> mappingRefs) {
     static NormalizedCandidate success(int sourceRowNumber, String productKey, String programKey, int lockPeriodDays, BigDecimal ratePercent, BigDecimal pricePoints, String adjustmentType, BigDecimal adjustmentValue, String adjustmentUnit, Map<String, String> rawAttributes, String profileVersion) {
       return new NormalizedCandidate(UUID.randomUUID(), sourceRowNumber, productKey, programKey, lockPeriodDays, ratePercent, pricePoints, adjustmentType, adjustmentValue, adjustmentUnit, "INFO", "normalized", Map.copyOf(rawAttributes), Map.of("profileVersion", profileVersion));

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.wcpe.integration.ChannelApiFoundationService.ChannelResponse;
 import com.wcpe.integration.ChannelApiFoundationService.ChannelResult;
+import com.wcpe.integration.ChannelApiFoundationService.ChannelClient;
 import com.wcpe.integration.ChannelApiFoundationService.ChannelStatus;
 import com.wcpe.integration.ChannelApiFoundationService.ChannelType;
 import com.wcpe.integration.ChannelApiFoundationService.RegisterChannelClient;
@@ -80,6 +81,22 @@ class ChannelApiFoundationServiceTest {
     ChannelResponse registered = service.register(registerCommand(TENANT_ONE, "idem-1", "los-main")).value().orElseThrow();
 
     assertFalse(service.fetch(TENANT_TWO, registered.id(), "corr-PII-16-S01").valid());
+    assertFalse(
+        service
+            .update(
+                new UpdateChannelClient(
+                    TENANT_ONE,
+                    registered.id(),
+                    "idem-invalid-transition",
+                    "integration-admin",
+                    ChannelStatus.SUSPENDED,
+                    1,
+                    List.of("product-ref-conventional"),
+                    Map.of("policyRef", "tenant-rate-limit-policy"),
+                    Map.of("environment", "test"),
+                    "corr-PII-16-S01"))
+            .valid());
+    assertFalse(service.validateReadiness(TENANT_ONE, registered.id(), "corr-PII-16-S01").ready());
 
     ChannelResponse activated =
         service
@@ -102,6 +119,40 @@ class ChannelApiFoundationServiceTest {
     assertEquals(2, activated.version());
     assertEquals(ChannelApiFoundationService.UPDATED_EVENT_TYPE, service.outboxEvents().get(1).eventType());
     assertTrue(service.validateReadiness(TENANT_ONE, registered.id(), "corr-PII-16-S01").ready());
+  }
+
+  @Test
+  void readinessFailsForMissingProducts() throws Exception {
+    putChannel(
+        new ChannelClient(
+            TENANT_ONE,
+            "channel-without-products",
+            "los-no-products",
+            "LOS without products",
+            ChannelType.LOS,
+            ChannelStatus.ACTIVE,
+            List.of(),
+            Map.of("policyRef", "tenant-rate-limit-policy"),
+            Map.of("environment", "test"),
+            1,
+            "integration-admin",
+            Instant.parse("2026-06-04T01:00:00Z"),
+            Instant.parse("2026-06-04T01:00:00Z"),
+            "corr-PII-16-S01"));
+
+    ChannelApiFoundationService.ChannelReadiness readiness =
+        service.validateReadiness(TENANT_ONE, "channel-without-products", "corr-PII-16-S01");
+
+    assertFalse(readiness.ready());
+    assertEquals("POLICY_NOT_SATISFIED", readiness.validationMessages().get(0).reason());
+  }
+
+  @SuppressWarnings("unchecked")
+  private void putChannel(ChannelClient channel) throws Exception {
+    java.lang.reflect.Field channelsField = ChannelApiFoundationService.class.getDeclaredField("channels");
+    channelsField.setAccessible(true);
+    Map<String, ChannelClient> channels = (Map<String, ChannelClient>) channelsField.get(service);
+    channels.put(channel.tenantId() + ":" + channel.channelId(), channel);
   }
 
   private RegisterChannelClient registerCommand(String tenantId, String idempotencyKey, String externalRef) {

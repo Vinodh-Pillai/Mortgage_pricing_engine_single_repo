@@ -1,0 +1,26 @@
+{
+  "storyId": "PII-07-S03",
+  "policyType": "BRANCH_OVERLAY",
+  "tenantId": "tenant-a",
+  "branchId": "branch-grandchild",
+  "sourceHierarchyVersionId": "hierarchy-v1",
+  "waterfall": [
+    {
+      "stepType": "CHANNEL_MARGIN",
+      "priceAfter": "99.600"
+    },
+    {
+      "stepType": "BRANCH_OVERLAY",
+      "selectedRuleBranchId": "branch-child",
+      "selectionReason": "nearest-authorized-ancestor",
+      "amountRef": "cfg.childOverlayBps",
+      "enterpriseLimitRef": "cfg.enterpriseLimitBps",
+      "priceAfter": "99.420"
+    }
+  ],
+  "evidence": {
+    "eventType": "BranchOverlayPolicyPublished.v1",
+    "auditAction": "BRANCH_OVERLAY_POLICY_PUBLISHED",
+    "replayUsesHierarchyVersion": true
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "fixture": "configured-adjustments",
+  "tenant": "tenant-a",
+  "selection_id": "11111111-1111-1111-1111-111111111111",
+  "scenario_hash": "scenario-hash-1",
+  "version_refs": ["adjustment-version-1", "cap-floor-version-1"],
+  "expected_steps": ["BASE_PRICE", "ADJUSTMENT", "ADJUSTMENT", "CAP_FLOOR_CHECK", "ROUND_FINAL_PRICE"],
+  "expected_final_price": "100.12500"
+}

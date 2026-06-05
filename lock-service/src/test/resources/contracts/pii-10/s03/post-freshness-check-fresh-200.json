@@ -1,0 +1,9 @@
+{
+  "checkId": "FRESHNESS-<stable>",
+  "quoteId": "QUOTE-FRESHNESS",
+  "decision": "FRESH",
+  "reasonCodes": ["QUOTE_FRESH"],
+  "policyVersionId": "freshness-policy-v1",
+  "quoteAgeSeconds": 300,
+  "correlationId": "corr-pii10-s03"
+}

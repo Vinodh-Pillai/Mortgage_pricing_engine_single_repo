@@ -34,6 +34,17 @@ class AdjustmentRuleBookLifecycleTest {
     }
 
     @Test
+    void cashOutRuleBookDimensionsAreConfigurableAndValidated() {
+        AdjustmentRuleBook book = draftRuleBook(List.of(
+            validRule("cashOutFlag", "CONFIGURED_CASH_OUT"),
+            validRule("loanAmountBand", "CONFIGURED_AMOUNT_BAND"),
+            validRule("subordinateFinancingFlag", "CONFIGURED_SUBORDINATE_FLAG")
+        ));
+
+        assertThat(book.validateRules()).isEmpty();
+    }
+
+    @Test
     void unknownConditionDimensionsFailClosed() {
         AdjustmentRuleBook book = draftRuleBook(List.of(validRule("borrowerName", "not-allowed")));
 

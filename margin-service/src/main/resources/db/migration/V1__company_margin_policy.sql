@@ -39,8 +39,21 @@ create table margin_rule (
   max_ref varchar(256) not null,
   rounding_scale int not null,
   reason_code varchar(80) not null,
+  branch_scope_json jsonb not null default '{}'::jsonb,
+  source_hierarchy_version_id varchar(128),
   visibility_classification varchar(80) not null default 'INTERNAL',
   constraint ck_margin_rule_unit check (unit in ('BPS', 'PRICE_POINTS'))
+);
+
+create table branch_margin_assignment (
+  tenant_id uuid not null,
+  branch_id varchar(128) not null,
+  parent_branch_id varchar(128),
+  region_id varchar(128),
+  hierarchy_version_id varchar(128) not null,
+  active boolean not null,
+  updated_at timestamptz not null,
+  primary key (tenant_id, branch_id, hierarchy_version_id)
 );
 
 create table pricing_calculation_step (
@@ -59,4 +72,6 @@ create table pricing_calculation_step (
 
 create index idx_margin_policy_status on margin_policy(tenant_id, status, updated_at desc);
 create index idx_margin_policy_version_scope on margin_policy_version using gin (scope_json);
+create index idx_margin_rule_branch_scope on margin_rule using gin (branch_scope_json);
+create index idx_branch_margin_assignment_active on branch_margin_assignment(tenant_id, region_id, active);
 create index idx_pricing_calculation_step_quote on pricing_calculation_step(tenant_id, quote_option_id);

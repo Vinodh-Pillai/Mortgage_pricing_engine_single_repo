@@ -1,0 +1,14 @@
+{
+  "tenantId": "10000000-0000-0000-0000-000000000063",
+  "quoteId": "QUOTE-PII-06-S03",
+  "scenarioId": "SCENARIO-PII-06-S03",
+  "classification": {
+    "code": "CONFIGURED_CASH_OUT",
+    "sourceSystem": "scenario-service",
+    "sourceTimestamp": "2026-01-01T00:00:00Z"
+  },
+  "newLoanAmount": "400000.00",
+  "cashOutAmount": "50000.00",
+  "ltv": "82.500000",
+  "ruleType": "CASH_OUT_LLPA"
+}

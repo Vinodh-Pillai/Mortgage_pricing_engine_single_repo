@@ -1,0 +1,9 @@
+{
+  "category": "LLPA_FICO_LTV",
+  "status": "FAIL_CLOSED",
+  "validationMessages": [
+    "representative FICO is required"
+  ],
+  "pointsDelta": "0.000000",
+  "bpsDelta": "0.0000"
+}

@@ -1,0 +1,17 @@
+{
+  "storyId": "PII-15-S03",
+  "scenarioId": "scenario-456",
+  "status": "high_cost",
+  "advisorySeverity": "BLOCKING",
+  "triggeredTests": ["APR_SPREAD_TEST"],
+  "rulePackVersionRefs": [
+    {
+      "jurisdiction": "FEDERAL",
+      "rulePackCode": "HIGH_COST",
+      "version": 7,
+      "configVersionId": "config-version-2026-a",
+      "citation": "configured-citation"
+    }
+  ],
+  "piiMinimization": "Borrower names and SSNs are not stored in high-cost replay evidence."
+}

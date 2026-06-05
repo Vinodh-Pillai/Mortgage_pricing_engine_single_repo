@@ -1,0 +1,7 @@
+{
+  "category": "LLPA_CASH_OUT",
+  "status": "CONFLICT",
+  "validationMessages": [
+    "ADJ_CASH_OUT_AMBIGUOUS"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "baselineLtv": 0.81250,
+  "propertyValueUsed": 400000.00,
+  "rows": [
+    {
+      "targetLtv": 0.80000,
+      "loanAmount": 320000.00,
+      "downPaymentAmount": 80000.00,
+      "cltv": 0.82500,
+      "hcltv": 0.82500,
+      "eligibility": "NOT_PRICED",
+      "miStatus": "UNAVAILABLE",
+      "crossedThresholds": []
+    },
+    {
+      "targetLtv": 0.95000,
+      "loanAmount": 380000.00,
+      "downPaymentAmount": 20000.00,
+      "cltv": 0.97500,
+      "hcltv": 0.97500,
+      "eligibility": "NOT_PRICED",
+      "miStatus": "UNAVAILABLE",
+      "crossedThresholds": ["85%", "90%", "95%"]
+    }
+  ],
+  "disclaimer": "MI estimates are marked unavailable until the MI dependency supplies tenant product rate-card versions. Pricing output is non-binding."
+}

@@ -9,6 +9,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 public final class QuoteTestSupport {
@@ -38,6 +39,28 @@ public final class QuoteTestSupport {
 
     public static QuoteApplicationService service(QuoteDependencies dependencies, InMemoryQuoteCache cache) {
         return new QuoteApplicationService(new InMemoryQuoteRepository(), dependencies, cache, new BestExecutionRanker(), CLOCK);
+    }
+
+    public static ComparisonViewConfig comparisonView() {
+        return new ComparisonViewConfig(
+            "default-view",
+            "view-v1",
+            List.of(
+                new ComparisonColumn("rank", "Rank", 1),
+                new ComparisonColumn("productLabel", "Product", 2),
+                new ComparisonColumn("investorLabel", "Investor", 3),
+                new ComparisonColumn("noteRate", "Note Rate", 4),
+                new ComparisonColumn("pricePoints", "Price/Points", 5),
+                new ComparisonColumn("lockDays", "Lock Days", 6),
+                new ComparisonColumn("totalAdjustments", "Total Adjustments", 7),
+                new ComparisonColumn("margin", "Margin", 8),
+                new ComparisonColumn("expiration", "Expiration", 9)
+            ),
+            Set.of("margin", "investorLabel"),
+            null,
+            3,
+            "audit-safe-redaction-v1"
+        );
     }
 
     public static FixtureDependencies dependenciesWithPolicy() {

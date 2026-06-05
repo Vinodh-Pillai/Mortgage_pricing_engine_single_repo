@@ -1,0 +1,13 @@
+{
+  "tenantId": "10000000-0000-0000-0000-000000000006",
+  "quoteId": "QUOTE-PII-06-S02",
+  "scenarioId": "SCENARIO-PII-06-S02",
+  "productId": "configured-product",
+  "investorId": "configured-investor",
+  "channel": "configured-channel",
+  "quoteDate": "2026-02-01T00:00:00Z",
+  "loanAmount": "250000.00",
+  "representativeFico": 742,
+  "ltv": "82.500000",
+  "ruleBookVersion": "v1"
+}

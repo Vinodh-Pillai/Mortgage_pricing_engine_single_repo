@@ -1,0 +1,10 @@
+{
+  "category": "LLPA_CASH_OUT",
+  "status": "APPLIED",
+  "selectedLtvBandKey": "CONFIGURED_LTV_BAND_A",
+  "selectedLoanAmountBandKey": "CONFIGURED_AMOUNT_BAND_A",
+  "pointsDelta": "0.375000",
+  "bpsDelta": "37.5000",
+  "moneyImpact": "1500.00",
+  "ruleType": "CASH_OUT_LLPA"
+}

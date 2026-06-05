@@ -1,0 +1,11 @@
+{
+  "tenantId": "11111111-1111-1111-1111-111111111111",
+  "quoteId": "QUOTE-FRESHNESS",
+  "decision": "FRESH",
+  "reasonCodes": ["QUOTE_FRESH"],
+  "policyVersionId": "freshness-policy-v1",
+  "sourceRefs": {
+    "quoteSnapshot": "quote-snapshot-v1",
+    "policyConfig": "freshness-policy-v1"
+  }
+}

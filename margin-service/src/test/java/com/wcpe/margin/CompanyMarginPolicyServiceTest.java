@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.wcpe.margin.CompanyMarginPolicyService.CommandReceipt;
 import com.wcpe.margin.CompanyMarginPolicyService.CreatePolicyCommand;
 import com.wcpe.margin.CompanyMarginPolicyService.EffectiveWindow;
+import com.wcpe.margin.CompanyMarginPolicyService.BranchOverlayContext;
 import com.wcpe.margin.CompanyMarginPolicyService.MarginPolicyException;
 import com.wcpe.margin.CompanyMarginPolicyService.MarginPolicyVersion;
 import com.wcpe.margin.CompanyMarginPolicyService.MarginRule;
@@ -86,6 +87,114 @@ class CompanyMarginPolicyServiceTest {
         () -> service.publish("tenant-a", second.policyId(), "publisher-e", "corr-4")).getMessage());
   }
 
+  @Test
+  void channelMarginResolverSelectsMostSpecificRuleAndPublishesChannelEvent() {
+    CommandReceipt created = service.createChannelDraft(command("tenant-a", "admin-a", "idem-6", "hash-6",
+        channelVersion("v-channel-1", List.of(
+            new MarginRule(20, MarginUnit.BPS, "cfg.channelRetailBps", "cfg.channelRetailMinBps",
+                "cfg.channelRetailMaxBps", 3, "CHANNEL_MARGIN", new MarginScope("*", "*", "RETAIL", "*", "*", "*", "*")),
+            new MarginRule(10, MarginUnit.BPS, "cfg.channelRetailPurchaseBps", "cfg.channelRetailPurchaseMinBps",
+                "cfg.channelRetailPurchaseMaxBps", 3, "CHANNEL_MARGIN", scope())))));
+
+    service.submit("tenant-a", created.policyId(), "admin-a", "corr-2");
+    service.approve("tenant-a", created.policyId(), "approver-b", "corr-3");
+    service.publish("tenant-a", created.policyId(), "publisher-c", "corr-4");
+
+    var simulation = service.simulateChannel("tenant-a", created.policyId(),
+        ref -> Optional.ofNullable(Map.of(
+            "cfg.channelRetailBps", new BigDecimal("30"),
+            "cfg.channelRetailMinBps", new BigDecimal("5"),
+            "cfg.channelRetailMaxBps", new BigDecimal("40"),
+            "cfg.channelRetailPurchaseBps", new BigDecimal("15"),
+            "cfg.channelRetailPurchaseMinBps", new BigDecimal("10"),
+            "cfg.channelRetailPurchaseMaxBps", new BigDecimal("20")).get(ref)),
+        new BigDecimal("99.750"), scope());
+
+    assertEquals("CHANNEL", service.outboxEvents().get(0).policyType());
+    assertEquals(new BigDecimal("99.600"), simulation.priceAfterMargin());
+    assertEquals("CHANNEL_MARGIN", simulation.steps().get(0).stepType());
+    assertEquals("CHANNEL_MARGIN", simulation.steps().get(0).reasonCode());
+  }
+
+  @Test
+  void channelMarginResolverFailsClosedForMissingOrAmbiguousRule() {
+    CommandReceipt missing = service.createChannelDraft(command("tenant-a", "admin-a", "idem-7", "hash-7",
+        channelVersion("v-channel-2", List.of(new MarginRule(10, MarginUnit.BPS, "cfg.channelRetailBps",
+            "cfg.channelRetailMinBps", "cfg.channelRetailMaxBps", 3, "CHANNEL_MARGIN",
+            new MarginScope("*", "*", "RETAIL", "*", "*", "*", "*"))))));
+
+    assertEquals("CHANNEL_NOT_CONFIGURED", assertThrows(MarginPolicyException.class,
+        () -> service.simulateChannel("tenant-a", missing.policyId(), ref -> Optional.empty(), new BigDecimal("99.750"),
+            new MarginScope("CONVENTIONAL", "*", "WHOLESALE", "*", "*", "PURCHASE", "*"))).getMessage());
+
+    CommandReceipt ambiguous = service.createChannelDraft(command("tenant-a", "admin-a", "idem-8", "hash-8",
+        channelVersion("v-channel-3", List.of(
+            new MarginRule(10, MarginUnit.BPS, "cfg.channelRetailBps", "cfg.channelRetailMinBps",
+                "cfg.channelRetailMaxBps", 3, "CHANNEL_MARGIN", scope()),
+            new MarginRule(10, MarginUnit.BPS, "cfg.channelRetailAltBps", "cfg.channelRetailAltMinBps",
+                "cfg.channelRetailAltMaxBps", 3, "CHANNEL_MARGIN", scope())))));
+
+    assertEquals("CHANNEL_MARGIN_OVERLAP", assertThrows(MarginPolicyException.class,
+        () -> service.simulateChannel("tenant-a", ambiguous.policyId(), ref -> Optional.of(BigDecimal.ONE),
+            new BigDecimal("99.750"), scope())).getMessage());
+  }
+
+  @Test
+  void branchOverlayResolverAppliesNearestAncestorWhenConfigured() {
+    CommandReceipt created = service.createBranchOverlayDraft(command("tenant-a", "admin-a", "idem-9", "hash-9",
+        branchVersion("v-branch-1", List.of(
+            branchRule(20, "cfg.parentOverlayBps", "branch-parent", "region-east"),
+            branchRule(10, "cfg.childOverlayBps", "branch-child", "region-east")))));
+
+    service.submit("tenant-a", created.policyId(), "admin-a", "corr-2");
+    service.approve("tenant-a", created.policyId(), "approver-b", "corr-3");
+    service.publish("tenant-a", created.policyId(), "publisher-c", "corr-4");
+
+    var simulation = service.simulateBranchOverlay("tenant-a", created.policyId(),
+        ref -> Optional.ofNullable(Map.of(
+            "cfg.parentOverlayBps", new BigDecimal("12"),
+            "cfg.childOverlayBps", new BigDecimal("18"),
+            "cfg.branchMinBps", new BigDecimal("1"),
+            "cfg.branchMaxBps", new BigDecimal("25"),
+            "cfg.enterpriseLimitBps", new BigDecimal("20")).get(ref)),
+        new BigDecimal("99.600"), branchContext("branch-grandchild", List.of("branch-child", "branch-parent"), false));
+
+    assertEquals("BRANCH_OVERLAY", service.outboxEvents().get(0).policyType());
+    assertEquals("BRANCH_OVERLAY_POLICY_PUBLISHED", service.auditRecords().get(service.auditRecords().size() - 1).action());
+    assertEquals(new BigDecimal("99.420"), simulation.priceAfterMargin());
+    assertEquals("BRANCH_OVERLAY", simulation.steps().get(0).stepType());
+  }
+
+  @Test
+  void branchLimitEvaluatorRejectsOverlayBeyondConfiguredLimit() {
+    CommandReceipt created = service.createBranchOverlayDraft(command("tenant-a", "admin-a", "idem-10", "hash-10",
+        branchVersion("v-branch-2", List.of(branchRule(10, "cfg.childOverlayBps", "branch-child", "region-east")))));
+
+    assertEquals("BRANCH_OVERLAY_LIMIT_EXCEEDED", assertThrows(MarginPolicyException.class,
+        () -> service.simulateBranchOverlay("tenant-a", created.policyId(),
+            ref -> Optional.ofNullable(Map.of(
+                "cfg.childOverlayBps", new BigDecimal("30"),
+                "cfg.branchMinBps", new BigDecimal("1"),
+                "cfg.branchMaxBps", new BigDecimal("40"),
+                "cfg.enterpriseLimitBps", new BigDecimal("20")).get(ref)),
+            new BigDecimal("99.600"), branchContext("branch-child", List.of("branch-parent"), false))).getMessage());
+  }
+
+  @Test
+  void branchOverlayResolverFailsOnStaleHierarchyAndUnauthorizedBranch() {
+    CommandReceipt created = service.createBranchOverlayDraft(command("tenant-a", "admin-a", "idem-11", "hash-11",
+        branchVersion("v-branch-3", List.of(branchRule(10, "cfg.childOverlayBps", "branch-child", "region-east")))));
+
+    assertEquals("BRANCH_HIERARCHY_STALE", assertThrows(MarginPolicyException.class,
+        () -> service.simulateBranchOverlay("tenant-a", created.policyId(), ref -> Optional.of(BigDecimal.ONE),
+            new BigDecimal("99.600"), branchContext("branch-child", List.of(), true))).getMessage());
+
+    assertEquals("BRANCH_SCOPE_UNAUTHORIZED", assertThrows(MarginPolicyException.class,
+        () -> service.simulateBranchOverlay("tenant-a", created.policyId(), ref -> Optional.of(BigDecimal.ONE),
+            new BigDecimal("99.600"), new BranchOverlayContext("tenant-a", "branch-other", "region-east", List.of(),
+                "hierarchy-v1", "cfg.enterpriseLimitBps", List.of("branch-child"), false, scope()))).getMessage());
+  }
+
   private CommandReceipt publish(CreatePolicyCommand command, String approver) {
     CommandReceipt created = service.createDraft(command);
     service.submit(command.tenantId(), created.policyId(), command.actorId(), "corr-2");
@@ -96,7 +205,7 @@ class CompanyMarginPolicyServiceTest {
   private static CreatePolicyCommand command(String tenantId, String actorId, String idempotencyKey, String hash,
       MarginPolicyVersion version) {
     return new CreatePolicyCommand(tenantId, "request-1", actorId, idempotencyKey, "corr-1",
-        "Conventional Retail Company Margin", version, hash);
+        "Conventional Retail Margin " + version.versionId(), version, hash);
   }
 
   private static MarginPolicyVersion version(String versionId) {
@@ -105,6 +214,27 @@ class CompanyMarginPolicyServiceTest {
         List.of(new MarginRule(1, MarginUnit.BPS, "cfg.companyMarginBps", "cfg.companyMarginMinBps",
             "cfg.companyMarginMaxBps", 3, "COMPANY_MARGIN")),
         "cfg-hash-1");
+  }
+
+  private static MarginPolicyVersion channelVersion(String versionId, List<MarginRule> rules) {
+    return new MarginPolicyVersion(versionId, 1, scope(),
+        new EffectiveWindow(Instant.parse("2026-01-01T00:00:00Z"), null), rules, "cfg-channel-hash-1");
+  }
+
+  private static MarginPolicyVersion branchVersion(String versionId, List<MarginRule> rules) {
+    return new MarginPolicyVersion(versionId, 1, scope(),
+        new EffectiveWindow(Instant.parse("2026-01-01T00:00:00Z"), null), rules, "cfg-branch-hash-1");
+  }
+
+  private static MarginRule branchRule(int priority, String amountRef, String branchId, String regionId) {
+    return new MarginRule(priority, MarginUnit.BPS, amountRef, "cfg.branchMinBps", "cfg.branchMaxBps", 3,
+        "BRANCH_OVERLAY", new MarginScope("CONVENTIONAL", "*", "RETAIL", "*", "*", "PURCHASE", "*",
+            branchId, regionId, "hierarchy-v1", "INHERIT"));
+  }
+
+  private static BranchOverlayContext branchContext(String branchId, List<String> ancestors, boolean hierarchyStale) {
+    return new BranchOverlayContext("tenant-a", branchId, "region-east", ancestors, "hierarchy-v1",
+        "cfg.enterpriseLimitBps", List.of(branchId), hierarchyStale, scope());
   }
 
   private static MarginScope scope() {

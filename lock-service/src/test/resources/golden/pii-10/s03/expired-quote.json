@@ -1,0 +1,7 @@
+{
+  "tenantId": "11111111-1111-1111-1111-111111111111",
+  "quoteId": "QUOTE-FRESHNESS",
+  "decision": "STALE",
+  "reasonCodes": ["QUOTE_EXPIRED"],
+  "remediations": ["Refresh quote before requesting a lock"]
+}

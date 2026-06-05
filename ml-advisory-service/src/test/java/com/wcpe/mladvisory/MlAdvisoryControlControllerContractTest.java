@@ -23,6 +23,9 @@ class MlAdvisoryControlControllerContractTest {
     assertEquals(
         "POST /api/v1/tenants/{tenantId}/ml-advisory/kill-switch:deactivate",
         MlAdvisoryControlService.DEACTIVATE_KILL_SWITCH_ENDPOINT);
+    assertEquals(
+        "GET /api/v1/tenants/{tenantId}/ml-advisory/feature-snapshots?scenarioId=&from=&to=",
+        MlAdvisoryControlService.SEARCH_FEATURE_SNAPSHOTS_ENDPOINT);
   }
 
   @Test

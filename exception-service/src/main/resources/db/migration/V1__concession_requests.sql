@@ -10,6 +10,7 @@ create table if not exists concession_request (
   currency varchar(8),
   reason_code varchar(128) not null,
   comments_redacted text not null,
+  expiration date,
   policy_version_id varchar(128) not null,
   authority_matrix_version_id varchar(128) not null,
   reason_code_version_id varchar(128) not null,

@@ -1,0 +1,9 @@
+{
+  "fixture": "rounding-boundary",
+  "tenant": "tenant-a",
+  "selection_id": "11111111-1111-1111-1111-111111111111",
+  "scenario_hash": "scenario-hash-1",
+  "rounding_output_context": "FINAL_PRICE",
+  "expected_scale": 5,
+  "expected_rounding_source": "tenant-governed rounding policy"
+}

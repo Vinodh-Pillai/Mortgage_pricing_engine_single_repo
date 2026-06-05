@@ -32,6 +32,32 @@ create table if not exists base_pricing_grid_row (
     constraint base_pricing_grid_row_base_price_ck check (base_price >= 0)
 );
 
+create table if not exists base_pricing_grid_import (
+    id uuid primary key default gen_random_uuid(),
+    tenant_id varchar(64) not null,
+    grid_version_id uuid not null references base_pricing_grid_version(id),
+    source_type varchar(80) not null,
+    source_digest varchar(256) not null,
+    status varchar(40) not null,
+    validation_summary jsonb not null default '[]'::jsonb,
+    created_by varchar(128) not null,
+    created_at timestamptz not null default current_timestamp,
+    updated_at timestamptz not null default current_timestamp,
+    constraint base_pricing_grid_import_status_ck check (status in ('DRAFT', 'VALIDATED', 'VALIDATION_FAILED', 'PUBLISHED'))
+);
+
+create table if not exists base_pricing_grid_event (
+    id uuid primary key default gen_random_uuid(),
+    tenant_id varchar(64) not null,
+    grid_version_id uuid not null,
+    event_type varchar(120) not null,
+    actor_id varchar(128) not null,
+    correlation_id varchar(128) not null,
+    idempotency_key varchar(160),
+    payload jsonb not null default '{}'::jsonb,
+    occurred_at timestamptz not null default current_timestamp
+);
+
 create table if not exists base_rate_selection_audit (
     id uuid primary key default gen_random_uuid(),
     tenant_id varchar(64) not null,
@@ -52,8 +78,20 @@ create unique index if not exists base_pricing_grid_version_uniq
 create index if not exists base_pricing_grid_version_lookup_idx
     on base_pricing_grid_version (tenant_id, status, effective_from);
 
+create index if not exists base_pricing_grid_version_scope_lookup_idx
+    on base_pricing_grid_version (tenant_id, product_code, investor_code, channel_code, status, effective_from, effective_to);
+
 create index if not exists base_pricing_grid_row_lookup_idx
     on base_pricing_grid_row (tenant_id, grid_version_id, lock_period_days, note_rate);
+
+create unique index if not exists base_pricing_grid_row_key_uniq
+    on base_pricing_grid_row (tenant_id, grid_version_id, lock_period_days, note_rate, coalesce(bucket_key::text, '{}'));
+
+create index if not exists base_pricing_grid_import_version_idx
+    on base_pricing_grid_import (tenant_id, grid_version_id, status);
+
+create index if not exists base_pricing_grid_event_version_idx
+    on base_pricing_grid_event (tenant_id, grid_version_id, occurred_at desc);
 
 create index if not exists base_rate_selection_audit_selection_idx
     on base_rate_selection_audit (tenant_id, selection_id);

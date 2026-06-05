@@ -4,22 +4,152 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class BaseRateSelectionApi {
     public static final String BASE_RATE_READ_PERMISSION = "pricing.baserate.read";
     public static final String BASE_RATE_WRITE_PERMISSION = "pricing.baserate.write";
+    public static final String GRID_IMPORT_PERMISSION = "pricing.grid.import";
+    public static final String GRID_PUBLISH_PERMISSION = "pricing.grid.publish";
+    public static final String GRID_READ_PERMISSION = "pricing.grid.read";
 
     private final BaseRateSelectionRepository repository;
 
     public BaseRateSelectionApi(BaseRateSelectionRepository repository) {
         this.repository = Objects.requireNonNull(repository);
+    }
+
+    public BaseGridImportResponse importBaseGrid(String tenantId, BaseRateSelectionHeaders headers,
+            BaseGridImportRequest request) {
+        requireTenant(tenantId);
+        requirePermission(headers, GRID_IMPORT_PERMISSION);
+        validateImportRequest(tenantId, request);
+
+        UUID importId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        Instant now = Instant.now();
+
+        BasePricingGridVersion version = new BasePricingGridVersion(
+                versionId,
+                tenantId,
+                request.productCode(),
+                request.investorCode(),
+                request.channelCode(),
+                repository.nextGridVersionNumber(tenantId, request.productCode(), request.investorCode(), request.channelCode()),
+                GridVersionStatus.DRAFT,
+                request.effectiveFrom(),
+                request.effectiveTo(),
+                request.sourceDigest(),
+                null,
+                null,
+                now,
+                now);
+        repository.addGridVersion(version);
+
+        for (BaseGridRowDraft row : request.rows()) {
+            repository.addGridRow(new BasePricingGridRow(
+                    UUID.randomUUID(),
+                    tenantId,
+                    versionId,
+                    row.lockPeriodDays(),
+                    row.noteRate(),
+                    row.basePrice(),
+                    row.bucketKey(),
+                    rowHash(row),
+                    now));
+        }
+
+        BasePricingGridImport gridImport = new BasePricingGridImport(importId, tenantId, versionId,
+                request.sourceType(), request.sourceDigest(), GridImportStatus.DRAFT, headers.actorId(), now, now,
+                List.of());
+        repository.saveGridImport(gridImport);
+        repository.saveGridEvent(new BaseGridEvent(UUID.randomUUID(), tenantId, versionId,
+                "pricing.base-grid-imported.v1", headers.actorId(), headers.correlationId(), headers.idempotencyKey(), now,
+                Map.of("rowCount", String.valueOf(request.rows().size()), "sourceDigest", request.sourceDigest())));
+
+        return new BaseGridImportResponse(importId, versionId, GridImportStatus.DRAFT,
+                request.rows().size(), List.of(), "audit:" + importId, headers.correlationId());
+    }
+
+    public BaseGridValidationResult validateBaseGrid(String tenantId, BaseRateSelectionHeaders headers, UUID versionId) {
+        requireTenant(tenantId);
+        requirePermission(headers, GRID_IMPORT_PERMISSION);
+        BasePricingGridVersion version = requireGridVersion(tenantId, versionId);
+        List<String> errors = validatePersistedGrid(version);
+        GridImportStatus status = errors.isEmpty() ? GridImportStatus.VALIDATED : GridImportStatus.VALIDATION_FAILED;
+        repository.markGridImportStatus(tenantId, versionId, status, errors);
+        repository.saveGridEvent(new BaseGridEvent(UUID.randomUUID(), tenantId, versionId,
+                "pricing.base-grid-validated.v1", headers.actorId(), headers.correlationId(), headers.idempotencyKey(),
+                Instant.now(), Map.of("status", status.name(), "errorCount", String.valueOf(errors.size()))));
+        return new BaseGridValidationResult(versionId, status, errors, "audit:" + versionId, headers.correlationId());
+    }
+
+    public BaseGridPublishResponse publishBaseGrid(String tenantId, BaseRateSelectionHeaders headers, UUID versionId) {
+        requireTenant(tenantId);
+        requirePermission(headers, GRID_PUBLISH_PERMISSION);
+        BasePricingGridVersion version = requireGridVersion(tenantId, versionId);
+        BasePricingGridImport gridImport = repository.findGridImport(tenantId, versionId)
+                .orElseThrow(() -> new BaseRateSelectionValidationException("grid import is required before publish"));
+        if (gridImport.status() != GridImportStatus.VALIDATED) {
+            throw new BaseRateSelectionValidationException("GRID_NOT_APPROVED: validated grid import is required before publish");
+        }
+        if (Objects.equals(gridImport.createdBy(), headers.actorId())) {
+            throw new BaseRateSelectionValidationException("GRID_NOT_APPROVED: importer cannot publish own grid");
+        }
+
+        List<BasePricingGridVersion> overlaps = repository.findGridVersion(tenantId, version.productCode(),
+                version.investorCode(), version.channelCode()).stream()
+                .filter(candidate -> candidate.status() == GridVersionStatus.PUBLISHED)
+                .filter(candidate -> !candidate.id().equals(versionId))
+                .filter(candidate -> windowsOverlap(version.effectiveFrom(), version.effectiveTo(),
+                        candidate.effectiveFrom(), candidate.effectiveTo()))
+                .toList();
+        if (!overlaps.isEmpty()) {
+            throw new BaseRateSelectionConflictException("GRID_EFFECTIVE_WINDOW_OVERLAP");
+        }
+
+        BasePricingGridVersion published = version.withPublication(headers.actorId(), Instant.now());
+        repository.replaceGridVersion(published);
+        repository.markGridImportStatus(tenantId, versionId, GridImportStatus.PUBLISHED, List.of());
+        repository.invalidateGridCache(tenantId, versionId);
+        repository.saveGridEvent(new BaseGridEvent(UUID.randomUUID(), tenantId, versionId,
+                "pricing.base-grid-published.v1", headers.actorId(), headers.correlationId(), headers.idempotencyKey(),
+                Instant.now(), Map.of("rowCount", String.valueOf(repository.findGridRows(tenantId, versionId).size()),
+                        "sourceDigest", version.sourceDigest())));
+
+        return new BaseGridPublishResponse(versionId, GridVersionStatus.PUBLISHED,
+                repository.findGridRows(tenantId, versionId).size(), "audit:" + versionId, headers.correlationId());
+    }
+
+    public BaseGridLookupResponse lookupBaseGridRow(String tenantId, BaseRateSelectionHeaders headers,
+            BaseGridLookupRequest request) {
+        requireTenant(tenantId);
+        requirePermission(headers, GRID_READ_PERMISSION);
+        validateLookupRequest(request);
+        BasePricingGridVersion version = resolveGridVersion(tenantId, request.productCode(), request.investorCode(),
+                request.channelCode(), request.asOf());
+        String bucketHash = bucketHash(request.bucketKey());
+        List<BasePricingGridRow> matches = repository.findGridRows(tenantId, version.id(), request.lockPeriodDays()).stream()
+                .filter(row -> row.noteRate().compareTo(request.noteRate()) == 0)
+                .filter(row -> bucketHash(row.bucketKey()).equals(bucketHash))
+                .toList();
+        if (matches.isEmpty()) {
+            throw new BaseRateSelectionNotFoundException("GRID_LOOKUP_NOT_FOUND");
+        }
+        if (matches.size() > 1) {
+            throw new BaseRateSelectionConflictException("GRID_LOOKUP_AMBIGUOUS");
+        }
+        BasePricingGridRow row = matches.get(0);
+        return new BaseGridLookupResponse(version.id(), row.id(), row.lockPeriodDays(), row.noteRate(), row.basePrice(),
+                row.rowHash(), bucketHash, headers.correlationId());
     }
 
     public BaseRateSelectionResponse selectRate(String tenantId, BaseRateSelectionHeaders headers, BaseRateSelectionRequest request) {
@@ -184,13 +314,133 @@ public final class BaseRateSelectionApi {
         }
     }
 
+    private static void validateImportRequest(String tenantId, BaseGridImportRequest request) {
+        if (request == null) {
+            throw new BaseRateSelectionValidationException("request is required");
+        }
+        requireText(request.productCode(), "product_code is required");
+        requireText(request.investorCode(), "investor_code is required");
+        requireText(request.channelCode(), "channel_code is required");
+        requireText(request.sourceType(), "source_type is required");
+        requireText(request.sourceDigest(), "source_digest is required");
+        if (request.effectiveFrom() == null) {
+            throw new BaseRateSelectionValidationException("effective_from is required");
+        }
+        if (request.effectiveTo() != null && !request.effectiveTo().isAfter(request.effectiveFrom())) {
+            throw new BaseRateSelectionValidationException("effective_to must be after effective_from");
+        }
+        if (!request.approvalWorkflowConfigured()) {
+            throw new BaseRateSelectionValidationException("POLICY_NOT_SATISFIED: approval workflow configuration is required");
+        }
+        if (request.allowedLockPeriodDays().isEmpty()) {
+            throw new BaseRateSelectionValidationException("POLICY_NOT_SATISFIED: lock period configuration is required");
+        }
+        if (request.rows().isEmpty()) {
+            throw new BaseRateSelectionValidationException("at least one grid row is required");
+        }
+        Set<String> keys = new HashSet<>();
+        for (BaseGridRowDraft row : request.rows()) {
+            validateRowDraft(row, request.allowedLockPeriodDays(), request.allowedBucketDimensions());
+            String key = row.lockPeriodDays() + "|" + row.noteRate().toPlainString() + "|" + bucketHash(row.bucketKey());
+            if (!keys.add(key)) {
+                throw new BaseRateSelectionValidationException("GRID_DUPLICATE_ROW");
+            }
+        }
+    }
+
+    private static void validateLookupRequest(BaseGridLookupRequest request) {
+        if (request == null) {
+            throw new BaseRateSelectionValidationException("request is required");
+        }
+        requireText(request.productCode(), "product_code is required");
+        requireText(request.investorCode(), "investor_code is required");
+        requireText(request.channelCode(), "channel_code is required");
+        if (request.lockPeriodDays() <= 0) {
+            throw new BaseRateSelectionValidationException("lock_period_days must be positive");
+        }
+        if (request.noteRate() == null) {
+            throw new BaseRateSelectionValidationException("note_rate is required");
+        }
+        if (request.asOf() == null) {
+            throw new BaseRateSelectionValidationException("as_of is required");
+        }
+    }
+
+    private static void validateRowDraft(BaseGridRowDraft row, Set<Integer> allowedLockPeriodDays,
+            Set<String> allowedBucketDimensions) {
+        if (row == null) {
+            throw new BaseRateSelectionValidationException("grid row is required");
+        }
+        if (!allowedLockPeriodDays.contains(row.lockPeriodDays())) {
+            throw new BaseRateSelectionValidationException("GRID_LOCK_PERIOD_UNCONFIGURED");
+        }
+        if (row.noteRate() == null || row.basePrice() == null) {
+            throw new BaseRateSelectionValidationException("GRID_SCALE_INVALID");
+        }
+        if (row.noteRate().scale() > 5 || row.basePrice().scale() > 5) {
+            throw new BaseRateSelectionValidationException("GRID_SCALE_INVALID");
+        }
+        Set<String> bucketKeys = row.bucketKey() == null ? Set.of() : row.bucketKey().keySet();
+        if (!allowedBucketDimensions.containsAll(bucketKeys)) {
+            throw new BaseRateSelectionValidationException("GRID_BUCKET_DIMENSION_UNKNOWN");
+        }
+    }
+
+    private List<String> validatePersistedGrid(BasePricingGridVersion version) {
+        List<String> errors = new ArrayList<>();
+        List<BasePricingGridRow> rows = repository.findGridRows(version.tenantId(), version.id());
+        if (rows.isEmpty()) {
+            errors.add("GRID_ROWS_REQUIRED");
+        }
+        Set<String> keys = new HashSet<>();
+        for (BasePricingGridRow row : rows) {
+            String key = row.lockPeriodDays() + "|" + row.noteRate().toPlainString() + "|" + bucketHash(row.bucketKey());
+            if (!keys.add(key)) {
+                errors.add("GRID_DUPLICATE_ROW");
+            }
+        }
+        return List.copyOf(errors);
+    }
+
+    private BasePricingGridVersion requireGridVersion(String tenantId, UUID versionId) {
+        if (versionId == null) {
+            throw new BaseRateSelectionValidationException("version_id is required");
+        }
+        return repository.findGridVersionById(tenantId, versionId)
+                .orElseThrow(() -> new BaseRateSelectionGridNotFoundException("grid version not found"));
+    }
+
+    private static boolean windowsOverlap(Instant leftFrom, Instant leftTo, Instant rightFrom, Instant rightTo) {
+        Instant normalizedLeftTo = leftTo == null ? Instant.MAX : leftTo;
+        Instant normalizedRightTo = rightTo == null ? Instant.MAX : rightTo;
+        return leftFrom.isBefore(normalizedRightTo) && rightFrom.isBefore(normalizedLeftTo);
+    }
+
+    private static String rowHash(BaseGridRowDraft row) {
+        return row.lockPeriodDays() + ":" + row.noteRate().setScale(5, BigDecimal.ROUND_HALF_UP).toPlainString()
+                + ":" + row.basePrice().setScale(5, BigDecimal.ROUND_HALF_UP).toPlainString() + ":"
+                + bucketHash(row.bucketKey());
+    }
+
+    private static String bucketHash(Map<String, String> bucketKey) {
+        if (bucketKey == null || bucketKey.isEmpty()) {
+            return "default";
+        }
+        TreeMap<String, String> sorted = new TreeMap<>(bucketKey);
+        List<String> parts = new ArrayList<>();
+        sorted.forEach((key, value) -> parts.add(key + "=" + value));
+        return String.join("|", parts);
+    }
+
     private static void requirePermission(BaseRateSelectionHeaders headers, String permission) {
         if (headers == null) {
             throw new BaseRateSelectionAccessDeniedException("headers are required");
         }
         requireText(headers.actorId(), "actor_id is required");
         requireText(headers.correlationId(), "correlation_id is required");
-        requireText(headers.idempotencyKey(), "idempotency_key is required");
+        if (!GRID_READ_PERMISSION.equals(permission)) {
+            requireText(headers.idempotencyKey(), "idempotency_key is required");
+        }
         if (!headers.permissions().contains(permission)) {
             throw new BaseRateSelectionAccessDeniedException(permission + " permission is required");
         }
@@ -212,6 +462,13 @@ public final class BaseRateSelectionApi {
         DRAFT,
         PUBLISHED,
         SUSPENDED
+    }
+
+    public enum GridImportStatus {
+        DRAFT,
+        VALIDATED,
+        VALIDATION_FAILED,
+        PUBLISHED
     }
 
     public enum BaseRateSelectionStatus {
@@ -268,7 +525,7 @@ public final class BaseRateSelectionApi {
             if (value == null) {
                 throw new BaseRateSelectionValidationException("note_rate must not be null");
             }
-            this.value = value.setScale(5, BigDecimal.ROUND_HALF_UP);
+            value = value.setScale(5, BigDecimal.ROUND_HALF_UP);
         }
     }
 
@@ -277,7 +534,7 @@ public final class BaseRateSelectionApi {
             if (value == null) {
                 throw new BaseRateSelectionValidationException("price must not be null");
             }
-            this.value = value.setScale(5, BigDecimal.ROUND_HALF_UP);
+            value = value.setScale(5, BigDecimal.ROUND_HALF_UP);
         }
     }
 
@@ -322,6 +579,11 @@ public final class BaseRateSelectionApi {
             Instant approvedAt,
             Instant createdAt,
             Instant updatedAt) {
+        public BasePricingGridVersion withPublication(String actorId, Instant publishedAt) {
+            return new BasePricingGridVersion(id, tenantId, productCode, investorCode, channelCode, versionNumber,
+                    GridVersionStatus.PUBLISHED, effectiveFrom, effectiveTo, sourceDigest, actorId, publishedAt, createdAt,
+                    publishedAt);
+        }
     }
 
     public record BasePricingGridRow(
@@ -342,6 +604,127 @@ public final class BaseRateSelectionApi {
                 basePrice = basePrice.setScale(5, BigDecimal.ROUND_HALF_UP);
             }
         }
+    }
+
+    public record BasePricingGridImport(
+            UUID importId,
+            String tenantId,
+            UUID gridVersionId,
+            String sourceType,
+            String sourceDigest,
+            GridImportStatus status,
+            String createdBy,
+            Instant createdAt,
+            Instant updatedAt,
+            List<String> validationMessages) {
+        public BasePricingGridImport {
+            validationMessages = validationMessages == null ? List.of() : List.copyOf(validationMessages);
+        }
+
+        public BasePricingGridImport withStatus(GridImportStatus status, List<String> validationMessages) {
+            return new BasePricingGridImport(importId, tenantId, gridVersionId, sourceType, sourceDigest, status,
+                    createdBy, createdAt, Instant.now(), validationMessages);
+        }
+    }
+
+    public record BaseGridEvent(
+            UUID eventId,
+            String tenantId,
+            UUID gridVersionId,
+            String eventType,
+            String actorId,
+            String correlationId,
+            String idempotencyKey,
+            Instant occurredAt,
+            Map<String, String> payload) {
+        public BaseGridEvent {
+            payload = payload == null ? Map.of() : Map.copyOf(payload);
+        }
+    }
+
+    public record BaseGridRowDraft(
+            int lockPeriodDays,
+            BigDecimal noteRate,
+            BigDecimal basePrice,
+            Map<String, String> bucketKey) {
+        public BaseGridRowDraft {
+            bucketKey = bucketKey == null ? Map.of() : Map.copyOf(bucketKey);
+        }
+    }
+
+    public record BaseGridImportRequest(
+            String productCode,
+            String investorCode,
+            String channelCode,
+            Instant effectiveFrom,
+            Instant effectiveTo,
+            String sourceType,
+            String sourceDigest,
+            boolean approvalWorkflowConfigured,
+            Set<Integer> allowedLockPeriodDays,
+            Set<String> allowedBucketDimensions,
+            List<BaseGridRowDraft> rows) {
+        public BaseGridImportRequest {
+            allowedLockPeriodDays = allowedLockPeriodDays == null ? Set.of() : Set.copyOf(allowedLockPeriodDays);
+            allowedBucketDimensions = allowedBucketDimensions == null ? Set.of() : Set.copyOf(allowedBucketDimensions);
+            rows = rows == null ? List.of() : List.copyOf(rows);
+        }
+    }
+
+    public record BaseGridImportResponse(
+            UUID importId,
+            UUID gridVersionId,
+            GridImportStatus status,
+            int rowCount,
+            List<String> validationMessages,
+            String auditRef,
+            String correlationId) {
+        public BaseGridImportResponse {
+            validationMessages = validationMessages == null ? List.of() : List.copyOf(validationMessages);
+        }
+    }
+
+    public record BaseGridValidationResult(
+            UUID gridVersionId,
+            GridImportStatus status,
+            List<String> validationMessages,
+            String auditRef,
+            String correlationId) {
+        public BaseGridValidationResult {
+            validationMessages = validationMessages == null ? List.of() : List.copyOf(validationMessages);
+        }
+    }
+
+    public record BaseGridPublishResponse(
+            UUID gridVersionId,
+            GridVersionStatus status,
+            int rowCount,
+            String auditRef,
+            String correlationId) {
+    }
+
+    public record BaseGridLookupRequest(
+            String productCode,
+            String investorCode,
+            String channelCode,
+            int lockPeriodDays,
+            BigDecimal noteRate,
+            Instant asOf,
+            Map<String, String> bucketKey) {
+        public BaseGridLookupRequest {
+            bucketKey = bucketKey == null ? Map.of() : Map.copyOf(bucketKey);
+        }
+    }
+
+    public record BaseGridLookupResponse(
+            UUID gridVersionId,
+            UUID rowId,
+            int lockPeriodDays,
+            BigDecimal noteRate,
+            BigDecimal basePrice,
+            String rowHash,
+            String bucketKeyHash,
+            String correlationId) {
     }
 
     public record BaseRateSelection(
@@ -447,6 +830,29 @@ public final class BaseRateSelectionApi {
 
         List<BasePricingGridRow> findGridRows(String tenantId, UUID gridVersionId, int lockPeriodDays);
 
+        List<BasePricingGridRow> findGridRows(String tenantId, UUID gridVersionId);
+
+        Optional<BasePricingGridVersion> findGridVersionById(String tenantId, UUID gridVersionId);
+
+        int nextGridVersionNumber(String tenantId, String productCode, String investorCode, String channelCode);
+
+        void addGridVersion(BasePricingGridVersion version);
+
+        void addGridRow(BasePricingGridRow row);
+
+        void replaceGridVersion(BasePricingGridVersion version);
+
+        void saveGridImport(BasePricingGridImport gridImport);
+
+        Optional<BasePricingGridImport> findGridImport(String tenantId, UUID gridVersionId);
+
+        void markGridImportStatus(String tenantId, UUID gridVersionId, GridImportStatus status,
+                List<String> validationMessages);
+
+        void saveGridEvent(BaseGridEvent event);
+
+        void invalidateGridCache(String tenantId, UUID gridVersionId);
+
         void saveAudit(BaseRateSelectionAudit audit);
     }
 
@@ -455,6 +861,9 @@ public final class BaseRateSelectionApi {
         private final List<BasePricingGridVersion> gridVersions = new ArrayList<>();
         private final List<BasePricingGridRow> gridRows = new ArrayList<>();
         private final List<BaseRateSelectionAudit> audits = new ArrayList<>();
+        private final Map<UUID, BasePricingGridImport> gridImports = new ConcurrentHashMap<>();
+        private final List<BaseGridEvent> gridEvents = new ArrayList<>();
+        private final Set<String> invalidatedGridCacheKeys = ConcurrentHashMap.newKeySet();
 
         @Override
         public void save(BaseRateSelection selection) {
@@ -482,6 +891,67 @@ public final class BaseRateSelectionApi {
         }
 
         @Override
+        public List<BasePricingGridRow> findGridRows(String tenantId, UUID gridVersionId) {
+            return gridRows.stream()
+                    .filter(row -> tenantId.equals(row.tenantId()))
+                    .filter(row -> gridVersionId.equals(row.gridVersionId()))
+                    .toList();
+        }
+
+        @Override
+        public Optional<BasePricingGridVersion> findGridVersionById(String tenantId, UUID gridVersionId) {
+            return gridVersions.stream()
+                    .filter(version -> tenantId.equals(version.tenantId()))
+                    .filter(version -> gridVersionId.equals(version.id()))
+                    .findFirst();
+        }
+
+        @Override
+        public int nextGridVersionNumber(String tenantId, String productCode, String investorCode, String channelCode) {
+            return findGridVersion(tenantId, productCode, investorCode, channelCode).stream()
+                    .mapToInt(BasePricingGridVersion::versionNumber)
+                    .max()
+                    .orElse(0) + 1;
+        }
+
+        @Override
+        public void replaceGridVersion(BasePricingGridVersion version) {
+            gridVersions.removeIf(existing -> existing.id().equals(version.id()));
+            gridVersions.add(version);
+        }
+
+        @Override
+        public void saveGridImport(BasePricingGridImport gridImport) {
+            gridImports.put(gridImport.gridVersionId(), gridImport);
+        }
+
+        @Override
+        public Optional<BasePricingGridImport> findGridImport(String tenantId, UUID gridVersionId) {
+            BasePricingGridImport gridImport = gridImports.get(gridVersionId);
+            if (gridImport == null || !tenantId.equals(gridImport.tenantId())) {
+                return Optional.empty();
+            }
+            return Optional.of(gridImport);
+        }
+
+        @Override
+        public void markGridImportStatus(String tenantId, UUID gridVersionId, GridImportStatus status,
+                List<String> validationMessages) {
+            findGridImport(tenantId, gridVersionId)
+                    .ifPresent(gridImport -> gridImports.put(gridVersionId, gridImport.withStatus(status, validationMessages)));
+        }
+
+        @Override
+        public void saveGridEvent(BaseGridEvent event) {
+            gridEvents.add(event);
+        }
+
+        @Override
+        public void invalidateGridCache(String tenantId, UUID gridVersionId) {
+            invalidatedGridCacheKeys.add(tenantId + ":" + gridVersionId);
+        }
+
+        @Override
         public void saveAudit(BaseRateSelectionAudit audit) {
             audits.add(audit);
         }
@@ -492,6 +962,14 @@ public final class BaseRateSelectionApi {
 
         public void addGridRow(BasePricingGridRow row) {
             gridRows.add(row);
+        }
+
+        public List<BaseGridEvent> gridEvents() {
+            return List.copyOf(gridEvents);
+        }
+
+        public boolean wasGridCacheInvalidated(String tenantId, UUID gridVersionId) {
+            return invalidatedGridCacheKeys.contains(tenantId + ":" + gridVersionId);
         }
     }
 

@@ -1,0 +1,2 @@
+product_code,investor_code,channel_code,lock_period_days,note_rate,base_price,bucket_key
+CONVENTIONAL,SYNTH-INVESTOR,RETAIL,30,6.12500,100.00000,default

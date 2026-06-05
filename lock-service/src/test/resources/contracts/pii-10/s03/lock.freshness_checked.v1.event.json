@@ -1,0 +1,13 @@
+{
+  "eventType": "lock.freshness_checked.v1",
+  "eventVersion": "1",
+  "eventKey": "tenantId:checkId",
+  "payload": {
+    "quoteId": "QUOTE-FRESHNESS",
+    "decision": "FRESH",
+    "reasonCodes": "QUOTE_FRESH",
+    "policyVersion": "freshness-policy-v1",
+    "quoteAgeSeconds": "300",
+    "resultHash": "<sha256>"
+  }
+}

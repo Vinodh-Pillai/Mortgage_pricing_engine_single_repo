@@ -1,0 +1,8 @@
+{
+  "checkId": "FRESHNESS-<stable>",
+  "quoteId": "QUOTE-FRESHNESS",
+  "decision": "STALE",
+  "reasonCodes": ["SCENARIO_HASH_CHANGED"],
+  "remediations": ["Refresh pricing from the current scenario snapshot"],
+  "correlationId": "corr-pii10-s03"
+}

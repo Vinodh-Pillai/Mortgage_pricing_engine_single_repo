@@ -1,0 +1,42 @@
+{
+  "story_id": "PII-16-S02",
+  "endpoint": "/api/v1/tenants/{tenantId}/channels/{channelId}/quotes/requests",
+  "request": {
+    "losLoanId": "loan-1",
+    "borrowerSummary": {
+      "tokenizedBorrowerRef": "borrower-token"
+    },
+    "property": {
+      "state": "VA",
+      "propertyType": "SINGLE_FAMILY",
+      "estimatedValue": "450000"
+    },
+    "loanTerms": {
+      "loanAmount": "300000",
+      "noteRate": "6.750",
+      "purpose": "PURCHASE",
+      "lienPosition": "FIRST"
+    },
+    "credit": {
+      "representativeCreditScore": "redacted-in-events",
+      "creditBucketRef": "credit-bucket-a"
+    },
+    "occupancy": "PRIMARY_RESIDENCE",
+    "lockIntent": "FLOAT",
+    "productPreference": "product-ref-conventional",
+    "requestedAt": "2026-06-04T02:00:00Z",
+    "sourceSystem": "approved-los",
+    "clientSchemaVersion": "LOS-QUOTE-V1"
+  },
+  "expected_response": {
+    "status": "PRICED",
+    "quoteId": "quote-123",
+    "reasonCodes": [],
+    "correlationId": "corr-PII-16-S02"
+  },
+  "event_contracts": [
+    "integration.los-quote-request.accepted.v1",
+    "integration.los-quote-request.priced.v1",
+    "integration.los-quote-request.rejected.v1"
+  ]
+}

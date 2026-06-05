@@ -132,9 +132,9 @@ class BaseRateSelectionServiceTest {
 
         BaseRateSelectionResponse response = api.selectRate(TENANT_A, validWriteHeaders(), validRequest());
 
-        assertEquals(BigDecimal.valueOf(6, 5), response.selectedNoteRate(),
+        assertEquals(new BigDecimal("6.12500"), response.selectedNoteRate(),
                 "Note rate should be scaled to 5 decimal places");
-        assertEquals(BigDecimal.valueOf(100, 5).add(new BigDecimal("0.50001")), response.selectedBasePrice(),
+        assertEquals(new BigDecimal("100.50001"), response.selectedBasePrice(),
                 "Base price should be scaled to 5 decimal places");
 
         // Verify CandidateRate constructor normalization

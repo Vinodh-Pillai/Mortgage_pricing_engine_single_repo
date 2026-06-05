@@ -79,7 +79,11 @@ public final class ExceptionModels {
   ) {}
 
   public enum ConcessionRequestStatus {
-    SUBMITTED, NEEDS_ELIGIBILITY_EXCEPTION, APPROVED_PENDING_APPLICATION
+    SUBMITTED, NEEDS_ELIGIBILITY_EXCEPTION, APPROVED_PENDING_APPLICATION, APPLIED
+  }
+
+  public enum ApplicationTargetType {
+    QUOTE, LOCK
   }
 
   public enum ApprovalDecisionType {
@@ -152,6 +156,58 @@ public final class ExceptionModels {
     Instant decidedAt
   ) {}
 
+  public record ApplicationTarget(
+    ApplicationTargetType targetType,
+    String quoteId,
+    String lockId,
+    String currentQuoteSnapshotHash,
+    String currentLockState
+  ) {}
+
+  public record ApplicationPrecedence(
+    String precedenceConfigVersionId,
+    int scale,
+    String roundingMode
+  ) {}
+
+  public record ApplyApprovedConcessionRequest(
+    UUID tenantId,
+    String concessionRequestId,
+    ApplicationTarget target,
+    int expectedRequestVersion,
+    String expectedQuoteSnapshotHash,
+    String expectedLedgerHash,
+    String pricingRuleVersionId,
+    String policyVersionId,
+    ApplicationPrecedence precedence,
+    boolean eligibilityExceptionsResolved,
+    String actorId,
+    String idempotencyKey,
+    String correlationId
+  ) {}
+
+  public record ConcessionApplicationResponse(
+    UUID tenantId,
+    String applicationId,
+    String concessionRequestId,
+    ApplicationTargetType targetType,
+    String quoteId,
+    String lockId,
+    ConcessionRequestStatus status,
+    String pricingLedgerEntryId,
+    String beforePriceHash,
+    String afterPriceHash,
+    String pricingRuleVersionId,
+    String policyVersionId,
+    String precedenceConfigVersionId,
+    String auditRef,
+    String outboxEventType,
+    String replayHash,
+    String correlationId,
+    int version,
+    Instant appliedAt
+  ) {}
+
   public record PricingConcessionRequestCreate(
     UUID tenantId,
     String quoteId,
@@ -183,6 +239,7 @@ public final class ExceptionModels {
     String reasonCode,
     String commentsRedacted,
     List<ConcessionEvidenceRef> evidenceRefs,
+    String expiration,
     String concessionPolicyVersionId,
     String authorityMatrixVersionId,
     String reasonCodeVersionId,
@@ -223,6 +280,7 @@ public final class ExceptionModels {
     String reasonCode,
     String commentsRedacted,
     List<ConcessionEvidenceRef> evidenceRefs,
+    String expiration,
     String concessionPolicyVersionId,
     String authorityMatrixVersionId,
     String reasonCodeVersionId,
@@ -261,5 +319,32 @@ public final class ExceptionModels {
     String eventHash,
     int aggregateVersion,
     Instant createdAt
+  ) {}
+
+  public record ConcessionApplicationRecord(
+    UUID tenantId,
+    String applicationId,
+    String concessionRequestId,
+    ApplicationTargetType targetType,
+    String quoteId,
+    String lockId,
+    ConcessionAmount appliedAmount,
+    String pricingLedgerEntryId,
+    String beforePriceHash,
+    String afterPriceHash,
+    String pricingRuleVersionId,
+    String policyVersionId,
+    String precedenceConfigVersionId,
+    int scale,
+    String roundingMode,
+    ConcessionRequestStatus status,
+    String idempotencyKey,
+    String appliedBy,
+    String correlationId,
+    String auditRef,
+    String outboxEventType,
+    String replayHash,
+    int version,
+    Instant appliedAt
   ) {}
 }

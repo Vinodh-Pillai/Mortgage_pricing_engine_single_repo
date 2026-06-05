@@ -1,0 +1,12 @@
+{
+  "category": "LLPA_FICO_LTV",
+  "status": "APPLIED",
+  "selectedFicoBandKey": "CONFIGURED_FICO_BAND_A",
+  "selectedLtvBandKey": "CONFIGURED_LTV_BAND_A",
+  "pointsDelta": "0.125000",
+  "bpsDelta": "12.5000",
+  "moneyAmount": "312.50",
+  "reasonCode": "CONFIGURED_REASON_A",
+  "ruleBookVersion": "v1",
+  "roundingMode": "HALF_UP"
+}

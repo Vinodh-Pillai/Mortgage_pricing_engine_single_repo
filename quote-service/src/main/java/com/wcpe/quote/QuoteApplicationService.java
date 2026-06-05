@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 public class QuoteApplicationService {
@@ -13,9 +14,11 @@ public class QuoteApplicationService {
     private final QuoteDependencies dependencies;
     private final QuoteCache cache;
     private final BestExecutionRanker ranker;
+    private final QuotePresentationModelBuilder presentationModelBuilder = new QuotePresentationModelBuilder();
     private final Clock clock;
     private final List<OutboxEvent> outboxEvents = new ArrayList<>();
     private final List<AuditEntry> auditEntries = new ArrayList<>();
+    private final Map<String, QuoteComparisonExport> comparisonExportsByIdempotencyKey = new LinkedHashMap<>();
 
     public QuoteApplicationService(
         QuoteRepository repository,
@@ -41,7 +44,98 @@ public class QuoteApplicationService {
     public Quote getQuote(UUID tenantId, UUID quoteId) {
         Quote stored = repository.findById(tenantId, quoteId)
             .orElseThrow(() -> new QuoteCreateException("NOT_FOUND", "Quote not found"));
-        return cache.get(tenantId, quoteId, stored.version()).orElse(stored);
+        Quote current = cache.get(tenantId, quoteId, stored.version()).orElse(stored);
+        return expireIfNeeded(current);
+    }
+
+    public QuoteComparisonResponse compareQuoteOptions(
+        UUID tenantId,
+        UUID quoteId,
+        ComparisonViewConfig config,
+        Set<String> allowedFields,
+        String actorId,
+        String correlationId
+    ) {
+        validateComparisonRequest(config, actorId, correlationId);
+        Quote quote = getQuote(tenantId, quoteId);
+        QuoteComparisonResponse response = presentationModelBuilder.build(quote, config, allowedFields, clock);
+        outboxEvents.add(event("quote.comparison_viewed.v1", quote));
+        auditEntries.add(new AuditEntry(
+            "QUOTE_COMPARISON_VIEWED",
+            actorId,
+            tenantId.toString(),
+            correlationId,
+            quote.replayHash(),
+            clock.instant(),
+            Map.of(
+                "quoteId", quote.quoteId().toString(),
+                "viewId", config.viewId(),
+                "viewVersion", config.version(),
+                "maskedFieldCount", Integer.toString(response.hiddenFields().size())
+            )
+        ));
+        return response;
+    }
+
+    public QuoteComparisonExport exportComparison(
+        UUID tenantId,
+        UUID quoteId,
+        ComparisonViewConfig config,
+        Set<String> allowedFields,
+        String actorId,
+        String correlationId,
+        String idempotencyKey,
+        String format
+    ) {
+        validateComparisonRequest(config, actorId, correlationId);
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new QuoteCreateException("IDEMPOTENCY_KEY_REQUIRED", "Comparison export requires an idempotency key");
+        }
+        String key = tenantId + ":" + idempotencyKey;
+        QuoteComparisonExport existing = comparisonExportsByIdempotencyKey.get(key);
+        if (existing != null) {
+            if (!existing.quoteId().equals(quoteId) || !existing.viewId().equals(config.viewId()) || !existing.viewVersion().equals(config.version())) {
+                throw new QuoteCreateException("IDEMPOTENCY_CONFLICT", "Comparison export idempotency key was used with different input");
+            }
+            return existing;
+        }
+
+        Quote quote = getQuote(tenantId, quoteId);
+        QuoteComparisonResponse comparison = presentationModelBuilder.build(quote, config, allowedFields, clock);
+        UUID exportId = UUID.nameUUIDFromBytes((tenantId + ":" + idempotencyKey).getBytes());
+        QuoteComparisonExport export = new QuoteComparisonExport(
+            tenantId,
+            exportId,
+            quoteId,
+            config.viewId(),
+            config.version(),
+            comparison.rows().stream().map(row -> UUID.fromString(row.get("optionId").toString())).toList(),
+            format == null || format.isBlank() ? "json" : format,
+            config.redactionProfile(),
+            "audit-safe-export:" + exportId,
+            actorId,
+            clock.instant(),
+            idempotencyKey,
+            "audit:" + correlationId
+        );
+        comparisonExportsByIdempotencyKey.put(key, export);
+        outboxEvents.add(event("quote.comparison_exported.v1", quote));
+        auditEntries.add(new AuditEntry(
+            "QUOTE_COMPARISON_EXPORTED",
+            actorId,
+            tenantId.toString(),
+            correlationId,
+            quote.replayHash(),
+            export.createdAt(),
+            Map.of(
+                "quoteId", quote.quoteId().toString(),
+                "exportId", export.exportId().toString(),
+                "viewId", config.viewId(),
+                "viewVersion", config.version(),
+                "redactionProfile", export.redactionProfile()
+            )
+        ));
+        return export;
     }
 
     public List<OutboxEvent> outboxEvents() {
@@ -100,6 +194,53 @@ public class QuoteApplicationService {
         return existing;
     }
 
+    private Quote expireIfNeeded(Quote quote) {
+        if (!canExpire(quote.status()) || clock.instant().isBefore(quote.expiresAt())) {
+            return quote;
+        }
+        Quote expired = new Quote(
+            quote.tenantId(),
+            quote.quoteId(),
+            quote.scenarioId(),
+            quote.scenarioVersion(),
+            QuoteStatus.EXPIRED,
+            quote.rankingPolicyId(),
+            quote.rankingPolicyVersion(),
+            quote.inputVersionSet(),
+            quote.options(),
+            quote.expiresAt(),
+            quote.auditRef(),
+            quote.replayHash(),
+            quote.idempotencyKey(),
+            quote.createdBy(),
+            quote.createdAt(),
+            quote.correlationId(),
+            quote.version() + 1
+        );
+        repository.save(expired);
+        cache.put(expired);
+        outboxEvents.add(event("quote.expired.v1", expired));
+        auditEntries.add(new AuditEntry(
+            "QUOTE_EXPIRED",
+            expired.createdBy(),
+            expired.tenantId().toString(),
+            expired.correlationId(),
+            expired.replayHash(),
+            clock.instant(),
+            Map.of(
+                "quoteId", expired.quoteId().toString(),
+                "status", expired.status().name(),
+                "expiresAt", expired.expiresAt().toString(),
+                "rankingPolicyVersion", expired.rankingPolicyVersion()
+            )
+        ));
+        return expired;
+    }
+
+    private static boolean canExpire(QuoteStatus status) {
+        return status == QuoteStatus.READY || status == QuoteStatus.NO_OPTIONS;
+    }
+
     private static void validate(QuoteCreateRequest request) {
         if (request.tenantId() == null || request.scenarioId() == null || request.actorId() == null || request.actorId().isBlank()
             || request.idempotencyKey() == null || request.idempotencyKey().isBlank()) {
@@ -107,6 +248,15 @@ public class QuoteApplicationService {
         }
         if (request.scenarioVersion() < 1 || request.requestedLockPeriods().isEmpty()) {
             throw new QuoteCreateException("QUOTE_VALIDATION_FAILED", "scenarioVersion and requested lock periods are required");
+        }
+    }
+
+    private static void validateComparisonRequest(ComparisonViewConfig config, String actorId, String correlationId) {
+        if (config == null) {
+            throw new QuoteCreateException("POLICY_NOT_SATISFIED", "Comparison view configuration is required");
+        }
+        if (actorId == null || actorId.isBlank() || correlationId == null || correlationId.isBlank()) {
+            throw new QuoteCreateException("QUOTE_VALIDATION_FAILED", "actorId and correlationId are required");
         }
     }
 

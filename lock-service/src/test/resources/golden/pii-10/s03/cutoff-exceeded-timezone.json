@@ -1,0 +1,7 @@
+{
+  "tenantId": "11111111-1111-1111-1111-111111111111",
+  "quoteId": "QUOTE-FRESHNESS",
+  "decision": "STALE",
+  "reasonCodes": ["RATE_SHEET_NOT_LOCKABLE"],
+  "policyVersionId": "freshness-policy-v1"
+}

@@ -436,6 +436,20 @@ public final class RateFeedModels {
     Map<String, Object> ruleConfigs
   ) {}
 
+  // ── PII-04-S07: Local OCR rate sheet intake records ──
+
+  public record StartOcrExtractionRequest(String expectedFileSha256, UUID ocrProfileId) {}
+
+  public record OcrExtractionResponse(UUID ocrExtractionId, UUID batchId, String status, String resultHash) {}
+
+  public record ReviewOcrCellRequest(String reviewedText) {}
+
+  public record OcrCellReviewResponse(UUID ocrExtractionId, UUID cellId, String status, String resultHash) {}
+
+  public record ApproveOcrExtractionRequest(String expectedResultHash) {}
+
+  public record OcrApprovalResponse(UUID ocrExtractionId, UUID batchId, String status, String parserHandoffArtifact, String resultHash) {}
+
   // ── Exception class ─────────────────────────────────────────────────────────
 
   public static final class RateFeedException extends RuntimeException {

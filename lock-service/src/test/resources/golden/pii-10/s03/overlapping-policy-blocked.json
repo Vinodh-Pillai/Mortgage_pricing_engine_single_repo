@@ -1,0 +1,7 @@
+{
+  "tenantId": "11111111-1111-1111-1111-111111111111",
+  "quoteId": "QUOTE-FRESHNESS",
+  "decision": "CONFIG_ERROR",
+  "reasonCodes": ["CONFIG_AMBIGUOUS"],
+  "remediations": ["Resolve tenant/channel/product/investor freshness policy configuration"]
+}

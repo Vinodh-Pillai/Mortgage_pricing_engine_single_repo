@@ -58,6 +58,30 @@ class RateFeedController {
         () -> ResponseEntity.status(HttpStatus.ACCEPTED).body(service.parseBatch(tenantId, batchId, request, h.idempotencyKey(), h.actorId(), h.correlationId())));
   }
 
+  @PostMapping("/rate-feed-batches/{batchId}/ocr-extractions")
+  ResponseEntity<RateFeedModels.OcrExtractionResponse> startOcrExtraction(@PathVariable UUID tenantId, @PathVariable UUID batchId,
+      @RequestBody RateFeedModels.StartOcrExtractionRequest request, HttpServletRequest http) {
+    Headers h = headers(http);
+    return withAuthorizedHeaders(h, RateFeedRoles.RATE_FEED_UPLOAD,
+        () -> ResponseEntity.status(HttpStatus.ACCEPTED).body(service.startOcrExtraction(tenantId, batchId, request, h.idempotencyKey(), h.actorId(), h.correlationId())));
+  }
+
+  @PatchMapping("/ocr-extractions/{ocrExtractionId}/cells/{cellId}")
+  ResponseEntity<RateFeedModels.OcrCellReviewResponse> reviewOcrCell(@PathVariable UUID tenantId, @PathVariable UUID ocrExtractionId,
+      @PathVariable UUID cellId, @RequestBody RateFeedModels.ReviewOcrCellRequest request, HttpServletRequest http) {
+    Headers h = headers(http);
+    return withAuthorizedHeaders(h, RateFeedRoles.RATE_FEED_OCR_REVIEW,
+        () -> ResponseEntity.ok(service.reviewOcrCell(tenantId, ocrExtractionId, cellId, request, h.actorId(), h.correlationId())));
+  }
+
+  @PostMapping("/ocr-extractions/{ocrExtractionId}/approve")
+  ResponseEntity<RateFeedModels.OcrApprovalResponse> approveOcrExtraction(@PathVariable UUID tenantId, @PathVariable UUID ocrExtractionId,
+      @RequestBody(required = false) RateFeedModels.ApproveOcrExtractionRequest request, HttpServletRequest http) {
+    Headers h = headers(http);
+    return withAuthorizedHeaders(h, RateFeedRoles.RATE_FEED_OCR_REVIEW,
+        () -> ResponseEntity.ok(service.approveOcrExtraction(tenantId, ocrExtractionId, request, h.actorId(), h.correlationId())));
+  }
+
   @GetMapping("/rate-feed-batches/{batchId}/parse-results")
   ResponseEntity<RateFeedModels.ParseResultPage> parseResults(@PathVariable UUID tenantId, @PathVariable UUID batchId,
       @RequestParam(required = false) String severity,
@@ -74,6 +98,21 @@ class RateFeedController {
     Headers h = headers(http);
     return withAuthorizedHeaders(h, RateFeedRoles.RATE_FEED_NORMALIZE,
         () -> ResponseEntity.status(HttpStatus.ACCEPTED).body(service.normalizeBatch(tenantId, batchId, request, h.idempotencyKey(), h.actorId(), h.correlationId())));
+  }
+
+  @PostMapping("/rate-feed-batches/{batchId}/validate")
+  ResponseEntity<RateFeedModels.ValidateBatchResponse> validateBatch(@PathVariable UUID tenantId, @PathVariable UUID batchId,
+      @RequestBody RateFeedModels.ValidateBatchRequest request, HttpServletRequest http) {
+    Headers h = headers(http);
+    return withAuthorizedHeaders(h, RateFeedRoles.RATE_FEED_VALIDATE,
+        () -> ResponseEntity.status(HttpStatus.ACCEPTED).body(service.validateBatch(tenantId, batchId, request, h.idempotencyKey(), h.actorId(), h.correlationId())));
+  }
+
+  @GetMapping("/rate-feed-batches/{batchId}/validation-report")
+  ResponseEntity<RateFeedModels.ValidationReportResponse> validationReport(@PathVariable UUID tenantId, @PathVariable UUID batchId,
+      HttpServletRequest http) {
+    return withAuthorizedHeaders(headers(http), RateFeedRoles.RATE_FEED_VIEW,
+        () -> ResponseEntity.ok(service.validationReport(tenantId, batchId)));
   }
 
   @GetMapping("/rate-feed-batches/{batchId}/normalized-entries")

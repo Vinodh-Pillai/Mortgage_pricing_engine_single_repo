@@ -1,0 +1,11 @@
+{
+  "fixture_id": "PII-05-S03-published-lookup",
+  "tenant_id": "tenant-a",
+  "product_code": "CONVENTIONAL",
+  "investor_code": "SYNTH-INVESTOR",
+  "channel_code": "RETAIL",
+  "lock_period_days": 30,
+  "note_rate": "6.12500",
+  "base_price": "100.00000",
+  "bucket_key_hash": "default"
+}

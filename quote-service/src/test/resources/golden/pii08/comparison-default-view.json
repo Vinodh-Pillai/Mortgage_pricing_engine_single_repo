@@ -1,0 +1,20 @@
+{
+  "viewId": "default-view",
+  "viewVersion": "view-v1",
+  "columns": [
+    "rank",
+    "productLabel",
+    "investorLabel",
+    "noteRate",
+    "pricePoints",
+    "lockDays",
+    "totalAdjustments",
+    "margin",
+    "expiration"
+  ],
+  "restrictedFields": [
+    "investorLabel",
+    "margin"
+  ],
+  "redactionProfile": "audit-safe-redaction-v1"
+}

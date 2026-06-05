@@ -25,6 +25,18 @@ public final class LockModels {
     }
   }
 
+  public enum LockDecisionType {
+    APPROVE, REJECT
+  }
+
+  public enum FreshnessDecisionType {
+    FRESH, EXPIRES_SOON, STALE, POLICY_SUSPENDED, CONFIG_ERROR, UNKNOWN;
+
+    public boolean lockable() {
+      return this == FRESH || this == EXPIRES_SOON;
+    }
+  }
+
   public record LockRequestCommand(
     UUID tenantId,
     String requestId,
@@ -93,6 +105,107 @@ public final class LockModels {
     String requestHash
   ) {}
 
+  public record LockDecisionCommand(
+    UUID tenantId,
+    String lockId,
+    LockDecisionType decision,
+    String actorId,
+    String requesterActorId,
+    int expectedVersion,
+    List<String> reasonCodes,
+    String note,
+    String policyVersionId,
+    String complianceEvidenceRef,
+    String idempotencyKey,
+    String correlationId,
+    Instant decidedAt,
+    boolean permissionGranted,
+    boolean separationOfDutiesConfigured,
+    boolean decisionPolicyCurrent
+  ) {}
+
+  public record LockDecisionResponse(
+    UUID tenantId,
+    String lockId,
+    String decisionId,
+    LockDecisionType decision,
+    RateLockStatus previousStatus,
+    RateLockStatus status,
+    int version,
+    String resultSummary,
+    List<String> validationMessages,
+    String auditRef,
+    String replayRef,
+    String correlationId,
+    String outboxEventType,
+    String decisionHash
+  ) {}
+
+  public record FreshnessCheckCommand(
+    UUID tenantId,
+    String requestId,
+    String actorId,
+    String quoteId,
+    String scenarioHash,
+    String pricingResultHash,
+    String currentScenarioHash,
+    String currentPricingResultHash,
+    String rateSheetVersion,
+    String marketDataVersion,
+    String productId,
+    String investorId,
+    String channel,
+    Instant quotePricedAt,
+    Instant evaluatedAt,
+    long maxQuoteAgeSeconds,
+    long expirySoonWindowSeconds,
+    Instant expiresAt,
+    String policyVersionId,
+    String complianceEvidenceRef,
+    boolean permissionGranted,
+    boolean policyResolved,
+    boolean policyAmbiguous,
+    boolean rateSheetLockable,
+    boolean marketSuspended,
+    boolean investorEnabled,
+    boolean complianceBlocking,
+    boolean emitAuditEvent,
+    String idempotencyKey,
+    String correlationId,
+    Map<String, String> sourceRefs
+  ) {}
+
+  public record FreshnessCheckResponse(
+    UUID tenantId,
+    String checkId,
+    String quoteId,
+    FreshnessDecisionType decision,
+    List<String> reasonCodes,
+    String policyVersionId,
+    long quoteAgeSeconds,
+    Instant expiresAt,
+    List<String> remediations,
+    String auditRef,
+    String replayRef,
+    String correlationId,
+    String resultHash
+  ) {}
+
+  public record FreshnessCheckRecord(
+    UUID tenantId,
+    String checkId,
+    String quoteId,
+    String scenarioHash,
+    String policyVersionId,
+    FreshnessDecisionType decision,
+    List<String> reasonCodes,
+    Instant evaluatedAt,
+    Instant expiresAt,
+    String resultHash,
+    String createdBy,
+    String correlationId
+  ) {}
+
   public record LockEvent(
     String eventType,
     String eventVersion,
@@ -124,6 +237,12 @@ public final class LockModels {
   public record MetricsSnapshot(
     long lockRequestTotal,
     long lockRequestRejectedTotal,
+    long lockApprovalTotal,
+    long lockRejectionTotal,
+    long lockDecisionPolicyBlockedTotal,
+    long freshnessCheckTotal,
+    long freshnessPolicyResolutionFailureTotal,
+    long freshnessExpiresSoonTotal,
     long lockOutboxLagSeconds
   ) {}
 

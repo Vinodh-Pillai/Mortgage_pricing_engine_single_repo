@@ -3,6 +3,7 @@ package com.wcpe.exception.domain;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.LocalDate;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -105,6 +106,59 @@ public class ExceptionService {
     );
   }
 
+  public ExceptionModels.ConcessionApplicationResponse applyApprovedConcession(
+    ExceptionModels.ApplyApprovedConcessionRequest command
+  ) {
+    validateApplyRequest(command);
+    ExceptionModels.PricingConcessionRequestRecord concession = repository
+      .findConcessionById(command.tenantId().toString(), command.concessionRequestId())
+      .orElseThrow(() -> new ExceptionServiceException(
+        "UNKNOWN_CONCESSION_REQUEST",
+        "Unknown concession request id for tenant scope: " + command.concessionRequestId()
+      ));
+
+    var replayed = repository.findApplicationByIdempotencyKey(command.tenantId(), command.idempotencyKey());
+    if (replayed.isPresent()) {
+      if (!applicationMatchesExisting(command, replayed.get())) {
+        throw new ExceptionServiceException(
+          "IDEMPOTENCY_CONFLICT",
+          "Idempotency-Key already exists for a different concession application"
+        );
+      }
+      return toApplicationResponse(replayed.get());
+    }
+
+    validateApplyAgainstConcession(command, concession);
+    if (repository.findApplicationByTarget(command.tenantId(), command.concessionRequestId(), command.target()).isPresent()) {
+      throw new ExceptionServiceException("ALREADY_APPLIED", "concession request is already applied to this target");
+    }
+
+    String pricingLedgerEntryId = "LEDGER-" + hash(command.tenantId() + ":" + command.concessionRequestId()
+      + ":" + command.target().targetType() + ":" + command.expectedLedgerHash()).substring(0, 16);
+    String afterPriceHash = hash(String.join("|",
+      command.expectedLedgerHash(),
+      concession.requestHash(),
+      command.pricingRuleVersionId(),
+      command.policyVersionId(),
+      command.precedence().precedenceConfigVersionId(),
+      String.valueOf(command.precedence().scale()),
+      command.precedence().roundingMode()
+    ));
+    String replayHash = applyReplayHash(command, concession, pricingLedgerEntryId, afterPriceHash);
+    String outboxEventType = command.target().targetType() == ExceptionModels.ApplicationTargetType.LOCK
+      ? "ConcessionAppliedToLock.v1"
+      : "ConcessionAppliedToQuote.v1";
+
+    return toApplicationResponse(repository.applyConcession(
+      concession,
+      normalizeApplyRequest(command),
+      pricingLedgerEntryId,
+      afterPriceHash,
+      replayHash,
+      outboxEventType
+    ));
+  }
+
   public ExceptionModels.ExceptionRequestStatus status(String exceptionRequestId) {
     return repository.findById(exceptionRequestId)
       .map(this::toStatus)
@@ -169,6 +223,7 @@ public class ExceptionService {
       record.reasonCode(),
       record.commentsRedacted(),
       record.evidenceRefs(),
+      record.expiration(),
       record.concessionPolicyVersionId(),
       record.authorityMatrixVersionId(),
       record.reasonCodeVersionId(),
@@ -324,6 +379,186 @@ public class ExceptionService {
     if (approval.actorRoleRefs().stream().noneMatch(concession.nextApproverGroups()::contains)) {
       throw new ExceptionServiceException("NOT_CURRENT_APPROVER", "actor does not satisfy current approval route step");
     }
+  }
+
+  private static ExceptionModels.ApplyApprovedConcessionRequest normalizeApplyRequest(
+    ExceptionModels.ApplyApprovedConcessionRequest command
+  ) {
+    ExceptionModels.ApplicationTarget target = command.target();
+    return new ExceptionModels.ApplyApprovedConcessionRequest(
+      command.tenantId(),
+      command.concessionRequestId().trim(),
+      new ExceptionModels.ApplicationTarget(
+        target.targetType(),
+        target.quoteId().trim(),
+        isBlank(target.lockId()) ? null : target.lockId().trim(),
+        target.currentQuoteSnapshotHash().trim(),
+        isBlank(target.currentLockState()) ? null : target.currentLockState().trim()
+      ),
+      command.expectedRequestVersion(),
+      command.expectedQuoteSnapshotHash().trim(),
+      command.expectedLedgerHash().trim(),
+      command.pricingRuleVersionId().trim(),
+      command.policyVersionId().trim(),
+      new ExceptionModels.ApplicationPrecedence(
+        command.precedence().precedenceConfigVersionId().trim(),
+        command.precedence().scale(),
+        command.precedence().roundingMode().trim()
+      ),
+      command.eligibilityExceptionsResolved(),
+      command.actorId().trim(),
+      command.idempotencyKey().trim(),
+      command.correlationId().trim()
+    );
+  }
+
+  private static void validateApplyRequest(ExceptionModels.ApplyApprovedConcessionRequest command) {
+    if (command == null) {
+      throw new ExceptionServiceException("VALIDATION_FAILED", "apply approved concession request is required");
+    }
+    requireTenant(command.tenantId());
+    requireText(command.concessionRequestId(), "VALIDATION_FAILED", "concessionRequestId is required");
+    requireText(command.expectedQuoteSnapshotHash(), "VALIDATION_FAILED", "expectedQuoteSnapshotHash is required");
+    requireText(command.expectedLedgerHash(), "VALIDATION_FAILED", "expectedLedgerHash is required");
+    requireText(command.pricingRuleVersionId(), "POLICY_NOT_SATISFIED", "pricingRuleVersionId is required");
+    requireText(command.policyVersionId(), "POLICY_NOT_SATISFIED", "policyVersionId is required");
+    requireText(command.actorId(), "FORBIDDEN", "actorId is required");
+    requireText(command.idempotencyKey(), "VALIDATION_FAILED", "Idempotency-Key is required");
+    requireText(command.correlationId(), "VALIDATION_FAILED", "correlationId is required");
+    validateTarget(command.target());
+    validatePrecedence(command.precedence());
+  }
+
+  private static void validateTarget(ExceptionModels.ApplicationTarget target) {
+    if (target == null || target.targetType() == null) {
+      throw new ExceptionServiceException("VALIDATION_FAILED", "application target is required");
+    }
+    requireText(target.quoteId(), "VALIDATION_FAILED", "quoteId is required");
+    requireText(target.currentQuoteSnapshotHash(), "VALIDATION_FAILED", "currentQuoteSnapshotHash is required");
+    if (target.targetType() == ExceptionModels.ApplicationTargetType.LOCK) {
+      requireText(target.lockId(), "LOCK_STATE_INVALID", "lockId is required for lock concession application");
+      requireText(target.currentLockState(), "LOCK_STATE_INVALID", "currentLockState is required for lock concession application");
+    }
+  }
+
+  private static void validatePrecedence(ExceptionModels.ApplicationPrecedence precedence) {
+    if (precedence == null) {
+      throw new ExceptionServiceException("POLICY_NOT_SATISFIED", "application precedence config is required");
+    }
+    requireText(precedence.precedenceConfigVersionId(), "POLICY_NOT_SATISFIED", "precedenceConfigVersionId is required");
+    requireText(precedence.roundingMode(), "POLICY_NOT_SATISFIED", "roundingMode is required");
+    if (precedence.scale() < 0) {
+      throw new ExceptionServiceException("POLICY_NOT_SATISFIED", "configured pricing scale must be non-negative");
+    }
+  }
+
+  private static void validateApplyAgainstConcession(
+    ExceptionModels.ApplyApprovedConcessionRequest command,
+    ExceptionModels.PricingConcessionRequestRecord concession
+  ) {
+    if (concession.status() != ExceptionModels.ConcessionRequestStatus.APPROVED_PENDING_APPLICATION) {
+      throw new ExceptionServiceException("REQUEST_NOT_APPROVED", "concession request must be fully approved before application");
+    }
+    if (command.expectedRequestVersion() != concession.version()) {
+      throw new ExceptionServiceException("VERSION_CONFLICT", "expectedRequestVersion does not match current version");
+    }
+    if (!concession.quoteId().equals(command.target().quoteId())) {
+      throw new ExceptionServiceException("QUOTE_HASH_CHANGED", "application target quote does not match concession request");
+    }
+    if (!concession.quoteSnapshotHash().equals(command.expectedQuoteSnapshotHash())
+      || !command.expectedQuoteSnapshotHash().equals(command.target().currentQuoteSnapshotHash())) {
+      throw new ExceptionServiceException("QUOTE_HASH_CHANGED", "quote or lock snapshot hash changed since approval");
+    }
+    if (command.target().targetType() == ExceptionModels.ApplicationTargetType.LOCK
+      && !Objects.equals(concession.lockId(), command.target().lockId())) {
+      throw new ExceptionServiceException("LOCK_STATE_INVALID", "application target lock does not match concession request");
+    }
+    if (!command.eligibilityExceptionsResolved()) {
+      throw new ExceptionServiceException(
+        "ELIGIBILITY_EXCEPTION_UNRESOLVED",
+        "eligibility exception dependencies must be resolved before application"
+      );
+    }
+    if (isExpired(concession)) {
+      throw new ExceptionServiceException("CONCESSION_EXPIRED", "approved concession is expired");
+    }
+  }
+
+  private static boolean isExpired(ExceptionModels.PricingConcessionRequestRecord concession) {
+    String expiration = concession.expiration();
+    if (isBlank(expiration)) {
+      return false;
+    }
+    try {
+      return LocalDate.parse(expiration).isBefore(LocalDate.now());
+    } catch (RuntimeException ignored) {
+      return false;
+    }
+  }
+
+  private static boolean applicationMatchesExisting(
+    ExceptionModels.ApplyApprovedConcessionRequest command,
+    ExceptionModels.ConcessionApplicationRecord existing
+  ) {
+    return existing.concessionRequestId().equals(command.concessionRequestId())
+      && existing.targetType() == command.target().targetType()
+      && existing.quoteId().equals(command.target().quoteId())
+      && Objects.equals(existing.lockId(), command.target().lockId())
+      && existing.beforePriceHash().equals(command.expectedLedgerHash())
+      && existing.pricingRuleVersionId().equals(command.pricingRuleVersionId())
+      && existing.policyVersionId().equals(command.policyVersionId())
+      && existing.precedenceConfigVersionId().equals(command.precedence().precedenceConfigVersionId())
+      && existing.scale() == command.precedence().scale()
+      && existing.roundingMode().equals(command.precedence().roundingMode())
+      && existing.appliedBy().equals(command.actorId());
+  }
+
+  private static String applyReplayHash(
+    ExceptionModels.ApplyApprovedConcessionRequest command,
+    ExceptionModels.PricingConcessionRequestRecord concession,
+    String pricingLedgerEntryId,
+    String afterPriceHash
+  ) {
+    return hash(String.join("|",
+      concession.requestHash(),
+      command.target().targetType().name(),
+      command.target().quoteId(),
+      Objects.toString(command.target().lockId(), ""),
+      command.expectedLedgerHash(),
+      afterPriceHash,
+      pricingLedgerEntryId,
+      command.pricingRuleVersionId(),
+      command.policyVersionId(),
+      command.precedence().precedenceConfigVersionId(),
+      command.precedence().roundingMode(),
+      String.valueOf(command.precedence().scale())
+    ));
+  }
+
+  private static ExceptionModels.ConcessionApplicationResponse toApplicationResponse(
+    ExceptionModels.ConcessionApplicationRecord record
+  ) {
+    return new ExceptionModels.ConcessionApplicationResponse(
+      record.tenantId(),
+      record.applicationId(),
+      record.concessionRequestId(),
+      record.targetType(),
+      record.quoteId(),
+      record.lockId(),
+      record.status(),
+      record.pricingLedgerEntryId(),
+      record.beforePriceHash(),
+      record.afterPriceHash(),
+      record.pricingRuleVersionId(),
+      record.policyVersionId(),
+      record.precedenceConfigVersionId(),
+      record.auditRef(),
+      record.outboxEventType(),
+      record.replayHash(),
+      record.correlationId(),
+      record.version(),
+      record.appliedAt()
+    );
   }
 
   private ExceptionModels.ConcessionApprovalResponse toApprovalResponse(

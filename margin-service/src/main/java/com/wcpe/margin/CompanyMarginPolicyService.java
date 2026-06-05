@@ -14,7 +14,9 @@ import java.util.Optional;
 import java.util.UUID;
 
 public final class CompanyMarginPolicyService {
-  private static final String POLICY_TYPE = "COMPANY";
+  public static final String COMPANY_POLICY_TYPE = "COMPANY";
+  public static final String CHANNEL_POLICY_TYPE = "CHANNEL";
+  public static final String BRANCH_OVERLAY_POLICY_TYPE = "BRANCH_OVERLAY";
   private final Clock clock;
   private final Map<PolicyKey, MarginPolicy> policies = new HashMap<>();
   private final Map<String, CommandReceipt> idempotencyReceipts = new HashMap<>();
@@ -35,27 +37,36 @@ public final class CompanyMarginPolicyService {
       }
       return existing;
     }
-    validateDraft(command.name(), command.version());
-    PolicyKey key = new PolicyKey(command.tenantId(), command.name());
-    if (policies.containsKey(key)) {
+    validateDraft(command.policyType(), command.name(), command.version());
+    if (activePolicyNameExists(command.tenantId(), command.name(), command.policyType())) {
       throw new MarginPolicyException("MARGIN_POLICY_ALREADY_EXISTS");
     }
+    String policyId = UUID.randomUUID().toString();
     MarginPolicy policy = new MarginPolicy(
         command.tenantId(),
-        UUID.randomUUID().toString(),
+        policyId,
         command.name(),
+        command.policyType(),
         PolicyStatus.DRAFT,
         List.of(command.version()),
         command.actorId(),
         command.actorId(),
         Instant.now(clock),
         Instant.now(clock));
-    policies.put(key, policy);
+    policies.put(new PolicyKey(command.tenantId(), policyId), policy);
     CommandReceipt receipt = new CommandReceipt(policy.policyId(), policy.status(), policy.currentVersion().versionNumber(),
         command.correlationId(), command.requestHash(), List.of(), "audit:" + policy.policyId());
     idempotencyReceipts.put(idemKey, receipt);
     auditRecords.add(AuditRecord.completed(command.tenantId(), policy.policyId(), command.actorId(), command.correlationId(), "DRAFT_CREATED"));
     return receipt;
+  }
+
+  public CommandReceipt createChannelDraft(CreatePolicyCommand command) {
+    return createDraft(command.withPolicyType(CHANNEL_POLICY_TYPE));
+  }
+
+  public CommandReceipt createBranchOverlayDraft(CreatePolicyCommand command) {
+    return createDraft(command.withPolicyType(BRANCH_OVERLAY_POLICY_TYPE));
   }
 
   public SimulationResult simulate(String tenantId, String policyId, ConfigResolver configResolver, BigDecimal priceBeforeMargin) {
@@ -69,6 +80,45 @@ public final class CompanyMarginPolicyService {
       runningPrice = step.priceAfterMargin();
     }
     return new SimulationResult(policyId, version.versionId(), runningPrice, steps);
+  }
+
+  public SimulationResult simulateChannel(String tenantId, String policyId, ConfigResolver configResolver,
+      BigDecimal priceAfterCompanyMargin, MarginScope quoteScope) {
+    MarginPolicy policy = findById(tenantId, policyId);
+    if (!CHANNEL_POLICY_TYPE.equals(policy.policyType())) {
+      throw new MarginPolicyException("CHANNEL_NOT_CONFIGURED");
+    }
+    MarginPolicyVersion version = policy.currentVersion();
+    MarginRule rule = selectChannelRule(version, quoteScope);
+    MarginCalculationStep step = calculate(rule, configResolver, priceAfterCompanyMargin, version.versionId(), "CHANNEL_MARGIN");
+    return new SimulationResult(policyId, version.versionId(), step.priceAfterMargin(), List.of(step));
+  }
+
+  public SimulationResult simulateBranchOverlay(String tenantId, String policyId, ConfigResolver configResolver,
+      BigDecimal priceAfterChannelMargin, BranchOverlayContext context) {
+    Objects.requireNonNull(context, "context is required");
+    MarginPolicy policy = findById(tenantId, policyId);
+    if (!BRANCH_OVERLAY_POLICY_TYPE.equals(policy.policyType())) {
+      throw new MarginPolicyException("BRANCH_OVERLAY_NOT_CONFIGURED");
+    }
+    if (!tenantId.equals(context.tenantId())) {
+      throw new MarginPolicyException("TENANT_ACCESS_DENIED");
+    }
+    if (!context.authorizedBranchIds().contains(context.branchId())) {
+      throw new MarginPolicyException("BRANCH_SCOPE_UNAUTHORIZED");
+    }
+    if (context.hierarchyStale()) {
+      throw new MarginPolicyException("BRANCH_HIERARCHY_STALE");
+    }
+    MarginPolicyVersion version = policy.currentVersion();
+    MarginRule rule = selectBranchOverlayRule(version, context);
+    MarginCalculationStep step = calculate(rule, configResolver, priceAfterChannelMargin, version.versionId(), "BRANCH_OVERLAY");
+    BigDecimal enterpriseLimit = resolveRequired(configResolver, context.enterpriseLimitRef());
+    BigDecimal enterpriseLimitPoints = rule.unit() == MarginUnit.BPS ? enterpriseLimit.movePointLeft(2) : enterpriseLimit;
+    if (step.marginPoints().abs().compareTo(enterpriseLimitPoints.abs()) > 0) {
+      throw new MarginPolicyException("BRANCH_OVERLAY_LIMIT_EXCEEDED");
+    }
+    return new SimulationResult(policyId, version.versionId(), step.priceAfterMargin(), List.of(step));
   }
 
   public CommandReceipt submit(String tenantId, String policyId, String actorId, String correlationId) {
@@ -90,20 +140,23 @@ public final class CompanyMarginPolicyService {
     }
     rejectPublishedOverlap(policy);
     MarginPolicy published = policy.withStatus(PolicyStatus.PUBLISHED, actorId, Instant.now(clock));
-    policies.put(new PolicyKey(tenantId, policy.name()), published);
+    policies.put(new PolicyKey(tenantId, policy.policyId()), published);
     MarginPolicyVersion version = published.currentVersion();
     MarginPolicyPublishedEvent event = new MarginPolicyPublishedEvent(
         tenantId,
         policyId,
         version.versionId(),
-        POLICY_TYPE,
+        policy.policyType(),
         version.scope().stableHash(),
         version.effectiveWindow().effectiveFromUtc(),
         version.configHash(),
         actorId,
         correlationId);
     outbox.add(event);
-    auditRecords.add(AuditRecord.completed(tenantId, policyId, actorId, correlationId, "MARGIN_POLICY_PUBLISHED"));
+    String action = BRANCH_OVERLAY_POLICY_TYPE.equals(policy.policyType())
+        ? "BRANCH_OVERLAY_POLICY_PUBLISHED"
+        : "MARGIN_POLICY_PUBLISHED";
+    auditRecords.add(AuditRecord.completed(tenantId, policyId, actorId, correlationId, action));
     return new CommandReceipt(policyId, PolicyStatus.PUBLISHED, version.versionNumber(), correlationId, "publish:" + policyId, List.of(event), "audit:" + policyId);
   }
 
@@ -142,12 +195,17 @@ public final class CompanyMarginPolicyService {
       throw new MarginPolicyException("MARGIN_VERSION_STALE");
     }
     MarginPolicy changed = policy.withStatus(to, actorId, Instant.now(clock));
-    policies.put(new PolicyKey(tenantId, changed.name()), changed);
+    policies.put(new PolicyKey(tenantId, changed.policyId()), changed);
     auditRecords.add(AuditRecord.completed(tenantId, policyId, actorId, correlationId, action));
     return new CommandReceipt(policyId, to, changed.currentVersion().versionNumber(), correlationId, action + ":" + policyId, List.of(), "audit:" + policyId);
   }
 
   private MarginCalculationStep calculate(MarginRule rule, ConfigResolver configResolver, BigDecimal priceBeforeMargin, String sourceVersionId) {
+    return calculate(rule, configResolver, priceBeforeMargin, sourceVersionId, "COMPANY_MARGIN");
+  }
+
+  private MarginCalculationStep calculate(MarginRule rule, ConfigResolver configResolver, BigDecimal priceBeforeMargin,
+      String sourceVersionId, String stepType) {
     BigDecimal amount = resolveRequired(configResolver, rule.amountRef());
     BigDecimal min = resolveRequired(configResolver, rule.minRef());
     BigDecimal max = resolveRequired(configResolver, rule.maxRef());
@@ -157,15 +215,83 @@ public final class CompanyMarginPolicyService {
     BigDecimal margin = amount.max(min).min(max);
     BigDecimal points = rule.unit() == MarginUnit.BPS ? margin.movePointLeft(2) : margin;
     BigDecimal priceAfterMargin = priceBeforeMargin.subtract(points).setScale(rule.roundingScale(), RoundingMode.HALF_UP);
-    return new MarginCalculationStep("COMPANY_MARGIN", sourceVersionId, priceBeforeMargin, priceAfterMargin, points,
+    return new MarginCalculationStep(stepType, sourceVersionId, priceBeforeMargin, priceAfterMargin, points,
         rule.reasonCode(), replayHash(rule, priceBeforeMargin, priceAfterMargin));
+  }
+
+  private MarginRule selectChannelRule(MarginPolicyVersion version, MarginScope quoteScope) {
+    Objects.requireNonNull(quoteScope, "quoteScope is required");
+    List<MarginRule> matches = version.rules().stream()
+        .filter(rule -> rule.scope().matches(quoteScope))
+        .sorted(Comparator.comparingInt((MarginRule rule) -> specificity(rule.scope())).reversed()
+            .thenComparingInt(MarginRule::priority))
+        .toList();
+    if (matches.isEmpty()) {
+      throw new MarginPolicyException("CHANNEL_NOT_CONFIGURED");
+    }
+    MarginRule best = matches.get(0);
+    long ambiguous = matches.stream()
+        .filter(rule -> specificity(rule.scope()) == specificity(best.scope()))
+        .filter(rule -> rule.priority() == best.priority())
+        .count();
+    if (ambiguous > 1) {
+      throw new MarginPolicyException("CHANNEL_MARGIN_OVERLAP");
+    }
+    return best;
+  }
+
+  private MarginRule selectBranchOverlayRule(MarginPolicyVersion version, BranchOverlayContext context) {
+    MarginScope quoteScope = context.scope().withBranch(context.branchId(), context.regionId());
+    List<MarginRule> matches = version.rules().stream()
+        .filter(rule -> context.hierarchyVersionId().equals(rule.scope().sourceHierarchyVersionId()))
+        .filter(rule -> branchOverlayScopeMatches(rule.scope(), quoteScope, context))
+        .sorted(Comparator.comparingInt((MarginRule rule) -> branchSpecificity(rule.scope(), context)).reversed()
+            .thenComparing(Comparator.comparingInt((MarginRule rule) -> specificity(rule.scope())).reversed())
+            .thenComparingInt(MarginRule::priority))
+        .toList();
+    if (matches.isEmpty()) {
+      throw new MarginPolicyException("BRANCH_OVERLAY_NOT_CONFIGURED");
+    }
+    MarginRule best = matches.get(0);
+    long ambiguous = matches.stream()
+        .filter(rule -> branchSpecificity(rule.scope(), context) == branchSpecificity(best.scope(), context))
+        .filter(rule -> specificity(rule.scope()) == specificity(best.scope()))
+        .filter(rule -> rule.priority() == best.priority())
+        .count();
+    if (ambiguous > 1) {
+      throw new MarginPolicyException("BRANCH_OVERLAY_AMBIGUOUS");
+    }
+    return best;
+  }
+
+  private static int branchSpecificity(MarginScope scope, BranchOverlayContext context) {
+    if (Objects.equals(scope.branchId(), context.branchId())) {
+      return 3;
+    }
+    if (context.branchAncestorIds().contains(scope.branchId())) {
+      return 2;
+    }
+    if (Objects.equals(scope.regionId(), context.regionId())) {
+      return 1;
+    }
+    return 0;
+  }
+
+  private static boolean branchOverlayScopeMatches(MarginScope ruleScope, MarginScope quoteScope,
+      BranchOverlayContext context) {
+    boolean hierarchyMatch = ruleScope.matches(quoteScope) || context.branchAncestorIds().contains(ruleScope.branchId());
+    MarginScope comparable = new MarginScope(ruleScope.productFamily(), ruleScope.investorGroup(), ruleScope.channel(),
+        ruleScope.state(), ruleScope.occupancy(), ruleScope.purpose(), ruleScope.lockPeriodBucket(),
+        quoteScope.branchId(), quoteScope.regionId(), ruleScope.sourceHierarchyVersionId(), ruleScope.inheritanceMode());
+    return hierarchyMatch && comparable.matches(quoteScope);
   }
 
   private BigDecimal resolveRequired(ConfigResolver configResolver, String ref) {
     return configResolver.resolve(ref).orElseThrow(() -> new MarginPolicyException("MARGIN_CONFIG_UNAVAILABLE"));
   }
 
-  private void validateDraft(String name, MarginPolicyVersion version) {
+  private void validateDraft(String policyType, String name, MarginPolicyVersion version) {
+    requireText(policyType, "policyType");
     requireText(name, "name");
     Objects.requireNonNull(version, "version is required");
     if (version.rules().isEmpty()) {
@@ -176,6 +302,15 @@ public final class CompanyMarginPolicyService {
       requireText(rule.minRef(), "minRef");
       requireText(rule.maxRef(), "maxRef");
       requireText(rule.reasonCode(), "reasonCode");
+      if (CHANNEL_POLICY_TYPE.equals(policyType) && "*".equals(rule.scope().channel())) {
+        throw new MarginPolicyException("CHANNEL_MARGIN_SCOPE_TOO_BROAD");
+      }
+      if (BRANCH_OVERLAY_POLICY_TYPE.equals(policyType)) {
+        if ("*".equals(rule.scope().branchId()) && "*".equals(rule.scope().regionId())) {
+          throw new MarginPolicyException("BRANCH_OVERLAY_SCOPE_REQUIRED");
+        }
+        requireText(rule.scope().sourceHierarchyVersionId(), "sourceHierarchyVersionId");
+      }
     }
   }
 
@@ -183,12 +318,34 @@ public final class CompanyMarginPolicyService {
     boolean overlap = policies.values().stream()
         .filter(policy -> !policy.policyId().equals(candidate.policyId()))
         .filter(policy -> policy.tenantId().equals(candidate.tenantId()))
+        .filter(policy -> policy.policyType().equals(candidate.policyType()))
         .filter(policy -> policy.status() == PolicyStatus.PUBLISHED)
         .anyMatch(policy -> policy.currentVersion().scope().matches(candidate.currentVersion().scope())
             && policy.currentVersion().effectiveWindow().overlaps(candidate.currentVersion().effectiveWindow()));
     if (overlap) {
+      if (CHANNEL_POLICY_TYPE.equals(candidate.policyType())) {
+        throw new MarginPolicyException("CHANNEL_MARGIN_OVERLAP");
+      }
       throw new MarginPolicyException("MARGIN_SCOPE_OVERLAP");
     }
+  }
+
+  private boolean activePolicyNameExists(String tenantId, String name, String policyType) {
+    return policies.values().stream()
+        .filter(policy -> policy.tenantId().equals(tenantId))
+        .filter(policy -> policy.name().equals(name))
+        .filter(policy -> policy.policyType().equals(policyType))
+        .anyMatch(policy -> policy.status() != PolicyStatus.PUBLISHED && policy.status() != PolicyStatus.SUSPENDED);
+  }
+
+  private static int specificity(MarginScope scope) {
+    return specific(scope.productFamily()) + specific(scope.investorGroup()) + specific(scope.channel())
+        + specific(scope.state()) + specific(scope.occupancy()) + specific(scope.purpose())
+        + specific(scope.lockPeriodBucket()) + specific(scope.branchId()) + specific(scope.regionId());
+  }
+
+  private static int specific(String value) {
+    return "*".equals(value) ? 0 : 1;
   }
 
   private MarginPolicy findById(String tenantId, String policyId) {
@@ -231,19 +388,28 @@ public final class CompanyMarginPolicyService {
   }
 
   public record CreatePolicyCommand(String tenantId, String requestId, String actorId, String idempotencyKey,
-      String correlationId, String name, MarginPolicyVersion version, String requestHash) {}
+      String correlationId, String name, MarginPolicyVersion version, String requestHash, String policyType) {
+    public CreatePolicyCommand(String tenantId, String requestId, String actorId, String idempotencyKey,
+        String correlationId, String name, MarginPolicyVersion version, String requestHash) {
+      this(tenantId, requestId, actorId, idempotencyKey, correlationId, name, version, requestHash, COMPANY_POLICY_TYPE);
+    }
+
+    CreatePolicyCommand withPolicyType(String policyType) {
+      return new CreatePolicyCommand(tenantId, requestId, actorId, idempotencyKey, correlationId, name, version, requestHash, policyType);
+    }
+  }
 
   public record CommandReceipt(String policyId, PolicyStatus status, int version, String correlationId,
       String requestHash, List<MarginPolicyPublishedEvent> events, String auditRef) {}
 
-  public record MarginPolicy(String tenantId, String policyId, String name, PolicyStatus status,
+  public record MarginPolicy(String tenantId, String policyId, String name, String policyType, PolicyStatus status,
       List<MarginPolicyVersion> versions, String createdBy, String updatedBy, Instant createdAt, Instant updatedAt) {
     public MarginPolicyVersion currentVersion() {
       return versions.stream().max(Comparator.comparingInt(MarginPolicyVersion::versionNumber)).orElseThrow();
     }
 
     MarginPolicy withStatus(PolicyStatus status, String actorId, Instant now) {
-      return new MarginPolicy(tenantId, policyId, name, status, versions, createdBy, actorId, createdAt, now);
+      return new MarginPolicy(tenantId, policyId, name, policyType, status, versions, createdBy, actorId, createdAt, now);
     }
   }
 
@@ -251,19 +417,37 @@ public final class CompanyMarginPolicyService {
       EffectiveWindow effectiveWindow, List<MarginRule> rules, String configHash) {}
 
   public record MarginRule(int priority, MarginUnit unit, String amountRef, String minRef, String maxRef,
-      int roundingScale, String reasonCode) {}
+      int roundingScale, String reasonCode, MarginScope scope) {
+    public MarginRule(int priority, MarginUnit unit, String amountRef, String minRef, String maxRef,
+        int roundingScale, String reasonCode) {
+      this(priority, unit, amountRef, minRef, maxRef, roundingScale, reasonCode, new MarginScope("*", "*", "*", "*", "*", "*", "*"));
+    }
+  }
 
   public record MarginScope(String productFamily, String investorGroup, String channel, String state,
-      String occupancy, String purpose, String lockPeriodBucket) {
+      String occupancy, String purpose, String lockPeriodBucket, String branchId, String regionId,
+      String sourceHierarchyVersionId, String inheritanceMode) {
+    public MarginScope(String productFamily, String investorGroup, String channel, String state,
+        String occupancy, String purpose, String lockPeriodBucket) {
+      this(productFamily, investorGroup, channel, state, occupancy, purpose, lockPeriodBucket, "*", "*", "*", "INHERIT");
+    }
+
     boolean matches(MarginScope other) {
       return match(productFamily, other.productFamily) && match(investorGroup, other.investorGroup)
           && match(channel, other.channel) && match(state, other.state)
           && match(occupancy, other.occupancy) && match(purpose, other.purpose)
-          && match(lockPeriodBucket, other.lockPeriodBucket);
+          && match(lockPeriodBucket, other.lockPeriodBucket) && match(branchId, other.branchId)
+          && match(regionId, other.regionId);
+    }
+
+    MarginScope withBranch(String branchId, String regionId) {
+      return new MarginScope(productFamily, investorGroup, channel, state, occupancy, purpose, lockPeriodBucket,
+          branchId, regionId, sourceHierarchyVersionId, inheritanceMode);
     }
 
     String stableHash() {
-      return Integer.toHexString(Objects.hash(productFamily, investorGroup, channel, state, occupancy, purpose, lockPeriodBucket));
+      return Integer.toHexString(Objects.hash(productFamily, investorGroup, channel, state, occupancy, purpose,
+          lockPeriodBucket, branchId, regionId, sourceHierarchyVersionId, inheritanceMode));
     }
 
     private static boolean match(String left, String right) {
@@ -285,6 +469,20 @@ public final class CompanyMarginPolicyService {
 
   public record SimulationResult(String policyId, String versionId, BigDecimal priceAfterMargin,
       List<MarginCalculationStep> steps) {}
+
+  public record BranchOverlayContext(String tenantId, String branchId, String regionId, List<String> branchAncestorIds,
+      String hierarchyVersionId, String enterpriseLimitRef, List<String> authorizedBranchIds, boolean hierarchyStale,
+      MarginScope scope) {
+    public BranchOverlayContext {
+      requireText(tenantId, "tenantId");
+      requireText(branchId, "branchId");
+      requireText(hierarchyVersionId, "hierarchyVersionId");
+      requireText(enterpriseLimitRef, "enterpriseLimitRef");
+      branchAncestorIds = List.copyOf(Objects.requireNonNull(branchAncestorIds, "branchAncestorIds is required"));
+      authorizedBranchIds = List.copyOf(Objects.requireNonNull(authorizedBranchIds, "authorizedBranchIds is required"));
+      scope = Objects.requireNonNull(scope, "scope is required");
+    }
+  }
 
   public record MarginCalculationStep(String stepType, String sourceVersionId, BigDecimal priceBeforeMargin,
       BigDecimal priceAfterMargin, BigDecimal marginPoints, String reasonCode, String replayHash) {}

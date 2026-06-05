@@ -1,0 +1,8 @@
+{
+  "storyId": "PII-15-S03",
+  "scenarioId": "scenario-456",
+  "status": "blocked_missing_config",
+  "advisorySeverity": "BLOCKING",
+  "reasonCodes": ["MISSING_THRESHOLD_CONFIG"],
+  "eventType": "HighCostEvaluationFailedClosed.v1"
+}
