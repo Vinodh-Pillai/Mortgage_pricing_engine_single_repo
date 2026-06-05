@@ -1,0 +1,9 @@
+{
+  "fixture_id": "missing-price-grid-missing-422",
+  "story_id": "PII-05-S06",
+  "errorCode": "PRICE_GRID_MISSING",
+  "httpStatus": 422,
+  "diagnosticsRef": "missing-price-incident:{incidentId}",
+  "correlationId": "corr-1",
+  "note": "Synthetic fixture only; no mortgage pricing rates or policy thresholds."
+}

@@ -32,6 +32,7 @@ public final class RateFeedRoles {
   public static final String RATE_FEED_ADMIN    = "RATE_FEED_ADMIN";
   public static final String RATE_FEED_VALIDATE = "RATE_FEED_VALIDATE";
   public static final String RATE_FEED_OCR_REVIEW = "RATE_FEED_OCR_REVIEW";
+  public static final String RATE_FEED_OPERATIONS = "RATE_FEED_OPERATIONS";
 
   private static final Set<String> ALL_ROLES = Set.of(
       RATE_FEED_UPLOAD,
@@ -43,7 +44,8 @@ public final class RateFeedRoles {
       RATE_FEED_APPROVER,
       RATE_FEED_ADMIN,
       RATE_FEED_VALIDATE,
-      RATE_FEED_OCR_REVIEW
+      RATE_FEED_OCR_REVIEW,
+      RATE_FEED_OPERATIONS
   );
 
   /**

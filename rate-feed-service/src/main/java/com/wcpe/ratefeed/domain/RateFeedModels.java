@@ -393,6 +393,51 @@ public final class RateFeedModels {
     List<ValidationWarningDetail> warnings
   ) {}
 
+  // ── PII-04-S08: Rate sheet cache invalidation records ─────────────────────
+
+  public enum CacheInvalidationReason { PUBLISH, ROLLBACK, GOVERNANCE_CHANGE, MANUAL_RETRY }
+  public enum CacheInvalidationStatus { PENDING, COMPLETED, PARTIAL, FAILED, RETRYING, BROKER_UNAVAILABLE }
+
+  public record RateSheetCacheInvalidationRequest(
+    CacheInvalidationReason reason,
+    UUID versionId,
+    UUID investorId,
+    UUID channelId,
+    Instant effectiveAt,
+    String expectedVersionHash
+  ) {}
+
+  public record RateSheetCacheInvalidationResponse(
+    UUID cacheInvalidationId,
+    String status,
+    List<String> affectedPatterns
+  ) {}
+
+  public record RateSheetCacheInvalidationDetailResponse(
+    UUID cacheInvalidationId,
+    UUID tenantId,
+    UUID versionId,
+    CacheInvalidationReason reason,
+    String status,
+    List<String> affectedPatterns,
+    String requestedBy,
+    Instant createdAt,
+    Instant completedAt,
+    int retryCount,
+    String lastErrorCode,
+    String correlationId
+  ) {}
+
+  public record CacheInvalidationAck(
+    UUID ackId,
+    UUID cacheInvalidationId,
+    String consumerName,
+    String consumerInstance,
+    String status,
+    Instant ackedAt,
+    Map<String, Object> details
+  ) {}
+
   // ── PII-04-S06: Validation job request/response records ──
 
   public enum ValidationFindingSeverity { BLOCKER, WARNING, INFO }

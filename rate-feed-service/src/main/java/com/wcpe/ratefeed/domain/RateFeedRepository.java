@@ -135,6 +135,55 @@ class RateFeedRepository {
     }
   }
 
+  Optional<PublishedRateSheetVersionRow> publishedRateSheetVersion(UUID tenantId, UUID versionId) {
+    List<PublishedRateSheetVersionRow> rows = jdbc.query("select sheet_id,tenant_id,investor_id,channel_id,product_code,version,status,grid_hash,result_hash,effective_at from rate_feed.rate_sheet where tenant_id=? and sheet_id=? and status in ('PUBLISHED','ACTIVE','ROLLBACK_PUBLISHED')",
+        (rs, row) -> new PublishedRateSheetVersionRow(
+            rs.getObject("tenant_id", UUID.class), rs.getObject("sheet_id", UUID.class),
+            rs.getObject("investor_id", UUID.class), rs.getObject("channel_id", UUID.class),
+            rs.getString("product_code"), rs.getInt("version"), rs.getString("status"),
+            rs.getString("grid_hash"), rs.getString("result_hash"), rs.getTimestamp("effective_at").toInstant()),
+        tenantId, versionId);
+    return rows.stream().findFirst();
+  }
+
+  void evictCachePatterns(UUID tenantId, UUID cacheInvalidationId, List<String> affectedPatterns) {
+    // Local slice: Redis is cache-only and optional. A production adapter can replace this no-op
+    // behind the repository boundary; persistence/events still make consumers mark local caches stale.
+  }
+
+  void saveCacheInvalidation(CacheInvalidationRow row) {
+    jdbc.update("insert into rate_feed.rate_sheet_cache_invalidation(tenant_id,cache_invalidation_id,version_id,reason,status,affected_patterns,requested_by,completed_at,retry_count,last_error_code,correlation_id,expected_version_hash,investor_id,channel_id,effective_at,result_hash) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) on conflict (tenant_id, cache_invalidation_id) do update set status=excluded.status, affected_patterns=excluded.affected_patterns, completed_at=excluded.completed_at, retry_count=excluded.retry_count, last_error_code=excluded.last_error_code, correlation_id=excluded.correlation_id, result_hash=excluded.result_hash, updated_at=now()",
+        row.tenantId(), row.cacheInvalidationId(), row.versionId(), row.reason().name(), row.status(), jsonb(row.affectedPatterns()),
+        row.requestedBy(), row.completedAt() == null ? null : Timestamp.from(row.completedAt()), row.retryCount(), row.lastErrorCode(), row.correlationId(),
+        row.expectedVersionHash(), row.investorId(), row.channelId(), row.effectiveAt() == null ? null : Timestamp.from(row.effectiveAt()), row.resultHash());
+  }
+
+  void markCacheInvalidationBrokerUnavailable(UUID tenantId, UUID cacheInvalidationId, String errorCode) {
+    jdbc.update("update rate_feed.rate_sheet_cache_invalidation set status='BROKER_UNAVAILABLE', last_error_code=?, updated_at=now() where tenant_id=? and cache_invalidation_id=?", errorCode, tenantId, cacheInvalidationId);
+  }
+
+  CacheInvalidationRow cacheInvalidation(UUID tenantId, UUID cacheInvalidationId) {
+    try {
+      return jdbc.queryForObject("select * from rate_feed.rate_sheet_cache_invalidation where tenant_id=? and cache_invalidation_id=?",
+          (rs, row) -> new CacheInvalidationRow(
+              rs.getObject("tenant_id", UUID.class), rs.getObject("cache_invalidation_id", UUID.class), rs.getObject("version_id", UUID.class),
+              RateFeedModels.CacheInvalidationReason.valueOf(rs.getString("reason")), rs.getString("status"), patterns(rs.getString("affected_patterns")),
+              rs.getString("requested_by"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("completed_at") == null ? null : rs.getTimestamp("completed_at").toInstant(),
+              rs.getInt("retry_count"), rs.getString("last_error_code"), rs.getString("correlation_id"), rs.getString("expected_version_hash"),
+              rs.getObject("investor_id", UUID.class), rs.getObject("channel_id", UUID.class), rs.getTimestamp("effective_at") == null ? null : rs.getTimestamp("effective_at").toInstant(),
+              rs.getString("result_hash")), tenantId, cacheInvalidationId);
+    } catch (EmptyResultDataAccessException ex) {
+      throw new RateFeedException(HttpStatus.NOT_FOUND, "CACHE_INVALIDATION_NOT_FOUND", "Cache invalidation command was not found for this tenant.");
+    }
+  }
+
+  private List<String> patterns(String json) {
+    try {
+      if (json == null || json.isBlank()) return List.of();
+      return mapper.readValue(json, mapper.getTypeFactory().constructCollectionType(List.class, String.class));
+    } catch (Exception ex) { throw new IllegalStateException(ex); }
+  }
+
   BatchParseSource batchParseSource(UUID tenantId, UUID batchId) {
     try {
       return jdbc.queryForObject("select batch_id,investor_id,channel_id,feed_format_id,status,file_sha256 from rate_feed.rate_feed_batch where tenant_id=? and batch_id=?", (rs, row) -> new BatchParseSource(
@@ -194,4 +243,6 @@ class RateFeedRepository {
   record UploadSessionRow(UUID uploadSessionId, UUID investorId, UUID channelId, UUID feedFormatId, String sourceType, Instant effectiveAt, String timezone, String fileName, String contentType, long contentLengthBytes, UUID supersedesBatchId, String status, Instant expiresAt, String createdBy, String correlationId) {}
   record BatchParseSource(UUID batchId, UUID investorId, UUID channelId, UUID feedFormatId, String status, String fileSha256) {}
   record InvestorFeedIntegrationRow(UUID tenantId, UUID investorId, UUID channelId, UUID feedFormatId, String tenantExternalKey, String investorExternalKey, String channelExternalKey, String feedFormat, String schemaVersion) {}
+  record PublishedRateSheetVersionRow(UUID tenantId, UUID versionId, UUID investorId, UUID channelId, String productKey, int version, String status, String gridHash, String resultHash, Instant effectiveAt) {}
+  record CacheInvalidationRow(UUID tenantId, UUID cacheInvalidationId, UUID versionId, RateFeedModels.CacheInvalidationReason reason, String status, List<String> affectedPatterns, String requestedBy, Instant createdAt, Instant completedAt, int retryCount, String lastErrorCode, String correlationId, String expectedVersionHash, UUID investorId, UUID channelId, Instant effectiveAt, String resultHash) {}
 }

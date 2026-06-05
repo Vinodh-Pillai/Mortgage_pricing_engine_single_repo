@@ -1,0 +1,8 @@
+{
+  "fixture_id": "missing-price-ambiguous-row-409",
+  "story_id": "PII-05-S06",
+  "errorCode": "PRICE_LOOKUP_AMBIGUOUS",
+  "httpStatus": 409,
+  "remediation": "correct duplicate grid rows before pricing can continue",
+  "note": "Synthetic fixture only; no mortgage pricing rates or policy thresholds."
+}

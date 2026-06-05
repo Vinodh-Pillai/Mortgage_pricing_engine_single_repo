@@ -1,0 +1,8 @@
+{
+  "fixture_id": "missing-price-row-missing-lock-422",
+  "story_id": "PII-05-S06",
+  "errorCode": "PRICE_ROW_MISSING_LOCK_PERIOD",
+  "httpStatus": 422,
+  "remediation": "choose an available lock period or publish a row for this lock period",
+  "note": "Synthetic fixture only; no mortgage pricing rates or policy thresholds."
+}

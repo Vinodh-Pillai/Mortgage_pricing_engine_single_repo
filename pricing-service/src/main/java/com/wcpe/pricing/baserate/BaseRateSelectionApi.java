@@ -275,7 +275,7 @@ public final class BaseRateSelectionApi {
         }
 
         if (requestedNoteRate == null) {
-            return candidates.get(0);
+            throw new BaseRateSelectionNoteRateUnavailableException("PRICE_ROW_MISSING_NOTE_RATE");
         }
 
         Optional<CandidateRate> exactMatch = candidates.stream()
@@ -285,16 +285,7 @@ public final class BaseRateSelectionApi {
             return exactMatch.get();
         }
 
-        CandidateRate closest = candidates.get(0);
-        BigDecimal closestDiff = requestedNoteRate.subtract(closest.noteRate()).abs();
-        for (CandidateRate candidate : candidates) {
-            BigDecimal diff = requestedNoteRate.subtract(candidate.noteRate()).abs();
-            if (diff.compareTo(closestDiff) < 0) {
-                closest = candidate;
-                closestDiff = diff;
-            }
-        }
-        return closest;
+        throw new BaseRateSelectionNoteRateUnavailableException("PRICE_ROW_MISSING_NOTE_RATE");
     }
 
     private static void validateSelectionRequest(String tenantId, BaseRateSelectionRequest request) {

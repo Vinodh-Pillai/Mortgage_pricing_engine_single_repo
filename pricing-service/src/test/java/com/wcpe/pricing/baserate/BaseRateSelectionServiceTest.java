@@ -62,7 +62,7 @@ class BaseRateSelectionServiceTest {
     private BaseRateSelectionRequest validRequest() {
         return new BaseRateSelectionRequest(
                 "sc-1", "hash-1", PRODUCT, INVESTOR, CHANNEL,
-                30, AS_OF, null, "policy-1");
+                30, AS_OF, new BigDecimal("6.12500"), "policy-1");
     }
 
     /* ── tests ── */
@@ -113,7 +113,7 @@ class BaseRateSelectionServiceTest {
 
         BaseRateSelectionRequest request60 = new BaseRateSelectionRequest(
                 "sc-1", "hash-1", PRODUCT, INVESTOR, CHANNEL,
-                60, AS_OF, null, "policy-1");
+                60, AS_OF, new BigDecimal("6.12500"), "policy-1");
 
         assertThrows(BaseRateSelectionNotFoundException.class, () ->
                 api.selectRate(TENANT_A, validWriteHeaders(), request60));

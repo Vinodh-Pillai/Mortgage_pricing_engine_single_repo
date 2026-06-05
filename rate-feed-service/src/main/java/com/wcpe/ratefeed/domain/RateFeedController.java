@@ -186,6 +186,29 @@ class RateFeedController {
         () -> ResponseEntity.ok(service.rollbackVersion(tenantId, versionId, request, h.idempotencyKey(), h.actorId(), h.correlationId())));
   }
 
+  @PostMapping("/rate-sheet-cache-invalidations")
+  ResponseEntity<RateFeedModels.RateSheetCacheInvalidationResponse> createCacheInvalidation(@PathVariable UUID tenantId,
+      @RequestBody RateFeedModels.RateSheetCacheInvalidationRequest request, HttpServletRequest http) {
+    Headers h = headers(http);
+    return withAuthorizedHeaders(h, RateFeedRoles.RATE_FEED_OPERATIONS,
+        () -> ResponseEntity.status(HttpStatus.ACCEPTED).body(service.createRateSheetCacheInvalidation(tenantId, request, h.idempotencyKey(), h.actorId(), h.correlationId())));
+  }
+
+  @PostMapping("/rate-sheet-cache-invalidations/{cacheInvalidationId}/retry")
+  ResponseEntity<RateFeedModels.RateSheetCacheInvalidationResponse> retryCacheInvalidation(@PathVariable UUID tenantId, @PathVariable UUID cacheInvalidationId,
+      HttpServletRequest http) {
+    Headers h = headers(http);
+    return withAuthorizedHeaders(h, RateFeedRoles.RATE_FEED_OPERATIONS,
+        () -> ResponseEntity.status(HttpStatus.ACCEPTED).body(service.retryRateSheetCacheInvalidation(tenantId, cacheInvalidationId, h.actorId(), h.correlationId())));
+  }
+
+  @GetMapping("/rate-sheet-cache-invalidations/{cacheInvalidationId}")
+  ResponseEntity<RateFeedModels.RateSheetCacheInvalidationDetailResponse> cacheInvalidation(@PathVariable UUID tenantId, @PathVariable UUID cacheInvalidationId,
+      HttpServletRequest http) {
+    return withAuthorizedHeaders(headers(http), RateFeedRoles.RATE_FEED_VIEW,
+        () -> ResponseEntity.ok(service.cacheInvalidation(tenantId, cacheInvalidationId)));
+  }
+
   // ── PII-04-S01: Batch list endpoint ──
 
   @GetMapping("/rate-feed-batches")

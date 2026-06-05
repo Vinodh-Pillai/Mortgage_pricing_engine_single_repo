@@ -1081,6 +1081,129 @@ class RateFeedService {
     return publishSheet(tenantId, target, current.sheetId(), current.sheetId(), actor, correlationId, "RateSheetRollbackPublished.v1", "RATE_SHEET_ROLLBACK_PUBLISHED", "ROLLBACK_PUBLISHED");
   }
 
+  @Transactional
+  public RateFeedModels.RateSheetCacheInvalidationResponse createRateSheetCacheInvalidation(UUID tenantId, RateFeedModels.RateSheetCacheInvalidationRequest request, String idempotencyKey, String actor, String correlationId) {
+    RateFeedRoles.require(RateFeedRoles.RATE_FEED_OPERATIONS);
+    Map<String, Object> identity = new LinkedHashMap<>();
+    identity.put("command", "rateSheetCacheInvalidation");
+    identity.put("tenantId", tenantId);
+    identity.put("body", request);
+    return repository.idempotent(tenantId, idempotencyKey, identity, RateFeedModels.RateSheetCacheInvalidationResponse.class,
+        () -> doCreateRateSheetCacheInvalidation(tenantId, request, actor(actor), correlation(correlationId)));
+  }
+
+  @Transactional
+  public RateFeedModels.RateSheetCacheInvalidationResponse retryRateSheetCacheInvalidation(UUID tenantId, UUID cacheInvalidationId, String actor, String correlationId) {
+    RateFeedRoles.require(RateFeedRoles.RATE_FEED_OPERATIONS);
+    requireUuid("CACHE_INVALIDATION_REQUIRED", "cacheInvalidationId is required.", cacheInvalidationId);
+    RateFeedRepository.CacheInvalidationRow previous = repository.cacheInvalidation(tenantId, cacheInvalidationId);
+    if ("COMPLETED".equals(previous.status())) {
+      throw new RateFeedException(HttpStatus.CONFLICT, "INVALIDATION_ALREADY_COMPLETED", "Completed cache invalidations cannot be retried.");
+    }
+    return performCacheInvalidation(tenantId, cacheInvalidationId, previous.versionId(), previous.investorId(), previous.channelId(), previous.reason(),
+        previous.expectedVersionHash(), previous.effectiveAt(), previous.retryCount() + 1, actor(actor), correlation(correlationId));
+  }
+
+  public RateFeedModels.RateSheetCacheInvalidationDetailResponse cacheInvalidation(UUID tenantId, UUID cacheInvalidationId) {
+    RateFeedRoles.require(RateFeedRoles.RATE_FEED_VIEW);
+    RateFeedRepository.CacheInvalidationRow row = repository.cacheInvalidation(tenantId, cacheInvalidationId);
+    return new RateFeedModels.RateSheetCacheInvalidationDetailResponse(row.cacheInvalidationId(), row.tenantId(), row.versionId(), row.reason(), row.status(),
+        row.affectedPatterns(), row.requestedBy(), row.createdAt(), row.completedAt(), row.retryCount(), row.lastErrorCode(), row.correlationId());
+  }
+
+  private RateFeedModels.RateSheetCacheInvalidationResponse doCreateRateSheetCacheInvalidation(UUID tenantId, RateFeedModels.RateSheetCacheInvalidationRequest request, String actor, String correlationId) {
+    validateCacheInvalidationRequest(request);
+    RateFeedRepository.PublishedRateSheetVersionRow version = repository.publishedRateSheetVersion(tenantId, request.versionId())
+        .orElseThrow(() -> new RateFeedException(HttpStatus.CONFLICT, "VERSION_NOT_PUBLISHED", "Rate sheet version must be published before cache invalidation."));
+    if (!version.resultHash().equals(request.expectedVersionHash())) {
+      throw new RateFeedException(HttpStatus.CONFLICT, "STALE_VERSION_HASH", "expectedVersionHash does not match the published rate sheet version hash.");
+    }
+    if (!version.investorId().equals(request.investorId()) || !version.channelId().equals(request.channelId())) {
+      throw new RateFeedException(HttpStatus.CONFLICT, "VERSION_NOT_PUBLISHED", "Requested investor/channel does not match the published rate sheet version.");
+    }
+    return performCacheInvalidation(tenantId, UUID.randomUUID(), request.versionId(), request.investorId(), request.channelId(), request.reason(), request.expectedVersionHash(), request.effectiveAt(), 0, actor, correlationId);
+  }
+
+  private void validateCacheInvalidationRequest(RateFeedModels.RateSheetCacheInvalidationRequest request) {
+    if (request == null) throw validation("REQUEST_BODY_REQUIRED", "Request body is required.");
+    if (request.reason() == null) throw validation("REASON_REQUIRED", "reason is required.");
+    requireUuid("VERSION_REQUIRED", "versionId is required.", request.versionId());
+    requireUuid("INVESTOR_REQUIRED", "investorId is required.", request.investorId());
+    requireUuid("CHANNEL_REQUIRED", "channelId is required.", request.channelId());
+    if (request.expectedVersionHash() == null || request.expectedVersionHash().isBlank()) throw validation("EXPECTED_VERSION_HASH_REQUIRED", "expectedVersionHash is required for stale-version protection.");
+    rejectFormulaMetadata("expectedVersionHash", request.expectedVersionHash());
+  }
+
+  private RateFeedModels.RateSheetCacheInvalidationResponse performCacheInvalidation(UUID tenantId, UUID cacheInvalidationId, UUID versionId,
+      UUID investorId, UUID channelId, RateFeedModels.CacheInvalidationReason reason, String expectedVersionHash, Instant effectiveAt,
+      int retryCount, String actor, String correlationId) {
+    List<String> affectedPatterns = cacheKeyPatterns(tenantId, versionId, investorId, channelId);
+    String status = retryCount > 0 ? "RETRYING" : "PENDING";
+    String lastErrorCode = null;
+    Instant completedAt = null;
+    try {
+      repository.evictCachePatterns(tenantId, cacheInvalidationId, affectedPatterns);
+      status = "COMPLETED";
+      completedAt = Instant.now();
+    } catch (RuntimeException ex) {
+      status = "FAILED";
+      lastErrorCode = "CACHE_PROVIDER_UNAVAILABLE";
+    }
+    String resultHash = Hashing.sha256("cache-invalidation:" + tenantId + ":" + cacheInvalidationId + ":" + versionId + ":" + status + ":" + retryCount);
+    RateFeedRepository.CacheInvalidationRow row = new RateFeedRepository.CacheInvalidationRow(tenantId, cacheInvalidationId, versionId, reason,
+        status, affectedPatterns, actor, Instant.now(), completedAt, retryCount, lastErrorCode, correlationId, expectedVersionHash, investorId, channelId, effectiveAt, resultHash);
+    repository.saveCacheInvalidation(row);
+    try {
+      publishCacheInvalidationEvents(tenantId, cacheInvalidationId, versionId, investorId, channelId, reason, status, affectedPatterns, actor, correlationId, retryCount, lastErrorCode, resultHash);
+    } catch (RuntimeException ex) {
+      status = "BROKER_UNAVAILABLE";
+      lastErrorCode = "BROKER_UNAVAILABLE";
+      repository.markCacheInvalidationBrokerUnavailable(tenantId, cacheInvalidationId, lastErrorCode);
+    }
+    repository.audit(tenantId, cacheInvalidationId, "RATE_SHEET_CACHE_INVALIDATION_" + status, "RateSheetCacheInvalidation", actor, correlationId, null, resultHash,
+        cacheInvalidationPayload(cacheInvalidationId, versionId, investorId, channelId, reason, status, affectedPatterns, retryCount, lastErrorCode, resultHash));
+    return new RateFeedModels.RateSheetCacheInvalidationResponse(cacheInvalidationId, status, affectedPatterns);
+  }
+
+  private void publishCacheInvalidationEvents(UUID tenantId, UUID cacheInvalidationId, UUID versionId, UUID investorId, UUID channelId,
+      RateFeedModels.CacheInvalidationReason reason, String status, List<String> affectedPatterns, String actor, String correlationId,
+      int retryCount, String lastErrorCode, String resultHash) {
+    Map<String, String> headers = cacheInvalidationHeaders(investorId, channelId, correlationId);
+    Map<String, Object> payload = cacheInvalidationPayload(cacheInvalidationId, versionId, investorId, channelId, reason, status, affectedPatterns, retryCount, lastErrorCode, resultHash);
+    repository.outbox(tenantId, cacheInvalidationId, "RateSheetCacheInvalidationRequested.v1", 1, actor, correlationId, headers, payload);
+    if ("COMPLETED".equals(status)) {
+      repository.outbox(tenantId, cacheInvalidationId, "RateSheetCacheInvalidated.v1", 1, actor, correlationId, headers, payload);
+    }
+  }
+
+  private Map<String, String> cacheInvalidationHeaders(UUID investorId, UUID channelId, String correlationId) {
+    return Map.of("investorId", investorId.toString(), "channelId", channelId.toString(), "correlationId", correlationId);
+  }
+
+  private Map<String, Object> cacheInvalidationPayload(UUID cacheInvalidationId, UUID versionId, UUID investorId, UUID channelId,
+      RateFeedModels.CacheInvalidationReason reason, String status, List<String> affectedPatterns, int retryCount, String lastErrorCode, String resultHash) {
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("cacheInvalidationId", cacheInvalidationId);
+    payload.put("versionId", versionId);
+    payload.put("investorId", investorId);
+    payload.put("channelId", channelId);
+    payload.put("reason", reason.name());
+    payload.put("status", status);
+    payload.put("affectedPatterns", affectedPatterns);
+    payload.put("retryCount", retryCount);
+    payload.put("lastErrorCode", lastErrorCode);
+    payload.put("resultHash", resultHash);
+    payload.put("sourceRefs", Map.of("rateSheetVersionId", versionId.toString()));
+    return payload;
+  }
+
+  private List<String> cacheKeyPatterns(UUID tenantId, UUID versionId, UUID investorId, UUID channelId) {
+    return List.of(
+        "rate-sheet:" + tenantId + ":active:" + investorId + ":" + channelId + ":*",
+        "rate-sheet:" + tenantId + ":version:" + versionId + ":*",
+        "base-pricing:" + tenantId + ":rate-sheet:" + investorId + ":" + channelId + ":*");
+  }
+
   private RateFeedModels.PublishWorkflowStateResponse publishSheet(UUID tenantId, RateSheet sheet, UUID commandVersionId, UUID rollbackFromVersionId, String actor, String correlationId, String eventType, String auditAction, String status) {
     String cacheCommandId = UUID.randomUUID().toString();
     String resultHash = workflowHash(eventType, tenantId, sheet.sheetId(), actor, sheet.gridHash(), sheet.resultHash(), cacheCommandId);
@@ -1095,6 +1218,9 @@ class RateFeedService {
     payload.put("rollbackFromVersionId", rollbackFromVersionId);
     repository.outbox(tenantId, sheet.sheetId(), eventType, 1, actor, correlationId, workflowHeaders(sheet), payload);
     repository.audit(tenantId, sheet.sheetId(), auditAction, "RateSheetVersion", actor, correlationId, sheet.resultHash(), resultHash, payload);
+    performCacheInvalidation(tenantId, UUID.fromString(cacheCommandId), sheet.sheetId(), sheet.investorId(), sheet.channelId(),
+        rollbackFromVersionId == null ? RateFeedModels.CacheInvalidationReason.PUBLISH : RateFeedModels.CacheInvalidationReason.ROLLBACK,
+        sheet.resultHash(), sheet.effectiveAt(), 0, actor, correlationId);
     List<RateFeedModels.ValidationWarningDetail> warnings = List.of(new RateFeedModels.ValidationWarningDetail("CACHE_INVALIDATION_ACK_UNAVAILABLE", "External cache invalidation acknowledgement infrastructure is not available in this local service slice; command ID was recorded."));
     return workflowState(tenantId, sheet.sheetId(), eventType, auditAction, cacheCommandId, resultHash, warnings);
   }

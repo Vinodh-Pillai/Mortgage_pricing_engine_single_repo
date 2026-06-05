@@ -127,6 +127,6 @@ class BaseRateSelectionContractTest {
     private static BaseRateSelectionRequest validRequest() {
         return new BaseRateSelectionRequest(
                 "sc-1", "hash-1", PRODUCT, INVESTOR, CHANNEL,
-                30, java.time.Instant.parse("2026-06-01T00:00:00Z"), null, "policy-1");
+                30, java.time.Instant.parse("2026-06-01T00:00:00Z"), new BigDecimal("6.12500"), "policy-1");
     }
 }

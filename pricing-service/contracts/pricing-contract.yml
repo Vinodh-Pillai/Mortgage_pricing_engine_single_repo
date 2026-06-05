@@ -227,6 +227,60 @@ paths:
                 $ref: "#/components/schemas/BaseGridLookupResponse"
         "409": { description: "GRID_LOOKUP_AMBIGUOUS" }
         "422": { description: "GRID_LOOKUP_NOT_FOUND" }
+  /api/v1/tenants/{tenantId}/pricing/missing-price-incidents/{incidentId}:
+    get:
+      summary: "Return tenant-scoped missing-price incident diagnostics"
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: incidentId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: "Missing-price incident found"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MissingPriceIncident"
+        "403": { description: "TENANT_ACCESS_DENIED" }
+        "404": { description: "NOT_FOUND" }
+  /api/v1/tenants/{tenantId}/pricing/missing-price-incidents/{incidentId}/retry:
+    post:
+      summary: "Retry a blocked missing-price lookup against current or pinned grid version"
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: incidentId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MissingPriceRetryRequest"
+      responses:
+        "200":
+          description: "Retry recorded"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MissingPriceRetryResponse"
+        "403": { description: "TENANT_ACCESS_DENIED" }
+        "404": { description: "NOT_FOUND" }
+        "409": { description: "PRICE_LOOKUP_AMBIGUOUS, PRICE_VERSION_STALE, or IDEMPOTENCY_CONFLICT" }
+        "422": { description: "PRICE_GRID_MISSING, PRICE_ROW_MISSING_LOCK_PERIOD, PRICE_ROW_MISSING_NOTE_RATE, PRICE_ROW_MISSING_BUCKET, or PRICE_GRID_SUSPENDED" }
   /api/v1/tenants/{tenantId}/pricing/final-prices:
     post:
       summary: "Calculate deterministic final price from selected base rate and versioned pricing configuration"
@@ -552,3 +606,40 @@ components:
         config_ref: { type: string, nullable: true }
         reason_code: { type: string }
         rounding_mode: { type: string, nullable: true }
+    MissingPriceIncident:
+      type: object
+      required: ["id", "tenant_id", "scenario_hash", "reason_code", "status", "correlation_id", "created_at"]
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string }
+        scenario_hash: { type: string }
+        product_code: { type: string }
+        investor_code: { type: string }
+        channel_code: { type: string }
+        lock_period_days: { type: integer }
+        note_rate: { type: string, nullable: true }
+        as_of: { type: string, format: date-time }
+        reason_code:
+          type: string
+          enum: ["PRICE_GRID_MISSING", "PRICE_ROW_MISSING_LOCK_PERIOD", "PRICE_ROW_MISSING_NOTE_RATE", "PRICE_ROW_MISSING_BUCKET", "PRICE_GRID_SUSPENDED", "PRICE_LOOKUP_AMBIGUOUS", "PRICE_VERSION_STALE"]
+        status: { type: string, enum: ["OPEN", "RESOLVED", "RETRY_FAILED", "VALID_PRICE_FOUND"] }
+        correlation_id: { type: string }
+        created_at: { type: string, format: date-time }
+        resolved_at: { type: string, format: date-time, nullable: true }
+    MissingPriceRetryRequest:
+      type: object
+      required: ["lookup_status", "result_ref"]
+      properties:
+        lookup_status:
+          type: string
+          enum: ["EXACT_MATCH", "NO_ACTIVE_GRID", "MISSING_LOCK_PERIOD", "MISSING_NOTE_RATE", "MISSING_BUCKET", "GRID_SUSPENDED", "AMBIGUOUS_ROWS", "VERSION_STALE"]
+        result_ref: { type: string }
+    MissingPriceRetryResponse:
+      type: object
+      required: ["retry_id", "incident_id", "result_status", "result_ref", "correlation_id"]
+      properties:
+        retry_id: { type: string, format: uuid }
+        incident_id: { type: string, format: uuid }
+        result_status: { type: string, enum: ["OPEN", "RESOLVED", "RETRY_FAILED", "VALID_PRICE_FOUND"] }
+        result_ref: { type: string }
+        correlation_id: { type: string }
