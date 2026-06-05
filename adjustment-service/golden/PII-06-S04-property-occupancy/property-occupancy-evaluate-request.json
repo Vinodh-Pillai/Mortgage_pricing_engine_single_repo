@@ -1,0 +1,22 @@
+{
+  "tenantId": "10000000-0000-0000-0000-000000000064",
+  "quoteId": "QUOTE-PII-06-S04",
+  "scenarioId": "SCENARIO-PII-06-S04",
+  "productId": "configured-product",
+  "investorId": "configured-investor",
+  "channel": "configured-channel",
+  "quoteDate": "2026-02-01T00:00:00Z",
+  "loanAmount": "400000.00",
+  "priceBeforePropertyOccupancy": "100.000000",
+  "occupancyCode": "CONFIGURED_OCCUPANCY",
+  "propertyTypeCode": "CONFIGURED_PROPERTY",
+  "units": 2,
+  "projectTypeCode": "CONFIGURED_PROJECT",
+  "manufacturedHousingFlag": false,
+  "stateCode": "CONFIGURED_STATE",
+  "countyCode": "CONFIGURED_COUNTY",
+  "ltv": "82.500000",
+  "firstTimeHomebuyerFlag": true,
+  "qualifierCodes": ["CONFIGURED_PROJECT_QUALIFIER"],
+  "ruleBookVersion": "v1"
+}

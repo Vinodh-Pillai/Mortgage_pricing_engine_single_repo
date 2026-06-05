@@ -450,6 +450,44 @@ public final class RateFeedModels {
 
   public record OcrApprovalResponse(UUID ocrExtractionId, UUID batchId, String status, String parserHandoffArtifact, String resultHash) {}
 
+  // ── PII-04-S09: Partner investor feed API records ─────────────────────────
+
+  public record PartnerFileSubmissionMetadata(
+    String investorExternalKey,
+    String channelExternalKey,
+    String feedFormatExternalKey,
+    String schemaVersion,
+    Instant effectiveAt,
+    String timezone,
+    String sourceSystem
+  ) {}
+
+  public record PartnerStructuredSubmissionRequest(
+    String investorExternalKey,
+    String channelExternalKey,
+    String feedFormatExternalKey,
+    String schemaVersion,
+    Instant effectiveAt,
+    String timezone,
+    Map<String, String> metadata,
+    List<Map<String, Object>> rows
+  ) {}
+
+  public record PartnerSubmissionResponse(UUID submissionId, UUID batchId, String status, String statusUrl, Instant receivedAt, String resultHash) {}
+
+  public record PartnerSubmissionStatusResponse(
+    UUID submissionId,
+    UUID batchId,
+    String status,
+    String tenantExternalKey,
+    String investorExternalKey,
+    String channelExternalKey,
+    String feedFormat,
+    String schemaVersion,
+    Instant receivedAt,
+    String resultHash
+  ) {}
+
   // ── Exception class ─────────────────────────────────────────────────────────
 
   public static final class RateFeedException extends RuntimeException {

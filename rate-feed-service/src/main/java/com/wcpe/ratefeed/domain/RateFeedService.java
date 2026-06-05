@@ -1393,6 +1393,101 @@ class RateFeedService {
     return replayService.replay(request, actor, correlationId);
   }
 
+  @Transactional
+  RateFeedModels.PartnerSubmissionResponse submitPartnerFile(String tenantExternalKey, RateFeedModels.PartnerFileSubmissionMetadata metadata, MultipartFile file, PartnerHeaders headers) {
+    PartnerAuth auth = requirePartnerAuth(headers);
+    if (headers.rateLimitExceeded()) throw new RateFeedException(HttpStatus.TOO_MANY_REQUESTS, "RATE_LIMIT_EXCEEDED", "Partner rate limit policy denied this request.");
+    if (metadata == null) throw validation("METADATA_REQUIRED", "metadata part is required.");
+    requirePartnerField("INVESTOR_EXTERNAL_KEY_REQUIRED", "investorExternalKey is required.", metadata.investorExternalKey());
+    requirePartnerField("CHANNEL_EXTERNAL_KEY_REQUIRED", "channelExternalKey is required.", metadata.channelExternalKey());
+    requirePartnerField("FEED_FORMAT_REQUIRED", "feedFormatExternalKey is required.", metadata.feedFormatExternalKey());
+    if (metadata.effectiveAt() == null) throw validation("EFFECTIVE_TIME_REQUIRED", "effectiveAt is required.");
+    if (metadata.timezone() == null || metadata.timezone().isBlank()) throw validation("EFFECTIVE_TIME_REQUIRED", "timezone is required.");
+    try { ZoneId.of(metadata.timezone()); } catch (DateTimeException ex) { throw validation("MALFORMED_METADATA", "timezone metadata is not valid."); }
+    rejectFormulaMetadata("sourceSystem", metadata.sourceSystem());
+    if (file == null || file.isEmpty()) throw validation("FILE_REQUIRED", "file is required.");
+    String fileName = Optional.ofNullable(file.getOriginalFilename()).orElse("partner-rate-feed.csv");
+    rejectFormulaMetadata("fileName", fileName);
+    if (!fileName.toLowerCase(Locale.ROOT).endsWith(".csv")) throw new RateFeedException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "FEED_FORMAT_NOT_ALLOWED", "Only CSV partner feed files are supported by this local slice.");
+    String contentType = normalizeMediaType(file.getContentType());
+    if (!Set.of("text/csv", "application/csv", "application/vnd.ms-excel", "").contains(contentType)) throw new RateFeedException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "FEED_FORMAT_NOT_ALLOWED", "Unsupported partner feed media type.");
+    RateFeedRepository.InvestorFeedIntegrationRow integration = requireIntegration(tenantExternalKey, metadata.investorExternalKey(), metadata.channelExternalKey(), metadata.feedFormatExternalKey());
+    String schemaVersion = integration.schemaVersion();
+    if (metadata.schemaVersion() != null && !metadata.schemaVersion().isBlank() && !metadata.schemaVersion().equals(schemaVersion)) throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "SCHEMA_VERSION_UNSUPPORTED", "schemaVersion is not configured for this partner feed integration.");
+    Map<String, Object> identity = partnerIdentity("partnerFileSubmission", tenantExternalKey, metadata, fileName, file.getSize(), auth.subject());
+    return repository.idempotent(integration.tenantId(), headers.idempotencyKey(), identity, RateFeedModels.PartnerSubmissionResponse.class,
+        () -> repository.savePartnerSubmission(integration, UUID.randomUUID(), UUID.randomUUID(), "FILE", "RECEIVED", schemaVersion, fileName, contentType.isBlank() ? "text/csv" : contentType,
+            file.getSize(), Hashing.sha256(repository.json(identity)), auth.subject(), correlation(headers.correlationId())));
+  }
+
+  @Transactional
+  RateFeedModels.PartnerSubmissionResponse submitPartnerStructured(String tenantExternalKey, RateFeedModels.PartnerStructuredSubmissionRequest request, PartnerHeaders headers) {
+    PartnerAuth auth = requirePartnerAuth(headers);
+    if (headers.rateLimitExceeded()) throw new RateFeedException(HttpStatus.TOO_MANY_REQUESTS, "RATE_LIMIT_EXCEEDED", "Partner rate limit policy denied this request.");
+    if (request == null) throw validation("REQUEST_BODY_REQUIRED", "Request body is required.");
+    requirePartnerField("INVESTOR_EXTERNAL_KEY_REQUIRED", "investorExternalKey is required.", request.investorExternalKey());
+    requirePartnerField("CHANNEL_EXTERNAL_KEY_REQUIRED", "channelExternalKey is required.", request.channelExternalKey());
+    requirePartnerField("FEED_FORMAT_REQUIRED", "feedFormatExternalKey is required.", request.feedFormatExternalKey());
+    if (request.schemaVersion() == null || request.schemaVersion().isBlank()) throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "SCHEMA_VERSION_UNSUPPORTED", "schemaVersion is required.");
+    if (request.rows() == null || request.rows().isEmpty()) throw validation("EMPTY_RATE_SHEET", "Structured submission must include at least one row.");
+    RateFeedRepository.InvestorFeedIntegrationRow integration = requireIntegration(tenantExternalKey, request.investorExternalKey(), request.channelExternalKey(), request.feedFormatExternalKey());
+    if (!request.schemaVersion().equals(integration.schemaVersion())) throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "SCHEMA_VERSION_UNSUPPORTED", "schemaVersion is not configured for this partner feed integration.");
+    validateStructuredRows(request.rows());
+    Map<String, Object> identity = partnerIdentity("partnerStructuredSubmission", tenantExternalKey, request.investorExternalKey(), request.channelExternalKey(), request.feedFormatExternalKey(), request.schemaVersion(), request.rows(), request.metadata(), auth.subject());
+    return repository.idempotent(integration.tenantId(), headers.idempotencyKey(), identity, RateFeedModels.PartnerSubmissionResponse.class,
+        () -> repository.savePartnerSubmission(integration, UUID.randomUUID(), UUID.randomUUID(), "STRUCTURED", "VALIDATION_PENDING", request.schemaVersion(), "structured-submission.json", "application/json",
+            repository.json(request.rows()).length(), Hashing.sha256(repository.json(identity)), auth.subject(), correlation(headers.correlationId())));
+  }
+
+  RateFeedModels.PartnerSubmissionStatusResponse partnerSubmissionStatus(String tenantExternalKey, UUID submissionId, PartnerHeaders headers) {
+    requirePartnerAuth(headers);
+    if (tenantExternalKey == null || tenantExternalKey.isBlank()) throw validation("TENANT_EXTERNAL_KEY_REQUIRED", "tenantExternalKey is required.");
+    requireUuid("SUBMISSION_REQUIRED", "submissionId is required.", submissionId);
+    return repository.partnerSubmissionStatus(tenantExternalKey, submissionId);
+  }
+
+  private RateFeedRepository.InvestorFeedIntegrationRow requireIntegration(String tenantExternalKey, String investorExternalKey, String channelExternalKey, String feedFormat) {
+    if (tenantExternalKey == null || tenantExternalKey.isBlank()) throw validation("TENANT_EXTERNAL_KEY_REQUIRED", "tenantExternalKey is required.");
+    return repository.partnerIntegration(tenantExternalKey, investorExternalKey, channelExternalKey, feedFormat)
+        .orElseThrow(() -> new RateFeedException(HttpStatus.FORBIDDEN, "PARTNER_NOT_AUTHORIZED_FOR_INVESTOR", "Partner is not authorized for the requested tenant, investor, channel, and feed format."));
+  }
+
+  private static PartnerAuth requirePartnerAuth(PartnerHeaders headers) {
+    if (headers == null || headers.clientId() == null || headers.clientId().isBlank() || headers.authSubject() == null || headers.authSubject().isBlank()) {
+      throw new RateFeedException(HttpStatus.UNAUTHORIZED, "PARTNER_AUTH_FAILED", "Partner authentication subject is required.");
+    }
+    rejectFormulaMetadata("partnerClientId", headers.clientId());
+    rejectFormulaMetadata("partnerAuthSubject", headers.authSubject());
+    return new PartnerAuth(headers.clientId().trim(), headers.authSubject().trim());
+  }
+
+  private static void requirePartnerField(String code, String message, String value) {
+    if (value == null || value.isBlank()) throw validation(code, message);
+    rejectFormulaMetadata(code, value);
+  }
+
+  private static void validateStructuredRows(List<Map<String, Object>> rows) {
+    int rowNumber = 0;
+    for (Map<String, Object> row : rows) {
+      rowNumber++;
+      if (row == null || row.isEmpty()) throw validation("STRUCTURED_ROW_INVALID", "Structured row " + rowNumber + " is empty.");
+      for (Map.Entry<String, Object> entry : row.entrySet()) {
+        if (entry.getKey() == null || entry.getKey().isBlank()) throw validation("STRUCTURED_ROW_INVALID", "Structured row " + rowNumber + " contains a blank field name.");
+        rejectFormulaMetadata(entry.getKey(), entry.getValue() == null ? null : entry.getValue().toString());
+      }
+    }
+  }
+
+  private Map<String, Object> partnerIdentity(String command, Object... values) {
+    Map<String, Object> identity = new LinkedHashMap<>();
+    identity.put("command", command);
+    identity.put("values", Arrays.asList(values));
+    return identity;
+  }
+
+  record PartnerHeaders(String idempotencyKey, String clientId, String authSubject, String correlationId, boolean rateLimitExceeded) {}
+  private record PartnerAuth(String clientId, String subject) {}
+
   private RowMapper<RateSheet> sheetMapper() {
     return (rs, row) -> new RateSheet(rs.getObject("sheet_id", UUID.class), rs.getObject("tenant_id", UUID.class),
         rs.getObject("investor_id", UUID.class), rs.getObject("channel_id", UUID.class),

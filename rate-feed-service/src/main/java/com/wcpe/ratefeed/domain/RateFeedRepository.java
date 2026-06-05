@@ -94,6 +94,47 @@ class RateFeedRepository {
     }
   }
 
+  Optional<InvestorFeedIntegrationRow> partnerIntegration(String tenantExternalKey, String investorExternalKey, String channelExternalKey, String feedFormat) {
+    List<InvestorFeedIntegrationRow> rows = jdbc.query("select * from rate_feed.investor_feed_integration where tenant_external_key=? and investor_external_key=? and channel_external_key=? and feed_format=? and active=true",
+        (rs, row) -> new InvestorFeedIntegrationRow(
+            rs.getObject("tenant_id", UUID.class), rs.getObject("investor_id", UUID.class), rs.getObject("channel_id", UUID.class), rs.getObject("feed_format_id", UUID.class),
+            rs.getString("tenant_external_key"), rs.getString("investor_external_key"), rs.getString("channel_external_key"), rs.getString("feed_format"), rs.getString("schema_version")),
+        tenantExternalKey, investorExternalKey, channelExternalKey, feedFormat);
+    return rows.stream().findFirst();
+  }
+
+  RateFeedModels.PartnerSubmissionResponse savePartnerSubmission(InvestorFeedIntegrationRow integration, UUID submissionId, UUID batchId, String submissionKind, String status,
+      String schemaVersion, String fileName, String contentType, long contentLengthBytes, String requestHash, String actor, String correlationId) {
+    String resultHash = Hashing.sha256(json(Map.of("submissionId", submissionId, "batchId", batchId, "requestHash", requestHash, "status", status)));
+    try {
+      jdbc.update("insert into rate_feed.investor_feed_submission(tenant_id,submission_id,batch_id,tenant_external_key,investor_external_key,channel_external_key,feed_format,schema_version,submission_kind,status,file_name,content_type,content_length_bytes,request_hash,result_hash,created_by,correlation_id) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          integration.tenantId(), submissionId, batchId, integration.tenantExternalKey(), integration.investorExternalKey(), integration.channelExternalKey(), integration.feedFormat(), schemaVersion,
+          submissionKind, status, fileName, contentType, contentLengthBytes, requestHash, resultHash, actor, correlationId);
+      jdbc.update("insert into rate_feed.rate_feed_batch(tenant_id,batch_id,upload_session_id,investor_id,channel_id,feed_format_id,source_type,status,effective_at,timezone,raw_file_id,file_sha256,file_name,content_type,content_length_bytes,uploaded_by,correlation_id,result_hash) values (?,?,?,?,?,?,?,?,now(),'UTC',?,?,?,?,?,?,?,?)",
+          integration.tenantId(), batchId, submissionId, integration.investorId(), integration.channelId(), integration.feedFormatId(), "PARTNER_API", "UPLOADED", UUID.randomUUID(), hexSha256(requestHash), fileName, contentType, contentLengthBytes, actor, correlationId, resultHash);
+    } catch (DuplicateKeyException ex) {
+      throw new RateFeedException(HttpStatus.CONFLICT, "IDEMPOTENCY_CONFLICT", "Partner submission conflicts with an existing submission.");
+    }
+    outbox(integration.tenantId(), submissionId, "InvestorFeedSubmissionReceived.v1", 1, actor, correlationId,
+        Map.of("investorId", integration.investorId().toString(), "channelId", integration.channelId().toString(), "feedFormatId", integration.feedFormatId().toString()),
+        Map.of("submissionId", submissionId, "batchId", batchId, "tenantExternalKey", integration.tenantExternalKey(), "investorExternalKey", integration.investorExternalKey(), "feedFormat", integration.feedFormat(), "status", status));
+    audit(integration.tenantId(), submissionId, "INVESTOR_FEED_SUBMISSION_RECEIVED", "InvestorFeedSubmission", actor, correlationId, requestHash, resultHash,
+        Map.of("submissionId", submissionId, "batchId", batchId, "tenantExternalKey", integration.tenantExternalKey(), "investorExternalKey", integration.investorExternalKey(), "feedFormat", integration.feedFormat(), "status", status));
+    return new RateFeedModels.PartnerSubmissionResponse(submissionId, batchId, status, "/api/v1/partner/rate-feeds/" + integration.tenantExternalKey() + "/submissions/" + submissionId, Instant.now(), resultHash);
+  }
+
+  RateFeedModels.PartnerSubmissionStatusResponse partnerSubmissionStatus(String tenantExternalKey, UUID submissionId) {
+    try {
+      return jdbc.queryForObject("select * from rate_feed.investor_feed_submission where tenant_external_key=? and submission_id=?",
+          (rs, row) -> new RateFeedModels.PartnerSubmissionStatusResponse(
+              rs.getObject("submission_id", UUID.class), rs.getObject("batch_id", UUID.class), rs.getString("status"), rs.getString("tenant_external_key"),
+              rs.getString("investor_external_key"), rs.getString("channel_external_key"), rs.getString("feed_format"), rs.getString("schema_version"),
+              rs.getTimestamp("created_at").toInstant(), rs.getString("result_hash")), tenantExternalKey, submissionId);
+    } catch (EmptyResultDataAccessException ex) {
+      throw new RateFeedException(HttpStatus.NOT_FOUND, "SUBMISSION_NOT_FOUND", "Partner feed submission was not found for this tenant external key.");
+    }
+  }
+
   BatchParseSource batchParseSource(UUID tenantId, UUID batchId) {
     try {
       return jdbc.queryForObject("select batch_id,investor_id,channel_id,feed_format_id,status,file_sha256 from rate_feed.rate_feed_batch where tenant_id=? and batch_id=?", (rs, row) -> new BatchParseSource(
@@ -146,6 +187,11 @@ class RateFeedRepository {
     } catch (Exception ex) { throw new IllegalStateException(ex); }
   }
 
+  private static String hexSha256(String hash) {
+    return hash != null && hash.startsWith("sha256:") ? hash.substring("sha256:".length()) : hash;
+  }
+
   record UploadSessionRow(UUID uploadSessionId, UUID investorId, UUID channelId, UUID feedFormatId, String sourceType, Instant effectiveAt, String timezone, String fileName, String contentType, long contentLengthBytes, UUID supersedesBatchId, String status, Instant expiresAt, String createdBy, String correlationId) {}
   record BatchParseSource(UUID batchId, UUID investorId, UUID channelId, UUID feedFormatId, String status, String fileSha256) {}
+  record InvestorFeedIntegrationRow(UUID tenantId, UUID investorId, UUID channelId, UUID feedFormatId, String tenantExternalKey, String investorExternalKey, String channelExternalKey, String feedFormat, String schemaVersion) {}
 }

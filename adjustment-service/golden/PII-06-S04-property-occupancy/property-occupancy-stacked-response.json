@@ -1,0 +1,19 @@
+{
+  "category": "LLPA_PROPERTY_OCCUPANCY",
+  "status": "APPLIED",
+  "pointsDelta": "0.375000",
+  "bpsDelta": "37.5000",
+  "moneyImpact": "1500.00",
+  "priceAfterPropertyOccupancy": "100.375000",
+  "reasonCodes": ["CONFIGURED_PROPERTY_REASON", "CONFIGURED_PROPERTY_REASON"],
+  "appliedRuleIds": [
+    "30000000-0000-0000-0000-000000000064",
+    "30000000-0000-0000-0000-000000000065"
+  ],
+  "suppressedRuleIds": [],
+  "waterfall": {
+    "category": "LLPA_PROPERTY_OCCUPANCY",
+    "ruleType": "PROPERTY_OCCUPANCY_LLPA",
+    "waterfallSequence": 50
+  }
+}

@@ -329,5 +329,50 @@ class RateFeedController {
     return m;
   }
 
-  record Headers(String idempotencyKey, String actorId, String correlationId, String roles) {}
+record Headers(String idempotencyKey, String actorId, String correlationId, String roles) {}
+}
+
+@RestController
+@RequestMapping("/api/v1/partner/rate-feeds/{tenantExternalKey}")
+class PartnerRateFeedController {
+  private final RateFeedService service;
+
+  PartnerRateFeedController(RateFeedService service) {
+    this.service = service;
+  }
+
+  @PostMapping(value = "/submissions", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+  ResponseEntity<RateFeedModels.PartnerSubmissionResponse> submitFile(@PathVariable String tenantExternalKey,
+      @RequestParam("file") MultipartFile file,
+      @RequestPart("metadata") RateFeedModels.PartnerFileSubmissionMetadata metadata,
+      HttpServletRequest http) {
+    return ResponseEntity.status(HttpStatus.ACCEPTED).body(service.submitPartnerFile(tenantExternalKey, metadata, file, partnerHeaders(http)));
+  }
+
+  @PostMapping("/structured-submissions")
+  ResponseEntity<RateFeedModels.PartnerSubmissionResponse> submitStructured(@PathVariable String tenantExternalKey,
+      @RequestBody RateFeedModels.PartnerStructuredSubmissionRequest request,
+      HttpServletRequest http) {
+    return ResponseEntity.status(HttpStatus.ACCEPTED).body(service.submitPartnerStructured(tenantExternalKey, request, partnerHeaders(http)));
+  }
+
+  @GetMapping("/submissions/{submissionId}")
+  RateFeedModels.PartnerSubmissionStatusResponse submissionStatus(@PathVariable String tenantExternalKey, @PathVariable UUID submissionId, HttpServletRequest http) {
+    return service.partnerSubmissionStatus(tenantExternalKey, submissionId, partnerHeaders(http));
+  }
+
+  @ExceptionHandler(RateFeedException.class)
+  ResponseEntity<Map<String, Object>> error(RateFeedException ex, HttpServletRequest request) {
+    String correlationId = Optional.ofNullable(request.getHeader("X-Correlation-Id")).filter(v -> !v.isBlank()).orElse(UUID.randomUUID().toString());
+    return ResponseEntity.status(ex.status()).body(Map.of("code", ex.code(), "message", ex.getMessage(), "correlationId", correlationId));
+  }
+
+  private static RateFeedService.PartnerHeaders partnerHeaders(HttpServletRequest request) {
+    return new RateFeedService.PartnerHeaders(
+        request.getHeader("Idempotency-Key"),
+        request.getHeader("X-Partner-Client-Id"),
+        request.getHeader("X-Partner-Auth-Subject"),
+        request.getHeader("X-Correlation-Id"),
+        "true".equalsIgnoreCase(request.getHeader("X-Partner-Rate-Limit-Exceeded")));
+  }
 }

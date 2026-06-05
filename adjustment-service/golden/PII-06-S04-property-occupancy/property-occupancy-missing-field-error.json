@@ -1,0 +1,7 @@
+{
+  "category": "LLPA_PROPERTY_OCCUPANCY",
+  "status": "FAIL_CLOSED",
+  "pointsDelta": "0.000000",
+  "bpsDelta": "0.0000",
+  "validationMessages": ["ADJ_PROPERTY_FIELD_MISSING: occupancyCode"]
+}
