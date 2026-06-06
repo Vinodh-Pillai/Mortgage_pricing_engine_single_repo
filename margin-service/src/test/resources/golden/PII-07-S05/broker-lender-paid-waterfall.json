@@ -1,0 +1,16 @@
+{
+  "storyId": "PII-07-S05",
+  "scenario": "broker-lender-paid-waterfall",
+  "planType": "BROKER",
+  "paymentResponsibility": "LENDER_PAID",
+  "channel": "wholesale",
+  "amountRef": "cfg.brokerAmountRef",
+  "capRef": "cfg.brokerCapRef",
+  "floorRef": "cfg.brokerFloorRef",
+  "expectedBehavior": [
+    "resolve broker amount from tenant-governed configuration references",
+    "clamp resolved broker amount to configured cap/floor references",
+    "subtract lender-paid broker compensation from price before profitability enforcement",
+    "mask internal economics unless pricing.comp.broker.view_sensitive is present"
+  ]
+}

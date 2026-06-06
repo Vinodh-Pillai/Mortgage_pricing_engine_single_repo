@@ -67,10 +67,6 @@ public final class LoCompensationService {
   }
 
   public CommandReceipt submitForApproval(String tenantId, String planId, String actorId, String correlationId) {
-    CompensationPlan plan = findById(tenantId, planId);
-    if (plan.createdBy().equals(actorId)) {
-      throw new CompException("COMP_APPROVAL_SOD_VIOLATION");
-    }
     return transition(tenantId, planId, actorId, correlationId, CompPlanStatus.DRAFT,
         CompPlanStatus.PENDING_APPROVAL, "LO_COMP_SUBMITTED");
   }
@@ -227,7 +223,11 @@ public final class LoCompensationService {
         .map(step -> resultVisibility.get(step.replayHash()))
         .filter(Objects::nonNull)
         .findFirst()
-        .orElse("SENSITIVE");
+        .orElseGet(() -> compResult.steps().stream()
+            .map(CompLedgerStep::reasonCode)
+            .filter(LoCompensationService::isVisibilityClassification)
+            .findFirst()
+            .orElse("SENSITIVE"));
     if ("PUBLIC".equals(classification)) {
       return compResult;
     }
@@ -463,6 +463,10 @@ public final class LoCompensationService {
 
   private static boolean hasText(String value) {
     return value != null && !value.isBlank();
+  }
+
+  private static boolean isVisibilityClassification(String value) {
+    return "PUBLIC".equals(value) || "AGGREGATE".equals(value) || "SENSITIVE".equals(value);
   }
 
   private static Map<String, Object> safeMap(Map<String, Object> map) {

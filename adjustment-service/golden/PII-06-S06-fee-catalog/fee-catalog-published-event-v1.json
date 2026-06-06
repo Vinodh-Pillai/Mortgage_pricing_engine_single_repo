@@ -1,0 +1,32 @@
+{
+  "topic": "pricing.fees.catalog.v1",
+  "eventType": "FeeCatalogPublished",
+  "eventVersion": 1,
+  "schemaVersion": "pricing.fees.catalog.v1",
+  "sourceService": "adjustment-service",
+  "key": "10000000-0000-0000-0000-000000000066:20000000-0000-0000-0000-000000000066:1",
+  "headers": {
+    "tenantId": "10000000-0000-0000-0000-000000000066",
+    "eventId": "40000000-0000-0000-0000-000000000066",
+    "sourceService": "adjustment-service",
+    "actorId": "approver-1",
+    "correlationId": "correlation-1",
+    "causationId": "causation-1",
+    "idempotencyKey": "idem-1",
+    "occurredAt": "2026-01-02T00:00:01Z"
+  },
+  "payload": {
+    "tenantId": "10000000-0000-0000-0000-000000000066",
+    "catalogVersionId": "20000000-0000-0000-0000-000000000066",
+    "version": 1,
+    "status": "PUBLISHED",
+    "effectiveWindow": {
+      "start": "2026-01-01T00:00:00Z",
+      "end": null
+    },
+    "feeCodes": ["CONFIGURED_FEE_A"],
+    "feeCodeListHash": "sha256-populated-by-domain-event",
+    "snapshotUri": "urn:wcpe:fee-catalog-snapshot:10000000-0000-0000-0000-000000000066:20000000-0000-0000-0000-000000000066:1",
+    "snapshotHash": "sha256-populated-by-domain-event"
+  }
+}

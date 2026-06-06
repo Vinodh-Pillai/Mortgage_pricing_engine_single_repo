@@ -1,0 +1,28 @@
+{
+  "tenantId": "10000000-0000-0000-0000-000000000066",
+  "catalogVersionId": "20000000-0000-0000-0000-000000000066",
+  "version": 1,
+  "status": "DRAFT",
+  "effectiveStart": "2026-01-01T00:00:00Z",
+  "fees": [
+    {
+      "feeCode": "CONFIGURED_FEE_A",
+      "displayName": "Configured fee A",
+      "category": "CONFIGURED_CATEGORY",
+      "toleranceBucket": "CONFIGURED_TOLERANCE_BUCKET",
+      "disclosureSection": "CONFIGURED_DISCLOSURE_SECTION",
+      "calculationMethod": "FIXED_AMOUNT",
+      "formulaParameters": {
+        "amountConfigRef": "tenant-fee-config-ref"
+      },
+      "applicability": {
+        "allowedProducts": ["configured-product"],
+        "investors": ["configured-investor"],
+        "channels": ["configured-channel"],
+        "jurisdictions": ["configured-jurisdiction"]
+      },
+      "reasonCode": "CONFIGURED_REASON",
+      "sourceRef": "source-policy-ref"
+    }
+  ]
+}

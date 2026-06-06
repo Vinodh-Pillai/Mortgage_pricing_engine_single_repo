@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.wcpe.margin.LoCompensationService.AuditRecord;
 import com.wcpe.margin.LoCompensationService.CommandReceipt;
+import com.wcpe.margin.LoCompensationService.CompAssignmentChangedEvent;
 import com.wcpe.margin.LoCompensationService.CompBasis;
 import com.wcpe.margin.LoCompensationService.CompCalculationResult;
 import com.wcpe.margin.LoCompensationService.CompException;
@@ -107,9 +108,23 @@ class LoCompensationServiceTest {
     CommandReceipt published = publish("idem-overlap", "creator-a", "approver-b");
     String versionId = ((LoCompensationService.CompPlanPublishedEvent) published.events().get(0)).versionId();
 
-    service.createAssignment("tenant-a", published.planId(), "ops-a", "idem-assignment-1", "corr-assign-1", 1,
+    CommandReceipt assigned = service.createAssignment("tenant-a", published.planId(), "ops-a", "idem-assignment-1", "corr-assign-1", 1,
         assignment("assignment-1", versionId, "lo-a", "branch-1", "retail", "conventional",
             NOW, NOW.plusSeconds(3600)));
+
+    assertEquals(1, assigned.events().size());
+    CompAssignmentChangedEvent assignmentEvent = (CompAssignmentChangedEvent) assigned.events().get(0);
+    assertEquals("tenant-a", assignmentEvent.tenantId());
+    assertEquals("assignment-1", assignmentEvent.assignmentId());
+    assertEquals(versionId, assignmentEvent.planVersionId());
+    assertEquals(LoCompensationService.LO_PAYEE_TYPE, assignmentEvent.payeeType());
+    assertEquals("lo-a", assignmentEvent.payeeId());
+    assertEquals("ops-a", assignmentEvent.actorId());
+    assertEquals("corr-assign-1", assignmentEvent.correlationId());
+    assertEquals(2, service.outboxEvents().size());
+    assertTrue(service.outboxEvents().contains(assignmentEvent));
+    assertTrue(service.auditRecords().stream().map(AuditRecord::action).toList()
+        .contains("LO_COMP_ASSIGNMENT_CREATED"));
 
     CompException exception = assertThrows(CompException.class,
         () -> service.createAssignment("tenant-a", published.planId(), "ops-a", "idem-assignment-2", "corr-assign-2", 1,
@@ -295,10 +310,10 @@ class LoCompensationServiceTest {
 
   private static CompCalculationResult resultWithVisibility(String visibilityClassification) {
     return new CompCalculationResult("plan-1", "version-1", CompBasis.PRICE_POINTS, new BigDecimal("38"),
-        new BigDecimal("20"), new BigDecimal("50"), new BigDecimal("38"), new BigDecimal("-38"),
-        new BigDecimal("99.370"), List.of(new CompLedgerStep("LO_COMP", new BigDecimal("99.750"),
+        new BigDecimal("20"), new BigDecimal("50"), new BigDecimal("38"), new BigDecimal("3800"),
+        new BigDecimal("61.750"), List.of(new CompLedgerStep("LO_COMP", new BigDecimal("99.750"),
             new BigDecimal("38"), CompBasis.PRICE_POINTS, false, new BigDecimal("50"), new BigDecimal("20"),
-            new BigDecimal("99.370"), visibilityClassification, "replay-hash-1")), "lo-a");
+            new BigDecimal("61.750"), visibilityClassification, "replay-hash-1")), "lo-a");
   }
 
   private static void assertAmount(String expected, BigDecimal actual) {

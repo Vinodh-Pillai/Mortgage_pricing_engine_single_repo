@@ -1,0 +1,7 @@
+{
+  "error": "VALIDATION_FAILED",
+  "validationMessages": [
+    "FORMULA_EXPRESSION_APPROVED requires formula parameter approvedExpressionRef",
+    "formula expressions must reference an approved expression catalog entry"
+  ]
+}
