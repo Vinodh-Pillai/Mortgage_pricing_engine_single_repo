@@ -1,0 +1,119 @@
+{
+  "fixture_name": "lo-comp-retail-waterfall",
+  "version": "1.0",
+  "description": "Synthetic golden fixture for a retail quote waterfall where LO compensation is applied after company, channel, and branch margin layers. Values are test data only and do not encode mortgage pricing policy.",
+  "inputs": {
+    "quote_id": "synthetic-quote-retail-waterfall-001",
+    "viewer": {
+      "role": "pricing-analyst",
+      "can_view_sensitive_compensation": true
+    },
+    "base_price": {
+      "amount": 100.0,
+      "unit": "price_percent"
+    },
+    "margin_layers": [
+      {
+        "layer": "company_margin",
+        "basis": "bps",
+        "amount_bps": -20.0,
+        "rule_ref": "synthetic-company-margin-A"
+      },
+      {
+        "layer": "channel_margin",
+        "basis": "bps",
+        "amount_bps": -12.5,
+        "rule_ref": "synthetic-retail-channel-margin-A"
+      },
+      {
+        "layer": "branch_overlay",
+        "basis": "bps",
+        "amount_bps": 7.5,
+        "rule_ref": "synthetic-branch-overlay-A"
+      }
+    ],
+    "lo_compensation": {
+      "basis": "bps",
+      "raw_amount_bps": 44.0,
+      "floor_bps": 25.0,
+      "cap_bps": 50.0,
+      "amount_ref": "synthetic-lo-plan-retail-A.amount_bps",
+      "cap_ref": "synthetic-lo-plan-retail-A.cap_bps",
+      "floor_ref": "synthetic-lo-plan-retail-A.floor_bps",
+      "cap_floor_applied": true,
+      "clamped_amount_bps": 44.0,
+      "price_impact_bps": -44.0
+    }
+  },
+  "expected_steps": [
+    {
+      "step_order": 1,
+      "step_type": "before_price",
+      "label": "Base eligible quote price",
+      "basis": "price_percent",
+      "input_price": null,
+      "amount": 100.0,
+      "output_price": 100.0
+    },
+    {
+      "step_order": 2,
+      "step_type": "company_margin",
+      "label": "Company margin",
+      "basis": "bps",
+      "amount_bps": -20.0,
+      "input_price": 100.0,
+      "output_price": 99.8,
+      "rule_ref": "synthetic-company-margin-A"
+    },
+    {
+      "step_order": 3,
+      "step_type": "channel_margin",
+      "label": "Retail channel margin",
+      "basis": "bps",
+      "amount_bps": -12.5,
+      "input_price": 99.8,
+      "output_price": 99.675,
+      "rule_ref": "synthetic-retail-channel-margin-A"
+    },
+    {
+      "step_order": 4,
+      "step_type": "branch_overlay",
+      "label": "Branch overlay",
+      "basis": "bps",
+      "amount_bps": 7.5,
+      "input_price": 99.675,
+      "output_price": 99.75,
+      "rule_ref": "synthetic-branch-overlay-A"
+    },
+    {
+      "step_order": 5,
+      "step_type": "lo_compensation",
+      "label": "LO compensation",
+      "basis": "bps",
+      "raw_amount_bps": 44.0,
+      "floor_bps": 25.0,
+      "cap_bps": 50.0,
+      "cap_floor_applied": true,
+      "clamped_amount_bps": 44.0,
+      "amount_bps": -44.0,
+      "input_price": 99.75,
+      "output_price": 99.31,
+      "amount_ref": "synthetic-lo-plan-retail-A.amount_bps",
+      "cap_ref": "synthetic-lo-plan-retail-A.cap_bps",
+      "floor_ref": "synthetic-lo-plan-retail-A.floor_bps"
+    }
+  ],
+  "expected_output": {
+    "final_price": {
+      "amount": 99.31,
+      "unit": "price_percent"
+    },
+    "total_adjustment_bps": -69.0,
+    "lo_compensation_applied_after": [
+      "company_margin",
+      "channel_margin",
+      "branch_overlay"
+    ],
+    "sensitive_compensation_redacted": false
+  }
+}

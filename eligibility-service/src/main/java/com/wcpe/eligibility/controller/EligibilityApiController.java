@@ -12,20 +12,27 @@ import com.wcpe.eligibility.domain.models.FicoLtvEvaluationResult;
 import com.wcpe.eligibility.domain.models.FicoLtvMatrixEvaluationRequest;
 import com.wcpe.eligibility.domain.models.InvestorOverlayEvaluationRequest;
 import com.wcpe.eligibility.domain.models.InvestorOverlayEvaluationResult;
+import com.wcpe.eligibility.domain.models.LoanLimitEvaluationRequest;
+import com.wcpe.eligibility.domain.models.LoanLimitEvaluationResult;
 import com.wcpe.eligibility.domain.models.OccupancyPurposeEvaluationRequest;
 import com.wcpe.eligibility.domain.models.OccupancyPurposeEvaluationResult;
 import com.wcpe.eligibility.domain.models.PropertyTypeEvaluationRequest;
 import com.wcpe.eligibility.domain.models.PropertyTypeEvaluationResult;
+import com.wcpe.eligibility.domain.models.QuoteSubmissionRequest;
+import com.wcpe.eligibility.domain.models.QuoteSubmissionResponse;
 import com.wcpe.eligibility.service.EligibilityApplicationService;
 import com.wcpe.eligibility.cache.EligibilityCacheService;
 import com.wcpe.eligibility.service.EligibilityExplanationService;
 import com.wcpe.eligibility.service.FicoLtvMatrixService;
 import com.wcpe.eligibility.service.InvestorOverlayRuleService;
+import com.wcpe.eligibility.service.LoanLimitEvaluationService;
 import com.wcpe.eligibility.service.OccupancyPurposeRuleService;
 import com.wcpe.eligibility.service.PropertyTypeRuleService;
+import com.wcpe.eligibility.service.QuoteSubmissionApplicationService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 
@@ -47,14 +54,30 @@ public class EligibilityApiController {
     private final InvestorOverlayRuleService investorOverlayRuleService;
     private final EligibilityCacheService eligibilityCacheService;
     private final EligibilityExplanationService eligibilityExplanationService;
+    private final QuoteSubmissionApplicationService quoteSubmissionApplicationService;
+    private final LoanLimitEvaluationService loanLimitEvaluationService;
 
     public EligibilityApiController(EligibilityApplicationService service, JdbcTemplate jdbcTemplate, ObjectMapper objectMapper,
-                                         FicoLtvMatrixService ficoLtvMatrixService,
-                                         OccupancyPurposeRuleService occupancyPurposeRuleService,
-                                          PropertyTypeRuleService propertyTypeRuleService,
-                                          InvestorOverlayRuleService investorOverlayRuleService,
-                                          EligibilityCacheService eligibilityCacheService,
-                                          EligibilityExplanationService eligibilityExplanationService) {
+                                           FicoLtvMatrixService ficoLtvMatrixService,
+                                           OccupancyPurposeRuleService occupancyPurposeRuleService,
+                                            PropertyTypeRuleService propertyTypeRuleService,
+                                            InvestorOverlayRuleService investorOverlayRuleService,
+                                            EligibilityCacheService eligibilityCacheService,
+                                            EligibilityExplanationService eligibilityExplanationService) {
+        this(service, jdbcTemplate, objectMapper, ficoLtvMatrixService, occupancyPurposeRuleService, propertyTypeRuleService,
+            investorOverlayRuleService, eligibilityCacheService, eligibilityExplanationService, null, null);
+    }
+
+    @Autowired
+    public EligibilityApiController(EligibilityApplicationService service, JdbcTemplate jdbcTemplate, ObjectMapper objectMapper,
+                                          FicoLtvMatrixService ficoLtvMatrixService,
+                                          OccupancyPurposeRuleService occupancyPurposeRuleService,
+                                           PropertyTypeRuleService propertyTypeRuleService,
+                                            InvestorOverlayRuleService investorOverlayRuleService,
+                                            EligibilityCacheService eligibilityCacheService,
+                                            EligibilityExplanationService eligibilityExplanationService,
+                                            QuoteSubmissionApplicationService quoteSubmissionApplicationService,
+                                            LoanLimitEvaluationService loanLimitEvaluationService) {
         this.service = service;
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
@@ -64,6 +87,18 @@ public class EligibilityApiController {
         this.investorOverlayRuleService = investorOverlayRuleService;
         this.eligibilityCacheService = eligibilityCacheService;
         this.eligibilityExplanationService = eligibilityExplanationService;
+        this.quoteSubmissionApplicationService = quoteSubmissionApplicationService;
+        this.loanLimitEvaluationService = loanLimitEvaluationService;
+    }
+
+    @PostMapping("/conventional-eligibility-core")
+    ResponseEntity<QuoteSubmissionResponse> submitConventionalEligibilityCore(
+            @PathVariable UUID tenantId,
+            @RequestBody QuoteSubmissionRequest request,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestHeader(value = "X-Correlation-Id", required = false) String correlationId) {
+        QuoteSubmissionResponse response = quoteSubmissionApplicationService.submitConventionalPurchase(tenantId, request, idempotencyKey, correlationId);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
     @GetMapping("/quotes/{quoteId}/options/{quoteOptionId}/eligibility-explanation")
@@ -189,6 +224,25 @@ public class EligibilityApiController {
         return ResponseEntity.ok(result);
     }
 
+    @PostMapping("/eligibility/evaluations/loan-limit")
+    ResponseEntity<LoanLimitEvaluationResult> evaluateLoanLimit(
+            @PathVariable UUID tenantId,
+            @RequestBody LoanLimitEvaluationRequest request,
+            @RequestHeader(value = "X-Correlation-Id", required = false) String correlationId) {
+
+        LoanLimitEvaluationResult result = loanLimitEvaluationService.evaluate(tenantId, request, correlationId);
+        if (result.decisions().stream().anyMatch(d -> "OVERLAPPING_LIMIT_VERSION".equals(d.reasonCode()))) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(result);
+        }
+        if (result.decisions().stream().anyMatch(d -> "MISSING_COUNTY".equals(d.reasonCode()) || "INVALID_UNIT_COUNT".equals(d.reasonCode()))) {
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(result);
+        }
+        if (result.decisions().stream().allMatch(d -> "LIMIT_NOT_CONFIGURED".equals(d.reasonCode()))) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(result);
+        }
+        return ResponseEntity.ok(result);
+    }
+
     @PostMapping("/eligibility/evaluations/occupancy-purpose")
     ResponseEntity<OccupancyPurposeEvaluationResult> evaluateOccupancyPurpose(
             @PathVariable UUID tenantId,
@@ -245,6 +299,34 @@ public class EligibilityApiController {
     @ExceptionHandler(IllegalArgumentException.class)
     ResponseEntity<Map<String, Object>> badRequest(IllegalArgumentException ex) {
         return ResponseEntity.badRequest().body(Map.of("code", "INVALID_REQUEST", "message", ex.getMessage()));
+    }
+
+    @ExceptionHandler(QuoteSubmissionApplicationService.ValidationException.class)
+    ResponseEntity<Map<String, Object>> validationFailed(QuoteSubmissionApplicationService.ValidationException ex) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(Map.of(
+            "type", "https://pricing/errors/validation-failed",
+            "code", "VALIDATION_FAILED",
+            "message", ex.getMessage(),
+            "fieldErrors", ex.fieldErrors()
+        ));
+    }
+
+    @ExceptionHandler(QuoteSubmissionApplicationService.IdempotencyConflictException.class)
+    ResponseEntity<Map<String, Object>> idempotencyConflict(QuoteSubmissionApplicationService.IdempotencyConflictException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+            "type", "https://pricing/errors/idempotency-conflict",
+            "code", "IDEMPOTENCY_CONFLICT",
+            "message", ex.getMessage()
+        ));
+    }
+
+    @ExceptionHandler(QuoteSubmissionApplicationService.DependencyUnavailableException.class)
+    ResponseEntity<Map<String, Object>> dependencyUnavailable(QuoteSubmissionApplicationService.DependencyUnavailableException ex) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of(
+            "type", "https://pricing/errors/dependency-unavailable",
+            "code", "DEPENDENCY_UNAVAILABLE",
+            "message", ex.getMessage()
+        ));
     }
 
     @ExceptionHandler(UnsupportedProductFamilyException.class)

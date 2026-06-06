@@ -84,6 +84,58 @@ class BaseRateSelectionServiceTest {
         assertEquals(2, response.candidateRates().size());
         assertNotNull(response.resultHash());
         assertTrue(response.ledger().size() >= 3);
+        assertTrue(repository.audits().stream().anyMatch(audit -> response.resultHash().equals(audit.responseHash())));
+        assertTrue(repository.gridEvents().stream()
+                .anyMatch(event -> "pricing.base-rate-selected.v1".equals(event.eventType())));
+    }
+
+    @Test
+    @DisplayName("idempotency replays same response and rejects conflicting request")
+    void idempotency_replay_and_conflict() {
+        UUID gridId = addPublishedGridVersion(TENANT_A,
+                Instant.parse("2026-01-01T00:00:00Z"),
+                Instant.parse("2027-01-01T00:00:00Z"));
+        addGridRow(gridId, TENANT_A, 30, new BigDecimal("6.12500"), new BigDecimal("100.00000"));
+        addGridRow(gridId, TENANT_A, 30, new BigDecimal("6.25000"), new BigDecimal("99.50000"));
+
+        BaseRateSelectionResponse first = api.selectRate(TENANT_A, validWriteHeaders(), validRequest());
+        BaseRateSelectionResponse replay = api.selectRate(TENANT_A, validWriteHeaders(), validRequest());
+
+        assertEquals(first.selectionId(), replay.selectionId());
+        assertEquals(first.resultHash(), replay.resultHash());
+
+        BaseRateSelectionRequest conflicting = new BaseRateSelectionRequest(
+                "sc-1", "hash-1", PRODUCT, INVESTOR, CHANNEL,
+                30, AS_OF, new BigDecimal("6.25000"), "policy-1");
+
+        assertThrows(BaseRateSelectionConflictException.class, () ->
+                api.selectRate(TENANT_A, validWriteHeaders(), conflicting));
+    }
+
+    @Test
+    @DisplayName("result hash is deterministic for equivalent commands")
+    void result_hash_is_deterministic_for_equivalent_commands() {
+        UUID gridId = addPublishedGridVersion(TENANT_A,
+                Instant.parse("2026-01-01T00:00:00Z"),
+                Instant.parse("2027-01-01T00:00:00Z"));
+        addGridRow(gridId, TENANT_A, 30, new BigDecimal("6.12500"), new BigDecimal("100.00000"));
+
+        BaseRateSelectionResponse first = api.selectRate(TENANT_A, validWriteHeaders(), validRequest());
+
+        repository = new InMemoryBaseRateSelectionRepository();
+        api = new BaseRateSelectionApi(repository);
+        repository.addGridVersion(new BasePricingGridVersion(
+                gridId, TENANT_A, PRODUCT, INVESTOR, CHANNEL, 1,
+                GridVersionStatus.PUBLISHED,
+                Instant.parse("2026-01-01T00:00:00Z"),
+                Instant.parse("2027-01-01T00:00:00Z"),
+                "digest-1", "approver-1", Instant.now(), Instant.now(), Instant.now()));
+        addGridRow(gridId, TENANT_A, 30, new BigDecimal("6.12500"), new BigDecimal("100.00000"));
+
+        BaseRateSelectionResponse second = api.selectRate(TENANT_A, validWriteHeaders(), validRequest());
+
+        assertEquals(first.resultHash(), second.resultHash());
+        assertEquals(first.selectionId(), second.selectionId());
     }
 
     @Test
@@ -115,7 +167,7 @@ class BaseRateSelectionServiceTest {
                 "sc-1", "hash-1", PRODUCT, INVESTOR, CHANNEL,
                 60, AS_OF, new BigDecimal("6.12500"), "policy-1");
 
-        assertThrows(BaseRateSelectionNotFoundException.class, () ->
+        assertThrows(BaseRateSelectionLockPeriodUnsupportedException.class, () ->
                 api.selectRate(TENANT_A, validWriteHeaders(), request60));
     }
 

@@ -1,0 +1,6 @@
+{
+  "status": "CONFLICT",
+  "validationMessages": ["ADJ_STATE_RULE_AMBIGUOUS"],
+  "pointsDelta": "0.000000",
+  "moneyImpact": "0.00"
+}

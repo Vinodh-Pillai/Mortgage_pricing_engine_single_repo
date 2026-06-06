@@ -11,7 +11,8 @@ public record RankingPolicy(
     Duration quoteTtl,
     Map<String, Integer> rankByCandidateId,
     Map<String, BigDecimal> scoreByCandidateId,
-    Map<String, List<String>> reasonsByCandidateId
+    Map<String, List<String>> reasonsByCandidateId,
+    RankingPolicyRef policyRef
 ) {
     public RankingPolicy {
         rankByCandidateId = Map.copyOf(rankByCandidateId == null ? Map.of() : rankByCandidateId);

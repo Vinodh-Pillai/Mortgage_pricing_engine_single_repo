@@ -1,0 +1,73 @@
+{
+  "fixture_name": "lo-comp-cap-floor",
+  "version": "1.0",
+  "description": "Synthetic golden fixture for an LO compensation calculation where the raw compensation exceeds the configured synthetic cap and is clamped before price impact is applied.",
+  "inputs": {
+    "quote_id": "synthetic-quote-cap-floor-001",
+    "base_price_before_lo_comp": {
+      "amount": 99.625,
+      "unit": "price_percent"
+    },
+    "lo_compensation_calculation": {
+      "basis": "bps",
+      "amount_ref": "synthetic-lo-plan-cap-test.amount_bps",
+      "cap_ref": "synthetic-lo-plan-cap-test.cap_bps",
+      "floor_ref": "synthetic-lo-plan-cap-test.floor_bps",
+      "raw_calculation_input": {
+        "plan_id": "synthetic-lo-plan-cap-test",
+        "basis": "bps",
+        "configured_amount_bps": 72.5,
+        "synthetic_reference_note": "Configured solely for testing clamp behavior; not a mortgage pricing rule."
+      },
+      "floor_bps": 20.0,
+      "cap_bps": 55.0
+    }
+  },
+  "expected_steps": [
+    {
+      "step_order": 1,
+      "step_type": "lo_comp_raw_calculation",
+      "label": "Calculate raw LO compensation",
+      "basis": "bps",
+      "amount_ref": "synthetic-lo-plan-cap-test.amount_bps",
+      "raw_amount_bps": 72.5,
+      "floor_ref": "synthetic-lo-plan-cap-test.floor_bps",
+      "floor_bps": 20.0,
+      "cap_ref": "synthetic-lo-plan-cap-test.cap_bps",
+      "cap_bps": 55.0
+    },
+    {
+      "step_order": 2,
+      "step_type": "lo_comp_cap_floor_clamp",
+      "label": "Clamp LO compensation to cap/floor bounds",
+      "basis": "bps",
+      "raw_amount_bps": 72.5,
+      "floor_bps": 20.0,
+      "cap_bps": 55.0,
+      "clamp_reason": "raw_amount_exceeds_cap",
+      "clamped_result_bps": 55.0
+    },
+    {
+      "step_order": 3,
+      "step_type": "lo_comp_price_impact",
+      "label": "Apply clamped LO compensation to quote price",
+      "basis": "bps",
+      "input_price": 99.625,
+      "price_impact_bps": -55.0,
+      "output_price": 99.075
+    }
+  ],
+  "expected_output": {
+    "basis": "bps",
+    "raw_amount_bps": 72.5,
+    "cap_ref": "synthetic-lo-plan-cap-test.cap_bps",
+    "floor_ref": "synthetic-lo-plan-cap-test.floor_bps",
+    "clamped_result_bps": 55.0,
+    "price_impact_bps": -55.0,
+    "final_price": {
+      "amount": 99.075,
+      "unit": "price_percent"
+    },
+    "cap_floor_applied": true
+  }
+}

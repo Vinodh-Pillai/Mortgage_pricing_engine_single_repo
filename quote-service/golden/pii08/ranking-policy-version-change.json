@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "story": "PII-08-S04",
+  "scenario": "policy-version-change",
+  "description": "Same candidates ranked under different policy versions produce different rankings",
+  "request": {
+    "tenantId": "11111111-1111-1111-1111-111111111111",
+    "scenarioId": "33333333-3333-3333-3333-333333333333",
+    "idempotencyKey": "golden-policy-version-change",
+    "candidates": [
+      {"candidateId": "opt-A", "investorId": "FNMA", "productId": "conv-30yr", "basePriceBps": "10000.0000", "noteRatePercent": "6.12500"},
+      {"candidateId": "opt-B", "investorId": "FHLMC", "productId": "conv-30yr", "basePriceBps": "9500.0000", "noteRatePercent": "6.25000"}
+    ]
+  },
+  "policy_v1": {
+    "weight_focus": "lowest_base_price",
+    "expected_rank1": "opt-B"
+  },
+  "policy_v2": {
+    "weight_focus": "lowest_note_rate",
+    "expected_rank1": "opt-A"
+  }
+}

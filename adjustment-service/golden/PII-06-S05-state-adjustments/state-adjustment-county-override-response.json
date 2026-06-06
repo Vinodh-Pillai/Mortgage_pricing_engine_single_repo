@@ -1,0 +1,10 @@
+{
+  "status": "APPLIED",
+  "category": "LLPA_STATE",
+  "jurisdictionKey": "CA:06037:*",
+  "specificityRank": 1,
+  "pointsDelta": "0.250000",
+  "bpsDelta": "25.0000",
+  "moneyImpact": "0.00",
+  "sourceRef": "CONFIGURED_SOURCE_REF"
+}

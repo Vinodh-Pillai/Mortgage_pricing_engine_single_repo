@@ -35,10 +35,13 @@ class ScenarioController {
   }
 
   @PatchMapping("/{scenarioId}/borrowers-credit")
-  ScenarioResponse borrowers(@PathVariable UUID tenantId, @PathVariable UUID scenarioId, @RequestHeader("Idempotency-Key") String key,
+  ResponseEntity<BorrowerCreditResponse> borrowers(@PathVariable UUID tenantId, @PathVariable UUID scenarioId, @RequestHeader("Idempotency-Key") String key,
       @RequestHeader(value = "X-Correlation-Id", required = false) String correlationId, @RequestHeader(value = "X-Roles", required = false) String roles,
       @RequestBody BorrowerCreditRequest request) {
-    return withRoles(roles, () -> service.updateBorrowers(tenantId, scenarioId, key, correlationId, request));
+    return withRoles(roles, () -> {
+      BorrowerCreditResponse response = service.updateBorrowers(tenantId, scenarioId, key, correlationId, request);
+      return ResponseEntity.ok(response);
+    });
   }
 
   @PatchMapping("/{scenarioId}/loan-structure")

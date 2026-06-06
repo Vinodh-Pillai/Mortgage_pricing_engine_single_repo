@@ -1,6 +1,7 @@
 package com.wcpe.scenario.domain;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.*;
 import org.springframework.stereotype.Service;
 
@@ -34,7 +35,22 @@ public class ScenarioService {
   }
 
   public ScenarioResponse get(UUID tenantId, UUID scenarioId) { return response(repository.get(tenantId, scenarioId)); }
-  public ScenarioResponse updateBorrowers(UUID tenantId, UUID scenarioId, String key, String correlationId, BorrowerCreditRequest request) { return mutate(tenantId, scenarioId, key, correlationId, "ScenarioBorrowerCreditUpdated.v1", s -> s.updateBorrowers(request)); }
+  public BorrowerCreditResponse updateBorrowers(UUID tenantId, UUID scenarioId, String key, String correlationId, BorrowerCreditRequest request) {
+    requireRole("SCENARIO_WRITER", WRITER_ROLES);
+    Optional<Object> replay = repository.idempotent(tenantId + ":" + scenarioId + ":borrowers", key, request);
+    if (replay.isPresent()) return (BorrowerCreditResponse) replay.get();
+    Scenario scenario = repository.get(tenantId, scenarioId);
+    scenario.updateBorrowers(request);
+    List<BorrowerCredit> borrowers = Optional.ofNullable(request.borrowers()).orElse(List.of());
+    RepresentativeCreditScorePolicy.RepresentativeCreditResult repResult = RepresentativeCreditScorePolicy.derive(borrowers);
+    repository.save(scenario);
+    repository.persistBorrowers(tenantId, scenarioId, scenario.version(), borrowers);
+    repository.persistRepresentativeCredit(tenantId, scenarioId, scenario.version(), repResult);
+    emit(tenantId, scenario, "ScenarioBorrowerCreditUpdated.v1", correlationId, Map.of("version", scenario.version(), "borrowerCount", borrowers.size()));
+    BorrowerCreditResponse creditResponse = borrowerCreditResponse(scenario, borrowers, repResult);
+    repository.remember(tenantId + ":" + scenarioId + ":borrowers", key, request, creditResponse);
+    return creditResponse;
+  }
   public ScenarioResponse updateLoan(UUID tenantId, UUID scenarioId, String key, String correlationId, LoanStructureRequest request) { return mutate(tenantId, scenarioId, key, correlationId, "ScenarioLoanStructureUpdated.v1", s -> s.updateLoan(request)); }
   public ScenarioResponse updateProperty(UUID tenantId, UUID scenarioId, String key, String correlationId, PropertyRequest request) { return mutate(tenantId, scenarioId, key, correlationId, "ScenarioPropertyUpdated.v1", s -> s.updateProperty(request)); }
   public ScenarioResponse updateIncomeAssets(UUID tenantId, UUID scenarioId, String key, String correlationId, IncomeAssetRequest request) { return mutate(tenantId, scenarioId, key, correlationId, "ScenarioIncomeAssetsUpdated.v1", s -> s.updateIncomeAssets(request)); }
@@ -132,5 +148,15 @@ public class ScenarioService {
     long warning = scenario.validationIssues().stream().filter(i -> i.severity() == Severity.WARNING).count();
     return new ScenarioResponse(scenario.scenarioId(), scenario.version(), scenario.status(), scenario.quoteIntent(), scenario.channel(), scenario.completedSections(),
         (int) blocking, (int) warning, scenario.derivedFields(), UUID.randomUUID(), scenario.replayHash(), scenario.validationIssues());
+  }
+
+  private static BorrowerCreditResponse borrowerCreditResponse(Scenario scenario, List<BorrowerCredit> borrowers, RepresentativeCreditScorePolicy.RepresentativeCreditResult result) {
+    long blocking = scenario.validationIssues().stream().filter(i -> i.severity() == Severity.BLOCKING).count();
+    long warning = scenario.validationIssues().stream().filter(i -> i.severity() == Severity.WARNING).count();
+    List<String> sections = scenario.completedSections().contains("BORROWER_CREDIT") ? List.of("BORROWER_CREDIT") : List.of();
+    return new BorrowerCreditResponse(scenario.scenarioId(), scenario.version(),
+        result.qualityStatus(), result.score(), result.rule(),
+        borrowers.size(), (int) blocking, (int) warning,
+        sections, UUID.randomUUID());
   }
 }

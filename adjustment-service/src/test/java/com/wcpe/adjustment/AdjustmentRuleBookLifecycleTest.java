@@ -13,9 +13,11 @@ import com.wcpe.adjustment.AdjustmentRuleBook.PricingPrecisionPolicy;
 import com.wcpe.adjustment.AdjustmentRuleBook.RuleBookResolutionService;
 import com.wcpe.adjustment.AdjustmentRuleBook.RuleBookSelector;
 import com.wcpe.adjustment.AdjustmentRuleBook.RuleBookStatus;
+import com.wcpe.adjustment.EvaluateAdjustmentRulesCommand.AdjustmentEvaluationResult;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
@@ -131,6 +133,57 @@ class AdjustmentRuleBookLifecycleTest {
             .hasMessageContaining("no published rule book resolves");
     }
 
+    @Test
+    void evaluationComparesRangeAndBooleanConditionValues() {
+        AdjustmentRule matchingRange = rule(
+            "30000000-0000-0000-0000-000000000001",
+            "ficoBandKey",
+            ConditionOperator.RANGE_CLOSED,
+            List.of("700", "739"),
+            "CONFIGURED_RANGE_REASON"
+        );
+        AdjustmentRule nonMatchingRange = rule(
+            "30000000-0000-0000-0000-000000000002",
+            "cltvBandKey",
+            ConditionOperator.RANGE_OPEN_END,
+            List.of("90"),
+            "CONFIGURED_OPEN_RANGE_REASON"
+        );
+        AdjustmentRule matchingBoolean = rule(
+            "30000000-0000-0000-0000-000000000003",
+            "cashOutFlag",
+            ConditionOperator.BOOLEAN_IS,
+            List.of("true"),
+            "CONFIGURED_BOOLEAN_REASON"
+        );
+        AdjustmentRule nonMatchingBoolean = rule(
+            "30000000-0000-0000-0000-000000000004",
+            "firstTimeHomebuyerFlag",
+            ConditionOperator.BOOLEAN_IS,
+            List.of("false"),
+            "CONFIGURED_BOOLEAN_FALSE_REASON"
+        );
+        AdjustmentRuleBook published = draftRuleBook(List.of(
+            matchingRange,
+            nonMatchingRange,
+            matchingBoolean,
+            nonMatchingBoolean
+        ))
+            .publish("approver-1", Instant.parse("2026-01-02T00:00:00Z"), List.of());
+
+        AdjustmentEvaluationResult result = new EvaluateAdjustmentRulesCommand(
+            published.ruleBookId(),
+            published.version(),
+            Map.of("ficoBandKey", "720", "cltvBandKey", "80", "cashOutFlag", "true", "firstTimeHomebuyerFlag", "not-boolean"),
+            new BigDecimal("300000"),
+            "correlation-1",
+            published.precisionPolicy()
+        ).evaluate(published, ExclusivityResolution.GroupStrategy.HIGHEST_COST);
+
+        assertThat(result.lines()).extracting("reasonCode")
+            .containsExactly("CONFIGURED_RANGE_REASON", "CONFIGURED_BOOLEAN_REASON");
+    }
+
     private static AdjustmentRuleBook draftRuleBook(List<AdjustmentRule> rules) {
         return draftRuleBook(UUID.fromString("20000000-0000-0000-0000-000000000000"), new EffectiveWindow(START, null), rules);
     }
@@ -154,13 +207,23 @@ class AdjustmentRuleBookLifecycleTest {
     }
 
     private static AdjustmentRule validRule(String dimension, String configuredValue) {
+        return rule(UUID.randomUUID().toString(), dimension, ConditionOperator.EQ, List.of(configuredValue), "CONFIGURED_REASON");
+    }
+
+    private static AdjustmentRule rule(
+        String ruleId,
+        String dimension,
+        ConditionOperator operator,
+        List<String> configuredValues,
+        String reasonCode
+    ) {
         return new AdjustmentRule(
-            UUID.randomUUID(),
+            UUID.fromString(ruleId),
             1,
-            List.of(new AdjustmentCondition(dimension, ConditionOperator.EQ, List.of(configuredValue))),
+            List.of(new AdjustmentCondition(dimension, operator, configuredValues)),
             new AdjustmentOutput(AdjustmentOutputType.POINTS_DELTA, new BigDecimal("0.125000"), null),
-            "CONFIGURED_REASON",
-            "configured-exclusivity-group",
+            reasonCode,
+            null,
             true,
             "source-doc-ref"
         );

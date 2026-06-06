@@ -20,11 +20,16 @@ public record QuoteOption(
     int rank,
     BigDecimal rankScore,
     List<String> rankReasons,
+    List<BigDecimal> criterionScores,
+    String tieBreakerTrace,
+    List<String> warnings,
     Map<String, String> upstreamRefs,
     Instant expiresAt
 ) {
     public QuoteOption {
         rankReasons = List.copyOf(rankReasons == null ? List.of() : rankReasons);
+        criterionScores = List.copyOf(criterionScores == null ? List.of() : criterionScores);
+        warnings = List.copyOf(warnings == null ? List.of() : warnings);
         upstreamRefs = Map.copyOf(upstreamRefs == null ? Map.of() : upstreamRefs);
     }
 }

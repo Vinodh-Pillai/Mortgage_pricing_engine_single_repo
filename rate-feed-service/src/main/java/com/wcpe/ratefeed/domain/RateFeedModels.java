@@ -533,6 +533,96 @@ public final class RateFeedModels {
     String resultHash
   ) {}
 
+  // ── PII-04-S10: Ingestion Audit Report records ────────────────────────────
+
+  public enum AuditRedactionLevel { STANDARD, ELEVATED }
+  public enum AuditReportFormat { JSON, CSV, PDF }
+  public enum ReplayVerificationStatus { PASSED, FAILED }
+
+  public record AuditTimelineEvent(
+    UUID auditEventId,
+    String eventType,
+    int eventVersion,
+    String aggregateType,
+    UUID aggregateId,
+    String actorId,
+    String actorType,
+    String correlationId,
+    String causationId,
+    Instant occurredAt,
+    String sourceService,
+    String beforeHash,
+    String afterHash,
+    Map<String, Object> evidenceRefs,
+    String resultHash,
+    AuditRedactionLevel redactionLevel
+  ) {}
+
+  public record AuditTimelinePage(
+    List<AuditTimelineEvent> events,
+    int page,
+    int size,
+    long totalEvents
+  ) {}
+
+  public record AuditTimelineRequest(
+    Instant from,
+    Instant to,
+    UUID investorId,
+    UUID channelId,
+    UUID batchId,
+    UUID versionId,
+    String actorId,
+    String eventType,
+    String status,
+    String correlationId,
+    int page,
+    int size
+  ) {}
+
+  public record AuditReportResponse(
+    UUID snapshotId,
+    UUID batchId,
+    UUID versionId,
+    String status,
+    int eventCount,
+    String snapshotHash,
+    Instant generatedAt,
+    String generatedBy,
+    Map<String, String> links
+  ) {}
+
+  public record AuditExportRequest(
+    AuditReportFormat format,
+    boolean includeRawValues,
+    String reasonCode
+  ) {}
+
+  public record AuditExportResponse(
+    UUID snapshotId,
+    String format,
+    String status,
+    String storageObjectId,
+    String snapshotHash,
+    Instant retentionUntil,
+    Map<String, String> links
+  ) {}
+
+  public record VerifyReplayRequest(
+    String expectedHash,
+    String correlationId
+  ) {}
+
+  public record VerifyReplayResponse(
+    UUID verificationId,
+    UUID batchId,
+    String expectedHash,
+    String actualHash,
+    ReplayVerificationStatus status,
+    String mismatchClassification,
+    Instant verifiedAt
+  ) {}
+
   // ── Exception class ─────────────────────────────────────────────────────────
 
   public static final class RateFeedException extends RuntimeException {

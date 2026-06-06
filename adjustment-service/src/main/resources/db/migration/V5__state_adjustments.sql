@@ -1,0 +1,63 @@
+create table if not exists jurisdiction_adjustment_rules (
+    tenant_id uuid not null,
+    rule_book_id uuid not null,
+    rule_id uuid not null,
+    rule_book_version varchar(40) not null,
+    state_code char(2) not null,
+    county_fips varchar(5),
+    municipality_code varchar(32),
+    product_id varchar(120),
+    investor_id varchar(120),
+    channel varchar(80),
+    loan_purpose varchar(80),
+    occupancy varchar(80),
+    property_type varchar(80),
+    min_loan_amount numeric(18, 2),
+    max_loan_amount numeric(18, 2),
+    specificity_rank int not null,
+    method varchar(32) not null,
+    value numeric(18, 6) not null,
+    cap_amount numeric(18, 2),
+    floor_amount numeric(18, 2),
+    reason_code varchar(120) not null,
+    source_ref varchar(255) not null,
+    priority int not null,
+    is_blocking boolean not null default false,
+    exclusivity_group varchar(120),
+    effective_start timestamptz not null,
+    effective_end timestamptz,
+    content_hash varchar(128) not null,
+    enabled boolean not null default true,
+    created_at timestamptz not null,
+    primary key (tenant_id, rule_book_id, rule_id),
+    constraint jurisdiction_adjustment_state_check check (state_code ~ '^[A-Z]{2}$'),
+    constraint jurisdiction_adjustment_county_check check (county_fips is null or county_fips ~ '^\\d{5}$'),
+    constraint jurisdiction_adjustment_municipality_check check (municipality_code is null or county_fips is not null),
+    constraint jurisdiction_adjustment_loan_amount_band_check check (min_loan_amount is null or max_loan_amount is null or min_loan_amount <= max_loan_amount),
+    constraint jurisdiction_adjustment_specificity_check check (specificity_rank in (0, 1, 2)),
+    constraint jurisdiction_adjustment_method_check check (method in ('POINTS_DELTA', 'BPS_DELTA', 'FIXED_MONEY', 'PERCENT_OF_LOAN_AMOUNT')),
+    constraint jurisdiction_adjustment_priority_check check (priority >= 0),
+    constraint jurisdiction_adjustment_cap_floor_check check (floor_amount is null or cap_amount is null or floor_amount <= cap_amount)
+);
+
+create index if not exists idx_jurisdiction_adjustment_selector
+    on jurisdiction_adjustment_rules (
+        tenant_id,
+        rule_book_version,
+        state_code,
+        county_fips,
+        municipality_code,
+        product_id,
+        investor_id,
+        channel,
+        loan_purpose,
+        occupancy,
+        property_type,
+        min_loan_amount,
+        max_loan_amount,
+        specificity_rank desc,
+        priority
+    );
+
+create unique index if not exists idx_jurisdiction_adjustment_content
+    on jurisdiction_adjustment_rules (tenant_id, rule_book_id, rule_id, content_hash);

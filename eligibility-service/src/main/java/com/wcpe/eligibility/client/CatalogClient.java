@@ -3,9 +3,11 @@ package com.wcpe.eligibility.client;
 import com.wcpe.eligibility.domain.models.*;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 @Component
 public class CatalogClient {
@@ -64,5 +66,21 @@ public class CatalogClient {
 
     public Integer getConformingLimit(String state) {
         return CONFORMING_LOAN_LIMITS.get(state);
+    }
+
+    public List<ProductCandidate> publishedConventionalPurchaseCandidates(String channelCode, String state) {
+        return PRODUCTS.values().stream()
+            .filter(product -> "CONVENTIONAL".equals(product.productFamily()))
+            .filter(product -> product.allowedChannels().contains(channelCode))
+            .filter(product -> product.allowedStates().contains(state))
+            .flatMap(product -> INVESTORS.values().stream()
+                .filter(investor -> "ACTIVE".equals(investor.status()))
+                .filter(investor -> investor.productFamilies().contains(product.productFamily()))
+                .map(investor -> new ProductCandidate(
+                    UUID.nameUUIDFromBytes((product.productCode() + ":" + investor.investorCode()).getBytes(StandardCharsets.UTF_8)),
+                    product.productCode(),
+                    investor.investorCode()
+                )))
+            .toList();
     }
 }

@@ -1,0 +1,16 @@
+{
+  "tenantId": "10000000-0000-0000-0000-000000000065",
+  "quoteId": "QUOTE-PII-06-S05",
+  "scenarioId": "SCENARIO-PII-06-S05",
+  "productId": "configured-product",
+  "investorId": "configured-investor",
+  "channel": "configured-channel",
+  "loanPurpose": "CONFIGURED_PURPOSE",
+  "occupancy": "CONFIGURED_OCCUPANCY",
+  "propertyType": "CONFIGURED_PROPERTY",
+  "loanAmount": "400000.00",
+  "propertyState": "CA",
+  "propertyCountyFips": "06037",
+  "quoteDate": "2026-02-01T00:00:00Z",
+  "ruleBookVersion": "v1"
+}

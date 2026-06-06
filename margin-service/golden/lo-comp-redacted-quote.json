@@ -1,0 +1,101 @@
+{
+  "fixture_name": "lo-comp-redacted-quote",
+  "version": "1.0",
+  "description": "Synthetic golden fixture showing LO compensation display behavior for a viewer without sensitive compensation visibility, alongside the full view for comparison.",
+  "inputs": {
+    "quote_id": "synthetic-quote-redaction-001",
+    "base_price_before_lo_comp": {
+      "amount": 99.95,
+      "unit": "price_percent"
+    },
+    "lo_compensation": {
+      "basis": "bps",
+      "raw_amount_bps": 38.0,
+      "floor_bps": 20.0,
+      "cap_bps": 45.0,
+      "clamped_amount_bps": 38.0,
+      "price_impact_bps": -38.0,
+      "amount_ref": "synthetic-lo-plan-redaction.amount_bps",
+      "cap_ref": "synthetic-lo-plan-redaction.cap_bps",
+      "floor_ref": "synthetic-lo-plan-redaction.floor_bps"
+    },
+    "viewers": {
+      "redacted_viewer": {
+        "role": "branch-user",
+        "can_view_sensitive_compensation": false
+      },
+      "full_viewer": {
+        "role": "compensation-admin",
+        "can_view_sensitive_compensation": true
+      }
+    }
+  },
+  "expected_steps": [
+    {
+      "view": "redacted",
+      "step_order": 1,
+      "step_type": "lo_compensation",
+      "label": "LO compensation - redacted",
+      "display_label": "LO compensation (restricted)",
+      "basis": "bps",
+      "amount_bps": null,
+      "raw_amount_bps": null,
+      "clamped_amount_bps": null,
+      "price_impact_bps": null,
+      "amount_redacted": true,
+      "redaction_reason": "viewer_lacks_sensitive_compensation_visibility",
+      "input_price": 99.95,
+      "output_price": 99.57
+    },
+    {
+      "view": "full",
+      "step_order": 1,
+      "step_type": "lo_compensation",
+      "label": "LO compensation",
+      "display_label": "LO compensation",
+      "basis": "bps",
+      "raw_amount_bps": 38.0,
+      "floor_bps": 20.0,
+      "cap_bps": 45.0,
+      "clamped_amount_bps": 38.0,
+      "price_impact_bps": -38.0,
+      "amount_redacted": false,
+      "input_price": 99.95,
+      "output_price": 99.57,
+      "amount_ref": "synthetic-lo-plan-redaction.amount_bps",
+      "cap_ref": "synthetic-lo-plan-redaction.cap_bps",
+      "floor_ref": "synthetic-lo-plan-redaction.floor_bps"
+    }
+  ],
+  "expected_output": {
+    "redacted_view": {
+      "viewer_can_view_sensitive_compensation": false,
+      "final_price": {
+        "amount": 99.57,
+        "unit": "price_percent"
+      },
+      "lo_compensation_step": {
+        "display_label": "LO compensation (restricted)",
+        "amount_redacted": true,
+        "basis": "bps",
+        "amount_bps": null,
+        "price_impact_bps": null
+      }
+    },
+    "full_view": {
+      "viewer_can_view_sensitive_compensation": true,
+      "final_price": {
+        "amount": 99.57,
+        "unit": "price_percent"
+      },
+      "lo_compensation_step": {
+        "display_label": "LO compensation",
+        "amount_redacted": false,
+        "basis": "bps",
+        "raw_amount_bps": 38.0,
+        "clamped_amount_bps": 38.0,
+        "price_impact_bps": -38.0
+      }
+    }
+  }
+}

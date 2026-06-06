@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "story": "PII-08-S04",
+  "scenario": "multi-investor-policy-a",
+  "description": "Multi-investor quote ranked by configured weighted criteria policy",
+  "request": {
+    "tenantId": "11111111-1111-1111-1111-111111111111",
+    "scenarioId": "33333333-3333-3333-3333-333333333333",
+    "idempotencyKey": "golden-multi-investor-a",
+    "policyId": "policy-golden-a",
+    "policyVersion": "v1",
+    "candidates": [
+      {"candidateId": "opt-fnma", "investorId": "FNMA", "productId": "conv-30yr", "basePriceBps": "10000.0000", "noteRatePercent": "6.12500"},
+      {"candidateId": "opt-fhlm", "investorId": "FHLMC", "productId": "conv-30yr", "basePriceBps": "9500.0000", "noteRatePercent": "6.25000"},
+      {"candidateId": "opt-private", "investorId": "PRIVATE-A", "productId": "conv-15yr", "basePriceBps": "9000.0000", "noteRatePercent": "5.75000"}
+    ]
+  },
+  "expected": {
+    "rankedOptions": [
+      {"candidateId": "opt-fnma", "rank": 1, "scoreGreaterThan": "0.40", "reasonContains": "lowest-base-price"},
+      {"candidateId": "opt-fhlm", "rank": 2, "scoreGreaterThan": "0.30", "reasonContains": "preference-list-match"},
+      {"candidateId": "opt-private", "rank": 3, "scoreGreaterThan": "0.10", "reasonContains": "compliance-flag-checked"}
+    ],
+    "noTieBreakerNeeded": true,
+    "policyVersion": "v1",
+    "auditActions": ["BEST_EXECUTION_POLICY_APPLIED"]
+  }
+}

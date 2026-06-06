@@ -47,6 +47,10 @@ record EventRecord(UUID eventId, UUID tenantId, UUID scenarioId, String eventTyp
 
 record AuditRecord(UUID auditPackageId, UUID tenantId, UUID scenarioId, String action, String correlationId, Instant occurredAt, String replayHash) {}
 
+record BorrowerCreditResponse(UUID scenarioId, int scenarioVersion, String creditReadinessStatus, Integer representativeCreditScore,
+    String representativeCreditScoreRule, int borrowerCount, int blockingIssueCount, int warningIssueCount,
+    List<String> updatedSections, UUID auditPackageId) {}
+
 final class ScenarioException extends RuntimeException {
   private final HttpStatus status;
   private final String code;

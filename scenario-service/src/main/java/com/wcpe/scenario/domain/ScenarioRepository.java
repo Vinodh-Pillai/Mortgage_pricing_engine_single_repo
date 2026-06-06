@@ -133,6 +133,52 @@ class ScenarioRepository {
         """, audit.tenantId(), audit.auditPackageId(), audit.scenarioId(), audit.action(), audit.correlationId(), audit.replayHash(), Timestamp.from(audit.occurredAt()));
   }
 
+  void persistBorrowers(UUID tenantId, UUID scenarioId, int version, List<BorrowerCredit> borrowers) {
+    UUID vId = UUID.nameUUIDFromBytes((tenantId + ":" + scenarioId + ":" + version).getBytes());
+    jdbc.update("delete from scenario.scenario_credit_attribute where tenant_id = ? and scenario_borrower_id in (select scenario_borrower_id from scenario.scenario_borrower where tenant_id = ? and scenario_version_id = ?)", tenantId, tenantId, vId);
+    jdbc.update("delete from scenario.scenario_borrower where tenant_id = ? and scenario_version_id = ?", tenantId, vId);
+    jdbc.update("delete from scenario.scenario_representative_credit where tenant_id = ? and scenario_version_id = ?", tenantId, vId);
+    for (BorrowerCredit b : borrowers) {
+      UUID borrowerId = UUID.randomUUID();
+      jdbc.update("""
+          insert into scenario.scenario_borrower (tenant_id, scenario_borrower_id, scenario_id, scenario_version_id, borrower_external_id, borrower_role, occupies_property, created_at_utc)
+          values (?, ?, ?, ?, ?, ?, ?, now())
+          """, tenantId, borrowerId, scenarioId, vId, b.borrowerExternalId(), b.borrowerRole(), b.occupiesProperty());
+      String creditStatus = b.creditStatus() != null ? b.creditStatus() : "MISSING";
+      String qualityStatus = computeQualityStatus(b);
+      UUID attrId = UUID.randomUUID();
+      jdbc.update("""
+          insert into scenario.scenario_credit_attribute (tenant_id, credit_attribute_id, scenario_borrower_id, credit_status, credit_score, credit_score_source, credit_score_date, quality_status)
+          values (?, ?, ?, ?, ?, ?, ?, ?)
+          """, tenantId, attrId, borrowerId, creditStatus, b.creditScore(), b.creditScoreSource(), b.creditScoreDate(), qualityStatus);
+    }
+  }
+
+  void persistRepresentativeCredit(UUID tenantId, UUID scenarioId, int version, RepresentativeCreditScorePolicy.RepresentativeCreditResult result) {
+    UUID vId = UUID.nameUUIDFromBytes((tenantId + ":" + scenarioId + ":" + version).getBytes());
+    String traceJson = "{}";
+    try { traceJson = mapper.writeValueAsString(result.trace()); } catch (Exception ex) { /* ignore */ }
+    jdbc.update("""
+        insert into scenario.scenario_representative_credit (tenant_id, scenario_version_id, scenario_id, version_number, representative_score, derivation_rule_code, derivation_trace_json, quality_status)
+        values (?, ?, ?, ?, ?, ?, ?::jsonb, ?)
+        on conflict (tenant_id, scenario_version_id) do update set
+          scenario_id = excluded.scenario_id,
+          version_number = excluded.version_number,
+          representative_score = excluded.representative_score,
+          derivation_rule_code = excluded.derivation_rule_code,
+          derivation_trace_json = excluded.derivation_trace_json,
+          quality_status = excluded.quality_status
+        """, tenantId, vId, scenarioId, version, result.score(), result.rule(), traceJson, result.qualityStatus());
+  }
+
+  private static String computeQualityStatus(BorrowerCredit b) {
+    if (!"AVAILABLE".equals(b.creditStatus())) return "MISSING";
+    if (b.creditScore() == null) return "MISSING";
+    if (b.creditScore() < 300 || b.creditScore() > 850) return "INVALID";
+    if (b.creditScoreDate() != null && b.creditScoreDate().isBefore(LocalDate.now().minusDays(120))) return "STALE";
+    return "COMPLETE";
+  }
+
   List<EventRecord> events(UUID tenantId, UUID scenarioId) {
     return jdbc.query("""
         select event_id, tenant_id, scenario_id, event_type, event_version, correlation_id, occurred_at, payload_json::text
@@ -184,6 +230,7 @@ class ScenarioRepository {
 
   private Object readResponse(String type, String json) {
     if ("BatchImportResponse".equals(type)) return read(json, BatchImportResponse.class);
+    if ("BorrowerCreditResponse".equals(type)) return read(json, BorrowerCreditResponse.class);
     return read(json, ScenarioResponse.class);
   }
 

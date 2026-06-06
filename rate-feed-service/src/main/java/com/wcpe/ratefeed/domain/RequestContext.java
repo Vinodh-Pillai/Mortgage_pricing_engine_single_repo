@@ -7,7 +7,7 @@ public final class RequestContext {
 
   private RequestContext() {}
 
-  static void roles(String roles) {
+  public static void roles(String roles) {
     if (roles == null || roles.isBlank()) {
       ROLES.set(Set.of());
       return;
@@ -21,5 +21,5 @@ public final class RequestContext {
   }
 
   public static boolean hasRole(String role) { return ROLES.get().contains(role); }
-  static void clear() { ROLES.remove(); }
+  public static void clear() { ROLES.remove(); }
 }

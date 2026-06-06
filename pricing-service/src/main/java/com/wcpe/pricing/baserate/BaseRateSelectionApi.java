@@ -1,10 +1,14 @@
 package com.wcpe.pricing.baserate;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -157,12 +161,25 @@ public final class BaseRateSelectionApi {
         requirePermission(headers, BASE_RATE_WRITE_PERMISSION);
         validateSelectionRequest(tenantId, request);
 
+        String requestFingerprint = stableHash("base-rate-selection-command", tenantId, request.scenarioId(),
+                request.scenarioHash(), request.productCode(), request.investorCode(), request.channelCode(),
+                request.lockPeriodDays(), request.asOf(), scale(request.requestedNoteRate()), request.selectionPolicyId());
+        Optional<BaseRateSelectionIdempotencyRecord> existing = repository.findIdempotencyRecord(tenantId,
+                headers.idempotencyKey());
+        if (existing.isPresent()) {
+            BaseRateSelectionIdempotencyRecord record = existing.get();
+            if (!record.requestFingerprint().equals(requestFingerprint)) {
+                throw new BaseRateSelectionConflictException("IDEMPOTENCY_CONFLICT");
+            }
+            return record.response();
+        }
+
         UUID gridVersionId = resolveGridVersionId(tenantId, request.productCode(), request.investorCode(),
                 request.channelCode(), request.asOf());
 
         List<BasePricingGridRow> matchingRows = repository.findGridRows(tenantId, gridVersionId, request.lockPeriodDays());
         if (matchingRows.isEmpty()) {
-            throw new BaseRateSelectionNotFoundException("no grid rows found for lock period " + request.lockPeriodDays());
+            throw new BaseRateSelectionLockPeriodUnsupportedException("LOCK_PERIOD_UNSUPPORTED");
         }
 
         List<CandidateRate> candidates = matchingRows.stream()
@@ -185,10 +202,13 @@ public final class BaseRateSelectionApi {
 
         List<String> warnings = new ArrayList<>();
 
-        String resultHash = UUID.randomUUID().toString();
+        String resultHash = stableHash("base-rate-selection-result", tenantId, request.scenarioHash(), gridVersionId,
+                selected.noteRate(), selected.basePrice(), request.lockPeriodDays(), request.asOf(),
+                request.selectionPolicyId(), rankedCandidates);
+        UUID selectionId = UUID.nameUUIDFromBytes((tenantId + ":" + resultHash).getBytes(StandardCharsets.UTF_8));
 
         BaseRateSelection selection = new BaseRateSelection(
-                UUID.randomUUID(),
+                selectionId,
                 gridVersionId,
                 selected.noteRate(),
                 selected.basePrice(),
@@ -214,7 +234,12 @@ public final class BaseRateSelectionApi {
                 Instant.now());
         repository.saveAudit(audit);
 
-        return new BaseRateSelectionResponse(
+        repository.saveGridEvent(new BaseGridEvent(UUID.randomUUID(), tenantId, gridVersionId,
+                "pricing.base-rate-selected.v1", headers.actorId(), headers.correlationId(), headers.idempotencyKey(),
+                Instant.now(), Map.of("selectionId", selection.selectionId().toString(), "resultHash", resultHash,
+                        "scenarioHash", request.scenarioHash(), "lockPeriodDays", String.valueOf(request.lockPeriodDays()))));
+
+        BaseRateSelectionResponse response = new BaseRateSelectionResponse(
                 selection.selectionId(),
                 gridVersionId,
                 selected.noteRate(),
@@ -225,6 +250,9 @@ public final class BaseRateSelectionApi {
                 ledger,
                 warnings,
                 resultHash);
+        repository.saveIdempotencyRecord(new BaseRateSelectionIdempotencyRecord(tenantId, headers.idempotencyKey(),
+                requestFingerprint, response, Instant.now()));
+        return response;
     }
 
     public BasePricingGridVersion resolveGridVersion(String tenantId, String productCode, String investorCode,
@@ -286,6 +314,23 @@ public final class BaseRateSelectionApi {
         }
 
         throw new BaseRateSelectionNoteRateUnavailableException("PRICE_ROW_MISSING_NOTE_RATE");
+    }
+
+    private static BigDecimal scale(BigDecimal value) {
+        return value == null ? null : value.setScale(5, BigDecimal.ROUND_HALF_UP);
+    }
+
+    private static String stableHash(Object... values) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            for (Object value : values) {
+                digest.update(String.valueOf(value).getBytes(StandardCharsets.UTF_8));
+                digest.update((byte) 0);
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 unavailable", ex);
+        }
     }
 
     private static void validateSelectionRequest(String tenantId, BaseRateSelectionRequest request) {
@@ -812,6 +857,14 @@ public final class BaseRateSelectionApi {
             Instant occurredAt) {
     }
 
+    public record BaseRateSelectionIdempotencyRecord(
+            String tenantId,
+            String idempotencyKey,
+            String requestFingerprint,
+            BaseRateSelectionResponse response,
+            Instant createdAt) {
+    }
+
     // ── Repository ──
 
     public interface BaseRateSelectionRepository {
@@ -845,6 +898,10 @@ public final class BaseRateSelectionApi {
         void invalidateGridCache(String tenantId, UUID gridVersionId);
 
         void saveAudit(BaseRateSelectionAudit audit);
+
+        Optional<BaseRateSelectionIdempotencyRecord> findIdempotencyRecord(String tenantId, String idempotencyKey);
+
+        void saveIdempotencyRecord(BaseRateSelectionIdempotencyRecord record);
     }
 
     public static final class InMemoryBaseRateSelectionRepository implements BaseRateSelectionRepository {
@@ -855,6 +912,7 @@ public final class BaseRateSelectionApi {
         private final Map<UUID, BasePricingGridImport> gridImports = new ConcurrentHashMap<>();
         private final List<BaseGridEvent> gridEvents = new ArrayList<>();
         private final Set<String> invalidatedGridCacheKeys = ConcurrentHashMap.newKeySet();
+        private final Map<String, BaseRateSelectionIdempotencyRecord> idempotency = new ConcurrentHashMap<>();
 
         @Override
         public void save(BaseRateSelection selection) {
@@ -947,6 +1005,16 @@ public final class BaseRateSelectionApi {
             audits.add(audit);
         }
 
+        @Override
+        public Optional<BaseRateSelectionIdempotencyRecord> findIdempotencyRecord(String tenantId, String idempotencyKey) {
+            return Optional.ofNullable(idempotency.get(tenantId + ":" + idempotencyKey));
+        }
+
+        @Override
+        public void saveIdempotencyRecord(BaseRateSelectionIdempotencyRecord record) {
+            idempotency.put(record.tenantId() + ":" + record.idempotencyKey(), record);
+        }
+
         public void addGridVersion(BasePricingGridVersion version) {
             gridVersions.add(version);
         }
@@ -957,6 +1025,10 @@ public final class BaseRateSelectionApi {
 
         public List<BaseGridEvent> gridEvents() {
             return List.copyOf(gridEvents);
+        }
+
+        public List<BaseRateSelectionAudit> audits() {
+            return List.copyOf(audits);
         }
 
         public boolean wasGridCacheInvalidated(String tenantId, UUID gridVersionId) {
