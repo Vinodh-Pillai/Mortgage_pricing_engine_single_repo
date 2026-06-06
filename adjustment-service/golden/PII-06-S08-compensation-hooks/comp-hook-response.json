@@ -1,0 +1,40 @@
+{
+  "storyId": "PII-06-S08",
+  "tenantId": "10000000-0000-0000-0000-000000000068",
+  "quoteId": "quote-PII-06-S08",
+  "scenarioId": "scenario-PII-06-S08",
+  "category": "COMPENSATION_HOOK",
+  "planRef": "COMP-PLAN-A:4",
+  "hookResults": [
+    {
+      "mappingId": "map-bps",
+      "hookType": "BPS_DELTA",
+      "status": "APPLIED",
+      "pointsDelta": "0.100000",
+      "visibilityLabel": "Compensation",
+      "reasonCode": "COMP_REASON"
+    },
+    {
+      "mappingId": "map-money",
+      "hookType": "PERCENT_OF_LOAN_AMOUNT",
+      "status": "APPLIED",
+      "moneyAmount": "625.00",
+      "visibilityLabel": "Compensation",
+      "reasonCode": "COMP_REASON"
+    },
+    {
+      "mappingId": "map-credit",
+      "hookType": "FEE_CREDIT",
+      "status": "APPLIED",
+      "moneyAmount": "-75.56",
+      "visibilityLabel": "Compensation",
+      "reasonCode": "COMP_REASON"
+    }
+  ],
+  "eventType": "QuoteAdjustmentApplied.v1",
+  "auditAction": "COMPENSATION_HOOK_EVALUATED",
+  "notes": [
+    "Synthetic tokenized identifiers only; no raw employee/personnel IDs.",
+    "All amounts are supplied as fixture/configured values, not hard-coded policy defaults."
+  ]
+}

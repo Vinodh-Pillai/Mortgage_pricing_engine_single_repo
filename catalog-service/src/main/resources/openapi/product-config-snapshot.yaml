@@ -1,0 +1,117 @@
+openapi: 3.0.3
+info:
+  title: Catalog Service Product Config Snapshot API
+  version: PII-02-S10
+paths:
+  /api/v1/tenants/{tenantId}/product-catalog/config-snapshots/resolve:
+    post:
+      summary: Resolve a read-only product configuration snapshot
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: X-Correlation-Id
+          in: header
+          required: false
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveCatalogRequest'
+      responses:
+        '200':
+          description: Snapshot resolved and materialized when new
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductConfigSnapshot'
+        '422':
+          description: Published product configuration is unavailable or incomplete
+  /api/v1/tenants/{tenantId}/product-catalog/config-snapshots/{snapshotId}:
+    get:
+      summary: Retrieve an immutable product configuration snapshot
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: snapshotId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Snapshot body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductConfigSnapshot'
+        '404':
+          description: SNAPSHOT_NOT_FOUND
+components:
+  schemas:
+    ResolveCatalogRequest:
+      type: object
+      required: [asOf, channelCode, productFamilyCode]
+      properties:
+        asOf: { type: string, format: date-time }
+        channelCode: { type: string }
+        productFamilyCode: { type: string }
+        stateCode: { type: string }
+        countyFips: { type: string }
+        investorCode: { type: string }
+        loanPurpose: { type: string }
+        propertyType: { type: string }
+        occupancyType: { type: string }
+        termMonths: { type: integer }
+        amortizationType: { type: string }
+        includeInactive: { type: boolean, default: false }
+    ProductConfigSnapshot:
+      type: object
+      required: [snapshotId, snapshotHash, tenantId, asOf, products, investors, referenceVersions, warnings]
+      properties:
+        snapshotId: { type: string, format: uuid }
+        snapshotHash: { type: string }
+        requestHash: { type: string }
+        tenantId: { type: string, format: uuid }
+        asOf: { type: string, format: date-time }
+        channel:
+          type: object
+          properties:
+            code: { type: string }
+            versionId: { type: string, format: uuid, nullable: true }
+        taxonomy:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string }
+              versionId: { type: string, format: uuid }
+        productComponents:
+          type: array
+          items:
+            type: object
+            properties:
+              productCode: { type: string }
+              productVersionId: { type: string, format: uuid }
+              investorCodes: { type: array, items: { type: string } }
+              termProfileCodes: { type: array, items: { type: string } }
+        investorComponents:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string }
+              versionId: { type: string, format: uuid }
+              requiresMiValidation: { type: boolean }
+        referenceVersions:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string }
+        warnings:
+          type: array
+          items: { type: string }

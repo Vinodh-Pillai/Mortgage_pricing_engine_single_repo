@@ -6,9 +6,15 @@ import org.springframework.stereotype.Service;
 
 @Service
 class SubmissionProfileService {
-  private static final Set<String> ADMIN_ROLES = Set.of("SCENARIO_ADMIN", "SCENARIO_WRITER");
   private static final Set<String> SUBMISSION_PROFILE_MANAGE = Set.of("SCENARIO_ADMIN");
   private static final Set<String> KNOWN_SECTIONS = Set.of("BORROWER_CREDIT", "LOAN_STRUCTURE", "PROPERTY", "INCOME_ASSETS");
+  private static final Set<String> REGISTERED_SCHEMA_PATHS = Set.of(
+      "quoteIntent", "channel", "scenarioName", "externalLoanId", "sourceSystem",
+      "borrowers", "borrowers.creditScore", "borrowers.creditStatus", "borrowers.creditScoreDate",
+      "loanStructure", "loanStructure.loanPurpose", "loanStructure.loanAmount", "loanStructure.termMonths",
+      "property", "propertyState", "property.propertyState", "property.propertyCounty", "property.propertyZip", "property.propertyType", "property.occupancyType", "property.units",
+      "incomeAssets", "incomeAssets.monthlyIncome", "incomeAssets.monthlyDebt", "incomeAssets.liquidAssets", "incomeAssets.incomeVerificationType"
+  );
 
   private final SubmissionProfileRepository repository;
   private final ScenarioRepository scenarioRepository;
@@ -35,6 +41,7 @@ class SubmissionProfileService {
   SubmissionProfileResponse publish(UUID tenantId, String idempotencyKey, String correlationId, String actorId,
       PublishSubmissionProfileRequest request) {
     requireRole("SCENARIO_ADMIN", SUBMISSION_PROFILE_MANAGE);
+    validatePublishRequest(request);
     Optional<Object> replay = scenarioRepository.idempotent(tenantId.toString() + ":profile-publish", idempotencyKey, request);
     if (replay.isPresent()) return (SubmissionProfileResponse) replay.get();
     UUID versionId = repository.publishProfile(tenantId, request.profileId(), request.effectiveFromUtc(),
@@ -103,12 +110,30 @@ class SubmissionProfileService {
     if (!issues.isEmpty()) throw new ScenarioException(org.springframework.http.HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "Submission profile validation failed.", issues);
   }
 
+  private void validatePublishRequest(PublishSubmissionProfileRequest request) {
+    List<ValidationIssue> issues = new ArrayList<>();
+    if (request == null) {
+      issues.add(new ValidationIssue("INVALID_PUBLISH_REQUEST", "request", Severity.BLOCKING, "Publish request is required."));
+    } else {
+      if (request.approvalToken() == null || request.approvalToken().isBlank()) {
+        issues.add(new ValidationIssue("MISSING_APPROVAL_TOKEN", "approvalToken", Severity.BLOCKING, "Approval token is required before publishing a submission profile."));
+      }
+      if (request.changeSetRef() == null || request.changeSetRef().isBlank()) {
+        issues.add(new ValidationIssue("MISSING_CHANGE_SET_REF", "changeSetRef", Severity.BLOCKING, "Change-set reference is required before publishing a submission profile."));
+      }
+    }
+    if (!issues.isEmpty()) throw new ScenarioException(org.springframework.http.HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "Submission profile publish validation failed.", issues);
+  }
+
   private void validateFieldPaths(List<SubmissionProfileFieldRule> rules) {
     List<ValidationIssue> issues = new ArrayList<>();
     for (int i = 0; i < rules.size(); i++) {
       SubmissionProfileFieldRule rule = rules.get(i);
       if (!KNOWN_SECTIONS.contains(rule.section())) issues.add(new ValidationIssue("UNKNOWN_SECTION", "rules[" + i + "].section", Severity.BLOCKING, "Section not registered: " + rule.section()));
       if (rule.fieldPath() == null || rule.fieldPath().isBlank()) issues.add(new ValidationIssue("MISSING_FIELD_PATH", "rules[" + i + "].fieldPath", Severity.BLOCKING, "Field path is required."));
+      else if (!REGISTERED_SCHEMA_PATHS.contains(rule.fieldPath())) issues.add(new ValidationIssue("UNKNOWN_FIELD_PATH", "rules[" + i + "].fieldPath", Severity.BLOCKING, "Field path is not registered in scenario schema: " + rule.fieldPath()));
+      if (rule.requiredWhenExpression() == null || rule.requiredWhenExpression().isBlank()) issues.add(new ValidationIssue("MISSING_REQUIRED_EXPRESSION", "rules[" + i + "].requiredWhenExpression", Severity.BLOCKING, "Required expression is required."));
+      else if (!"always()".equals(rule.requiredWhenExpression().trim())) issues.add(new ValidationIssue("UNSUPPORTED_REQUIRED_EXPRESSION", "rules[" + i + "].requiredWhenExpression", Severity.BLOCKING, "Only governed always() rules are supported by the local scenario schema registry."));
       if (rule.message() == null || rule.message().isBlank()) issues.add(new ValidationIssue("MISSING_RULE_MESSAGE", "rules[" + i + "].message", Severity.BLOCKING, "Rule message is required."));
     }
     if (!issues.isEmpty()) throw new ScenarioException(org.springframework.http.HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "Field rule validation failed.", issues);
@@ -119,9 +144,14 @@ class SubmissionProfileService {
     Object current = facts;
     for (String part : parts) {
       if (current instanceof Map) current = ((Map<?, ?>) current).get(part);
-      else return null;
+      else current = readAccessor(current, part);
     }
     return current;
+  }
+
+  private static Object readAccessor(Object target, String property) {
+    try { return target.getClass().getMethod(property).invoke(target); }
+    catch (Exception ex) { return null; }
   }
 
   private static boolean evaluateRequired(String expression) {

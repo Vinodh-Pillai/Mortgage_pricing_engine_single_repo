@@ -96,6 +96,11 @@ public class AuditReportService {
     requireAuditViewFromContext();
     RateFeedModels.AuditReportFormat format = request == null || request.format() == null
         ? RateFeedModels.AuditReportFormat.JSON : request.format();
+    String reasonCode = request == null ? null : request.reasonCode();
+    if (!present(reasonCode)) {
+      throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "POLICY_NOT_SATISFIED",
+          "Audit export reasonCode is required because governance reason-code configuration is external.");
+    }
     boolean includeRawValues = request != null && request.includeRawValues();
     if (includeRawValues && !RequestContext.hasRole(RateFeedRoles.RATE_FEED_AUDIT_EXPORT)) {
       throw new RateFeedException(HttpStatus.FORBIDDEN, "ELEVATED_EXPORT_PERMISSION_REQUIRED",
@@ -109,13 +114,13 @@ public class AuditReportService {
     UUID snapshotId = UUID.randomUUID();
     Instant generatedAt = Instant.now();
     Instant retentionUntil = generatedAt.plus(Duration.ofDays(retentionDays));
-    String snapshotHash = Hashing.sha256(snapshotHash(events) + "|" + format + "|raw=" + includeRawValues + "|" + safe(request == null ? null : request.reasonCode()));
+    String snapshotHash = Hashing.sha256(snapshotHash(events) + "|" + format + "|raw=" + includeRawValues + "|" + safe(reasonCode));
     String storageObjectId = includeRawValues ? null : "audit-exports/" + tenantId + "/" + batchId + "/" + snapshotId + "." + format.name().toLowerCase(Locale.ROOT);
 
     Map<String, Object> filters = new LinkedHashMap<>();
     filters.put("batchId", batchId.toString());
     filters.put("includeRawValues", includeRawValues);
-    filters.put("reasonCode", safe(request == null ? null : request.reasonCode()));
+    filters.put("reasonCode", safe(reasonCode));
     filters.put("correlationId", correlation(correlationId));
     Map<String, Object> watermark = watermark(tenantId, actor(actorId), generatedAt, snapshotHash);
     watermark.put("format", format.name());
@@ -129,7 +134,7 @@ public class AuditReportService {
         snapshotHash, retentionUntil, links(tenantId, batchId, snapshotId));
   }
 
-  @Transactional
+  @Transactional(noRollbackFor = RateFeedException.class)
   public RateFeedModels.VerifyReplayResponse verifyReplay(UUID tenantId, UUID batchId,
       RateFeedModels.VerifyReplayRequest request, String actorId) {
     requireAuditViewFromContext();
@@ -250,8 +255,9 @@ public class AuditReportService {
   private Map<String, String> links(UUID tenantId, UUID batchId, UUID snapshotId) {
     return Map.of(
         "batch", "/api/v1/tenants/" + tenantId + "/rate-feed-batches/" + batchId,
-        "snapshot", "/api/v1/tenants/" + tenantId + "/rate-feed-batches/" + batchId + "/audit-reports/" + snapshotId,
-        "export", "/api/v1/tenants/" + tenantId + "/rate-feed-batches/" + batchId + "/audit-exports/" + snapshotId);
+        "report", "/api/v1/tenants/" + tenantId + "/rate-feed-audit-reports/" + batchId,
+        "snapshot", "/api/v1/tenants/" + tenantId + "/rate-feed-audit-reports/" + batchId + "/snapshots/" + snapshotId,
+        "export", "/api/v1/tenants/" + tenantId + "/rate-feed-audit-reports/" + batchId + "/exports/" + snapshotId);
   }
 
   private Map<String, Object> watermark(UUID tenantId, String actorId, Instant generatedAt, String hash) {

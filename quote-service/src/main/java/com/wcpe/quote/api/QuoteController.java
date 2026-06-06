@@ -6,6 +6,9 @@ import com.wcpe.quote.QuoteApplicationService;
 import com.wcpe.quote.QuoteComparisonExport;
 import com.wcpe.quote.QuoteComparisonResponse;
 import com.wcpe.quote.QuoteCreateRequest;
+import com.wcpe.quote.QuoteExplanationResponse;
+import com.wcpe.quote.RankingPreviewRequest;
+import com.wcpe.quote.RankingPreviewResponse;
 import java.util.Set;
 import java.util.UUID;
 
@@ -37,6 +40,17 @@ public class QuoteController {
         return QuoteCreateResponse.from(applicationService.getQuote(tenantId, quoteId));
     }
 
+    public RankingPreviewResponse postTenantRankingPreview(UUID tenantId, String correlationId, RankingPreviewRequest body) {
+        RankingPreviewRequest tenantScopedBody = new RankingPreviewRequest(
+            tenantId,
+            body.actorId(),
+            correlationId,
+            body.policyRef(),
+            body.candidates()
+        );
+        return applicationService.previewRanking(tenantScopedBody);
+    }
+
     public QuoteComparisonResponse getTenantQuoteComparison(
         UUID tenantId,
         UUID quoteId,
@@ -59,5 +73,16 @@ public class QuoteController {
         String format
     ) {
         return applicationService.exportComparison(tenantId, quoteId, config, allowedFields, actorId, correlationId, idempotencyKey, format);
+    }
+
+    public QuoteExplanationResponse getTenantQuoteOptionExplanation(
+        UUID tenantId,
+        UUID quoteId,
+        UUID optionId,
+        Set<String> allowedFields,
+        String actorId,
+        String correlationId
+    ) {
+        return applicationService.explainQuoteOption(tenantId, quoteId, optionId, allowedFields, actorId, correlationId);
     }
 }

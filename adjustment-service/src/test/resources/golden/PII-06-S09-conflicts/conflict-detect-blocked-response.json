@@ -1,0 +1,17 @@
+{
+  "conflictRunId": "30000000-0000-0000-0000-000000000069",
+  "status": "BLOCKED",
+  "policyVersion": 1,
+  "conflicts": [
+    {
+      "policyCode": "DUPLICATE_REASON",
+      "severity": "BLOCKING",
+      "affectedLineIds": ["llpa-fico-1", "llpa-fico-2"],
+      "resolutionAction": "FAIL_ON_MULTIPLE",
+      "reasonCode": "CONFIGURED_REASON"
+    }
+  ],
+  "suppressedLineIds": [],
+  "eventType": "QuoteAdjustmentConflictsDetected.v1",
+  "auditAction": "ADJUSTMENT_CONFLICT_DETECTION_COMPLETED"
+}

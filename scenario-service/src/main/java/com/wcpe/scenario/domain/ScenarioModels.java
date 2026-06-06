@@ -22,6 +22,14 @@ record LoanStructureRequest(int scenarioVersion, String loanPurpose, BigDecimal 
     String amortizationType, BigDecimal subordinateFinancingAmount, BigDecimal helocDrawnAmount, BigDecimal helocLimitAmount,
     int requestedLockPeriodDays, BigDecimal temporaryPropertyValueForLtv) {}
 
+record LoanMetric(String metricCode, BigDecimal ratioValue, BigDecimal bpsValue, BigDecimal numeratorAmount,
+    BigDecimal denominatorAmount, String roundingRule, String qualityStatus) {}
+
+record LoanMetricResult(UUID calculationTraceId, String qualityStatus, List<LoanMetric> metrics, List<ValidationIssue> issues) {}
+
+record LoanStructureResponse(UUID scenarioId, int scenarioVersion, String loanStructureStatus, Map<String, BigDecimal> metrics,
+    UUID calculationTraceId, int blockingIssueCount, int warningIssueCount, UUID auditPackageId, List<ValidationIssue> validationIssues) {}
+
 record PropertyRequest(int scenarioVersion, String propertyState, String propertyCounty, String propertyZip, String propertyType,
     String occupancyType, int units, BigDecimal purchasePrice, BigDecimal appraisedValue, Map<String, Object> collateralFlags) {}
 

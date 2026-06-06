@@ -20,48 +20,95 @@ class CatalogController {
   }
 
   @PostMapping("/conventional-products/drafts")
+  ConventionalProductDraftResponse addConventionalProduct(@PathVariable UUID tenantId, @RequestBody ConventionalProductDraftRequest request, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.addConventionalProductDraft(tenantId, request, h.idempotencyKey, h.actorId, h.correlationId));
+  }
+
+  @PostMapping("/products/drafts")
   CatalogResponse addProduct(@PathVariable UUID tenantId, @RequestBody ProductRequest request, HttpServletRequest http) {
     Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.addProduct(tenantId, request, h.idempotencyKey, h.actorId, h.correlationId));
   }
 
   @PostMapping("/investors/drafts")
-  CatalogResponse addInvestor(@PathVariable UUID tenantId, @RequestBody InvestorRequest request, HttpServletRequest http) {
-    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.addInvestor(tenantId, request, h.idempotencyKey, h.actorId, h.correlationId));
+  InvestorCatalogDraftResponse addInvestor(@PathVariable UUID tenantId, @RequestBody InvestorCatalogDraftRequest request, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.addInvestorCatalogDraft(tenantId, request, h.idempotencyKey, h.actorId, h.correlationId));
+  }
+
+  @PostMapping("/investors/resolve")
+  InvestorResolveResponse resolveInvestors(@PathVariable UUID tenantId, @RequestBody InvestorResolveRequest request, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("READ_CATALOG", h.roles); return service.resolveInvestors(tenantId, request, h.actorId, h.correlationId, canViewInvestorSecret(h.roles));
   }
 
   @PostMapping("/taxonomy/drafts")
-  CatalogResponse addTaxonomy(@PathVariable UUID tenantId, @RequestBody ReferenceCatalogRequest request, HttpServletRequest http) {
-    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.addReference(tenantId, "PRODUCT_TAXONOMY", request, h.idempotencyKey, h.actorId, h.correlationId));
+  ProductTaxonomyDraftResponse addTaxonomy(@PathVariable UUID tenantId, @RequestBody ProductTaxonomyDraftRequest request, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.addProductTaxonomyDraft(tenantId, request, h.idempotencyKey, h.actorId, h.correlationId));
+  }
+
+  @PostMapping("/taxonomy/resolve")
+  ProductTaxonomyResolveResponse resolveTaxonomy(@PathVariable UUID tenantId, @RequestBody ProductTaxonomyResolveRequest request, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("READ_CATALOG", h.roles); return service.resolveProductTaxonomy(tenantId, request, h.actorId, h.correlationId);
   }
 
   @PostMapping("/channels/drafts")
-  CatalogResponse addChannel(@PathVariable UUID tenantId, @RequestBody ReferenceCatalogRequest request, HttpServletRequest http) {
-    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.addReference(tenantId, "CHANNEL", request, h.idempotencyKey, h.actorId, h.correlationId));
+  ChannelTaxonomyDraftResponse addChannel(@PathVariable UUID tenantId, @RequestBody ChannelTaxonomyDraftRequest request, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.addChannelTaxonomyDraft(tenantId, request, h.idempotencyKey, h.actorId, h.correlationId));
+  }
+
+  @PostMapping("/channels/resolve")
+  ChannelResolveResponse resolveChannel(@PathVariable UUID tenantId, @RequestBody ChannelResolveRequest request, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("READ_CATALOG", h.roles); return service.resolveChannel(tenantId, request, h.actorId, h.correlationId);
   }
 
   @PostMapping("/term-amortization/drafts")
-  CatalogResponse addTermAmortization(@PathVariable UUID tenantId, @RequestBody ReferenceCatalogRequest request, HttpServletRequest http) {
-    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.addReference(tenantId, "TERM_AMORTIZATION", request, h.idempotencyKey, h.actorId, h.correlationId));
+  TermAmortizationDraftResponse addTermAmortization(@PathVariable UUID tenantId, @RequestBody TermAmortizationDraftRequest request, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.addTermAmortizationDraft(tenantId, request, h.idempotencyKey, h.actorId, h.correlationId));
+  }
+
+  @PostMapping("/term-amortization/resolve")
+  TermAmortizationResolveResponse resolveTermAmortization(@PathVariable UUID tenantId, @RequestBody TermAmortizationResolveRequest request, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("READ_CATALOG", h.roles); return service.resolveTermAmortization(tenantId, request, h.actorId, h.correlationId);
   }
 
   @PostMapping("/property-types/drafts")
-  CatalogResponse addPropertyType(@PathVariable UUID tenantId, @RequestBody ReferenceCatalogRequest request, HttpServletRequest http) {
-    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.addReference(tenantId, "PROPERTY_TYPE", request, h.idempotencyKey, h.actorId, h.correlationId));
+  PropertyTypeDraftResponse addPropertyType(@PathVariable UUID tenantId, @RequestBody PropertyTypeDraftRequest request, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.addPropertyTypeDraft(tenantId, request, h.idempotencyKey, h.actorId, h.correlationId));
   }
 
   @PostMapping("/occupancy-types/drafts")
-  CatalogResponse addOccupancyType(@PathVariable UUID tenantId, @RequestBody ReferenceCatalogRequest request, HttpServletRequest http) {
-    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.addReference(tenantId, "OCCUPANCY_TYPE", request, h.idempotencyKey, h.actorId, h.correlationId));
+  OccupancyTypeDraftResponse addOccupancyType(@PathVariable UUID tenantId, @RequestBody OccupancyTypeDraftRequest request, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.addOccupancyTypeDraft(tenantId, request, h.idempotencyKey, h.actorId, h.correlationId));
+  }
+
+  @PostMapping("/property-occupancy/resolve")
+  PropertyOccupancyResolveResponse resolvePropertyOccupancy(@PathVariable UUID tenantId, @RequestBody PropertyOccupancyResolveRequest request, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("READ_CATALOG", h.roles); return service.resolvePropertyOccupancy(tenantId, request, h.actorId, h.correlationId);
+  }
+
+  @GetMapping("/property-occupancy")
+  PropertyOccupancyListResponse listPropertyOccupancy(@PathVariable UUID tenantId, @RequestParam(required = false) java.time.Instant asOf, HttpServletRequest http) {
+    String roles = http.getHeader("X-Roles"); authorizationService.authorize("READ_CATALOG", roles); return service.listPublishedPropertyOccupancy(tenantId, asOf);
   }
 
   @PostMapping("/loan-purposes/drafts")
-  CatalogResponse addLoanPurpose(@PathVariable UUID tenantId, @RequestBody ReferenceCatalogRequest request, HttpServletRequest http) {
-    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.addReference(tenantId, "LOAN_PURPOSE", request, h.idempotencyKey, h.actorId, h.correlationId));
+  @ResponseStatus(HttpStatus.CREATED)
+  LoanPurposeDraftResponse addLoanPurpose(@PathVariable UUID tenantId, @RequestBody LoanPurposeDraftRequest request, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.addLoanPurposeDraft(tenantId, request, h.idempotencyKey, h.actorId, h.correlationId));
+  }
+
+  @PostMapping("/loan-purposes/resolve")
+  LoanPurposeResolveResponse resolveLoanPurpose(@PathVariable UUID tenantId, @RequestBody LoanPurposeResolveRequest request, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("READ_CATALOG", h.roles); return service.resolveLoanPurpose(tenantId, request, h.actorId, h.correlationId);
   }
 
   @PostMapping("/markets/imports")
-  CatalogResponse addMarket(@PathVariable UUID tenantId, @RequestBody MarketRequest request, HttpServletRequest http) {
-    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.addMarket(tenantId, request, h.idempotencyKey, h.actorId, h.correlationId));
+  @ResponseStatus(HttpStatus.ACCEPTED)
+  MarketImportResponse importMarkets(@PathVariable UUID tenantId, @RequestBody MarketImportRequest request, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.importMarkets(tenantId, request, h.idempotencyKey, h.actorId, h.correlationId));
+  }
+
+  @PostMapping("/markets/resolve")
+  MarketResolveResponse resolveMarket(@PathVariable UUID tenantId, @RequestBody MarketResolveRequest request, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("READ_CATALOG", h.roles); return service.resolveMarket(tenantId, request, h.actorId, h.correlationId);
   }
 
   @PostMapping("/versions/current/actions/draft")
@@ -109,6 +156,19 @@ class CatalogController {
     Headers h = headers(http); authorizationService.authorize("ROLLBACK_CATALOG", h.roles); return withRoles(h.roles, () -> service.rollback(tenantId, request, h.idempotencyKey, h.actorId, h.correlationId));
   }
 
+  @PostMapping("/versions/{artifactType}/{artifactId}/actions")
+  CatalogVersionActionResponse applyVersionAction(@PathVariable UUID tenantId, @PathVariable String artifactType, @PathVariable UUID artifactId, @RequestBody CatalogVersionActionRequest request, HttpServletRequest http) {
+    Headers h = headers(http);
+    String action = request == null || request.action() == null ? "" : request.action().toUpperCase(Locale.ROOT);
+    authorizationService.authorize(permissionForVersionAction(action), h.roles);
+    return withRoles(h.roles, () -> service.applyVersionAction(tenantId, artifactType, artifactId, request, h.idempotencyKey, h.actorId, h.correlationId));
+  }
+
+  @GetMapping("/versions/{artifactType}/{artifactCode}/as-of")
+  CatalogVersionAsOfResponse resolveVersionAsOf(@PathVariable UUID tenantId, @PathVariable String artifactType, @PathVariable String artifactCode, @RequestParam(required = false) java.time.Instant asOf, HttpServletRequest http) {
+    String roles = http.getHeader("X-Roles"); authorizationService.authorize("READ_CATALOG", roles); return service.resolveVersionAsOf(tenantId, artifactType, artifactCode, asOf == null ? java.time.Instant.now() : asOf);
+  }
+
   @GetMapping("/active")
   CatalogResponse active(@PathVariable UUID tenantId, HttpServletRequest http) {
     String roles = http.getHeader("X-Roles"); authorizationService.authorize("READ_CATALOG", roles); return service.active(tenantId);
@@ -122,6 +182,11 @@ class CatalogController {
   @PostMapping("/config-snapshots/resolve")
   ProductConfigSnapshot resolve(@PathVariable UUID tenantId, @RequestBody ResolveCatalogRequest request, HttpServletRequest http) {
     Headers h = headers(http); authorizationService.authorize("READ_CATALOG", h.roles); return service.resolve(tenantId, request, h.idempotencyKey, h.actorId, h.correlationId);
+  }
+
+  @PostMapping("/conventional-products/resolve")
+  ConventionalProductResolveResponse resolveConventionalProducts(@PathVariable UUID tenantId, @RequestBody ConventionalProductResolveRequest request, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("READ_CATALOG", h.roles); return service.resolveConventionalProducts(tenantId, request, h.actorId, h.correlationId);
   }
 
   @GetMapping("/config-snapshots/{snapshotId}")
@@ -163,9 +228,119 @@ class CatalogController {
   }
 
   @ExceptionHandler(CatalogException.class)
-  ResponseEntity<Map<String, Object>> error(CatalogException ex) {
-    HttpStatus status = "IDEMPOTENCY_CONFLICT".equals(ex.getMessage()) ? HttpStatus.CONFLICT : HttpStatus.UNPROCESSABLE_ENTITY;
-    return ResponseEntity.status(status).body(Map.of("code", ex.getMessage(), "message", ex.getMessage()));
+  ResponseEntity<Map<String, Object>> error(CatalogException ex, HttpServletRequest request) {
+    String errorCode = ex.getMessage();
+    HttpStatus status = catalogErrorStatus(errorCode);
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("errorCode", errorCode);
+    body.put("code", errorCode);
+    body.put("message", errorCode);
+    body.put("fieldErrors", fieldErrors(errorCode));
+    body.put("correlationId", request.getHeader("X-Correlation-Id"));
+    return ResponseEntity.status(status).body(body);
+  }
+
+  private static List<Map<String, String>> fieldErrors(String errorCode) {
+    if ("VERSION_CONFLICT".equals(errorCode) || "CATALOG_VERSION_CONFLICT".equals(errorCode)) {
+      return List.of(Map.of(
+          "field", "rowVersion",
+          "code", "STALE",
+          "message", "Reload and retry with the latest row version."));
+    }
+    if ("NO_ELIGIBLE_CONVENTIONAL_PRODUCT".equals(errorCode)) {
+      return List.of(Map.of(
+          "field", "scenarioFacts",
+          "code", errorCode,
+          "message", "No eligible conventional product matched the supplied scenario facts."));
+    }
+    if ("MISSING_SCENARIO_FACTS".equals(errorCode)) {
+      return List.of(Map.of(
+          "field", "scenarioFacts",
+          "code", errorCode,
+          "message", "Required conventional product scenario facts were not supplied."));
+    }
+    if ("CHANNEL_MAPPING_NOT_FOUND".equals(errorCode)) {
+      return List.of(Map.of(
+          "field", "externalValue",
+          "code", "UNKNOWN_MAPPING",
+          "message", "Select or map a valid channel."));
+    }
+    if ("INVESTOR_NOT_ACTIVE_FOR_CHANNEL".equals(errorCode)) {
+      return List.of(Map.of(
+          "field", "channelCode",
+          "code", "NOT_ENABLED",
+          "message", "Choose a channel enabled for this investor."));
+    }
+    if ("TERM_AMORTIZATION_NOT_SUPPORTED".equals(errorCode)) {
+      return List.of(Map.of(
+          "field", "termMonths",
+          "code", "UNSUPPORTED_TERM",
+          "message", "Use one of 120, 180, 240, 360 months for published fixed profiles."));
+    }
+    if ("PROPERTY_OCCUPANCY_NOT_PUBLISHED".equals(errorCode)) {
+      return List.of(Map.of(
+          "field", "propertyType",
+          "code", "NOT_PUBLISHED",
+          "message", "Select a published property type."));
+    }
+    if ("LOAN_PURPOSE_NOT_SUPPORTED".equals(errorCode) || "CONSTRUCTION_TO_PERMANENT_DISABLED".equals(errorCode)) {
+      return List.of(Map.of(
+          "field", "loanPurpose",
+          "code", "DISABLED",
+          "message", "Select Purchase, Rate/Term Refinance, or Cash-Out Refinance."));
+    }
+    if ("MARKET_RESTRICTED".equals(errorCode)) {
+      return List.of(Map.of(
+          "field", "countyFips",
+          "code", "RESTRICTED",
+          "message", "Select an enabled property market or escalate to product operations."));
+    }
+    if ("PRODUCT_CONFIG_SNAPSHOT_UNAVAILABLE".equals(errorCode)) {
+      return List.of(Map.of(
+          "field", "asOf",
+          "code", "NO_PUBLISHED_CONFIG",
+          "message", "Choose a timestamp with published catalog configuration."));
+    }
+    if ("MARKET_NOT_ENABLED".equals(errorCode)) {
+      return List.of(Map.of(
+          "field", "countyFips",
+          "code", "MARKET_NOT_ENABLED",
+          "message", "Choose an enabled property market for the requested channel and product family."));
+    }
+    if ("INCLUDE_INACTIVE_REQUIRES_DEBUG_PERMISSION".equals(errorCode)) {
+      return List.of(Map.of(
+          "field", "includeInactive",
+          "code", "PERMISSION_DENIED",
+          "message", "includeInactive requires product catalog debug permission."));
+    }
+    if ("INVALID_COUNTY_FIPS".equals(errorCode)) {
+      return List.of(Map.of(
+          "field", "countyFips",
+          "code", "INVALID_COUNTY_FIPS",
+          "message", "County FIPS must be five digits and match the submitted state."));
+    }
+    if ("INVALID_STATE_CODE".equals(errorCode)) {
+      return List.of(Map.of(
+          "field", "stateCode",
+          "code", "INVALID_STATE_CODE",
+          "message", "Use a USPS state code or DC."));
+    }
+    return List.of();
+  }
+
+  private static String permissionForVersionAction(String action) {
+    return switch (action) {
+      case "VALIDATE", "SUBMIT_APPROVAL" -> "WRITE_CATALOG";
+      case "APPROVE", "REJECT" -> "APPROVE_CATALOG";
+      case "PUBLISH", "SUSPEND", "RETIRE" -> "PUBLISH_CATALOG";
+      case "ROLLBACK" -> "ROLLBACK_CATALOG";
+      default -> "WRITE_CATALOG";
+    };
+  }
+
+  private static boolean canViewInvestorSecret(String roles) {
+    if (roles == null) return false;
+    return Arrays.stream(roles.split(",")).map(String::trim).anyMatch(role -> role.equals("INVESTOR_SECRET_VIEW") || role.equals("investor:secret-view"));
   }
 
   private Headers headers(HttpServletRequest request) {
@@ -179,6 +354,12 @@ class CatalogController {
     } finally {
       RequestContext.clear();
     }
+  }
+
+  static HttpStatus catalogErrorStatus(String errorCode) {
+    if ("SEPARATION_OF_DUTIES_VIOLATION".equals(errorCode) || "INCLUDE_INACTIVE_REQUIRES_DEBUG_PERMISSION".equals(errorCode)) return HttpStatus.FORBIDDEN;
+    if ("IDEMPOTENCY_CONFLICT".equals(errorCode) || "VERSION_CONFLICT".equals(errorCode) || "CATALOG_VERSION_CONFLICT".equals(errorCode) || "IMPORT_ALREADY_PROCESSED".equals(errorCode)) return HttpStatus.CONFLICT;
+    return HttpStatus.UNPROCESSABLE_ENTITY;
   }
 
   record Headers(String idempotencyKey, String actorId, String correlationId, String roles) {}

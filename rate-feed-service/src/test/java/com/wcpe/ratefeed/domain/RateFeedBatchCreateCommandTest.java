@@ -113,7 +113,7 @@ class RateFeedBatchCreateCommandTest {
           "RateSheet.csv", "text/csv", 2048, null,
           "OPEN", Instant.now().plusSeconds(3600), "actor", "corr");
     });
-    when(repository.complete(any(), any(), any(), any(), any())).thenReturn(
+    when(repository.complete(any(), any(), any(), any(), any(), any())).thenReturn(
         new CompleteUploadResponse(UUID.randomUUID(), "UPLOADED", UUID.randomUUID(), UUID.randomUUID(), java.util.Map.of(), "result-hash"));
 
     CompleteUploadResponse response = service.complete(tenant(), sessionId, request, "idem-ok", "actor", "corr");

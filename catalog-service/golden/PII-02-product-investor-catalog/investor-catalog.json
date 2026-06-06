@@ -1,0 +1,45 @@
+{
+  "storyId": "PII-02-S04",
+  "investors": [
+    {
+      "investorCode": "FNMA",
+      "legalName": "Federal National Mortgage Association",
+      "investorType": "AGENCY",
+      "agency": "FANNIE_MAE",
+      "sellerServicerIds": [
+        {
+          "channelCode": "RETAIL",
+          "sellerIdMasked": "***456",
+          "servicerIdMasked": "***321"
+        }
+      ],
+      "deliveryTypes": ["BEST_EFFORTS", "MANDATORY"],
+      "activeChannelCodes": ["RETAIL"],
+      "requiresMiValidation": true,
+      "status": "DRAFT",
+      "effectiveStart": "2026-01-01T00:00:00Z"
+    },
+    {
+      "investorCode": "FHLMC",
+      "legalName": "Federal Home Loan Mortgage Corporation",
+      "investorType": "AGENCY",
+      "agency": "FREDDIE_MAC",
+      "sellerServicerIds": [
+        {
+          "channelCode": "RETAIL",
+          "sellerIdMasked": "***654",
+          "servicerIdMasked": "***210"
+        }
+      ],
+      "deliveryTypes": ["BEST_EFFORTS", "MANDATORY"],
+      "activeChannelCodes": ["RETAIL"],
+      "requiresMiValidation": true,
+      "status": "DRAFT",
+      "effectiveStart": "2026-01-01T00:00:00Z"
+    }
+  ],
+  "eventContract": {
+    "eventType": "InvestorCatalogChanged.v1",
+    "sellerServicerIdsOmitted": true
+  }
+}

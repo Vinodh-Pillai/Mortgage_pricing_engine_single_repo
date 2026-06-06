@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "story_id": "PII-09-S05",
+  "fixture": "conv30-vs-conv15-arm7-grid",
+  "expected_status": "COMPLETED_WITH_DEPENDENCY_GAPS",
+  "candidate_product_ids": ["conv-30", "conv-15", "arm-7"],
+  "expected_rule_hits": [
+    "product_catalog_version_unavailable",
+    "eligibility_dependency_unavailable",
+    "pricing_dependency_unavailable",
+    "payment_dependency_unavailable",
+    "apr_dependency_unavailable"
+  ],
+  "notes": "Golden fixture records fail-closed behavior until tenant-scoped catalog, eligibility, pricing, payment, and APR dependencies provide versioned product economics. No mortgage pricing values are invented."
+}

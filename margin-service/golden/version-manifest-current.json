@@ -1,0 +1,10 @@
+{
+  "tenantId": "tenant-a",
+  "scopeHash": "scope-a",
+  "activeAtUtc": "2026-04-01T12:00:00Z",
+  "policyVersions": {
+    "COMPANY": "company-v2",
+    "LO": "lo-v1"
+  },
+  "resolverEngineVersion": "margin-version-resolver-v1"
+}

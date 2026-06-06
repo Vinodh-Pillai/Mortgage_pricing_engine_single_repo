@@ -1,0 +1,10 @@
+{
+  "story_id": "PII-05-S08",
+  "case": "adjust-action",
+  "policy_required": true,
+  "input_price": "100.00000000",
+  "configured_cap": "99.50000000",
+  "action": "ADJUST",
+  "expected_output_price": "99.50000000",
+  "reason_code": "CONFIGURED_MAX_PRICE_ADJUSTED"
+}

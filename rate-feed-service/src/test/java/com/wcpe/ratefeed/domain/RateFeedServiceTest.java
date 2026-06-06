@@ -31,7 +31,7 @@ class RateFeedServiceTest {
       return command.get();
     });
 
-    UploadSessionResponse response = service.createSession(tenant(), validRequest("RateSheet.csv", "Text/CSV; Charset=UTF-8", "synthetic-source", "synthetic note"), "key-1", "actor", "corr");
+    UploadSessionResponse response = service.createSession(tenant(), validRequest("RateSheet.csv", "Text/CSV; Charset=UTF-8", "MANUAL_UPLOAD", "synthetic note"), "key-1", "actor", "corr");
 
     assertThat(response.status()).isEqualTo("OPEN");
     verify(repository).saveSession(any(), any(), any(), eq("actor"), eq("corr"), any(), eq(response));
@@ -45,14 +45,14 @@ class RateFeedServiceTest {
       return command.get();
     });
 
-    assertThatThrownBy(() -> service.createSession(tenant(), validRequest("=cmd.csv", "text/csv", "synthetic-source", "synthetic note"), "key-2", "actor", "corr"))
+    assertThatThrownBy(() -> service.createSession(tenant(), validRequest("=cmd.csv", "text/csv", "MANUAL_UPLOAD", "synthetic note"), "key-2", "actor", "corr"))
         .isInstanceOf(RateFeedException.class)
         .satisfies(ex -> assertRateFeedException(ex, "FORMULA_INJECTION_RISK", HttpStatus.BAD_REQUEST));
   }
 
   @Test
   void createSessionRequiresUploadRoleBeforePersistence() {
-    assertThatThrownBy(() -> service.createSession(tenant(), validRequest("RateSheet.csv", "text/csv", "synthetic-source", "note"), "key-3", "actor", "corr"))
+    assertThatThrownBy(() -> service.createSession(tenant(), validRequest("RateSheet.csv", "text/csv", "MANUAL_UPLOAD", "note"), "key-3", "actor", "corr"))
         .isInstanceOf(RateFeedException.class)
         .satisfies(ex -> assertRateFeedException(ex, "ACCESS_DENIED", HttpStatus.FORBIDDEN));
     verifyNoInteractions(repository);
@@ -96,7 +96,7 @@ class RateFeedServiceTest {
       return command.get();
     });
 
-    assertThatThrownBy(() -> service.createSession(tenant(), validRequest("RateSheet.csv", "application/pdf", "synthetic-source", "note"), "key-5", "actor", "corr"))
+    assertThatThrownBy(() -> service.createSession(tenant(), validRequest("RateSheet.csv", "application/pdf", "MANUAL_UPLOAD", "note"), "key-5", "actor", "corr"))
         .isInstanceOf(RateFeedException.class)
         .satisfies(ex -> assertRateFeedException(ex, "UNSUPPORTED_MEDIA_TYPE", HttpStatus.UNSUPPORTED_MEDIA_TYPE));
   }

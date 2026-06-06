@@ -20,3 +20,13 @@ dependencies {
 tasks.named('test') {
   useJUnitPlatform()
 }
+
+tasks.register('contractTest', Test) {
+  group = 'verification'
+  description = 'Runs pricing-service API/event/golden contract tests.'
+  useJUnitPlatform()
+  include '**/*ContractTest.class'
+  include '**/*ContractSuiteTest.class'
+  include '**/*EventSchemaCompatibilityTest.class'
+  shouldRunAfter tasks.named('test')
+}

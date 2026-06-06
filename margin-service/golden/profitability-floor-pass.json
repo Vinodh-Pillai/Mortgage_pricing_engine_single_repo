@@ -1,0 +1,11 @@
+{
+  "story_id": "PII-07-S06",
+  "scenario": "profitability-floor-pass",
+  "tenant_id": "tenant-a",
+  "quote_option_id": "quote-option-1",
+  "basis": "NET_PRICE",
+  "threshold_ref": "cfg.floor.tie",
+  "loaded_price": "99.500",
+  "decision": "PASS",
+  "decision_code": "PROFITABILITY_FLOOR_PASS"
+}

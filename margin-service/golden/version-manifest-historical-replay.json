@@ -1,0 +1,9 @@
+{
+  "tenantId": "tenant-a",
+  "scopeHash": "scope-a",
+  "activeAtUtc": "2026-02-01T12:00:00Z",
+  "policyVersions": {
+    "COMPANY": "company-v1"
+  },
+  "replayMode": "load-exact-manifest"
+}

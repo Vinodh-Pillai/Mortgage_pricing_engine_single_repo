@@ -22,6 +22,9 @@ public final class LockService {
   private long freshnessCheckTotal;
   private long freshnessPolicyResolutionFailureTotal;
   private long freshnessExpiresSoonTotal;
+  private long lockConfirmationTotal;
+  private long pendingInvestorConfirmationTotal;
+  private long investorMismatchTotal;
 
   public LockService() {
     this(new LockRepository());
@@ -261,6 +264,93 @@ public final class LockService {
       .orElseThrow(() -> new LockServiceException("NOT_FOUND", "Freshness check was not found for tenant"));
   }
 
+  public LockModels.LockConfirmationResponse confirmLock(LockModels.LockConfirmationCommand command) {
+    validateConfirmationRequired(command);
+    String confirmationHash = hash(command);
+    repository.findConfirmationIdempotency(command.tenantId(), command.idempotencyKey(), confirmationHash)
+      .ifPresent(response -> { throw new ConfirmationIdempotencyReplay(response); });
+
+    LockModels.RateLockRecord current = getLock(command.tenantId(), command.lockId());
+    LockModels.RateLockStatus nextStatus = confirmationStatus(command);
+    if (current.version() != command.expectedVersion()) {
+      throw new LockServiceException("VERSION_CONFLICT", "Confirmation expected aggregate version " + command.expectedVersion() + " but current version is " + current.version());
+    }
+    if (repository.hasActiveConfirmation(command.tenantId(), command.lockId())) {
+      throw new LockServiceException("DUPLICATE_ACTIVE_CONFIRMATION", "Lock already has an active confirmation");
+    }
+    if (!current.status().allowedNextStates().contains(nextStatus)) {
+      throw new LockServiceException("LOCK_STATE_CONFLICT", "Cannot transition from " + current.status() + " to " + nextStatus);
+    }
+    if (nextStatus == LockModels.RateLockStatus.ACTIVE && repository.hasLockNumber(command.tenantId(), command.lockNumber())) {
+      throw new LockServiceException("DUPLICATE_LOCK_NUMBER", "Lock number is already active for tenant");
+    }
+    if (nextStatus == LockModels.RateLockStatus.ACTIVE
+      && repository.hasInvestorExternalRef(command.tenantId(), command.investorId(), command.investorConfirmationRef())) {
+      throw new LockServiceException("DUPLICATE_INVESTOR_CONFIRMATION_REF", "Investor confirmation reference is already active for tenant/investor");
+    }
+
+    String confirmationId = stableId(command.tenantId(), command.lockId(), command.idempotencyKey());
+    String auditRef = "AUDIT-LOCK-CONFIRMATION-" + confirmationId;
+    String replayRef = "REPLAY-LOCK-CONFIRMATION-" + confirmationHash.substring(0, 16);
+    LockModels.RateLockRecord updated = new LockModels.RateLockRecord(
+      current.tenantId(), current.lockId(), current.requestId(), current.quoteId(), current.loanId(),
+      current.scenarioHash(), nextStatus, current.version() + 1, current.createdAt(), command.confirmedAt(),
+      current.idempotencyKey(), command.correlationId(), command.requestedPolicyVersionId(), current.requestHash(),
+      auditRef, replayRef, confirmationEventType(nextStatus)
+    );
+    LockModels.LockConfirmationRecord confirmation = new LockModels.LockConfirmationRecord(
+      command.tenantId(), confirmationId, command.lockId(), command.confirmationType(), command.lockNumber(),
+      command.investorId(), command.investorConfirmationRef(), nextStatus, updated.version(), command.confirmedAt(),
+      command.expiresAt(), confirmationHash, command.idempotencyKey(), command.correlationId(), replayRef
+    );
+    LockModels.LockConfirmationResponse response = new LockModels.LockConfirmationResponse(
+      command.tenantId(), command.lockId(), confirmationId, current.status(), nextStatus, updated.version(),
+      command.lockNumber(), command.investorConfirmationRef(), confirmationSummary(nextStatus), List.of(),
+      auditRef, replayRef, command.correlationId(), confirmationEventType(nextStatus), confirmationHash
+    );
+    LockModels.LockEvent event = new LockModels.LockEvent(
+      confirmationEventType(nextStatus), "1", command.tenantId() + ":" + command.lockId(), command.tenantId(),
+      command.lockId(), command.actorId(), command.correlationId(), current.requestId(), command.idempotencyKey(),
+      command.confirmedAt(), Map.of(
+        "confirmationId", confirmationId,
+        "status", nextStatus.name(),
+        "version", String.valueOf(updated.version()),
+        "lockNumber", command.lockNumber(),
+        "investorId", LockModels.normalized(command.investorId()),
+        "investorConfirmationRef", LockModels.normalized(command.investorConfirmationRef()),
+        "confirmedTermsHash", confirmationHash,
+        "sourceRefs", String.valueOf(Objects.hashCode(command.sourceRefs()))
+      )
+    );
+    LockModels.AuditSnapshot audit = new LockModels.AuditSnapshot(
+      auditRef, command.tenantId(), command.lockId(), confirmationAuditAction(nextStatus), command.actorId(),
+      current.status().name(), nextStatus.name(), command.requestedPolicyVersionId(), command.complianceEvidenceRef(),
+      command.correlationId(), confirmationHash
+    );
+    repository.saveConfirmation(updated, confirmation, response, confirmationHash, event, audit);
+    if (nextStatus == LockModels.RateLockStatus.PENDING_INVESTOR_CONFIRMATION) {
+      pendingInvestorConfirmationTotal++;
+    } else if (nextStatus == LockModels.RateLockStatus.INVESTOR_REJECTED) {
+      investorMismatchTotal++;
+    } else if (nextStatus == LockModels.RateLockStatus.ACTIVE) {
+      lockConfirmationTotal++;
+    }
+    return response;
+  }
+
+  public LockModels.LockConfirmationResponse confirmLockReplayAware(LockModels.LockConfirmationCommand command) {
+    try {
+      return confirmLock(command);
+    } catch (ConfirmationIdempotencyReplay replay) {
+      return replay.response;
+    }
+  }
+
+  public LockModels.LockConfirmationRecord getConfirmation(UUID tenantId, String confirmationId) {
+    return repository.findConfirmation(tenantId, confirmationId)
+      .orElseThrow(() -> new LockServiceException("NOT_FOUND", "Lock confirmation was not found for tenant"));
+  }
+
   public List<LockModels.LockEvent> outboxEvents() {
     return repository.outboxEvents();
   }
@@ -277,11 +367,16 @@ public final class LockService {
     return repository.freshnessCheckCount();
   }
 
+  public int committedConfirmationCount() {
+    return repository.confirmationCount();
+  }
+
   public LockModels.MetricsSnapshot metrics() {
     return new LockModels.MetricsSnapshot(
       lockRequestTotal, lockRequestRejectedTotal, lockApprovalTotal, lockRejectionTotal,
       lockDecisionPolicyBlockedTotal, freshnessCheckTotal, freshnessPolicyResolutionFailureTotal,
-      freshnessExpiresSoonTotal, 0
+      freshnessExpiresSoonTotal, lockConfirmationTotal, pendingInvestorConfirmationTotal,
+      investorMismatchTotal, 0
     );
   }
 
@@ -369,6 +464,47 @@ public final class LockService {
     }
     if (!command.permissionGranted()) {
       throw new LockServiceException("TENANT_ACCESS_DENIED", "LOCK_FRESHNESS_READ permission is required");
+    }
+  }
+
+  private static void validateConfirmationRequired(LockModels.LockConfirmationCommand command) {
+    if (command == null) {
+      throw new LockServiceException("VALIDATION_FAILED", "command is required");
+    }
+    List<String> missing = new ArrayList<>();
+    require(command.tenantId(), "tenantId", missing);
+    require(command.lockId(), "lockId", missing);
+    require(command.actorId(), "actorId", missing);
+    require(command.confirmationType(), "confirmationType", missing);
+    require(command.lockNumber(), "lockNumber", missing);
+    require(command.confirmedAt(), "confirmedAt", missing);
+    require(command.expiresAt(), "expiresAt", missing);
+    require(command.requestedProductId(), "requestedProductId", missing);
+    require(command.responseProductId(), "responseProductId", missing);
+    require(command.requestedLoanId(), "requestedLoanId", missing);
+    require(command.responseLoanId(), "responseLoanId", missing);
+    require(command.requestedPolicyVersionId(), "requestedPolicyVersionId", missing);
+    require(command.responsePolicyVersionId(), "responsePolicyVersionId", missing);
+    require(command.complianceEvidenceRef(), "complianceEvidenceRef", missing);
+    require(command.idempotencyKey(), "idempotencyKey", missing);
+    require(command.correlationId(), "correlationId", missing);
+    if (command.expectedVersion() <= 0) {
+      missing.add("expectedVersion");
+    }
+    if (command.lockPeriodDays() <= 0) {
+      missing.add("lockPeriodDays");
+    }
+    if (!missing.isEmpty()) {
+      throw new LockServiceException("VALIDATION_FAILED", "Missing or invalid fields: " + String.join(", ", missing));
+    }
+    if (!command.permissionGranted()) {
+      throw new LockServiceException("TENANT_ACCESS_DENIED", confirmationPermission(command.confirmationType()) + " permission is required");
+    }
+    if (!command.confirmationPolicyResolved()) {
+      throw new LockServiceException("POLICY_NOT_SATISFIED", "Confirmation policy configuration is missing or ambiguous");
+    }
+    if (!command.freshnessLockable() && command.confirmationType() != LockModels.LockConfirmationType.INVESTOR_CALLBACK) {
+      throw new LockServiceException("POLICY_NOT_SATISFIED", "Freshness guard must be lockable immediately before confirmation");
     }
   }
 
@@ -461,6 +597,57 @@ public final class LockService {
     };
   }
 
+  private static LockModels.RateLockStatus confirmationStatus(LockModels.LockConfirmationCommand command) {
+    return switch (command.confirmationType()) {
+      case INTERNAL -> LockModels.RateLockStatus.ACTIVE;
+      case INVESTOR_REQUEST -> LockModels.RateLockStatus.PENDING_INVESTOR_CONFIRMATION;
+      case INVESTOR_CALLBACK -> confirmationTermsMatch(command)
+        ? LockModels.RateLockStatus.ACTIVE
+        : LockModels.RateLockStatus.INVESTOR_REJECTED;
+    };
+  }
+
+  private static boolean confirmationTermsMatch(LockModels.LockConfirmationCommand command) {
+    return command.investorResponseMatches()
+      && LockModels.normalized(command.requestedProductId()).equals(LockModels.normalized(command.responseProductId()))
+      && LockModels.normalized(command.requestedLoanId()).equals(LockModels.normalized(command.responseLoanId()))
+      && LockModels.normalized(command.requestedPolicyVersionId()).equals(LockModels.normalized(command.responsePolicyVersionId()));
+  }
+
+  private static String confirmationPermission(LockModels.LockConfirmationType confirmationType) {
+    return switch (confirmationType) {
+      case INTERNAL -> "LOCK_CONFIRM_INTERNAL";
+      case INVESTOR_REQUEST, INVESTOR_CALLBACK -> "LOCK_CONFIRM_INVESTOR";
+    };
+  }
+
+  private static String confirmationEventType(LockModels.RateLockStatus status) {
+    return switch (status) {
+      case PENDING_INVESTOR_CONFIRMATION -> "lock.confirmation_requested.v1";
+      case ACTIVE -> "lock.confirmed.v1";
+      case INVESTOR_REJECTED -> "lock.investor_rejected.v1";
+      default -> throw new IllegalArgumentException("Unsupported confirmation status " + status);
+    };
+  }
+
+  private static String confirmationAuditAction(LockModels.RateLockStatus status) {
+    return switch (status) {
+      case PENDING_INVESTOR_CONFIRMATION -> "LOCK_CONFIRMATION_REQUESTED";
+      case ACTIVE -> "LOCK_CONFIRMED";
+      case INVESTOR_REJECTED -> "LOCK_INVESTOR_REJECTED";
+      default -> throw new IllegalArgumentException("Unsupported confirmation status " + status);
+    };
+  }
+
+  private static String confirmationSummary(LockModels.RateLockStatus status) {
+    return switch (status) {
+      case PENDING_INVESTOR_CONFIRMATION -> "Lock confirmation request queued for configured investor adapter";
+      case ACTIVE -> "Lock confirmed using current tenant policy configuration";
+      case INVESTOR_REJECTED -> "Investor confirmation response rejected by configured mismatch policy";
+      default -> throw new IllegalArgumentException("Unsupported confirmation status " + status);
+    };
+  }
+
   private static String decisionSummary(LockModels.LockDecisionType decision) {
     return switch (decision) {
       case APPROVE -> "Lock decision approved using current tenant policy configuration";
@@ -501,6 +688,21 @@ public final class LockService {
       String.valueOf(command.policyAmbiguous()), String.valueOf(command.rateSheetLockable()),
       String.valueOf(command.marketSuspended()), String.valueOf(command.investorEnabled()),
       String.valueOf(command.complianceBlocking()), String.valueOf(command.emitAuditEvent()),
+      String.valueOf(Objects.hashCode(command.sourceRefs()))
+    ));
+  }
+
+  private static String hash(LockModels.LockConfirmationCommand command) {
+    return hash(String.join("|",
+      command.tenantId().toString(), command.lockId(), command.actorId(),
+      String.valueOf(command.expectedVersion()), command.confirmationType().name(), command.lockNumber(),
+      String.valueOf(command.lockNumberOverrideAllowed()), LockModels.normalized(command.investorId()),
+      LockModels.normalized(command.investorConfirmationRef()), String.valueOf(command.lockPeriodDays()),
+      command.confirmedAt().toString(), command.expiresAt().toString(), command.requestedProductId(),
+      command.responseProductId(), command.requestedLoanId(), command.responseLoanId(),
+      command.requestedPolicyVersionId(), command.responsePolicyVersionId(),
+      String.valueOf(command.freshnessLockable()), String.valueOf(command.confirmationPolicyResolved()),
+      String.valueOf(command.investorResponseMatches()), command.complianceEvidenceRef(),
       String.valueOf(Objects.hashCode(command.sourceRefs()))
     ));
   }
@@ -552,6 +754,14 @@ public final class LockService {
     private final LockModels.FreshnessCheckResponse response;
 
     private FreshnessIdempotencyReplay(LockModels.FreshnessCheckResponse response) {
+      this.response = response;
+    }
+  }
+
+  private static final class ConfirmationIdempotencyReplay extends RuntimeException {
+    private final LockModels.LockConfirmationResponse response;
+
+    private ConfirmationIdempotencyReplay(LockModels.LockConfirmationResponse response) {
       this.response = response;
     }
   }

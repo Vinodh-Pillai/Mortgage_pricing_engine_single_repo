@@ -88,7 +88,7 @@ class RateFeedControllerAuthTest {
         UUID.fromString("00000000-0000-0000-0000-000000000201"),
         UUID.fromString("00000000-0000-0000-0000-000000000202"),
         UUID.fromString("00000000-0000-0000-0000-000000000203"),
-        "synthetic-source",
+        "MANUAL_UPLOAD",
         Instant.parse("2026-05-17T12:00:00Z"),
         "America/New_York",
         "RateSheet.csv",

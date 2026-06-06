@@ -1,18 +1,21 @@
 package com.wcpe.scenario.domain;
 
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.time.*;
 import java.util.*;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 @Service
 class BatchImportService {
   private static final Set<String> WRITER_ROLES = Set.of("SCENARIO_WRITER", "SCENARIO_ADMIN");
-  private static final Set<String> KNOWN_COLUMNS = Set.of("quote_intent", "channel", "scenario_name", "external_loan_id",
-      "source_system", "property_state", "property_zip", "property_type", "occupancy_type",
+  private static final Set<String> KNOWN_COLUMNS = Set.of("scenario_name", "external_loan_id", "source_system",
+      "property_state", "property_zip", "property_type", "occupancy_type",
       "units", "purchase_price", "credit_score", "credit_status", "credit_score_source",
       "monthly_income", "monthly_debt", "liquid_assets", "loan_amount", "term_months");
+  private static final Set<String> REQUIRED_COLUMNS = Set.of("scenario_name", "external_loan_id", "source_system");
   private static final Set<String> ALLOWED_MIME_TYPES = Set.of("text/csv", "application/csv");
   private static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
@@ -31,24 +34,34 @@ class BatchImportService {
   ImportJobResponse upload(MultipartFile file, String templateVersion, String channel, String quoteIntent,
       PartialSuccessPolicy policy, UUID tenantId, String idempotencyKey, String correlationId, String submittedBy) {
     requireRole("SCENARIO_WRITER", WRITER_ROLES);
+    requireIdempotencyKey(idempotencyKey);
     validateFileUpload(file);
-    validateTemplate(templateVersion);
-    Optional<Object> replay = scenarioRepository.idempotent(tenantId.toString() + ":import", idempotencyKey,
-        Map.of("file", file.getOriginalFilename(), "template", templateVersion, "channel", channel));
+    String fileHash = fileHash(file);
+    Map<String, Object> requestIdentity = Map.of("fileName", Optional.ofNullable(file.getOriginalFilename()).orElse(""),
+        "fileHash", fileHash, "templateVersion", templateVersion, "channel", channel, "quoteIntent", quoteIntent,
+        "partialSuccessPolicy", policy.name());
+    Optional<Object> replay = scenarioRepository.idempotent(tenantId.toString() + ":import", idempotencyKey, requestIdentity);
     if (replay.isPresent()) return (ImportJobResponse) replay.get();
-    String fileHash = Hashing.sha256(file.getOriginalFilename() + ":" + file.getSize() + ":" + System.currentTimeMillis());
-    // Parse CSV to count rows
     List<String[]> parsedRows = parseCsv(file);
-    validateHeaders(parsedRows.isEmpty() ? new String[0] : parsedRows.get(0));
+    String[] headers = parsedRows.isEmpty() ? new String[0] : parsedRows.get(0);
     int dataRows = Math.max(0, parsedRows.size() - 1);
     UUID jobId = importRepository.createJob(tenantId, file.getOriginalFilename(), fileHash,
         templateVersion, channel, quoteIntent, policy, submittedBy, dataRows);
-    // Process rows
-    processRows(tenantId, jobId, parsedRows.subList(1, parsedRows.size()), channel, quoteIntent, policy, correlationId);
-    ImportJobResponse response = new ImportJobResponse(jobId, ImportJobStatus.RUNNING, templateVersion, dataRows, Map.of(
+    if (!isTemplateSupported(templateVersion)) {
+      importRepository.markJobComplete(tenantId, jobId, ImportJobStatus.REJECTED_TEMPLATE_MISMATCH, Instant.now(), 0, 0);
+      emitImportCompleted(tenantId, jobId, ImportJobStatus.REJECTED_TEMPLATE_MISMATCH, 0, 0, correlationId, fileHash, templateVersion);
+      ImportJobResponse response = new ImportJobResponse(jobId, ImportJobStatus.REJECTED_TEMPLATE_MISMATCH, templateVersion, dataRows, Map.of(
+          "status", "/api/v1/tenants/" + tenantId + "/scenario-imports/" + jobId,
+          "ui", "/pricing/scenario-imports/" + jobId));
+      scenarioRepository.remember(tenantId.toString() + ":import", idempotencyKey, requestIdentity, response);
+      return response;
+    }
+    validateHeaders(headers);
+    ImportJobResponse response = new ImportJobResponse(jobId, ImportJobStatus.QUEUED, templateVersion, dataRows, Map.of(
         "status", "/api/v1/tenants/" + tenantId + "/scenario-imports/" + jobId,
         "ui", "/pricing/scenario-imports/" + jobId));
-    scenarioRepository.remember(tenantId.toString() + ":import", idempotencyKey, file.getOriginalFilename(), response);
+    processRows(tenantId, jobId, headers, parsedRows.subList(1, parsedRows.size()), channel, quoteIntent, policy, correlationId, fileHash, templateVersion);
+    scenarioRepository.remember(tenantId.toString() + ":import", idempotencyKey, requestIdentity, response);
     return response;
   }
 
@@ -112,6 +125,7 @@ class BatchImportService {
       }
     }
     fields.add(current.toString().trim());
+    for (int i = 0; i < fields.size(); i++) fields.set(i, neutralizeCsvInjection(fields.get(i)));
     return fields.toArray(String[]::new);
   }
 
@@ -119,11 +133,20 @@ class BatchImportService {
     return parseCsvLine(line);
   }
 
-  private void processRows(UUID tenantId, UUID jobId, List<String[]> rows, String channel, String quoteIntent,
-      PartialSuccessPolicy policy, String correlationId) {
+  private void processRows(UUID tenantId, UUID jobId, String[] headers, List<String[]> rows, String channel, String quoteIntent,
+      PartialSuccessPolicy policy, String correlationId, String fileHash, String templateVersion) {
     Instant startedAt = Instant.now();
     importRepository.startJob(tenantId, jobId, startedAt);
     int created = 0, failed = 0;
+
+    if (policy == PartialSuccessPolicy.REJECT_ALL_ON_ANY_ERROR) {
+      int prevalidationFailures = recordPrevalidationFailures(tenantId, jobId, headers, rows);
+      if (prevalidationFailures > 0) {
+        importRepository.markJobComplete(tenantId, jobId, ImportJobStatus.FAILED, Instant.now(), 0, prevalidationFailures);
+        emitImportCompleted(tenantId, jobId, ImportJobStatus.FAILED, 0, prevalidationFailures, correlationId, fileHash, templateVersion);
+        return;
+      }
+    }
 
     for (int i = 0; i < rows.size(); i++) {
       int rowNum = i + 2; // header is row 1, first data row is 2
@@ -132,17 +155,22 @@ class BatchImportService {
       String rowIdempotencyKey = jobId + ":row:" + rowNum;
 
       try {
-        CreateScenarioRequest request = mapRowToRequest(cols, channel, quoteIntent);
+        CreateScenarioRequest request = mapRowToRequest(headers, cols, channel, quoteIntent);
         if (request == null) throw new ScenarioException(org.springframework.http.HttpStatus.BAD_REQUEST, "INVALID_ROW", "Row " + rowNum + " could not be mapped.", List.of());
-        List<ValidationIssue> issues = validateRow(cols);
+        List<ValidationIssue> issues = validateRow(headers, cols);
         if (!issues.isEmpty() && issues.stream().anyMatch(iss -> iss.severity() == Severity.BLOCKING)) {
           if (policy == PartialSuccessPolicy.REJECT_ALL_ON_ANY_ERROR) {
-            importRepository.markJobComplete(tenantId, jobId, ImportJobStatus.FAILED, Instant.now(), 0, rowNum);
+            UUID rowId = importRepository.addRow(tenantId, jobId, rowNum, rowHash, ImportRowStatus.FAILED_VALIDATION, null, rowIdempotencyKey);
+            for (ValidationIssue issue : issues) {
+              importRepository.addError(tenantId, rowId, issue.fieldPath(), issue.code(), issue.message(), "");
+            }
+            importRepository.markJobComplete(tenantId, jobId, ImportJobStatus.FAILED, Instant.now(), 0, failed + 1);
+            emitImportCompleted(tenantId, jobId, ImportJobStatus.FAILED, 0, failed + 1, correlationId, fileHash, templateVersion);
             return;
           }
-          importRepository.addRow(tenantId, jobId, rowNum, rowHash, ImportRowStatus.FAILED_VALIDATION, null, rowIdempotencyKey);
+          UUID rowId = importRepository.addRow(tenantId, jobId, rowNum, rowHash, ImportRowStatus.FAILED_VALIDATION, null, rowIdempotencyKey);
           for (ValidationIssue issue : issues) {
-            importRepository.addError(tenantId, UUID.randomUUID(), issue.fieldPath(), issue.code(), issue.message(), "");
+            importRepository.addError(tenantId, rowId, issue.fieldPath(), issue.code(), issue.message(), "");
           }
           failed++;
           continue;
@@ -152,7 +180,11 @@ class BatchImportService {
           importRepository.addRow(tenantId, jobId, rowNum, rowHash, ImportRowStatus.CREATED, result.scenarioId(), rowIdempotencyKey);
           created++;
         } catch (ScenarioException ex) {
-          importRepository.addRow(tenantId, jobId, rowNum, rowHash, ImportRowStatus.SYSTEM_FAILED, null, rowIdempotencyKey);
+          ImportRowStatus status = ex.fieldErrors().isEmpty() ? ImportRowStatus.SYSTEM_FAILED : ImportRowStatus.FAILED_VALIDATION;
+          UUID rowId = importRepository.addRow(tenantId, jobId, rowNum, rowHash, status, null, rowIdempotencyKey);
+          for (ValidationIssue issue : ex.fieldErrors()) {
+            importRepository.addError(tenantId, rowId, issue.fieldPath(), issue.code(), issue.message(), "");
+          }
           failed++;
         }
       } catch (Exception ex) {
@@ -161,36 +193,32 @@ class BatchImportService {
       }
     }
 
-    ImportJobStatus finalStatus = failed > 0 && created > 0 ? ImportJobStatus.COMPLETED :
-        failed > 0 ? ImportJobStatus.FAILED : ImportJobStatus.COMPLETED;
+    ImportJobStatus finalStatus = failed > 0 && created == 0 ? ImportJobStatus.FAILED : ImportJobStatus.COMPLETED;
     importRepository.markJobComplete(tenantId, jobId, finalStatus, Instant.now(), created, failed);
+    emitImportCompleted(tenantId, jobId, finalStatus, created, failed, correlationId, fileHash, templateVersion);
   }
 
-  CreateScenarioRequest mapRowToRequest(String[] cols, String channel, String quoteIntent) {
-    if (cols == null || cols.length < 5) return null;
+  CreateScenarioRequest mapRowToRequest(String[] headers, String[] cols, String channel, String quoteIntent) {
+    if (headers == null || cols == null) return null;
+    Map<String, String> row = rowByHeader(headers, cols);
     Map<String, Object> facts = new LinkedHashMap<>();
     facts.put("channel", channel);
     facts.put("quoteIntent", quoteIntent);
-    int idx = 0;
-    facts.put("scenarioName", getSafe(cols, idx++));
-    facts.put("externalLoanId", getSafe(cols, idx++));
-    facts.put("sourceSystem", getSafe(cols, idx++) != null ? getSafe(cols, idx - 1) : "BATCH_IMPORT");
-    // Store remaining as structured facts
-    String[] colNames = {"property_state", "property_zip", "property_type", "occupancy_type",
-        "units", "purchase_price", "credit_score", "credit_status", "monthly_income", "monthly_debt",
-        "liquid_assets", "loan_amount", "term_months"};
-    for (int i = 0; i < colNames.length && idx < cols.length; i++, idx++) {
-      facts.put(colNames[i], getSafe(cols, idx));
+    for (String column : KNOWN_COLUMNS) {
+      if (row.containsKey(column)) facts.put(column, row.get(column));
     }
     return new CreateScenarioRequest(quoteIntent, channel,
-        facts.get("scenarioName") != null ? facts.get("scenarioName").toString() : null,
-        facts.get("externalLoanId") != null ? facts.get("externalLoanId").toString() : null,
-        "BATCH_IMPORT", facts);
+        row.get("scenario_name"), row.get("external_loan_id"),
+        row.get("source_system") != null ? row.get("source_system") : "BATCH_IMPORT", facts);
   }
 
-  private List<ValidationIssue> validateRow(String[] cols) {
+  private List<ValidationIssue> validateRow(String[] headers, String[] cols) {
     List<ValidationIssue> issues = new ArrayList<>();
-    if (cols == null || cols.length < 3) issues.add(new ValidationIssue("INSUFFICIENT_COLUMNS", "_row", Severity.BLOCKING, "Row has insufficient columns."));
+    if (cols == null) issues.add(new ValidationIssue("INSUFFICIENT_COLUMNS", "_row", Severity.BLOCKING, "Row has insufficient columns."));
+    Map<String, String> row = rowByHeader(headers, cols);
+    for (String required : REQUIRED_COLUMNS) {
+      if (row.get(required) == null || row.get(required).isBlank()) issues.add(new ValidationIssue("MISSING_REQUIRED_VALUE", required, Severity.BLOCKING, "Required CSV value is missing."));
+    }
     return issues;
   }
 
@@ -202,31 +230,78 @@ class BatchImportService {
     String contentType = file.getContentType();
     if (contentType != null && !ALLOWED_MIME_TYPES.contains(contentType.toLowerCase())) {
       String name = Optional.ofNullable(file.getOriginalFilename()).orElse("");
-      if (!name.endsWith(".csv") && !name.endsWith(". CSV")) throw new ScenarioException(
+      if (!name.toLowerCase(Locale.ROOT).endsWith(".csv")) throw new ScenarioException(
           org.springframework.http.HttpStatus.UNSUPPORTED_MEDIA_TYPE, "UNSUPPORTED_FILE_TYPE",
           "Only CSV files are accepted.", List.of());
     }
   }
 
   private void validateTemplate(String templateVersion) {
-    if (templateVersion == null || !templateVersion.equals("scenario-import-v1")) {
+    if (!isTemplateSupported(templateVersion)) {
       throw new ScenarioException(org.springframework.http.HttpStatus.UNSUPPORTED_MEDIA_TYPE,
           "TEMPLATE_MISMATCH", "Only template version scenario-import-v1 is supported.", List.of());
     }
   }
 
+  private boolean isTemplateSupported(String templateVersion) {
+    return "scenario-import-v1".equals(templateVersion);
+  }
+
   private void validateHeaders(String[] headers) {
-    if (headers == null || headers.length == 0) return;
-    // Basic header validation - ensure at least known columns exist
+    if (headers == null || headers.length == 0) throw new ScenarioException(HttpStatus.BAD_REQUEST,
+        "INVALID_CSV_HEADER", "CSV header row is required.", List.of());
+    Set<String> seen = new LinkedHashSet<>();
+    List<ValidationIssue> issues = new ArrayList<>();
+    for (String header : headers) {
+      String normalized = Optional.ofNullable(header).orElse("").trim().toLowerCase(Locale.ROOT);
+      if (normalized.isBlank()) continue;
+      seen.add(normalized);
+      if (!KNOWN_COLUMNS.contains(normalized)) issues.add(new ValidationIssue("UNKNOWN_COLUMN", normalized,
+          Severity.BLOCKING, "CSV column is not part of scenario-import-v1."));
+    }
+    for (String required : REQUIRED_COLUMNS) {
+      if (!seen.contains(required)) issues.add(new ValidationIssue("MISSING_REQUIRED_COLUMN", required,
+          Severity.BLOCKING, "CSV column is required by scenario-import-v1."));
+    }
+    if (!issues.isEmpty()) throw new ScenarioException(HttpStatus.BAD_REQUEST, "INVALID_CSV_HEADER",
+        "CSV header does not match scenario-import-v1.", issues);
   }
 
   private static String getSafe(String[] cols, int idx) {
     if (idx < cols.length && cols[idx] != null) {
       String val = cols[idx].trim();
-      if (isCsvInjection(val)) return val.replaceAll("^[=+\\-@`]", ""); // neutralize
+      if (isCsvInjection(val)) return neutralizeCsvInjection(val);
       return val;
     }
     return null;
+  }
+
+  private Map<String, String> rowByHeader(String[] headers, String[] cols) {
+    Map<String, String> row = new LinkedHashMap<>();
+    if (headers == null || cols == null) return row;
+    for (int i = 0; i < headers.length && i < cols.length; i++) {
+      String header = Optional.ofNullable(headers[i]).orElse("").trim().toLowerCase(Locale.ROOT);
+      if (!header.isBlank()) row.put(header, getSafe(cols, i));
+    }
+    return row;
+  }
+
+  private int recordPrevalidationFailures(UUID tenantId, UUID jobId, String[] headers, List<String[]> rows) {
+    int failed = 0;
+    for (int i = 0; i < rows.size(); i++) {
+      int rowNum = i + 2;
+      String[] cols = rows.get(i);
+      List<ValidationIssue> issues = validateRow(headers, cols);
+      if (issues.isEmpty()) continue;
+      String rowHash = Hashing.sha256(rowNum + ":" + String.join("|", cols));
+      String rowIdempotencyKey = jobId + ":row:" + rowNum;
+      UUID rowId = importRepository.addRow(tenantId, jobId, rowNum, rowHash, ImportRowStatus.FAILED_VALIDATION, null, rowIdempotencyKey);
+      for (ValidationIssue issue : issues) {
+        importRepository.addError(tenantId, rowId, issue.fieldPath(), issue.code(), issue.message(), "");
+      }
+      failed++;
+    }
+    return failed;
   }
 
   private static boolean isCsvInjection(String value) {
@@ -235,6 +310,45 @@ class BatchImportService {
       if (value.charAt(0) == prefix) return true;
     }
     return false;
+  }
+
+  private static String neutralizeCsvInjection(String value) {
+    if (value == null || value.isEmpty()) return value;
+    return isCsvInjection(value) ? value.substring(1) : value;
+  }
+
+  private static void requireIdempotencyKey(String key) {
+    if (key == null || key.isBlank()) {
+      throw new ScenarioException(HttpStatus.BAD_REQUEST, "IDEMPOTENCY_KEY_REQUIRED",
+          "Idempotency-Key is required for scenario import mutations.", List.of());
+    }
+  }
+
+  private static String fileHash(MultipartFile file) {
+    try (InputStream in = file.getInputStream()) {
+      return Hashing.sha256(new String(in.readAllBytes(), StandardCharsets.UTF_8));
+    } catch (IOException ex) {
+      throw new ScenarioException(HttpStatus.BAD_REQUEST, "CSV_PARSE_ERROR", "Failed to read CSV file.", List.of());
+    }
+  }
+
+  private void emitImportCompleted(UUID tenantId, UUID jobId, ImportJobStatus status, int created, int failed,
+      String correlationId, String fileHash, String templateVersion) {
+    String corr = correlationId == null || correlationId.isBlank() ? UUID.randomUUID().toString() : correlationId;
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("importJobId", jobId.toString());
+    payload.put("status", status.name());
+    payload.put("createdRows", created);
+    payload.put("failedRows", failed);
+    payload.put("templateVersion", templateVersion);
+    payload.put("fileHash", fileHash);
+    payload.put("createdScenarioIdsCount", created);
+    UUID auditPackageId = UUID.randomUUID();
+    payload.put("auditPackageId", auditPackageId.toString());
+    scenarioRepository.event(new EventRecord(UUID.randomUUID(), tenantId, jobId,
+        "ScenarioImportCompleted.v1", 1, corr, Instant.now(), payload));
+    scenarioRepository.audit(new AuditRecord(auditPackageId, tenantId, jobId,
+        "SCENARIO_IMPORT_COMPLETED", corr, Instant.now(), fileHash));
   }
 
   private static void requireRole(String required, Set<String> allowed) {

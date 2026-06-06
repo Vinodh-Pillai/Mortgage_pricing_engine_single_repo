@@ -1,0 +1,11 @@
+{
+  "basePriceBps": "10000.0000",
+  "totalAdjustmentBps": "25.2500",
+  "marginBps": "10.0000",
+  "roundingTrace": {
+    "mode": "HALF_UP",
+    "scale": 4,
+    "unroundedFinalPriceBps": "10035.2500",
+    "roundedFinalPriceBps": "10035.2500"
+  }
+}

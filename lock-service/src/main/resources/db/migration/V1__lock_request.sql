@@ -16,7 +16,7 @@ create table rate_locks (
   audit_ref varchar(128) not null,
   replay_ref varchar(128) not null,
   constraint rate_locks_tenant_lock unique (tenant_id, lock_id),
-  constraint rate_locks_status check (status in ('REQUESTED', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'CANCELLED'))
+  constraint rate_locks_status check (status in ('REQUESTED', 'PENDING_APPROVAL', 'APPROVED', 'PENDING_INVESTOR_CONFIRMATION', 'ACTIVE', 'INVESTOR_REJECTED', 'REJECTED', 'CANCELLED'))
 );
 
 create unique index rate_locks_tenant_idempotency_idx on rate_locks (tenant_id, idempotency_key);
@@ -62,3 +62,47 @@ create table lock_freshness_checks (
 
 create index lock_freshness_checks_tenant_quote_evaluated_idx on lock_freshness_checks (tenant_id, quote_id, evaluated_at desc);
 create index lock_freshness_checks_tenant_result_hash_idx on lock_freshness_checks (tenant_id, result_hash);
+
+create table lock_confirmations (
+  tenant_id uuid not null,
+  confirmation_id varchar(64) primary key,
+  lock_id varchar(64) not null,
+  confirmation_type varchar(40) not null,
+  lock_number varchar(128) not null,
+  investor_id varchar(128),
+  investor_confirmation_ref varchar(160),
+  status varchar(40) not null,
+  lock_version int not null,
+  confirmed_at timestamptz not null,
+  expires_at timestamptz not null,
+  confirmed_terms_hash varchar(128) not null,
+  idempotency_key varchar(160) not null,
+  correlation_id varchar(128) not null,
+  replay_ref varchar(128) not null,
+  constraint lock_confirmations_tenant_confirmation unique (tenant_id, confirmation_id),
+  constraint lock_confirmations_type check (confirmation_type in ('INTERNAL', 'INVESTOR_REQUEST', 'INVESTOR_CALLBACK')),
+  constraint lock_confirmations_status check (status in ('PENDING_INVESTOR_CONFIRMATION', 'ACTIVE', 'INVESTOR_REJECTED'))
+);
+
+create table investor_confirmation_attempts (
+  tenant_id uuid not null,
+  attempt_id varchar(64) primary key,
+  lock_id varchar(64) not null,
+  confirmation_id varchar(64) not null,
+  investor_id varchar(128) not null,
+  external_correlation_id varchar(160) not null,
+  payload_hash varchar(128) not null,
+  status varchar(40) not null,
+  created_at timestamptz not null,
+  updated_at timestamptz not null,
+  constraint investor_confirmation_attempts_tenant_attempt unique (tenant_id, attempt_id)
+);
+
+create unique index lock_confirmations_tenant_idempotency_idx on lock_confirmations (tenant_id, idempotency_key);
+create unique index lock_confirmations_active_lock_idx on lock_confirmations (tenant_id, lock_id)
+  where status = 'ACTIVE';
+create unique index lock_confirmations_tenant_number_idx on lock_confirmations (tenant_id, lock_number)
+  where status = 'ACTIVE';
+create unique index lock_confirmations_investor_ref_idx on lock_confirmations (tenant_id, investor_id, investor_confirmation_ref)
+  where status = 'ACTIVE' and investor_id is not null and investor_confirmation_ref is not null;
+create index lock_confirmations_tenant_status_confirmed_idx on lock_confirmations (tenant_id, status, confirmed_at desc);

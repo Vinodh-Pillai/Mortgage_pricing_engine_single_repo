@@ -1,0 +1,9 @@
+{
+  "story_id": "PII-05-S08",
+  "case": "conflicting-policy",
+  "policy_required": true,
+  "configured_floor": "101.00000000",
+  "configured_cap": "100.00000000",
+  "expected_error": "PRICE_BOUNDARY_CONFLICT",
+  "reason_code": "CONFLICTING_BOUNDS"
+}

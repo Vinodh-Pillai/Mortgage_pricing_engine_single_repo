@@ -1,6 +1,7 @@
 package com.wcpe.scenario.domain;
 
 import java.time.LocalDate;
+import java.util.List;
 
 final class BorrowerCreditValidator {
 

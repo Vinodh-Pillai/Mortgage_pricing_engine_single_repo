@@ -2,6 +2,7 @@ package com.wcpe.margin;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -193,6 +194,47 @@ class CompanyMarginPolicyServiceTest {
         () -> service.simulateBranchOverlay("tenant-a", created.policyId(), ref -> Optional.of(BigDecimal.ONE),
             new BigDecimal("99.600"), new BranchOverlayContext("tenant-a", "branch-other", "region-east", List.of(),
                 "hierarchy-v1", "cfg.enterpriseLimitBps", List.of("branch-child"), false, scope()))).getMessage());
+  }
+
+  @Test
+  void redactsMarginWaterfallForViewerWithoutSensitivePermission() {
+    CommandReceipt created = service.createDraft(command("tenant-a", "admin-a", "idem-12", "hash-12", version("v12")));
+
+    var internal = service.simulate("tenant-a", created.policyId(),
+        ref -> Optional.ofNullable(Map.of(
+            "cfg.companyMarginBps", new BigDecimal("25"),
+            "cfg.companyMarginMinBps", new BigDecimal("10"),
+            "cfg.companyMarginMaxBps", new BigDecimal("40")).get(ref)),
+        new BigDecimal("100.000"));
+
+    var redacted = service.applyVisibility("pricing.margin.view_public", internal);
+
+    assertEquals(internal.policyId(), redacted.policyId());
+    assertEquals(internal.versionId(), redacted.versionId());
+    assertEquals(internal.priceAfterMargin(), redacted.priceAfterMargin());
+    assertEquals("COMPANY_MARGIN", redacted.steps().get(0).stepType());
+    assertNull(redacted.steps().get(0).priceBeforeMargin());
+    assertNull(redacted.steps().get(0).priceAfterMargin());
+    assertNull(redacted.steps().get(0).marginPoints());
+    assertEquals(1, service.marginVisibilityRedactionTotal.get());
+  }
+
+  @Test
+  void allowsSensitiveMarginWaterfallWithPermission() {
+    CommandReceipt created = service.createDraft(command("tenant-a", "admin-a", "idem-13", "hash-13", version("v13")));
+    var internal = service.simulate("tenant-a", created.policyId(),
+        ref -> Optional.ofNullable(Map.of(
+            "cfg.companyMarginBps", new BigDecimal("25"),
+            "cfg.companyMarginMinBps", new BigDecimal("10"),
+            "cfg.companyMarginMaxBps", new BigDecimal("40")).get(ref)),
+        new BigDecimal("100.000"));
+
+    var visible = service.applyVisibility(CompanyMarginPolicyService.SENSITIVE_MARGIN_PERMISSION, internal);
+
+    assertEquals(new BigDecimal("100.000"), visible.steps().get(0).priceBeforeMargin());
+    assertEquals(new BigDecimal("99.750"), visible.steps().get(0).priceAfterMargin());
+    assertEquals(new BigDecimal("0.25"), visible.steps().get(0).marginPoints());
+    assertEquals(0, service.marginVisibilityRedactionTotal.get());
   }
 
   private CommandReceipt publish(CreatePolicyCommand command, String approver) {

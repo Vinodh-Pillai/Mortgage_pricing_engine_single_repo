@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "storyId": "PII-07-S10",
+  "fixtureId": "margin-comp-historical-version",
+  "tenant": "tenant-a",
+  "policyVersionRefs": {
+    "COMPANY": "company-policy:company-v1:cfg-company-v1",
+    "CHANNEL": "channel-policy:channel-v1:cfg-channel-v1",
+    "BRANCH_OVERLAY": "branch-policy:branch-v1:cfg-branch-v1",
+    "LO": "lo-plan:lo-v1:cfg-lo-v1",
+    "BROKER": "broker-plan:broker-v1:cfg-broker-v1",
+    "PROFITABILITY_FLOOR": "profitability-policy:floor-v1:cfg-floor-v1"
+  },
+  "notes": "Historical replay fixture binds to immutable symbolic version refs and hashes."
+}

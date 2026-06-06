@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+WRAPPER_JAR="$DIR/../scenario-service/gradle/wrapper/gradle-wrapper.jar"
+if [ ! -f "$WRAPPER_JAR" ]; then
+  echo "Gradle wrapper jar not found: $WRAPPER_JAR" >&2
+  exit 127
+fi
+exec java -Dorg.gradle.appname=gradlew -classpath "$WRAPPER_JAR" org.gradle.wrapper.GradleWrapperMain "$@"

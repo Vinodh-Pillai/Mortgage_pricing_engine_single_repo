@@ -18,7 +18,7 @@ create table if not exists scenario.submission_profile_version (
   status varchar(30) not null default 'DRAFT',
   effective_from_utc timestamptz not null,
   effective_to_utc timestamptz null,
-  checksum char(64) not null,
+  checksum varchar(80) not null,
   created_at timestamptz not null default now(),
   primary key (tenant_id, profile_version_id),
   foreign key (tenant_id, submission_profile_id) references scenario.submission_profile(tenant_id, submission_profile_id)
@@ -40,6 +40,7 @@ create table if not exists scenario.submission_profile_field_rule (
 
 create index if not exists spv_idx_channel_intent on scenario.submission_profile_version (tenant_id, status, effective_from_utc, effective_to_utc);
 create index if not exists sp_idx_channel on scenario.submission_profile (tenant_id, channel, quote_intent);
+create unique index if not exists spv_unique_profile_version on scenario.submission_profile_version (tenant_id, submission_profile_id, version_number);
 
 -- S09: Batch Scenario Import tables
 create table if not exists scenario.scenario_import_job (

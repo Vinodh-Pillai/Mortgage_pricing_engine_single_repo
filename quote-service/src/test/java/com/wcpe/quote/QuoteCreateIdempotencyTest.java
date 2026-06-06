@@ -14,7 +14,8 @@ class QuoteCreateIdempotencyTest {
         Quote replay = service.createQuote(QuoteTestSupport.request("idem-replay"));
 
         assertThat(replay.quoteId()).isEqualTo(first.quoteId());
-        assertThat(service.outboxEvents()).hasSize(2);
+        assertThat(service.outboxEvents()).extracting(OutboxEvent::eventType)
+            .containsExactly("quote.created.v1", "quote.ready.v1", "best_execution.ranked.v1");
         QuoteCreateRequest differentScenarioVersion = new QuoteCreateRequest(
             QuoteTestSupport.TENANT,
             QuoteTestSupport.SCENARIO,

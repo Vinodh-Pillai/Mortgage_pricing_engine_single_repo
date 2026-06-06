@@ -11,17 +11,20 @@ public final class LockModels {
   private LockModels() {}
 
   public enum RateLockStatus {
-    REQUESTED, PENDING_APPROVAL, APPROVED, REJECTED, CANCELLED;
+    REQUESTED, PENDING_APPROVAL, APPROVED, PENDING_INVESTOR_CONFIRMATION, ACTIVE, INVESTOR_REJECTED, REJECTED, CANCELLED;
 
     public Set<RateLockStatus> allowedNextStates() {
       return switch (this) {
         case REQUESTED, PENDING_APPROVAL -> Set.of(APPROVED, REJECTED, CANCELLED);
-        case APPROVED, REJECTED, CANCELLED -> Set.of();
+        case APPROVED -> Set.of(PENDING_INVESTOR_CONFIRMATION, ACTIVE, CANCELLED);
+        case PENDING_INVESTOR_CONFIRMATION -> Set.of(ACTIVE, INVESTOR_REJECTED, CANCELLED);
+        case ACTIVE, INVESTOR_REJECTED, REJECTED, CANCELLED -> Set.of();
       };
     }
 
     public boolean active() {
-      return this == REQUESTED || this == PENDING_APPROVAL || this == APPROVED;
+      return this == REQUESTED || this == PENDING_APPROVAL || this == APPROVED
+        || this == PENDING_INVESTOR_CONFIRMATION || this == ACTIVE;
     }
   }
 
@@ -35,6 +38,10 @@ public final class LockModels {
     public boolean lockable() {
       return this == FRESH || this == EXPIRES_SOON;
     }
+  }
+
+  public enum LockConfirmationType {
+    INTERNAL, INVESTOR_REQUEST, INVESTOR_CALLBACK
   }
 
   public record LockRequestCommand(
@@ -206,6 +213,71 @@ public final class LockModels {
     String correlationId
   ) {}
 
+  public record LockConfirmationCommand(
+    UUID tenantId,
+    String lockId,
+    String actorId,
+    int expectedVersion,
+    LockConfirmationType confirmationType,
+    String lockNumber,
+    boolean lockNumberOverrideAllowed,
+    String investorId,
+    String investorConfirmationRef,
+    int lockPeriodDays,
+    Instant confirmedAt,
+    Instant expiresAt,
+    String requestedProductId,
+    String responseProductId,
+    String requestedLoanId,
+    String responseLoanId,
+    String requestedPolicyVersionId,
+    String responsePolicyVersionId,
+    boolean permissionGranted,
+    boolean freshnessLockable,
+    boolean confirmationPolicyResolved,
+    boolean investorResponseMatches,
+    String complianceEvidenceRef,
+    String idempotencyKey,
+    String correlationId,
+    Map<String, String> sourceRefs
+  ) {}
+
+  public record LockConfirmationRecord(
+    UUID tenantId,
+    String confirmationId,
+    String lockId,
+    LockConfirmationType confirmationType,
+    String lockNumber,
+    String investorId,
+    String investorConfirmationRef,
+    RateLockStatus status,
+    int lockVersion,
+    Instant confirmedAt,
+    Instant expiresAt,
+    String confirmedTermsHash,
+    String idempotencyKey,
+    String correlationId,
+    String replayRef
+  ) {}
+
+  public record LockConfirmationResponse(
+    UUID tenantId,
+    String lockId,
+    String confirmationId,
+    RateLockStatus previousStatus,
+    RateLockStatus status,
+    int version,
+    String lockNumber,
+    String investorConfirmationRef,
+    String resultSummary,
+    List<String> validationMessages,
+    String auditRef,
+    String replayRef,
+    String correlationId,
+    String outboxEventType,
+    String confirmedTermsHash
+  ) {}
+
   public record LockEvent(
     String eventType,
     String eventVersion,
@@ -243,6 +315,9 @@ public final class LockModels {
     long freshnessCheckTotal,
     long freshnessPolicyResolutionFailureTotal,
     long freshnessExpiresSoonTotal,
+    long lockConfirmationTotal,
+    long pendingInvestorConfirmationTotal,
+    long investorMismatchTotal,
     long lockOutboxLagSeconds
   ) {}
 

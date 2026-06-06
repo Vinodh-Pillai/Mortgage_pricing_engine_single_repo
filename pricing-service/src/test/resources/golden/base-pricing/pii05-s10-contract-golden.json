@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "story_id": "PII-05-S10",
+  "fixture_label": "synthetic-test-only-base-pricing-contract",
+  "tenant_id": "tenant-pii05-s10",
+  "product_code": "SYNTH_CONVENTIONAL",
+  "investor_code": "SYNTH_INVESTOR",
+  "channel_code": "SYNTH_RETAIL",
+  "lock_period_days": 30,
+  "selected_note_rate": "6.12500",
+  "base_price": "100.00000",
+  "adjustments": [
+    {
+      "rule_id": "adj-synth-pii05-s10",
+      "version_ref": "adjustment-version-PII-05-S10",
+      "amount": "0.12500000",
+      "reason_code": "SYNTHETIC_CONTRACT_ADJUSTMENT"
+    }
+  ],
+  "rounded_final_price": "100.12500",
+  "version_refs": [
+    "adjustment-version-PII-05-S10",
+    "cap-floor-version-PII-05-S10",
+    "grid-version-PII-05-S10",
+    "rounding-policy-PII-05-S10"
+  ],
+  "expected_event_types": [
+    "pricing.base-rate-selected.v1",
+    "pricing.final-price-calculated.v1",
+    "pricing.version-graph-resolved.v1"
+  ]
+}

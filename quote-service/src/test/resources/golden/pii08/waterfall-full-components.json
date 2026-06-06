@@ -1,0 +1,29 @@
+{
+  "quoteId": "fixture-quote",
+  "optionId": "fixture-option",
+  "waterfallSections": [
+    {
+      "sectionId": "base-price",
+      "label": "Base price",
+      "lines": [
+        { "lineId": "base-price", "reasonCode": "BASE_PRICE", "sourceService": "pricing-service", "amountBps": "10000.0000" }
+      ]
+    },
+    {
+      "sectionId": "eligibility-adjustments",
+      "label": "Eligibility and LLPAs",
+      "lines": [
+        { "lineId": "total-adjustments", "reasonCode": "TOTAL_ADJUSTMENTS", "sourceService": "adjustment-service", "amountBps": "25.2500" }
+      ]
+    },
+    {
+      "sectionId": "margin-compensation",
+      "label": "Margins and compensation",
+      "lines": [
+        { "lineId": "margin", "reasonCode": "MARGIN", "sourceService": "margin-service", "amountBps": "10.0000" }
+      ]
+    }
+  ],
+  "finalPrice": "10035.2500",
+  "roundingTrace": { "mode": "HALF_UP", "scale": 4, "roundedFinalPriceBps": "10035.2500" }
+}

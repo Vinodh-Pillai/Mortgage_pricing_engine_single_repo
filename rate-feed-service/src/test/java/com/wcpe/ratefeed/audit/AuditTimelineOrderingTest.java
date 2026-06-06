@@ -84,11 +84,12 @@ class AuditTimelineOrderingTest {
     AtomicReference<String> sql = new AtomicReference<>();
     AtomicReference<Object[]> params = new AtomicReference<>();
 
-    when(jdbc.queryForObject(anyString(), eq(Long.class), any())).thenReturn(0L);
-    when(jdbc.query(anyString(), any(RowMapper.class), any()))
+    when(jdbc.queryForObject(anyString(), eq(Long.class), any(Object[].class))).thenReturn(0L);
+    when(jdbc.query(anyString(), any(RowMapper.class), any(Object[].class)))
         .thenAnswer(invocation -> {
           sql.set(invocation.getArgument(0));
-          params.set((Object[]) invocation.getArgument(2));
+          Object[] args = invocation.getArguments();
+          params.set(java.util.Arrays.copyOfRange(args, 2, args.length));
           return List.of();
         });
 

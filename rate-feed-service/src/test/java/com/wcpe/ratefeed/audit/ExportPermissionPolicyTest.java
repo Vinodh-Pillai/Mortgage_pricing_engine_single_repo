@@ -55,6 +55,19 @@ class ExportPermissionPolicyTest {
   }
 
   @Test
+  void export_requires_governed_reason_code() throws Exception {
+    AuditReportService service = serviceWithNoBatchEvents();
+    setRoles(RateFeedRoles.RATE_FEED_AUDIT_VIEW);
+
+    RateFeedException ex = assertThrows(RateFeedException.class,
+        () -> service.createExport(UUID.randomUUID(), UUID.randomUUID(),
+            new RateFeedModels.AuditExportRequest(RateFeedModels.AuditReportFormat.JSON, false, ""),
+            "actor-1", UUID.randomUUID().toString()));
+
+    assertEquals("POLICY_NOT_SATISFIED", ex.code());
+  }
+
+  @Test
   void export_denies_without_role() {
     AuditReportService service = serviceWithNoBatchEvents();
 

@@ -1,0 +1,41 @@
+{
+  "story_id": "PII-02-S01",
+  "taxonomy": [
+    {
+      "code": "CONVENTIONAL",
+      "name": "Conventional",
+      "level": "FAMILY",
+      "parentCode": null,
+      "agencyCategory": "CONVENTIONAL",
+      "effectiveStart": "2026-01-01T00:00:00Z",
+      "effectiveEnd": null,
+      "displayOrder": 10
+    },
+    {
+      "code": "CONVENTIONAL_FIXED",
+      "name": "Conventional Fixed Rate",
+      "level": "TYPE",
+      "parentCode": "CONVENTIONAL",
+      "agencyCategory": "CONVENTIONAL",
+      "effectiveStart": "2026-01-01T00:00:00Z",
+      "effectiveEnd": null,
+      "displayOrder": 20
+    },
+    {
+      "code": "CONVENTIONAL_ARM",
+      "name": "Conventional Adjustable Rate",
+      "level": "TYPE",
+      "parentCode": "CONVENTIONAL",
+      "agencyCategory": "CONVENTIONAL",
+      "effectiveStart": "2026-01-01T00:00:00Z",
+      "effectiveEnd": null,
+      "displayOrder": 30
+    }
+  ],
+  "resolve_request": {
+    "asOf": "2026-02-15T18:00:00Z",
+    "codes": ["CONVENTIONAL", "CONVENTIONAL_FIXED"]
+  },
+  "resolve_expected_status": "PUBLISHED",
+  "unknown_code_error": "PRODUCT_TAXONOMY_CODE_UNKNOWN"
+}

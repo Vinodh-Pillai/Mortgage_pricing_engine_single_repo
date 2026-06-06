@@ -1,0 +1,6 @@
+{
+  "eventType": "QuoteAdjustmentSummaryGenerated.v1",
+  "eventVersion": 1,
+  "sourceService": "adjustment-service",
+  "eventKey": "10000000-0000-0000-0000-000000000610:quote-PII-06-S10"
+}

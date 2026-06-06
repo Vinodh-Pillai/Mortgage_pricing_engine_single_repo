@@ -1,0 +1,10 @@
+{
+  "quoteId": "quote-PII-06-S10",
+  "scenarioId": "scenario-PII-06-S10",
+  "pricingRunId": "pricing-run-PII-06-S10",
+  "status": "READY",
+  "totalPoints": "0.125000",
+  "totalBps": "12.5000",
+  "borrowerTotal": "125.10",
+  "categories": ["LLPA", "BORROWER"]
+}

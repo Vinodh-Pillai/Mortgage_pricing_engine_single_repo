@@ -100,45 +100,45 @@ public class Scenario {
     requireVersion(request.scenarioVersion());
     List<BorrowerCredit> borrowers = Optional.ofNullable(request.borrowers()).orElse(List.of());
     List<ValidationIssue> issues = new ArrayList<>();
-    long primaryCount = borrowers.stream().filter(b -> "PRIMARY".equals(b.borrowerRole())).count();
     if (borrowers.isEmpty()) issues.add(issue("MISSING_BORROWER", "borrowers", Severity.BLOCKING, "At least one borrower is required."));
-    if (primaryCount != 1) issues.add(issue("DUPLICATE_PRIMARY_BORROWER", "borrowers.borrowerRole", Severity.BLOCKING, "Exactly one primary borrower is required."));
-    List<Integer> scores = new ArrayList<>();
+    if (!borrowers.isEmpty()) BorrowerCreditValidator.validateExactlyOnePrimary(borrowers);
     for (int i = 0; i < borrowers.size(); i++) {
       BorrowerCredit b = borrowers.get(i);
-      if (b.creditScore() != null && (b.creditScore() < 300 || b.creditScore() > 850)) issues.add(issue("CREDIT_SCORE_OUT_OF_RANGE", "borrowers[" + i + "].creditScore", Severity.BLOCKING, "Credit score must be 300..850."));
+      BorrowerCreditValidator.validateScoreRange(b.creditScore());
+      BorrowerCreditValidator.validateScoreDate(b.creditScoreDate());
       if ("AVAILABLE".equals(b.creditStatus()) && b.creditScore() == null) issues.add(issue("MISSING_CREDIT_SCORE", "borrowers[" + i + "].creditScore", Severity.BLOCKING, "Available credit requires a score."));
-      if (b.creditScoreDate() != null && b.creditScoreDate().isAfter(LocalDate.now())) issues.add(issue("FUTURE_CREDIT_SCORE_DATE", "borrowers[" + i + "].creditScoreDate", Severity.BLOCKING, "Credit score date cannot be in the future."));
       if (b.creditScoreDate() != null && b.creditScoreDate().isBefore(LocalDate.now().minusDays(120))) issues.add(issue("STALE_CREDIT_SCORE", "borrowers[" + i + "].creditScoreDate", Severity.WARNING, "Credit score is older than 120 days."));
-      if (b.creditScore() != null) scores.add(b.creditScore());
     }
+    RepresentativeCreditScorePolicy.RepresentativeCreditResult representativeCredit = RepresentativeCreditScorePolicy.derive(borrowers);
     rawFacts.put("borrowers", borrowers);
-    if (!scores.isEmpty()) derivedFields.put("representativeCreditScore", Collections.min(scores));
+    if (representativeCredit.score() != null) derivedFields.put("representativeCreditScore", representativeCredit.score());
+    else derivedFields.remove("representativeCreditScore");
+    derivedFields.put("representativeCreditScoreRule", representativeCredit.rule());
+    derivedFields.put("representativeCreditTrace", representativeCredit.trace());
     replaceSectionIssues("BORROWER_CREDIT", issues);
     completeWhenNoBlocking("BORROWER_CREDIT", issues);
     bump("UPDATE_BORROWER_CREDIT");
   }
 
-  public void updateLoan(LoanStructureRequest r) {
+  public LoanMetricResult updateLoan(LoanStructureRequest r) {
     requireVersion(r.scenarioVersion());
-    List<ValidationIssue> issues = new ArrayList<>();
-    if (nonPositive(r.loanAmount())) issues.add(issue("INVALID_LOAN_AMOUNT", "loanAmount", Severity.BLOCKING, "Loan amount must be positive."));
-    if (nonPositive(r.temporaryPropertyValueForLtv())) issues.add(issue("MISSING_LTV_DENOMINATOR", "temporaryPropertyValueForLtv", Severity.BLOCKING, "Property value is required for ratios."));
-    if (!Set.of(180, 240, 360).contains(r.termMonths())) issues.add(issue("TERM_NOT_ENABLED", "termMonths", Severity.BLOCKING, "Unsupported term."));
-    if (!Set.of(15, 30, 45, 60).contains(r.requestedLockPeriodDays())) issues.add(issue("LOCK_PERIOD_NOT_ENABLED", "requestedLockPeriodDays", Severity.BLOCKING, "Unsupported lock period."));
+    LoanMetricResult result = new LoanMetricCalculator().calculate(r);
+    List<ValidationIssue> issues = result.issues();
     rawFacts.put("loanStructure", r);
     if (issues.stream().noneMatch(i -> i.severity() == Severity.BLOCKING)) {
-      BigDecimal denominator = r.temporaryPropertyValueForLtv();
-      BigDecimal sub = defaultZero(r.subordinateFinancingAmount());
-      BigDecimal drawn = defaultZero(r.helocDrawnAmount());
-      BigDecimal limit = defaultZero(r.helocLimitAmount());
-      putRatio("ltv", r.loanAmount().divide(denominator, 5, RoundingMode.HALF_UP));
-      putRatio("cltv", r.loanAmount().add(sub).add(drawn).divide(denominator, 5, RoundingMode.HALF_UP));
-      putRatio("hcltv", r.loanAmount().add(sub).add(limit).divide(denominator, 5, RoundingMode.HALF_UP));
+      for (LoanMetric metric : result.metrics()) putRatio(metric.metricCode().toLowerCase(Locale.ROOT), metric.ratioValue());
+      derivedFields.put("loanTermFamily", r.termMonths() >= 300 ? "THIRTY_YEAR" : r.termMonths() >= 240 ? "TWENTY_YEAR" : "FIFTEEN_YEAR");
+      derivedFields.put("loanMetricTrace", result.metrics().stream().map(m -> Map.of(
+          "metricCode", m.metricCode(),
+          "numeratorAmount", m.numeratorAmount(),
+          "denominatorAmount", m.denominatorAmount(),
+          "roundingRule", m.roundingRule(),
+          "qualityStatus", m.qualityStatus())).toList());
     }
     replaceSectionIssues("LOAN_STRUCTURE", issues);
     completeWhenNoBlocking("LOAN_STRUCTURE", issues);
     bump("UPDATE_LOAN_STRUCTURE");
+    return result;
   }
 
   public void updateProperty(PropertyRequest r) {
@@ -197,10 +197,27 @@ public class Scenario {
     bump("SUBMIT_SCENARIO");
   }
 
+  public void applySubmissionProfileIssues(List<ValidationIssue> profileIssues) {
+    validationIssues.removeIf(i -> i.code().equals("SUBMISSION_PROFILE_NOT_FOUND") || i.code().equals("FIELD_REQUIRED_BY_PROFILE"));
+    if (profileIssues != null) validationIssues.addAll(profileIssues);
+    if (validationIssues.stream().anyMatch(i -> i.severity() == Severity.BLOCKING)) status = ScenarioStatus.DRAFT_INCOMPLETE;
+    refreshReplayHash();
+  }
+
+  public Map<String, Object> scenarioFacts() {
+    Map<String, Object> facts = new LinkedHashMap<>(rawFacts);
+    facts.put("quoteIntent", quoteIntent);
+    facts.put("channel", channel);
+    facts.put("scenarioName", scenarioName);
+    facts.put("externalLoanId", externalLoanId);
+    facts.put("sourceSystem", sourceSystem);
+    return facts;
+  }
+
   private void validateDraft() {
     validationIssues.clear();
-    if (!Set.of("PURCHASE", "RATE_TERM_REFI", "CASH_OUT_REFI", "SCENARIO_ANALYSIS").contains(quoteIntent)) validationIssues.add(issue("REQUIRED_FIELD_MISSING", "quoteIntent", Severity.BLOCKING, "Valid quote intent is required."));
-    if (!Set.of("RETAIL", "WHOLESALE", "CORRESPONDENT", "CONSUMER_DIRECT", "PARTNER_API").contains(channel)) validationIssues.add(issue("CHANNEL_NOT_ENABLED", "channel", Severity.BLOCKING, "Channel is not enabled."));
+    if (quoteIntent == null || quoteIntent.isBlank()) validationIssues.add(issue("REQUIRED_FIELD_MISSING", "quoteIntent", Severity.BLOCKING, "Quote intent is required."));
+    if (channel == null || channel.isBlank()) validationIssues.add(issue("REQUIRED_FIELD_MISSING", "channel", Severity.BLOCKING, "Channel is required."));
     if (sourceSystem == null || sourceSystem.isBlank()) validationIssues.add(issue("REQUIRED_FIELD_MISSING", "sourceSystem", Severity.BLOCKING, "Source system is required."));
   }
 
@@ -221,6 +238,10 @@ public class Scenario {
     versions.add(new VersionManifest(version, reason, replayHash, Instant.now()));
   }
 
+  private void refreshReplayHash() {
+    replayHash = Hashing.sha256(tenantId + ":" + scenarioId + ":" + version + ":" + rawFacts + ":" + normalizedFacts + ":" + derivedFields + ":" + validationIssues);
+  }
+
   private void requireVersion(int expected) {
     if (expected != version) throw new ScenarioException(HttpStatus.CONFLICT, "SCENARIO_VERSION_CONFLICT", "Expected version " + version + " but got " + expected + ".", List.of());
   }
@@ -238,6 +259,7 @@ public class Scenario {
     derivedFields.put(name, value.setScale(5, RoundingMode.HALF_UP));
     derivedFields.put(name + "Bps", value.multiply(new BigDecimal("10000")).setScale(4, RoundingMode.HALF_UP));
   }
+
 
   private static BigDecimal defaultZero(BigDecimal value) { return value == null ? BigDecimal.ZERO : value; }
   private static boolean nonPositive(BigDecimal value) { return value == null || value.compareTo(BigDecimal.ZERO) <= 0; }

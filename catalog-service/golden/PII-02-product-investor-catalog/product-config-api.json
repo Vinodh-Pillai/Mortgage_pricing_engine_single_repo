@@ -1,0 +1,31 @@
+{
+  "request": {
+    "asOf": "2026-04-15T14:30:00Z",
+    "channelCode": "RETAIL",
+    "productFamilyCode": "CONVENTIONAL",
+    "stateCode": "TX",
+    "countyFips": "48201",
+    "includeInactive": false
+  },
+  "expectedResponseShape": {
+    "snapshotId": "uuid",
+    "snapshotHash": "sha256:<64hex>",
+    "tenantId": "uuid",
+    "asOf": "2026-04-15T14:30:00Z",
+    "channel": { "code": "RETAIL", "versionId": "uuid-or-null" },
+    "productComponents": [
+      { "productCode": "CONV30", "productVersionId": "uuid", "investorCodes": ["FNMA"], "termProfileCodes": [] }
+    ],
+    "investorComponents": [
+      { "code": "FNMA", "versionId": "uuid", "requiresMiValidation": false }
+    ],
+    "referenceVersions": {
+      "loanPurposes": ["uuid"],
+      "propertyTypes": [],
+      "occupancyTypes": [],
+      "termAmortization": [],
+      "markets": ["uuid"]
+    },
+    "warnings": []
+  }
+}

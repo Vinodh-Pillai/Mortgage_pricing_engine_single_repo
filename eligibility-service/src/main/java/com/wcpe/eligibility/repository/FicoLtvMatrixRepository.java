@@ -22,7 +22,7 @@ public class FicoLtvMatrixRepository {
 
     public FicoLtvMatrixConfig resolve(UUID tenantId, String productFamily, String investorCode,
                                         String channel, String loanPurpose, String occupancyType,
-                                        Date effectiveDate) {
+                                        String propertyType, Date effectiveDate) {
         String effectiveDateStr = effectiveDate != null ? effectiveDate.toString() : LocalDate.now().toString();
 
         UUID matrixSetId = jdbc.queryForObject(
@@ -69,7 +69,7 @@ public class FicoLtvMatrixRepository {
                 rs.getString("reason_code"),
                 rs.getString("row_hash")
             ),
-            tenantId, matrixSetId, loanPurpose, occupancyType, null
+            tenantId, matrixSetId, loanPurpose, occupancyType, propertyType
         );
 
         String status = jdbc.queryForObject(

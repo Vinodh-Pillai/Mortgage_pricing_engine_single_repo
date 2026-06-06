@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "story_id": "PII-09-S05",
+  "export_type": "pdf-summary-contract",
+  "required_sections": [
+    "candidate product refs",
+    "investor refs",
+    "baseline product",
+    "ineligible reason code dictionary",
+    "product and dependency versions",
+    "pinned rows first when present"
+  ],
+  "borrower_facing_disclaimer": "disabled_until_compliance_template_available",
+  "notes": "Export contract is represented as JSON because PDF rendering/UI is outside the acquired scenario-analysis-service lock scope."
+}

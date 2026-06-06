@@ -207,6 +207,22 @@ class UploadSessionPolicyTest {
   }
 
   @Test
+  void createSessionRejectsUnknownSourceType() {
+    RequestContext.roles("RATE_FEED_UPLOAD");
+    when(repository.idempotent(any(), any(), any(), eq(UploadSessionResponse.class), any())).thenAnswer(invocation -> {
+      @SuppressWarnings("unchecked") Supplier<UploadSessionResponse> command = invocation.getArgument(4);
+      return command.get();
+    });
+
+    assertThatThrownBy(() -> service.createSession(tenant(), validRequest("Rate.csv", "text/csv", "UNAPPROVED_SOURCE", null), "key-src-invalid", "actor", "corr"))
+        .isInstanceOf(RateFeedException.class)
+        .satisfies(ex -> {
+          RateFeedException e = (RateFeedException) ex;
+          assertThat(e.code()).isEqualTo("INVALID_SOURCE_TYPE");
+        });
+  }
+
+  @Test
   void createSessionRequiresPositiveContentLength() {
     RequestContext.roles("RATE_FEED_UPLOAD");
     when(repository.idempotent(any(), any(), any(), eq(UploadSessionResponse.class), any())).thenAnswer(invocation -> {

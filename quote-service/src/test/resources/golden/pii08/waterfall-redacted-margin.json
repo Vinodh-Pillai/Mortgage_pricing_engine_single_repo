@@ -1,0 +1,14 @@
+{
+  "quoteId": "fixture-quote",
+  "optionId": "fixture-option",
+  "hiddenFields": ["margin"],
+  "waterfallSections": [
+    {
+      "sectionId": "margin-compensation",
+      "label": "Margins and compensation",
+      "lines": [
+        { "lineId": "margin", "reasonCode": "MARGIN", "sourceService": "margin-service", "amountBps": null, "visibility": "MASKED" }
+      ]
+    }
+  ]
+}

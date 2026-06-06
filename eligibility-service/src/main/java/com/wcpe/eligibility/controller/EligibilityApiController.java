@@ -213,14 +213,24 @@ public class EligibilityApiController {
     @PostMapping("/eligibility/evaluations/fico-ltv-matrix")
     ResponseEntity<FicoLtvEvaluationResult> evaluateFicoLtvMatrix(
             @PathVariable UUID tenantId,
-            @RequestBody FicoLtvMatrixEvaluationRequest request) {
+            @RequestBody FicoLtvMatrixEvaluationRequest request,
+            @RequestHeader(value = "X-Correlation-Id", required = false) String correlationId) {
 
-        if (request.facts() == null || request.facts().representativeFico() == null) {
-            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
-                .body(null);
+        if (request == null || request.facts() == null || request.facts().representativeFico() == null) {
+            FicoLtvEvaluationResult result = ficoLtvMatrixService.evaluate(tenantId, request, correlationId);
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(result);
         }
 
-        FicoLtvEvaluationResult result = ficoLtvMatrixService.evaluate(request);
+        FicoLtvEvaluationResult result = ficoLtvMatrixService.evaluate(tenantId, request, correlationId);
+        if ("MATRIX_NOT_CONFIGURED".equals(result.decision().reasonCode())) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(result);
+        }
+        if ("MATRIX_GAP_OR_OVERLAP".equals(result.decision().reasonCode())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(result);
+        }
+        if ("INVALID_LTV".equals(result.decision().reasonCode()) || "INVALID_FICO".equals(result.decision().reasonCode())) {
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(result);
+        }
         return ResponseEntity.ok(result);
     }
 
@@ -269,6 +279,12 @@ public class EligibilityApiController {
         }
 
         OccupancyPurposeEvaluationResult result = occupancyPurposeRuleService.evaluate(tenantId, request);
+        if ("OVERLAPPING_RULE_VERSION".equals(result.decision().reasonCode())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(result);
+        }
+        if ("OCCUPANCY_PURPOSE_RULE_NOT_CONFIGURED".equals(result.decision().reasonCode())) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(result);
+        }
         return ResponseEntity.ok(result);
     }
 

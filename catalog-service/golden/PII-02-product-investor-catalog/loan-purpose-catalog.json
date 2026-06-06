@@ -1,0 +1,11 @@
+{
+  "story_id": "PII-02-S08",
+  "catalog": "loan-purpose-catalog",
+  "effectiveStart": "2026-01-01T00:00:00Z",
+  "purposes": [
+    { "purposeCode": "PURCHASE", "displayName": "Purchase", "category": "PURCHASE", "isRefinance": false, "isCashOut": false, "requiresExistingLien": false, "eligibleForConventional": true, "agencyAliases": ["PUR"] },
+    { "purposeCode": "RATE_TERM_REFI", "displayName": "Rate/Term Refinance", "category": "REFINANCE", "isRefinance": true, "isCashOut": false, "requiresExistingLien": true, "eligibleForConventional": true, "agencyAliases": ["RATE_TERM_REFINANCE"] },
+    { "purposeCode": "CASH_OUT_REFI", "displayName": "Cash-Out Refinance", "category": "REFINANCE", "isRefinance": true, "isCashOut": true, "requiresExistingLien": true, "eligibleForConventional": true, "agencyAliases": ["CASH_OUT_REFINANCE"] },
+    { "purposeCode": "CONSTRUCTION_TO_PERMANENT", "displayName": "Construction-to-Permanent", "category": "CONSTRUCTION", "isRefinance": true, "isCashOut": false, "requiresExistingLien": true, "eligibleForConventional": false, "agencyAliases": ["CONSTRUCTION_PERM"] }
+  ]
+}

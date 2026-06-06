@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "storyId": "PII-07-S10",
+  "fixtureId": "margin-comp-full-stack-pass",
+  "tenant": "tenant-a",
+  "mode": "EXACT_MARGIN_COMP_MANIFEST",
+  "seed": "PII-07-S10-governed-symbolic-fixture",
+  "policyRefs": [
+    "company-policy:company-v1:cfg-company-v1",
+    "channel-policy:channel-v1:cfg-channel-v1",
+    "branch-policy:branch-v1:cfg-branch-v1",
+    "lo-plan:lo-v1:cfg-lo-v1",
+    "broker-plan:broker-v1:cfg-broker-v1",
+    "profitability-policy:floor-v1:cfg-floor-v1"
+  ],
+  "notes": "Symbolic governed fixture references only; no margin or compensation amounts are hard-coded."
+}

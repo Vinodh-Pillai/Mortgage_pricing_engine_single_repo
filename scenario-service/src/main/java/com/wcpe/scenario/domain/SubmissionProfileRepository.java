@@ -62,7 +62,7 @@ class SubmissionProfileRepository {
 
     checkOverlappingPublished(tenantId, profile.channel(), profile.quoteIntent(), effectiveFromUtc, effectiveToUtc);
 
-    int newVersion = active.versionNumber() + 1;
+    int newVersion = SubmissionProfileVersionPolicy.nextPublishedVersionNumber(active);
     UUID newVersionId = UUID.randomUUID();
     // Clone rules from active version
     List<SubmissionProfileFieldRule> rules = findRules(tenantId, active.versionId());
@@ -123,8 +123,8 @@ class SubmissionProfileRepository {
             'message', fr.message, 'remediationHint', fr.remediation_hint)) as rules_json,
           sv.effective_from_utc
         from scenario.submission_profile p
-        join scenario.submission_profile_version sv on sv.submission_profile_id = p.submission_profile_id
-        join scenario.submission_profile_field_rule fr on fr.profile_version_id = sv.profile_version_id
+        join scenario.submission_profile_version sv on sv.tenant_id = p.tenant_id and sv.submission_profile_id = p.submission_profile_id
+        join scenario.submission_profile_field_rule fr on fr.tenant_id = sv.tenant_id and fr.profile_version_id = sv.profile_version_id
         where p.tenant_id = ? and p.channel = ? and p.quote_intent = ?
           and sv.status = 'PUBLISHED'
           and sv.effective_from_utc <= ?
@@ -165,7 +165,7 @@ class SubmissionProfileRepository {
               'effectiveToUtc', sv.effective_to_utc, 'checksum', sv.checksum, 'createdAtUtc', sv.created_at))
             filter (where sv.profile_version_id is not null), '[]'::jsonb)::text as versions_json
           from scenario.submission_profile p
-          left join scenario.submission_profile_version sv on sv.submission_profile_id = p.submission_profile_id
+          left join scenario.submission_profile_version sv on sv.tenant_id = p.tenant_id and sv.submission_profile_id = p.submission_profile_id
           where p.tenant_id = ? and p.submission_profile_id = ?
           group by p.submission_profile_id, p.channel, p.quote_intent, p.profile_name
           """, (rs, row) -> {
@@ -181,7 +181,7 @@ class SubmissionProfileRepository {
   private List<SubmissionProfileVersion> findVersions(UUID tenantId, UUID profileId) {
     return jdbc.query("""
         select profile_version_id, submission_profile_id, version_number, status, effective_from_utc, effective_to_utc, checksum, created_at
-        from scenario.submission_profile_version where submission_profile_id = ?
+        from scenario.submission_profile_version where tenant_id = ? and submission_profile_id = ?
         order by version_number
         """, (rs, row) -> new SubmissionProfileVersion(
         (UUID) rs.getObject("profile_version_id"), (UUID) rs.getObject("submission_profile_id"),
@@ -189,33 +189,35 @@ class SubmissionProfileRepository {
         rs.getTimestamp("effective_from_utc").toInstant(),
         rs.getTimestamp("effective_to_utc") != null ? rs.getTimestamp("effective_to_utc").toInstant() : null,
         rs.getString("checksum"), new ArrayList<>(),
-        rs.getTimestamp("created_at").toInstant()), tenantId);
+        rs.getTimestamp("created_at").toInstant()), tenantId, profileId);
   }
 
   private List<SubmissionProfileFieldRule> findRules(UUID tenantId, UUID versionId) {
     return jdbc.query("""
         select section, field_path, required_when_expression, severity, message, remediation_hint
-        from scenario.submission_profile_field_rule where profile_version_id = ?
+        from scenario.submission_profile_field_rule where tenant_id = ? and profile_version_id = ?
         order by section, field_path
         """, (rs, row) -> new SubmissionProfileFieldRule(
         rs.getString("section"), rs.getString("field_path"), rs.getString("required_when_expression"),
-        FieldSeverity.valueOf(rs.getString("severity")), rs.getString("message"), rs.getString("remediation_hint")), versionId);
+        FieldSeverity.valueOf(rs.getString("severity")), rs.getString("message"), rs.getString("remediation_hint")), tenantId, versionId);
   }
 
   private void checkOverlappingPublished(UUID tenantId, String channel, String quoteIntent, Instant effectiveFromUtc, Instant effectiveToUtc) {
-    Long count = jdbc.queryForObject("""
-        select count(*) from scenario.submission_profile p
-        join scenario.submission_profile_version sv on sv.submission_profile_id = p.submission_profile_id
+    List<Map<String, Object>> existingPublishedWindows = jdbc.queryForList("""
+        select sv.effective_from_utc, sv.effective_to_utc from scenario.submission_profile p
+        join scenario.submission_profile_version sv on sv.tenant_id = p.tenant_id and sv.submission_profile_id = p.submission_profile_id
         where p.tenant_id = ? and p.channel = ? and p.quote_intent = ?
           and sv.status = 'PUBLISHED'
-          and sv.effective_from_utc < ?
-          and (? is null or sv.effective_to_utc is null or ? > sv.effective_to_utc or (sv.effective_to_utc is not null and sv.effective_to_utc > ?))
-        """, Long.class, tenantId, channel, quoteIntent, Timestamp.from(effectiveFromUtc),
-        Timestamp.from(effectiveToUtc != null ? effectiveToUtc : Instant.MAX),
-        effectiveToUtc != null ? Timestamp.from(effectiveToUtc) : null,
-        effectiveToUtc != null ? Timestamp.from(effectiveToUtc) : null);
-    if (count > 0) throw new ScenarioException(org.springframework.http.HttpStatus.CONFLICT, "OVERLAPPING_PUBLISHED_PROFILE",
-        "Overlapping published profile versions exist for this channel/intent combination.", List.of());
+        """, tenantId, channel, quoteIntent);
+    for (Map<String, Object> row : existingPublishedWindows) {
+      Instant existingFrom = ((Timestamp) row.get("effective_from_utc")).toInstant();
+      Timestamp existingToTimestamp = (Timestamp) row.get("effective_to_utc");
+      Instant existingTo = existingToTimestamp != null ? existingToTimestamp.toInstant() : null;
+      if (SubmissionProfileVersionPolicy.windowsOverlap(existingFrom, existingTo, effectiveFromUtc, effectiveToUtc)) {
+        throw new ScenarioException(org.springframework.http.HttpStatus.CONFLICT, "OVERLAPPING_PUBLISHED_PROFILE",
+            "Overlapping published profile versions exist for this channel/intent combination.", List.of());
+      }
+    }
   }
 
   private int nextVersion(UUID tenantId, String channel, String quoteIntent) {

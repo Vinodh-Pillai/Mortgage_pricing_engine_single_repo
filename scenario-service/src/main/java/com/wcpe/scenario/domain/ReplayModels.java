@@ -15,3 +15,5 @@ record ReplayAccessLogEntry(UUID accessId, UUID tenantId, UUID scenarioId, int s
     String redactionMode, boolean exportFlag, String accessReasonCode, String correlationId, Instant accessedAtUtc) {}
 
 record ReplayHashVerification(boolean verified, String expectedHash, String actualHash, List<String> warnings) {}
+
+record ScenarioReplayAccessRequest(String version, String redaction, boolean export, String accessReasonCode, String correlationId) {}

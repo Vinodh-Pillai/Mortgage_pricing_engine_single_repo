@@ -1,0 +1,10 @@
+{
+  "story_id": "PII-05-S08",
+  "case": "block-action",
+  "policy_required": true,
+  "input_price": "110.25000000",
+  "configured_cap": "101.00000000",
+  "action": "BLOCK",
+  "expected_error": "CAP_FLOOR_BLOCKED",
+  "reason_code": "CONFIGURED_MAX_PRICE_EXCEEDED"
+}

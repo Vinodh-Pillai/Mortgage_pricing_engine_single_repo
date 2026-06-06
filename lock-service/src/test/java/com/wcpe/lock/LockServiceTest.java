@@ -352,6 +352,132 @@ class LockServiceTest {
     assertEquals(1, service.metrics().freshnessExpiresSoonTotal());
   }
 
+  @Test
+  void ConfirmApprovedLockCreatesActiveTermsTest() {
+    LockModels.LockRequestResponse request = service.requestLock(validCommand("REQ-CONF-001", "IDEMP-CONF-REQ-001", TENANT_A));
+    LockModels.LockDecisionResponse approval = service.decideLock(decisionCommand(
+      request.lockId(), LockModels.LockDecisionType.APPROVE, request.version(), "IDEMP-CONF-DEC-001", TENANT_A
+    ));
+
+    LockModels.LockConfirmationResponse confirmation = service.confirmLock(confirmationCommand(
+      approval.lockId(), approval.version(), "IDEMP-CONF-001", TENANT_A, LockModels.LockConfirmationType.INTERNAL, true
+    ));
+
+    assertEquals(LockModels.RateLockStatus.APPROVED, confirmation.previousStatus());
+    assertEquals(LockModels.RateLockStatus.ACTIVE, confirmation.status());
+    assertEquals(3, confirmation.version());
+    assertEquals("LOCK-PII10-001", confirmation.lockNumber());
+    assertEquals("lock.confirmed.v1", confirmation.outboxEventType());
+    assertEquals("LOCK_CONFIRMED", service.auditSnapshots().get(2).action());
+    assertEquals("lock.confirmed.v1", service.outboxEvents().get(2).eventType());
+    assertTrue(confirmation.replayRef().startsWith("REPLAY-LOCK-CONFIRMATION-"));
+    assertEquals(1, service.committedConfirmationCount());
+    assertEquals(1, service.metrics().lockConfirmationTotal());
+  }
+
+  @Test
+  void InvestorMismatchFailsConfirmationTest() {
+    LockModels.LockRequestResponse request = service.requestLock(validCommand("REQ-CONF-002", "IDEMP-CONF-REQ-002", TENANT_A));
+    LockModels.LockDecisionResponse approval = service.decideLock(decisionCommand(
+      request.lockId(), LockModels.LockDecisionType.APPROVE, request.version(), "IDEMP-CONF-DEC-002", TENANT_A
+    ));
+    LockModels.LockConfirmationResponse pending = service.confirmLock(confirmationCommand(
+      approval.lockId(), approval.version(), "IDEMP-CONF-REQ-INV-002", TENANT_A, LockModels.LockConfirmationType.INVESTOR_REQUEST, true
+    ));
+
+    LockModels.LockConfirmationCommand callback = withResponseProduct(
+      confirmationCommand(pending.lockId(), pending.version(), "IDEMP-CONF-CB-002", TENANT_A, LockModels.LockConfirmationType.INVESTOR_CALLBACK, false),
+      "CONVENTIONAL-15Y"
+    );
+    LockModels.LockConfirmationResponse rejected = service.confirmLock(callback);
+
+    assertEquals(LockModels.RateLockStatus.PENDING_INVESTOR_CONFIRMATION, pending.status());
+    assertEquals(LockModels.RateLockStatus.INVESTOR_REJECTED, rejected.status());
+    assertEquals("lock.investor_rejected.v1", rejected.outboxEventType());
+    assertEquals("LOCK_INVESTOR_REJECTED", service.auditSnapshots().get(3).action());
+    assertEquals(1, service.metrics().pendingInvestorConfirmationTotal());
+    assertEquals(1, service.metrics().investorMismatchTotal());
+  }
+
+  @Test
+  void DuplicateConfirmationIsIdempotentTest() {
+    LockModels.LockRequestResponse request = service.requestLock(validCommand("REQ-CONF-003", "IDEMP-CONF-REQ-003", TENANT_A));
+    LockModels.LockDecisionResponse approval = service.decideLock(decisionCommand(
+      request.lockId(), LockModels.LockDecisionType.APPROVE, request.version(), "IDEMP-CONF-DEC-003", TENANT_A
+    ));
+    LockModels.LockConfirmationCommand command = confirmationCommand(
+      approval.lockId(), approval.version(), "IDEMP-CONF-003", TENANT_A, LockModels.LockConfirmationType.INTERNAL, true
+    );
+
+    LockModels.LockConfirmationResponse first = service.confirmLockReplayAware(command);
+    LockModels.LockConfirmationResponse replay = service.confirmLockReplayAware(command);
+
+    assertEquals(first.confirmationId(), replay.confirmationId());
+    LockServiceException conflict = assertThrows(
+      LockServiceException.class,
+      () -> service.confirmLock(withLockNumber(command, "LOCK-PII10-003-DIFFERENT"))
+    );
+    assertEquals("IDEMPOTENCY_CONFLICT", conflict.code());
+    LockServiceException duplicate = assertThrows(
+      LockServiceException.class,
+      () -> service.confirmLock(confirmationCommand(
+        approval.lockId(), first.version(), "IDEMP-CONF-003-B", TENANT_A, LockModels.LockConfirmationType.INTERNAL, true
+      ))
+    );
+    assertEquals("DUPLICATE_ACTIVE_CONFIRMATION", duplicate.code());
+  }
+
+  @Test
+  void postLockConfirmationApiMapsTenantScopedRouteToServiceCommand() {
+    LockModels.LockRequestResponse request = service.requestLock(validCommand("REQ-CONF-API-001", "IDEMP-CONF-API-REQ-001", TENANT_A));
+    LockModels.LockDecisionResponse approval = service.decideLock(decisionCommand(
+      request.lockId(), LockModels.LockDecisionType.APPROVE, request.version(), "IDEMP-CONF-API-DEC-001", TENANT_A
+    ));
+    LockConfirmationApi api = new LockConfirmationApi(service);
+
+    LockConfirmationApi.ConfirmationResponse response = api.postConfirmation(
+      TENANT_A,
+      approval.lockId(),
+      "IDEMP-CONF-API-001",
+      "corr-pii10-s04-api",
+      confirmationApiRequest(approval.version())
+    );
+
+    assertEquals("POST", LockConfirmationApi.POST_CONFIRMATION_METHOD);
+    assertEquals("/api/v1/tenants/{tenantId}/locks/{lockId}/confirmations", LockConfirmationApi.POST_CONFIRMATION_PATH);
+    assertEquals("lock:lock-confirmation:write", LockConfirmationApi.WRITE_PERMISSION);
+    assertEquals(LockModels.RateLockStatus.ACTIVE.name(), response.status());
+    assertEquals("lock.confirmed.v1", response.eventType());
+    assertEquals("corr-pii10-s04-api", response.correlationId());
+    assertTrue(response.auditRef().startsWith("AUDIT-LOCK-CONFIRMATION-"));
+  }
+
+  @Test
+  void getLockConfirmationApiReadsByTenantAndRejectsCrossTenantAccess() {
+    LockModels.LockRequestResponse request = service.requestLock(validCommand("REQ-CONF-API-002", "IDEMP-CONF-API-REQ-002", TENANT_A));
+    LockModels.LockDecisionResponse approval = service.decideLock(decisionCommand(
+      request.lockId(), LockModels.LockDecisionType.APPROVE, request.version(), "IDEMP-CONF-API-DEC-002", TENANT_A
+    ));
+    LockConfirmationApi api = new LockConfirmationApi(service);
+    LockConfirmationApi.ConfirmationResponse confirmation = api.postConfirmation(
+      TENANT_A,
+      approval.lockId(),
+      "IDEMP-CONF-API-002",
+      "corr-pii10-s04-api-read",
+      confirmationApiRequest(approval.version())
+    );
+
+    LockConfirmationApi.ConfirmationReadResponse read = api.getConfirmation(TENANT_A, confirmation.id());
+
+    assertEquals("GET", LockConfirmationApi.GET_CONFIRMATION_METHOD);
+    assertEquals("/api/v1/tenants/{tenantId}/lock-confirmation/{id}", LockConfirmationApi.GET_CONFIRMATION_PATH);
+    assertEquals("lock:lock-confirmation:read", LockConfirmationApi.READ_PERMISSION);
+    assertEquals(confirmation.id(), read.id());
+    assertEquals(confirmation.status(), read.status());
+    LockServiceException error = assertThrows(LockServiceException.class, () -> api.getConfirmation(TENANT_B, confirmation.id()));
+    assertEquals("NOT_FOUND", error.code());
+  }
+
   private static LockModels.LockRequestCommand validCommand(String requestId, String idempotencyKey, UUID tenantId) {
     return new LockModels.LockRequestCommand(
       tenantId,
@@ -384,6 +510,93 @@ class LockServiceTest {
       "lock-policy-v1",
       "compliance-evidence-v1",
       Map.of("quoteSnapshot", "quote-snapshot-v1", "pricingSnapshot", "pricing-snapshot-v1")
+    );
+  }
+
+  private static LockModels.LockConfirmationCommand confirmationCommand(
+    String lockId,
+    int expectedVersion,
+    String idempotencyKey,
+    UUID tenantId,
+    LockModels.LockConfirmationType confirmationType,
+    boolean investorResponseMatches
+  ) {
+    return new LockModels.LockConfirmationCommand(
+      tenantId,
+      lockId,
+      confirmationType == LockModels.LockConfirmationType.INVESTOR_CALLBACK ? "investor-adapter-service" : "lock-desk-user-1",
+      expectedVersion,
+      confirmationType,
+      "LOCK-PII10-001",
+      false,
+      "INVESTOR-A",
+      confirmationType == LockModels.LockConfirmationType.INTERNAL ? "" : "INV-CONF-REF-001",
+      30,
+      Instant.parse("2026-06-04T21:06:00Z"),
+      Instant.parse("2026-07-04T21:06:00Z"),
+      "CONVENTIONAL-30Y",
+      "CONVENTIONAL-30Y",
+      "LOAN-PII10",
+      "LOAN-PII10",
+      "lock-policy-v1",
+      "lock-policy-v1",
+      true,
+      true,
+      true,
+      investorResponseMatches,
+      "compliance-evidence-v1",
+      idempotencyKey,
+      "corr-pii10-s04",
+      Map.of("quoteSnapshot", "quote-snapshot-v1", "freshnessCheck", "freshness-check-v1")
+    );
+  }
+
+  private static LockModels.LockConfirmationCommand withResponseProduct(LockModels.LockConfirmationCommand command, String responseProductId) {
+    return new LockModels.LockConfirmationCommand(
+      command.tenantId(), command.lockId(), command.actorId(), command.expectedVersion(), command.confirmationType(),
+      command.lockNumber(), command.lockNumberOverrideAllowed(), command.investorId(), command.investorConfirmationRef(),
+      command.lockPeriodDays(), command.confirmedAt(), command.expiresAt(), command.requestedProductId(), responseProductId,
+      command.requestedLoanId(), command.responseLoanId(), command.requestedPolicyVersionId(), command.responsePolicyVersionId(),
+      command.permissionGranted(), command.freshnessLockable(), command.confirmationPolicyResolved(), command.investorResponseMatches(),
+      command.complianceEvidenceRef(), command.idempotencyKey(), command.correlationId(), command.sourceRefs()
+    );
+  }
+
+  private static LockModels.LockConfirmationCommand withLockNumber(LockModels.LockConfirmationCommand command, String lockNumber) {
+    return new LockModels.LockConfirmationCommand(
+      command.tenantId(), command.lockId(), command.actorId(), command.expectedVersion(), command.confirmationType(),
+      lockNumber, command.lockNumberOverrideAllowed(), command.investorId(), command.investorConfirmationRef(),
+      command.lockPeriodDays(), command.confirmedAt(), command.expiresAt(), command.requestedProductId(), command.responseProductId(),
+      command.requestedLoanId(), command.responseLoanId(), command.requestedPolicyVersionId(), command.responsePolicyVersionId(),
+      command.permissionGranted(), command.freshnessLockable(), command.confirmationPolicyResolved(), command.investorResponseMatches(),
+      command.complianceEvidenceRef(), command.idempotencyKey(), command.correlationId(), command.sourceRefs()
+    );
+  }
+
+  private static LockConfirmationApi.ConfirmationRequest confirmationApiRequest(int expectedVersion) {
+    return new LockConfirmationApi.ConfirmationRequest(
+      "lock-desk-user-1",
+      expectedVersion,
+      LockModels.LockConfirmationType.INTERNAL,
+      "LOCK-PII10-API-001",
+      false,
+      "INVESTOR-A",
+      "",
+      30,
+      Instant.parse("2026-06-04T21:06:00Z"),
+      Instant.parse("2026-07-04T21:06:00Z"),
+      "CONVENTIONAL-30Y",
+      "CONVENTIONAL-30Y",
+      "LOAN-PII10",
+      "LOAN-PII10",
+      "lock-policy-v1",
+      "lock-policy-v1",
+      true,
+      true,
+      true,
+      true,
+      "compliance-evidence-v1",
+      Map.of("quoteSnapshot", "quote-snapshot-v1", "freshnessCheck", "freshness-check-v1")
     );
   }
 

@@ -26,7 +26,7 @@ class ScenarioController {
   ResponseEntity<ScenarioResponse> create(@PathVariable UUID tenantId, @RequestHeader("Idempotency-Key") String key,
       @RequestHeader(value = "X-Correlation-Id", required = false) String correlationId, @RequestHeader(value = "X-Roles", required = false) String roles,
       @Valid @RequestBody CreateScenarioRequest request) {
-    return withRoles(roles, () -> ResponseEntity.status(HttpStatus.CREATED).body(service.createDraft(tenantId, key, correlationId, request)));
+    return withRoles(roles, () -> idempotentResponse(HttpStatus.CREATED, service.createDraft(tenantId, key, correlationId, request)));
   }
 
   @GetMapping("/{scenarioId}")
@@ -40,56 +40,57 @@ class ScenarioController {
       @RequestBody BorrowerCreditRequest request) {
     return withRoles(roles, () -> {
       BorrowerCreditResponse response = service.updateBorrowers(tenantId, scenarioId, key, correlationId, request);
-      return ResponseEntity.ok(response);
+      return idempotentResponse(HttpStatus.OK, response);
     });
   }
 
   @PatchMapping("/{scenarioId}/loan-structure")
-  ScenarioResponse loan(@PathVariable UUID tenantId, @PathVariable UUID scenarioId, @RequestHeader("Idempotency-Key") String key,
+  ResponseEntity<LoanStructureResponse> loan(@PathVariable UUID tenantId, @PathVariable UUID scenarioId, @RequestHeader("Idempotency-Key") String key,
       @RequestHeader(value = "X-Correlation-Id", required = false) String correlationId, @RequestHeader(value = "X-Roles", required = false) String roles,
       @RequestBody LoanStructureRequest request) {
-    return withRoles(roles, () -> service.updateLoan(tenantId, scenarioId, key, correlationId, request));
+    return withRoles(roles, () -> idempotentResponse(HttpStatus.OK, service.updateLoan(tenantId, scenarioId, key, correlationId, request)));
   }
 
   @PatchMapping("/{scenarioId}/property")
-  ScenarioResponse property(@PathVariable UUID tenantId, @PathVariable UUID scenarioId, @RequestHeader("Idempotency-Key") String key,
+  ResponseEntity<ScenarioResponse> property(@PathVariable UUID tenantId, @PathVariable UUID scenarioId, @RequestHeader("Idempotency-Key") String key,
       @RequestHeader(value = "X-Correlation-Id", required = false) String correlationId, @RequestHeader(value = "X-Roles", required = false) String roles,
       @RequestBody PropertyRequest request) {
-    return withRoles(roles, () -> service.updateProperty(tenantId, scenarioId, key, correlationId, request));
+    return withRoles(roles, () -> idempotentResponse(HttpStatus.OK, service.updateProperty(tenantId, scenarioId, key, correlationId, request)));
   }
 
   @PatchMapping("/{scenarioId}/income-assets")
-  ScenarioResponse income(@PathVariable UUID tenantId, @PathVariable UUID scenarioId, @RequestHeader("Idempotency-Key") String key,
+  ResponseEntity<ScenarioResponse> income(@PathVariable UUID tenantId, @PathVariable UUID scenarioId, @RequestHeader("Idempotency-Key") String key,
       @RequestHeader(value = "X-Correlation-Id", required = false) String correlationId, @RequestHeader(value = "X-Roles", required = false) String roles,
       @RequestBody IncomeAssetRequest request) {
-    return withRoles(roles, () -> service.updateIncomeAssets(tenantId, scenarioId, key, correlationId, request));
+    return withRoles(roles, () -> idempotentResponse(HttpStatus.OK, service.updateIncomeAssets(tenantId, scenarioId, key, correlationId, request)));
   }
 
   @PostMapping("/{scenarioId}/normalize")
-  ScenarioResponse normalize(@PathVariable UUID tenantId, @PathVariable UUID scenarioId, @RequestHeader("Idempotency-Key") String key,
+  ResponseEntity<ScenarioResponse> normalize(@PathVariable UUID tenantId, @PathVariable UUID scenarioId, @RequestHeader("Idempotency-Key") String key,
       @RequestHeader(value = "X-Correlation-Id", required = false) String correlationId, @RequestHeader(value = "X-Roles", required = false) String roles) {
-    return withRoles(roles, () -> service.normalize(tenantId, scenarioId, key, correlationId));
+    return withRoles(roles, () -> idempotentResponse(HttpStatus.OK, service.normalize(tenantId, scenarioId, key, correlationId)));
   }
 
   @PostMapping("/{scenarioId}/submit")
-  ScenarioResponse submit(@PathVariable UUID tenantId, @PathVariable UUID scenarioId, @RequestHeader("Idempotency-Key") String key,
+  ResponseEntity<ScenarioResponse> submit(@PathVariable UUID tenantId, @PathVariable UUID scenarioId, @RequestHeader("Idempotency-Key") String key,
       @RequestHeader(value = "X-Correlation-Id", required = false) String correlationId, @RequestHeader(value = "X-Roles", required = false) String roles) {
-    return withRoles(roles, () -> service.submit(tenantId, scenarioId, key, correlationId));
+    return withRoles(roles, () -> idempotentResponse(HttpStatus.OK, service.submit(tenantId, scenarioId, key, correlationId)));
   }
 
   @PostMapping("/{scenarioId}/clone")
-  ScenarioResponse cloneScenario(@PathVariable UUID tenantId, @PathVariable UUID scenarioId, @RequestHeader("Idempotency-Key") String key,
+  ResponseEntity<ScenarioResponse> cloneScenario(@PathVariable UUID tenantId, @PathVariable UUID scenarioId, @RequestHeader("Idempotency-Key") String key,
       @RequestHeader(value = "X-Correlation-Id", required = false) String correlationId, @RequestBody CloneScenarioRequest request) {
-    return service.cloneScenario(tenantId, scenarioId, key, correlationId, request);
+    return idempotentResponse(HttpStatus.OK, service.cloneScenario(tenantId, scenarioId, key, correlationId, request));
   }
 
   // S10: Scenario Replay Package API with redaction and hash verification
   @GetMapping("/{scenarioId}/replay-package")
   ReplayPackage replay(@PathVariable UUID tenantId, @PathVariable UUID scenarioId,
       @RequestParam(defaultValue = "latest") String version, @RequestParam(defaultValue = "role-default") String redaction,
+      @RequestParam(defaultValue = "false") boolean export, @RequestParam(value = "accessReasonCode", required = false) String accessReasonCode,
       @RequestHeader(value = "X-Roles", required = false) String roles,
       @RequestHeader(value = "X-Correlation-Id", required = false) String correlationId) {
-    return withRoles(roles, () -> service.replay(tenantId, scenarioId, version, redaction));
+    return withRoles(roles, () -> service.replay(tenantId, scenarioId, new ScenarioReplayAccessRequest(version, redaction, export, accessReasonCode, correlationId)));
   }
 
   @GetMapping("/{scenarioId}/events")
@@ -104,5 +105,11 @@ class ScenarioController {
     } finally {
       RequestContext.clear();
     }
+  }
+
+  private <T> ResponseEntity<T> idempotentResponse(HttpStatus status, T body) {
+    ResponseEntity.BodyBuilder builder = ResponseEntity.status(status);
+    if (service.wasIdempotencyReplayed()) builder.header("Idempotency-Replayed", "true");
+    return builder.body(body);
   }
 }

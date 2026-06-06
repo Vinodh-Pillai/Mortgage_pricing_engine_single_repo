@@ -42,8 +42,9 @@ public class BestExecutionRanker {
             }
         }
 
-        // Sort by aggregated score descending
-        resolved.sort(Comparator.comparing(ScoredCandidate::finalScore).reversed());
+        // Sort by aggregated score descending, then neutral candidate ID ordering for unresolved ties.
+        resolved.sort(Comparator.comparing((ScoredCandidate sc) -> sc.totalScore()).reversed()
+            .thenComparing(sc -> sc.candidate().candidateId()));
 
         // Assign ranks and build options
         return IntStream.range(0, resolved.size())
@@ -77,8 +78,8 @@ public class BestExecutionRanker {
 
     private ScoredCandidate applyTieDelta(ScoredCandidate sc, TieBreakerEvaluator.TieBreakerResult tieResult) {
         BigDecimal delta = tieResult.deltasByCandidateId().getOrDefault(sc.candidate().candidateId(), BigDecimal.ZERO);
-        List<String> trace = List.copyOf(sc.tieBreakerTrace());
-        List<String> warnings = List.copyOf(sc.warnings());
+        List<String> trace = new java.util.ArrayList<>(sc.tieBreakerTrace());
+        List<String> warnings = new java.util.ArrayList<>(sc.warnings());
         trace.addAll(tieResult.trace());
         warnings.addAll(tieResult.warnings());
         BigDecimal newScore = sc.totalScore().add(delta).setScale(8, RoundingMode.HALF_UP);

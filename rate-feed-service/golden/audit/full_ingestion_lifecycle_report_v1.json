@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "PII-04-S10.audit-report.v1",
+  "tenantId": "00000000-0000-0000-0000-000000000001",
+  "batchId": "10000000-0000-0000-0000-000000000010",
+  "status": "READY",
+  "timeline": [
+    {
+      "eventType": "RATE_FEED_UPLOADED",
+      "aggregateType": "RateFeedBatch",
+      "actorId": "pricing-admin-1",
+      "correlationId": "corr-pii-04-s10-001",
+      "causationId": "10000000-0000-0000-0000-000000000010",
+      "redactionLevel": "STANDARD",
+      "resultHash": "sha256:upload-result-hash"
+    },
+    {
+      "eventType": "RATE_SHEET_PUBLISHED",
+      "aggregateType": "RateSheet",
+      "actorId": "pricing-admin-2",
+      "correlationId": "corr-pii-04-s10-001",
+      "causationId": "10000000-0000-0000-0000-000000000010",
+      "redactionLevel": "STANDARD",
+      "resultHash": "sha256:publish-result-hash"
+    }
+  ],
+  "expectedLinks": [
+    "/api/v1/tenants/{tenantId}/rate-feed-audit-events",
+    "/api/v1/tenants/{tenantId}/rate-feed-audit-reports/{batchId}",
+    "/api/v1/tenants/{tenantId}/rate-feed-audit-reports/{batchId}/exports",
+    "/api/v1/tenants/{tenantId}/rate-feed-audit-reports/{batchId}/verify-replay"
+  ],
+  "policy": {
+    "rawValuesDefault": "redacted",
+    "rawValuesElevatedRole": "RATE_FEED_AUDIT_EXPORT",
+    "exportReasonCodeRequired": true
+  }
+}

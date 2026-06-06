@@ -150,7 +150,7 @@ public class FicoLtvMatrixRule implements EligibilityRule {
         try {
             FicoLtvMatrixConfig config = repository.resolve(
                 UUID.randomUUID(), productFamily, investorCode, null,
-                loanPurpose, "PRIMARY_RESIDENCE", null
+                loanPurpose, "PRIMARY_RESIDENCE", null, null
             );
             if (config != null) {
                 dbConfigs.add(config);

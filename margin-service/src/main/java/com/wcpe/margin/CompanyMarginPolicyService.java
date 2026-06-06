@@ -12,11 +12,14 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public final class CompanyMarginPolicyService {
   public static final String COMPANY_POLICY_TYPE = "COMPANY";
   public static final String CHANNEL_POLICY_TYPE = "CHANNEL";
   public static final String BRANCH_OVERLAY_POLICY_TYPE = "BRANCH_OVERLAY";
+  public static final String SENSITIVE_MARGIN_PERMISSION = "pricing.margin.view_sensitive";
+  public final AtomicInteger marginVisibilityRedactionTotal = new AtomicInteger();
   private final Clock clock;
   private final Map<PolicyKey, MarginPolicy> policies = new HashMap<>();
   private final Map<String, CommandReceipt> idempotencyReceipts = new HashMap<>();
@@ -119,6 +122,19 @@ public final class CompanyMarginPolicyService {
       throw new MarginPolicyException("BRANCH_OVERLAY_LIMIT_EXCEEDED");
     }
     return new SimulationResult(policyId, version.versionId(), step.priceAfterMargin(), List.of(step));
+  }
+
+  public SimulationResult applyVisibility(String viewerPermission, SimulationResult result) {
+    Objects.requireNonNull(result, "result is required");
+    if (SENSITIVE_MARGIN_PERMISSION.equals(viewerPermission)) {
+      return result;
+    }
+    marginVisibilityRedactionTotal.incrementAndGet();
+    return new SimulationResult(result.policyId(), result.versionId(), result.priceAfterMargin(),
+        result.steps().stream()
+            .map(step -> new MarginCalculationStep(step.stepType(), step.sourceVersionId(), null, null, null,
+                step.reasonCode(), step.replayHash()))
+            .toList());
   }
 
   public CommandReceipt submit(String tenantId, String policyId, String actorId, String correlationId) {

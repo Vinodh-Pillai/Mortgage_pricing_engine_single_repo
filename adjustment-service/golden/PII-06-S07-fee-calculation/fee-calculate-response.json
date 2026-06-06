@@ -1,0 +1,20 @@
+{
+  "story_id": "PII-06-S07",
+  "feeCalculationId": "30000000-0000-0000-0000-000000000067",
+  "quoteId": "quote-PII-06-S07",
+  "scenarioId": "scenario-PII-06-S07",
+  "catalogVersionId": "20000000-0000-0000-0000-000000000067",
+  "catalogValuesSource": "test fixture supplied configuration, not hard-coded domain policy",
+  "expectedTotals": {
+    "totalBorrowerPaid": "1600.01",
+    "totalLenderPaid": "0.00",
+    "totalThirdParty": "20.00"
+  },
+  "expectedFeeLines": [
+    { "feeCode": "APPRAISAL", "calculationMethod": "FIXED_AMOUNT", "rawAmount": "100.005000", "roundedAmount": "100.01" },
+    { "feeCode": "INVESTOR_BPS", "calculationMethod": "BPS_OF_LOAN_AMOUNT", "roundedAmount": "250.00" },
+    { "feeCode": "PROCESSING", "calculationMethod": "PERCENT_OF_LOAN_AMOUNT", "roundedAmount": "1250.00" },
+    { "feeCode": "THIRD_PARTY_UNIT", "calculationMethod": "PER_UNIT", "roundedAmount": "20.00" },
+    { "feeCode": "WAIVED_ADMIN", "calculationMethod": "WAIVED", "roundedAmount": "0.00" }
+  ]
+}

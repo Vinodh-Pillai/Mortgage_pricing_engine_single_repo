@@ -13,7 +13,12 @@ final class LockRepository {
   private final Map<String, IdempotencyRecord> idempotency = new HashMap<>();
   private final Map<String, DecisionIdempotencyRecord> decisionIdempotency = new HashMap<>();
   private final Map<String, FreshnessIdempotencyRecord> freshnessIdempotency = new HashMap<>();
+  private final Map<String, ConfirmationIdempotencyRecord> confirmationIdempotency = new HashMap<>();
   private final Map<String, LockModels.FreshnessCheckRecord> freshnessChecksByTenantAndId = new HashMap<>();
+  private final Map<String, LockModels.LockConfirmationRecord> confirmationsByTenantAndId = new HashMap<>();
+  private final Map<String, String> activeConfirmationByLock = new HashMap<>();
+  private final Map<String, String> lockNumberIndex = new HashMap<>();
+  private final Map<String, String> investorExternalRefIndex = new HashMap<>();
   private final List<LockModels.LockEvent> outboxEvents = new ArrayList<>();
   private final List<LockModels.AuditSnapshot> auditSnapshots = new ArrayList<>();
 
@@ -114,12 +119,66 @@ final class LockRepository {
     return Optional.ofNullable(freshnessChecksByTenantAndId.get(key(tenantId, checkId)));
   }
 
+  Optional<LockModels.LockConfirmationResponse> findConfirmationIdempotency(UUID tenantId, String idempotencyKey, String confirmationHash) {
+    ConfirmationIdempotencyRecord record = confirmationIdempotency.get(tenantId + ":" + idempotencyKey);
+    if (record == null) {
+      return Optional.empty();
+    }
+    if (!record.confirmationHash.equals(confirmationHash)) {
+      throw new LockServiceException("IDEMPOTENCY_CONFLICT", "Confirmation idempotency key was reused with a different payload");
+    }
+    return Optional.of(record.response);
+  }
+
+  boolean hasActiveConfirmation(UUID tenantId, String lockId) {
+    return activeConfirmationByLock.containsKey(tenantId + ":" + lockId);
+  }
+
+  boolean hasLockNumber(UUID tenantId, String lockNumber) {
+    return lockNumber != null && lockNumberIndex.containsKey(tenantId + ":" + lockNumber);
+  }
+
+  boolean hasInvestorExternalRef(UUID tenantId, String investorId, String investorConfirmationRef) {
+    return investorId != null && investorConfirmationRef != null
+      && investorExternalRefIndex.containsKey(tenantId + ":" + investorId + ":" + investorConfirmationRef);
+  }
+
+  void saveConfirmation(
+    LockModels.RateLockRecord lockRecord,
+    LockModels.LockConfirmationRecord confirmation,
+    LockModels.LockConfirmationResponse response,
+    String confirmationHash,
+    LockModels.LockEvent event,
+    LockModels.AuditSnapshot audit
+  ) {
+    replace(lockRecord);
+    confirmationsByTenantAndId.put(key(confirmation.tenantId(), confirmation.confirmationId()), confirmation);
+    confirmationIdempotency.put(confirmation.tenantId() + ":" + confirmation.idempotencyKey(), new ConfirmationIdempotencyRecord(confirmationHash, response));
+    if (confirmation.status() == LockModels.RateLockStatus.ACTIVE) {
+      activeConfirmationByLock.put(confirmation.tenantId() + ":" + confirmation.lockId(), confirmation.confirmationId());
+      lockNumberIndex.put(confirmation.tenantId() + ":" + confirmation.lockNumber(), confirmation.confirmationId());
+      if (!LockModels.normalized(confirmation.investorId()).isEmpty() && !LockModels.normalized(confirmation.investorConfirmationRef()).isEmpty()) {
+        investorExternalRefIndex.put(confirmation.tenantId() + ":" + confirmation.investorId() + ":" + confirmation.investorConfirmationRef(), confirmation.confirmationId());
+      }
+    }
+    outboxEvents.add(event);
+    auditSnapshots.add(audit);
+  }
+
+  Optional<LockModels.LockConfirmationRecord> findConfirmation(UUID tenantId, String confirmationId) {
+    return Optional.ofNullable(confirmationsByTenantAndId.get(key(tenantId, confirmationId)));
+  }
+
   int lockCount() {
     return locksByTenantAndId.size();
   }
 
   int freshnessCheckCount() {
     return freshnessChecksByTenantAndId.size();
+  }
+
+  int confirmationCount() {
+    return confirmationsByTenantAndId.size();
   }
 
   List<LockModels.LockEvent> outboxEvents() {
@@ -139,4 +198,6 @@ final class LockRepository {
   private record DecisionIdempotencyRecord(String decisionHash, LockModels.LockDecisionResponse response) {}
 
   private record FreshnessIdempotencyRecord(String resultHash, LockModels.FreshnessCheckResponse response) {}
+
+  private record ConfirmationIdempotencyRecord(String confirmationHash, LockModels.LockConfirmationResponse response) {}
 }

@@ -1,0 +1,11 @@
+{
+  "quoteId": "quote-PII-06-S10",
+  "status": "BLOCKED_CONFLICTS",
+  "conflicts": [
+    {
+      "conflictId": "conflict-1",
+      "severity": "BLOCKING",
+      "reasonCode": "CONFIGURED_REASON"
+    }
+  ]
+}

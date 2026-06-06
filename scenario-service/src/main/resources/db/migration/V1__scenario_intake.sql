@@ -2,7 +2,7 @@ create schema if not exists scenario;
 
 create table if not exists scenario.scenario (
   tenant_id uuid not null,
-  scenario_id uuid not null,
+  scenario_id uuid,
   lineage_id uuid not null,
   version int not null,
   status varchar(40) not null,
@@ -22,7 +22,7 @@ create table if not exists scenario.scenario (
 
 create table if not exists scenario.scenario_version (
   tenant_id uuid not null,
-  scenario_id uuid not null,
+  scenario_id uuid,
   version int not null,
   reason varchar(80) not null,
   replay_hash varchar(128) not null,

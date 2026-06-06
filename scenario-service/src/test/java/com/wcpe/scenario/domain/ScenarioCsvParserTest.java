@@ -2,6 +2,7 @@ package com.wcpe.scenario.domain;
 
 import java.util.*;
 import org.junit.jupiter.api.*;
+import org.springframework.mock.web.MockMultipartFile;
 import static org.junit.jupiter.api.Assertions.*;
 
 // S09 unit tests: CSV parsing and import processing
@@ -9,11 +10,11 @@ class ScenarioCsvParserTest {
 
   @Test
   void rejectsUnknownColumns() {
-    // If CSV headers don't match expected template, validation fails
-    // This is tested via the Row mapping logic
-    String[] line = parseLine("scenario_name,external_loan_id,source_system,property_state,property_zip");
-    assertNotNull(line);
-    assertEquals(5, line.length);
+    BatchImportService svc = new BatchImportService(null, null, null);
+    ScenarioException ex = assertThrows(ScenarioException.class,
+        () -> invokeValidateHeaders(svc, new String[] {"scenario_name", "external_loan_id", "unexpected"}));
+    assertEquals("INVALID_CSV_HEADER", ex.code());
+    assertTrue(ex.fieldErrors().stream().anyMatch(issue -> issue.code().equals("UNKNOWN_COLUMN")));
   }
 
   @Test
@@ -38,55 +39,40 @@ class ScenarioCsvParserTest {
 
   @Test
   void rejectsNonCsvFileExtension() {
-    // File validation rejects non-CSV extensions
-    assertTrue(true); // Enforced in BatchImportService.validateFileUpload
+    BatchImportService svc = new BatchImportService(null, null, null);
+    MockMultipartFile file = new MockMultipartFile("file", "scenario.txt", "text/plain", "bad".getBytes());
+    ScenarioException ex = assertThrows(ScenarioException.class, () -> invokeValidateFileUpload(svc, file));
+    assertEquals("UNSUPPORTED_FILE_TYPE", ex.code());
   }
 
   private String[] parseLine(String line) {
-    BatchImportService svc = new BatchImportService(null, null, null) {
-      // Override to test CSV parsing without DB
-      String[] parseLine(String input) {
-        List<String> fields = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        boolean inQuotes = false;
-        for (int i = 0; i < input.length(); i++) {
-          char c = input.charAt(i);
-          if (inQuotes) {
-            if (c == '"') {
-              if (i + 1 < input.length() && input.charAt(i + 1) == '"') {
-                current.append('"');
-                i++;
-              } else {
-                inQuotes = false;
-              }
-            } else {
-              current.append(c);
-            }
-          } else if (c == '"') {
-            inQuotes = true;
-          } else if (c == ',') {
-            fields.add(current.toString().trim());
-            current.setLength(0);
-          } else {
-            current.append(c);
-          }
-        }
-        fields.add(current.toString().trim());
-
-        // Apply CSV injection neutralization
-        for (int i = 0; i < fields.size(); i++) {
-          String val = fields.get(i);
-          char[] prefixes = {'=', '+', '-', '@', '`'};
-          for (char p : prefixes) {
-            if (val.startsWith(String.valueOf(p))) {
-              fields.set(i, val.substring(1));
-              break;
-            }
-          }
-        }
-        return fields.toArray(String[]::new);
-      }
-    };
+    BatchImportService svc = new BatchImportService(null, null, null);
     return svc.parseLine(line);
+  }
+
+  private void invokeValidateHeaders(BatchImportService svc, String[] headers) {
+    try {
+      java.lang.reflect.Method method = BatchImportService.class.getDeclaredMethod("validateHeaders", String[].class);
+      method.setAccessible(true);
+      method.invoke(svc, (Object) headers);
+    } catch (java.lang.reflect.InvocationTargetException ex) {
+      if (ex.getCause() instanceof RuntimeException runtime) throw runtime;
+      throw new RuntimeException(ex.getCause());
+    } catch (ReflectiveOperationException ex) {
+      throw new RuntimeException(ex);
+    }
+  }
+
+  private void invokeValidateFileUpload(BatchImportService svc, MockMultipartFile file) {
+    try {
+      java.lang.reflect.Method method = BatchImportService.class.getDeclaredMethod("validateFileUpload", org.springframework.web.multipart.MultipartFile.class);
+      method.setAccessible(true);
+      method.invoke(svc, file);
+    } catch (java.lang.reflect.InvocationTargetException ex) {
+      if (ex.getCause() instanceof RuntimeException runtime) throw runtime;
+      throw new RuntimeException(ex.getCause());
+    } catch (ReflectiveOperationException ex) {
+      throw new RuntimeException(ex);
+    }
   }
 }

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "storyId": "PII-07-S10",
+  "fixtureId": "margin-comp-role-redaction",
+  "tenant": "tenant-a",
+  "expectedRedactedSteps": [
+    "COMPANY_MARGIN",
+    "CHANNEL_MARGIN",
+    "BRANCH_OVERLAY",
+    "LO_COMPENSATION",
+    "BROKER_COMPENSATION",
+    "PROFITABILITY_FLOOR"
+  ],
+  "notes": "Visibility fixture asserts sensitive hash contributions and config references are omitted for non-sensitive replay viewers."
+}

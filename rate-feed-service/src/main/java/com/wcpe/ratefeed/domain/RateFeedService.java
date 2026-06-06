@@ -98,7 +98,7 @@ class RateFeedService {
       RateFeedRepository.UploadSessionRow session = repository.session(tenantId, sessionId);
       if (!"OPEN".equals(session.status())) throw new RateFeedException(HttpStatus.CONFLICT, "UPLOAD_SESSION_NOT_OPEN", "Upload session is not open.");
       if (Instant.now().isAfter(session.expiresAt())) throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "UPLOAD_SESSION_EXPIRED", "Upload session has expired.");
-      return repository.complete(tenantId, session, request, actor(actor), correlation(correlationId));
+      return repository.complete(tenantId, session, request, actor(actor), correlation(correlationId), idempotencyKey);
     });
   }
 
@@ -132,6 +132,10 @@ class RateFeedService {
     if (request.contentLengthBytes() <= 0) throw validation("CONTENT_LENGTH_REQUIRED", "Content length must be positive.");
     if (request.contentLengthBytes() > MAX_BYTES) throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "FILE_TOO_LARGE", "File exceeds maximum size.");
     if (request.sourceType() == null || request.sourceType().isBlank()) throw validation("SOURCE_TYPE_REQUIRED", "Source type is required.");
+    String sourceType = request.sourceType().trim().toUpperCase(Locale.ROOT);
+    if (!Set.of("MANUAL_UPLOAD", "PARTNER_API", "SCHEDULED_FETCH").contains(sourceType)) {
+      throw validation("INVALID_SOURCE_TYPE", "sourceType must be MANUAL_UPLOAD, PARTNER_API, or SCHEDULED_FETCH.");
+    }
   }
 
   /** Unified UUID validation — null check alone is sufficient. */
@@ -678,8 +682,8 @@ class RateFeedService {
     Long total = jdbc.queryForObject("select count(*) from rate_feed.normalized_rate_sheet_entry" + where, Long.class, params.toArray());
     params.add(boundedSize);
     params.add(boundedPage * boundedSize);
-    List<RateFeedModels.NormalizedEntryResponse> entries = jdbc.query("select entry_id,batch_id,source_row_id,canonical_product_key,rate_percent,price_points,lock_period_days,severity,message,mapping_refs ->> 'profileVersion' as mapping_version from rate_feed.normalized_rate_sheet_entry" + where + " order by source_row_id, created_at limit ? offset ?",
-        (rs, row) -> new RateFeedModels.NormalizedEntryResponse(rs.getObject("entry_id", UUID.class), rs.getObject("batch_id", UUID.class), rs.getInt("source_row_id"), rs.getString("canonical_product_key"), rs.getBigDecimal("rate_percent"), rs.getBigDecimal("price_points"), rs.getInt("lock_period_days"), rs.getString("severity"), rs.getString("message"), rs.getString("mapping_version")), params.toArray());
+    List<RateFeedModels.NormalizedEntryResponse> entries = jdbc.query("select entry_id,batch_id,source_row_id,canonical_product_key,program_key,rate_percent,price_points,lock_period_days,adjustment_type,adjustment_value,adjustment_unit,dimensions::text,raw_attributes::text,mapping_refs::text,mapping_refs ->> 'profileVersion' as mapping_version,severity,message from rate_feed.normalized_rate_sheet_entry" + where + " order by source_row_id, created_at limit ? offset ?",
+        (rs, row) -> new RateFeedModels.NormalizedEntryResponse(rs.getObject("entry_id", UUID.class), rs.getObject("batch_id", UUID.class), rs.getInt("source_row_id"), rs.getString("canonical_product_key"), rs.getString("program_key"), rs.getBigDecimal("rate_percent"), rs.getBigDecimal("price_points"), rs.getInt("lock_period_days"), rs.getString("adjustment_type"), rs.getBigDecimal("adjustment_value"), rs.getString("adjustment_unit"), repository.read(rs.getString("dimensions"), Map.class), repository.read(rs.getString("raw_attributes"), Map.class), repository.read(rs.getString("mapping_refs"), Map.class), rs.getString("severity"), rs.getString("message"), rs.getString("mapping_version")), params.toArray());
     return new RateFeedModels.NormalizedEntryPage(entries, boundedPage, boundedSize, total == null ? 0 : total);
   }
 
@@ -853,36 +857,49 @@ class RateFeedService {
       if ("ERROR".equals(field.severity())) return NormalizedCandidate.error(sourceRow, "Parsed row contains blocking field errors.", raw, profileVersion);
     }
     try {
-      String productKey = requiredCandidate(byName, "canonical_product_key");
-      BigDecimal rate = new BigDecimal(requiredCandidate(byName, "note_rate"));
-      BigDecimal price = new BigDecimal(requiredCandidate(byName, "base_price"));
-      int lockPeriod = Integer.parseInt(requiredCandidate(byName, "lock_period"));
-      String programKey = optionalCandidate(byName, "program_key");
-      BigDecimal adjustmentValue = optionalDecimal(byName, "adjustment_value");
-      String adjustmentType = optionalCandidate(byName, "adjustment_type");
-      String adjustmentUnit = optionalCandidate(byName, "adjustment_unit");
-      return NormalizedCandidate.success(sourceRow, productKey, programKey, lockPeriod, rate, price, adjustmentType, adjustmentValue, adjustmentUnit, raw, profileVersion);
+      String productKey = requiredGovernedCandidate(byName, "canonical_product_key");
+      BigDecimal rate = new BigDecimal(requiredGovernedCandidate(byName, "note_rate"));
+      BigDecimal price = new BigDecimal(requiredGovernedCandidate(byName, "base_price"));
+      int lockPeriod = Integer.parseInt(requiredGovernedCandidate(byName, "lock_period"));
+      String programKey = optionalGovernedCandidate(byName, "program_key");
+      BigDecimal adjustmentValue = optionalGovernedDecimal(byName, "adjustment_value");
+      String adjustmentType = optionalGovernedCandidate(byName, "adjustment_type");
+      String adjustmentUnit = optionalGovernedCandidate(byName, "adjustment_unit");
+      return NormalizedCandidate.success(sourceRow, productKey, programKey, lockPeriod, rate, price, adjustmentType, adjustmentValue, adjustmentUnit, raw, mappingRefs(byName, profileVersion), profileVersion);
     } catch (RuntimeException ex) {
       return NormalizedCandidate.error(sourceRow, ex.getMessage(), raw, profileVersion);
     }
   }
 
-  private static String requiredCandidate(Map<String, ParsedField> fields, String fieldName) {
-    String value = optionalCandidate(fields, fieldName);
+  private static String requiredGovernedCandidate(Map<String, ParsedField> fields, String fieldName) {
+    String value = optionalGovernedCandidate(fields, fieldName);
     if (value == null || value.isBlank()) throw new IllegalArgumentException("Missing governed mapping for " + fieldName + ".");
     return value;
   }
 
-  private static String optionalCandidate(Map<String, ParsedField> fields, String fieldName) {
+  private static String optionalGovernedCandidate(Map<String, ParsedField> fields, String fieldName) {
     ParsedField field = fields.get(fieldName);
     if (field == null) return null;
-    String value = field.candidateValue() == null || field.candidateValue().isBlank() ? field.rawValue() : field.candidateValue();
+    String value = field.candidateValue();
     return value == null || value.isBlank() ? null : value;
   }
 
-  private static BigDecimal optionalDecimal(Map<String, ParsedField> fields, String fieldName) {
-    String value = optionalCandidate(fields, fieldName);
+  private static BigDecimal optionalGovernedDecimal(Map<String, ParsedField> fields, String fieldName) {
+    String value = optionalGovernedCandidate(fields, fieldName);
     return value == null ? null : new BigDecimal(value);
+  }
+
+  private static Map<String, Object> mappingRefs(Map<String, ParsedField> fields, String profileVersion) {
+    Map<String, Object> refs = new LinkedHashMap<>();
+    refs.put("profileVersion", profileVersion);
+    Map<String, Object> fieldRefs = new LinkedHashMap<>();
+    for (ParsedField field : fields.values()) {
+      if (field.candidateValue() != null && !field.candidateValue().isBlank()) {
+        fieldRefs.put(field.fieldName(), Map.of("sourceColumn", field.sourceColumn(), "candidateValue", field.candidateValue()));
+      }
+    }
+    refs.put("fields", fieldRefs);
+    return refs;
   }
 
   @Transactional
@@ -1452,13 +1469,19 @@ class RateFeedService {
     }
   }
   private record NormalizedCandidate(UUID entryId, int sourceRowNumber, String canonicalProductKey, String programKey, int lockPeriodDays, BigDecimal ratePercent, BigDecimal pricePoints, String adjustmentType, BigDecimal adjustmentValue, String adjustmentUnit, String severity, String message, Map<String, String> rawAttributes, Map<String, Object> mappingRefs) {
-    static NormalizedCandidate success(int sourceRowNumber, String productKey, String programKey, int lockPeriodDays, BigDecimal ratePercent, BigDecimal pricePoints, String adjustmentType, BigDecimal adjustmentValue, String adjustmentUnit, Map<String, String> rawAttributes, String profileVersion) {
-      return new NormalizedCandidate(UUID.randomUUID(), sourceRowNumber, productKey, programKey, lockPeriodDays, ratePercent, pricePoints, adjustmentType, adjustmentValue, adjustmentUnit, "INFO", "normalized", Map.copyOf(rawAttributes), Map.of("profileVersion", profileVersion));
+    static NormalizedCandidate success(int sourceRowNumber, String productKey, String programKey, int lockPeriodDays, BigDecimal ratePercent, BigDecimal pricePoints, String adjustmentType, BigDecimal adjustmentValue, String adjustmentUnit, Map<String, String> rawAttributes, Map<String, Object> mappingRefs, String profileVersion) {
+      return new NormalizedCandidate(UUID.randomUUID(), sourceRowNumber, productKey, programKey, lockPeriodDays, ratePercent, pricePoints, adjustmentType, adjustmentValue, adjustmentUnit, "INFO", "normalized", Map.copyOf(rawAttributes), Map.copyOf(mappingRefs));
     }
     static NormalizedCandidate error(int sourceRowNumber, String message, Map<String, String> rawAttributes, String profileVersion) {
       return new NormalizedCandidate(UUID.randomUUID(), sourceRowNumber, null, null, 0, null, null, null, null, null, "ERROR", message, Map.copyOf(rawAttributes), Map.of("profileVersion", profileVersion));
     }
-    Map<String, Object> dimensions() { return Map.of("sourceRow", sourceRowNumber); }
+    Map<String, Object> dimensions() {
+      Map<String, Object> dimensions = new LinkedHashMap<>();
+      dimensions.put("sourceRow", sourceRowNumber);
+      if (adjustmentType != null && !adjustmentType.isBlank()) dimensions.put("adjustmentType", adjustmentType);
+      if (adjustmentUnit != null && !adjustmentUnit.isBlank()) dimensions.put("adjustmentUnit", adjustmentUnit);
+      return dimensions;
+    }
     Map<String, Object> hashMaterial() {
       Map<String, Object> material = new LinkedHashMap<>();
       material.put("sourceRow", sourceRowNumber);

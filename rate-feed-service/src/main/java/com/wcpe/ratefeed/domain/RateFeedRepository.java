@@ -62,26 +62,32 @@ class RateFeedRepository {
     }
   }
 
-  CompleteUploadResponse complete(UUID tenantId, UploadSessionRow session, CompleteUploadRequest request, String actor, String correlationId) {
+  CompleteUploadResponse complete(UUID tenantId, UploadSessionRow session, CompleteUploadRequest request, String actor, String correlationId, String idempotencyKey) {
     UUID rawFileId = UUID.randomUUID();
     UUID batchId = UUID.randomUUID();
+    UUID parserCommandId = UUID.randomUUID();
+    Instant uploadedAt = Instant.now();
+    String normalizedScanStatus = Optional.ofNullable(request.scanStatus()).orElse("CLEAN").trim().toUpperCase(Locale.ROOT);
     String resultHash = Hashing.sha256(json(Map.of("batchId", batchId, "fileSha256", request.fileSha256(), "sessionId", session.uploadSessionId())));
     try {
       jdbc.update("insert into rate_feed.raw_file(tenant_id,raw_file_id,storage_object_id,file_sha256,scan_status,scan_result_id,retention_until) values (?,?,?,?,?,?,?)",
-          tenantId, rawFileId, request.storageObjectId(), request.fileSha256().toLowerCase(Locale.ROOT), "CLEAN", request.scanResultId(), Timestamp.from(Instant.now().plus(Duration.ofDays(2555))));
+          tenantId, rawFileId, request.storageObjectId(), request.fileSha256().toLowerCase(Locale.ROOT), normalizedScanStatus, request.scanResultId(), Timestamp.from(uploadedAt.plus(Duration.ofDays(2555))));
       jdbc.update("insert into rate_feed.rate_feed_batch(tenant_id,batch_id,upload_session_id,investor_id,channel_id,feed_format_id,source_type,status,effective_at,timezone,raw_file_id,file_sha256,file_name,content_type,content_length_bytes,supersedes_batch_id,uploaded_by,correlation_id,result_hash) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
           tenantId, batchId, session.uploadSessionId(), session.investorId(), session.channelId(), session.feedFormatId(), session.sourceType(), "UPLOADED", Timestamp.from(session.effectiveAt()), session.timezone(), rawFileId, request.fileSha256().toLowerCase(Locale.ROOT), session.fileName(), session.contentType(), session.contentLengthBytes(), session.supersedesBatchId(), actor, correlationId, resultHash);
       jdbc.update("update rate_feed.upload_session set status='COMPLETED', updated_at=now() where tenant_id=? and upload_session_id=?", tenantId, session.uploadSessionId());
     } catch (DuplicateKeyException ex) {
       throw new RateFeedException(HttpStatus.CONFLICT, "DUPLICATE_FILE_HASH", "A batch already exists for this file hash, feed format, and effective timestamp.");
     }
-    CompleteUploadResponse response = new CompleteUploadResponse(batchId, "UPLOADED", rawFileId, UUID.randomUUID(), Map.of("batch", "/api/v1/tenants/" + tenantId + "/rate-feed-batches/" + batchId), resultHash);
+    evictCachePatterns(tenantId, batchId, List.of("rate-feed:" + tenantId + ":batches:*"));
+    CompleteUploadResponse response = new CompleteUploadResponse(batchId, "UPLOADED", rawFileId, parserCommandId, Map.of("batch", "/api/v1/tenants/" + tenantId + "/rate-feed-batches/" + batchId), resultHash);
     // V-003 fix: pass actual session values to outbox
-    outbox(tenantId, batchId, "RateSheetUploaded.v1", 1, actor, correlationId,
+    outbox(tenantId, batchId, "RateSheetUploaded.v1", 1, actor, correlationId, session.uploadSessionId().toString(), idempotencyKey,
         Map.of("investorId", session.investorId().toString(),
                "channelId", session.channelId().toString(),
                "feedFormatId", session.feedFormatId().toString()),
-        Map.of("batchId", batchId, "uploadSessionId", session.uploadSessionId(), "effectiveAt", session.effectiveAt().toString(), "fileSha256", request.fileSha256().toLowerCase(Locale.ROOT), "status", "UPLOADED"));
+        Map.of("batchId", batchId, "uploadSessionId", session.uploadSessionId(), "effectiveAt", session.effectiveAt().toString(),
+               "fileSha256", request.fileSha256().toLowerCase(Locale.ROOT), "sourceType", session.sourceType(),
+               "status", "UPLOADED", "uploadedAt", uploadedAt.toString(), "sourceRefs", List.of(request.storageObjectId())));
     audit(tenantId, batchId, "RATE_SHEET_UPLOADED", "RateFeedBatch", actor, correlationId, null, resultHash, response);
     return response;
   }
@@ -195,6 +201,10 @@ class RateFeedRepository {
 
   // V-003 fix: outbox accepts sessionHeaders with actual session values
   void outbox(UUID tenantId, UUID aggregateId, String eventType, int version, String actor, String correlationId, Map<String, String> sessionHeaders, Object payload) {
+    outbox(tenantId, aggregateId, eventType, version, actor, correlationId, null, null, sessionHeaders, payload);
+  }
+
+  void outbox(UUID tenantId, UUID aggregateId, String eventType, int version, String actor, String correlationId, String causationId, String idempotencyKey, Map<String, String> sessionHeaders, Object payload) {
     UUID eventId = UUID.randomUUID();
     Map<String, Object> headers = new HashMap<>();
     headers.put("tenantId", tenantId);
@@ -204,6 +214,8 @@ class RateFeedRepository {
     headers.put("sourceService", "rate-feed-service");
     headers.put("actorId", actor);
     headers.put("correlationId", correlationId);
+    headers.put("causationId", causationId == null || causationId.isBlank() ? aggregateId.toString() : causationId);
+    headers.put("idempotencyKey", idempotencyKey == null ? "" : idempotencyKey);
     headers.put("occurredAt", Instant.now().toString());
     // V-003: use actual session values (investorId, channelId, feedFormatId)
     if (sessionHeaders != null) {

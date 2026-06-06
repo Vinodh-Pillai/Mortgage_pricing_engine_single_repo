@@ -79,16 +79,21 @@ class BatchImportRepository {
   }
 
   @Transactional
-  void addRow(UUID tenantId, UUID jobId, int rowNumber, String rowHash, ImportRowStatus status,
+  UUID addRow(UUID tenantId, UUID jobId, int rowNumber, String rowHash, ImportRowStatus status,
       UUID scenarioId, String idempotencyKey) {
     UUID rowId = UUID.randomUUID();
-    jdbc.update("""
+    int inserted = jdbc.update("""
         insert into scenario.scenario_import_row (tenant_id, import_row_id, import_job_id, row_number,
           row_hash, status, scenario_id, idempotency_key, created_at_utc)
         values (?, ?, ?, ?, ?, ?, ?, ?, now())
         on conflict (tenant_id, import_job_id, row_number) do nothing
         """, tenantId, rowId, jobId, rowNumber, rowHash, status.name(),
         scenarioId != null ? scenarioId : null, idempotencyKey);
+    if (inserted > 0) return rowId;
+    return jdbc.queryForObject("""
+        select import_row_id from scenario.scenario_import_row
+        where tenant_id = ? and import_job_id = ? and row_number = ?
+        """, UUID.class, tenantId, jobId, rowNumber);
   }
 
   @Transactional

@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "storyId": "PII-07-S10",
+  "fixtureId": "margin-comp-profitability-breach",
+  "tenant": "tenant-a",
+  "expectedMismatchStep": "PROFITABILITY_FLOOR",
+  "notes": "Breach fixture uses governed symbolic threshold references rather than inline numeric thresholds."
+}

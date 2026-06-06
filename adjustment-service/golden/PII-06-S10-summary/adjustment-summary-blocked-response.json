@@ -1,0 +1,5 @@
+{
+  "quoteId": "quote-PII-06-S10",
+  "status": "BLOCKED_CONFLICTS",
+  "conflicts": ["conflict-1"]
+}

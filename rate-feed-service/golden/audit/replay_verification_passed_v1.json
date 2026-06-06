@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "PII-04-S10.replay-verification.v1",
+  "tenantId": "00000000-0000-0000-0000-000000000001",
+  "batchId": "10000000-0000-0000-0000-000000000010",
+  "expectedHash": "sha256:publish-result-hash",
+  "actualHash": "sha256:publish-result-hash",
+  "status": "PASSED",
+  "mismatchClassification": null,
+  "auditEvidence": {
+    "persistVerification": true,
+    "mismatchPersistsBefore409": true
+  }
+}

@@ -95,7 +95,14 @@ public final class QuoteTestSupport {
                 Duration.ofHours(4),
                 Map.of("A", 2, "B", 1),
                 Map.of("A", new BigDecimal("0.50000000"), "B", new BigDecimal("0.90000000")),
-                Map.of("A", List.of("fixture configured rank 2"), "B", List.of("fixture configured rank 1"))
+                Map.of("A", List.of("fixture configured rank 2"), "B", List.of("fixture configured rank 1")),
+                new RankingPolicyRef(
+                    "ranking-policy-fixture",
+                    "rank-v1",
+                    List.of(new RankingCriterion("fixture-price", "numeric_min", "basePriceBps", BigDecimal.ONE, true, "{}")),
+                    List.of(new TieBreaker("fixture-candidate-id", "candidateId", "DESC", 1, Map.of())),
+                    Map.of("source", "unit-test")
+                )
             ));
         }
 

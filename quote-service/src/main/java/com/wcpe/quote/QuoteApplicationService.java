@@ -48,6 +48,35 @@ public class QuoteApplicationService {
         return expireIfNeeded(current);
     }
 
+    public RankingPreviewResponse previewRanking(RankingPreviewRequest request) {
+        validatePreview(request);
+        RankingPolicyRef policyRef = request.policyRef();
+        RankingPolicy previewPolicy = new RankingPolicy(
+            policyRef.policyId(),
+            policyRef.policyVersion(),
+            java.time.Duration.ofHours(1),
+            Map.of(),
+            Map.of(),
+            Map.of(),
+            policyRef
+        );
+        Instant expiresAt = clock.instant().plus(previewPolicy.quoteTtl());
+        List<QuoteOption> options = ranker.rank(request.candidates(), previewPolicy, expiresAt);
+        String replayHash = ReplayHash.sha256(Map.of(
+            "tenantId", request.tenantId(),
+            "policyRef", policyRef.policyId() + ":" + policyRef.policyVersion(),
+            "options", options.stream().map(option -> option.rank() + ":" + option.productId() + ":" + option.rankScore()).toList()
+        ).toString());
+        return new RankingPreviewResponse(
+            request.tenantId(),
+            policyRef.policyId(),
+            policyRef.policyVersion(),
+            options,
+            replayHash,
+            request.correlationId()
+        );
+    }
+
     public QuoteComparisonResponse compareQuoteOptions(
         UUID tenantId,
         UUID quoteId,
@@ -136,6 +165,59 @@ public class QuoteApplicationService {
             )
         ));
         return export;
+    }
+
+    public QuoteExplanationResponse explainQuoteOption(
+        UUID tenantId,
+        UUID quoteId,
+        UUID optionId,
+        Set<String> allowedFields,
+        String actorId,
+        String correlationId
+    ) {
+        validateExplanationRequest(optionId, actorId, correlationId);
+        Quote quote = getQuote(tenantId, quoteId);
+        QuoteOption option = quote.options().stream()
+            .filter(candidate -> candidate.optionId().equals(optionId))
+            .findFirst()
+            .orElseThrow(() -> new QuoteCreateException("NOT_FOUND", "Quote option not found"));
+        PriceWaterfall waterfall = option.waterfall();
+        Set<String> safeAllowedFields = allowedFields == null ? Set.of() : allowedFields;
+        List<PriceWaterfall.WaterfallSection> sections = maskedSections(waterfall, safeAllowedFields);
+        List<String> hiddenFields = sections.stream()
+            .flatMap(section -> section.lines().stream())
+            .filter(line -> "MASKED".equals(line.visibility()))
+            .map(PriceWaterfall.WaterfallLine::lineId)
+            .toList();
+        String auditRef = "audit:" + correlationId + ":" + optionId;
+
+        outboxEvents.add(event("quote.explanation_viewed.v1", quote));
+        auditEntries.add(new AuditEntry(
+            "QUOTE_WATERFALL_VIEWED",
+            actorId,
+            tenantId.toString(),
+            correlationId,
+            quote.replayHash(),
+            clock.instant(),
+            Map.of(
+                "quoteId", quote.quoteId().toString(),
+                "optionId", option.optionId().toString(),
+                "maskedFieldCount", Integer.toString(hiddenFields.size()),
+                "sourceRefs", waterfall.upstreamRefs().toString()
+            )
+        ));
+
+        return new QuoteExplanationResponse(
+            quote.quoteId(),
+            option.optionId(),
+            sections,
+            option.finalPriceBps(),
+            waterfall.roundingTrace(),
+            waterfall.upstreamRefs(),
+            hiddenFields,
+            option.warnings(),
+            auditRef
+        );
     }
 
     public List<OutboxEvent> outboxEvents() {
@@ -251,6 +333,19 @@ public class QuoteApplicationService {
         }
     }
 
+    private static void validatePreview(RankingPreviewRequest request) {
+        if (request == null || request.tenantId() == null || request.actorId() == null || request.actorId().isBlank()
+            || request.correlationId() == null || request.correlationId().isBlank()) {
+            throw new QuoteCreateException("QUOTE_VALIDATION_FAILED", "tenantId, actorId, and correlationId are required");
+        }
+        if (request.policyRef() == null || request.policyRef().criteria().isEmpty()) {
+            throw new QuoteCreateException("POLICY_NOT_SATISFIED", "Ranking preview requires configured policy criteria");
+        }
+        if (request.candidates() == null || request.candidates().isEmpty()) {
+            throw new QuoteCreateException("QUOTE_VALIDATION_FAILED", "Ranking preview requires candidate options");
+        }
+    }
+
     private static void validateComparisonRequest(ComparisonViewConfig config, String actorId, String correlationId) {
         if (config == null) {
             throw new QuoteCreateException("POLICY_NOT_SATISFIED", "Comparison view configuration is required");
@@ -258,6 +353,26 @@ public class QuoteApplicationService {
         if (actorId == null || actorId.isBlank() || correlationId == null || correlationId.isBlank()) {
             throw new QuoteCreateException("QUOTE_VALIDATION_FAILED", "actorId and correlationId are required");
         }
+    }
+
+    private static void validateExplanationRequest(UUID optionId, String actorId, String correlationId) {
+        if (optionId == null) {
+            throw new QuoteCreateException("QUOTE_VALIDATION_FAILED", "optionId is required");
+        }
+        if (actorId == null || actorId.isBlank() || correlationId == null || correlationId.isBlank()) {
+            throw new QuoteCreateException("QUOTE_VALIDATION_FAILED", "actorId and correlationId are required");
+        }
+    }
+
+    private static List<PriceWaterfall.WaterfallSection> maskedSections(PriceWaterfall waterfall, Set<String> allowedFields) {
+        return waterfall.sections().stream()
+            .map(section -> new PriceWaterfall.WaterfallSection(
+                section.sectionId(),
+                section.label(),
+                section.displayOrder(),
+                section.lines().stream().map(line -> line.maskedFor(allowedFields)).toList()
+            ))
+            .toList();
     }
 
     private static String normalizedReplayInput(
@@ -280,6 +395,7 @@ public class QuoteApplicationService {
     private void recordAuditAndEvents(Quote quote) {
         outboxEvents.add(event("quote.created.v1", quote));
         outboxEvents.add(event(quote.status() == QuoteStatus.NO_OPTIONS ? "quote.no_options.v1" : "quote.ready.v1", quote));
+        outboxEvents.add(bestExecutionRankedEvent(quote));
         auditEntries.add(new AuditEntry(
             "QUOTE_CREATE_REQUESTED",
             quote.createdBy(),
@@ -298,6 +414,62 @@ public class QuoteApplicationService {
             quote.createdAt(),
             Map.of("status", quote.status().name(), "quoteId", quote.quoteId().toString())
         ));
+        auditEntries.add(new AuditEntry(
+            "BEST_EXECUTION_POLICY_APPLIED",
+            quote.createdBy(),
+            quote.tenantId().toString(),
+            quote.correlationId(),
+            quote.replayHash(),
+            quote.createdAt(),
+            Map.of(
+                "quoteId", quote.quoteId().toString(),
+                "policyId", quote.rankingPolicyId(),
+                "policyVersion", quote.rankingPolicyVersion(),
+                "rankedOptionCount", Integer.toString(quote.options().size())
+            )
+        ));
+        if (quote.options().stream().anyMatch(option -> option.tieBreakerTrace() != null && !option.tieBreakerTrace().isBlank())) {
+            auditEntries.add(new AuditEntry(
+                "BEST_EXECUTION_TIE_BREAKER_APPLIED",
+                quote.createdBy(),
+                quote.tenantId().toString(),
+                quote.correlationId(),
+                quote.replayHash(),
+                quote.createdAt(),
+                Map.of(
+                    "quoteId", quote.quoteId().toString(),
+                    "policyVersion", quote.rankingPolicyVersion(),
+                    "trace", quote.options().stream().map(QuoteOption::tieBreakerTrace).distinct().toList().toString()
+                )
+            ));
+        }
+    }
+
+    private static OutboxEvent bestExecutionRankedEvent(Quote quote) {
+        return new OutboxEvent(
+            "best_execution.ranked.v1",
+            "1",
+            quote.tenantId() + ":" + quote.quoteId(),
+            quote.createdAt(),
+            Map.of(
+                "tenantId", quote.tenantId().toString(),
+                "eventType", "best_execution.ranked.v1",
+                "eventVersion", "1",
+                "sourceService", "quote-service",
+                "actorId", quote.createdBy(),
+                "correlationId", quote.correlationId(),
+                "idempotencyKey", quote.idempotencyKey()
+            ),
+            Map.of(
+                "quoteId", quote.quoteId().toString(),
+                "tenantId", quote.tenantId().toString(),
+                "policyRef", quote.rankingPolicyId() + ":" + quote.rankingPolicyVersion(),
+                "rankedOptionIds", quote.options().stream().map(option -> option.optionId().toString()).toList().toString(),
+                "scores", quote.options().stream().map(option -> option.rank() + ":" + option.rankScore()).toList().toString(),
+                "warnings", quote.options().stream().flatMap(option -> option.warnings().stream()).distinct().toList().toString(),
+                "replayHash", quote.replayHash()
+            )
+        );
     }
 
     private static OutboxEvent event(String eventType, Quote quote) {

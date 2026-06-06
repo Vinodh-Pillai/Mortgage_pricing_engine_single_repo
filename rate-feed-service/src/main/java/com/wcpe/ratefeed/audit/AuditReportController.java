@@ -56,7 +56,7 @@ class AuditReportController {
     Headers h = headers(http);
     RateFeedModels.AuditTimelineRequest request = new RateFeedModels.AuditTimelineRequest(
         from, to, investorId, channelId, batchId, versionId, actorId, eventType, status, correlationId, page, size);
-    return withAuthorizedHeaders(h, RateFeedRoles.RATE_FEED_AUDIT_VIEW,
+    return withAnyAuthorizedHeaders(h, auditReadRoles(),
         () -> ResponseEntity.ok(auditReportService.queryTimeline(tenantId, request, roles(h.roles()))));
   }
 
@@ -65,7 +65,7 @@ class AuditReportController {
       @PathVariable UUID batchId,
       HttpServletRequest http) {
     Headers h = headers(http);
-    return withAuthorizedHeaders(h, RateFeedRoles.RATE_FEED_AUDIT_VIEW,
+    return withAnyAuthorizedHeaders(h, auditReadRoles(),
         () -> ResponseEntity.ok(auditReportService.getBatchReport(tenantId, batchId, h.actorId())));
   }
 
@@ -75,11 +75,8 @@ class AuditReportController {
       @RequestBody RateFeedModels.AuditExportRequest request,
       HttpServletRequest http) {
     Headers h = headers(http);
-    String requiredRole = request != null && request.includeRawValues()
-        ? RateFeedRoles.RATE_FEED_AUDIT_EXPORT
-        : RateFeedRoles.RATE_FEED_AUDIT_VIEW;
-    return withAuthorizedHeaders(h, requiredRole,
-        () -> ResponseEntity.status(HttpStatus.CREATED)
+    return withAnyAuthorizedHeaders(h, auditReadRoles(),
+        () -> ResponseEntity.status(HttpStatus.ACCEPTED)
             .body(auditReportService.createExport(tenantId, batchId, request, h.actorId(), h.correlationId())));
   }
 
@@ -89,7 +86,7 @@ class AuditReportController {
       @RequestBody RateFeedModels.VerifyReplayRequest request,
       HttpServletRequest http) {
     Headers h = headers(http);
-    return withAuthorizedHeaders(h, RateFeedRoles.RATE_FEED_AUDIT_VIEW,
+    return withAnyAuthorizedHeaders(h, auditReadRoles(),
         () -> ResponseEntity.ok(auditReportService.verifyReplay(tenantId, batchId, request, h.actorId())));
   }
 
@@ -104,6 +101,10 @@ class AuditReportController {
   }
 
   private <T> T withAuthorizedHeaders(Headers headers, String requiredRole, Supplier<T> action) {
+    return withAnyAuthorizedHeaders(headers, Set.of(requiredRole), action);
+  }
+
+  private <T> T withAnyAuthorizedHeaders(Headers headers, Set<String> allowedRoles, Supplier<T> action) {
     if (!trustedDirectHeadersEnabled) {
       if (present(headers.roles()) || present(headers.actorId())) {
         throw new RateFeedException(HttpStatus.UNAUTHORIZED, "UNTRUSTED_DIRECT_AUTH_HEADERS", "Direct X-Roles/X-Actor-Id headers are not trusted.");
@@ -112,12 +113,19 @@ class AuditReportController {
     }
     try {
       RequestContext.roles(headers.roles());
-      String validatedRole = RateFeedRoles.validateRole(requiredRole);
-      if (!RequestContext.hasRole(validatedRole)) {
-        throw new RateFeedException(HttpStatus.FORBIDDEN, "ACCESS_DENIED", validatedRole + " role is required.");
+      Set<String> validatedRoles = new HashSet<>();
+      for (String role : allowedRoles) validatedRoles.add(RateFeedRoles.validateRole(role));
+      boolean authorized = validatedRoles.stream().anyMatch(RequestContext::hasRole);
+      if (!authorized) {
+        throw new RateFeedException(HttpStatus.FORBIDDEN, "AUDIT_ACCESS_DENIED",
+            "One of " + validatedRoles + " is required for rate-feed audit access.");
       }
       return action.get();
     } finally { RequestContext.clear(); }
+  }
+
+  private Set<String> auditReadRoles() {
+    return Set.of(RateFeedRoles.RATE_FEED_AUDIT_VIEW, RateFeedRoles.RATE_FEED_AUDIT_EXPORT, RateFeedRoles.RATE_FEED_ADMIN);
   }
 
   private static Set<String> roles(String roles) {

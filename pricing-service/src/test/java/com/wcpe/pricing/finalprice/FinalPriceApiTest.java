@@ -1,6 +1,7 @@
 package com.wcpe.pricing.finalprice;
 
 import com.wcpe.pricing.finalprice.FinalPriceApi.AdjustmentRule;
+import com.wcpe.pricing.finalprice.FinalPriceApi.CapFloorAction;
 import com.wcpe.pricing.finalprice.FinalPriceApi.CapFloorRule;
 import com.wcpe.pricing.finalprice.FinalPriceApi.FinalPriceErrorCode;
 import com.wcpe.pricing.finalprice.FinalPriceApi.FinalPriceException;
@@ -186,6 +187,55 @@ class FinalPriceApiTest {
                 () -> api.calculate(TENANT, writeHeaders("idem-cap"), request(false)));
 
         assertEquals(FinalPriceErrorCode.CAP_FLOOR_BLOCKED, exception.code());
+    }
+
+    @Test
+    void PriceCapFloorEvaluator_appliesConfiguredAdjustAction() {
+        configuration = new PricingConfigurationSnapshot(TENANT, List.of("adjustment-version-1", "cap-floor-version-adjust"), null, null, null,
+                "BASE", "FINAL_PRICE", List.of(),
+                List.of(new CapFloorRule("cap-floor-version-adjust", null, new BigDecimal("99.50000000"),
+                        CapFloorAction.ADJUST, 10, "CONFIGURED_MAX_PRICE_ADJUSTED")), true);
+
+        FinalPriceResponse response = api.calculate(TENANT, writeHeaders("idem-cap-adjust"), request(false));
+
+        assertEquals(new BigDecimal("99.50000"), response.roundedFinalPrice());
+        assertEquals(CapFloorAction.ADJUST, response.capFloorResults().get(0).action());
+        assertTrue(response.capFloorResults().get(0).adjusted());
+        assertTrue(response.ledger().stream().anyMatch(entry -> "CAP_FLOOR_CHECK".equals(entry.step())
+                && "ADJUST".equals(entry.operation())));
+    }
+
+    @Test
+    void PriceBoundaryPolicyValidator_rejectsConflictingRules() {
+        FinalPriceException exception = assertThrows(FinalPriceException.class,
+                () -> new CapFloorRule("cap-floor-conflict", new BigDecimal("101.00000000"),
+                        new BigDecimal("100.00000000"), CapFloorAction.BLOCK, 1, "CONFLICTING_BOUNDS"));
+
+        assertEquals(FinalPriceErrorCode.PRICE_BOUNDARY_CONFLICT, exception.code());
+    }
+
+    @Test
+    void PriceBoundaryPolicyMissing_failsClosedWhenRequired() {
+        configuration = new PricingConfigurationSnapshot(TENANT, List.of("adjustment-version-1", "cap-floor-version-required"), null, null,
+                null, "BASE", "FINAL_PRICE", List.of(), List.of(), true);
+
+        FinalPriceException exception = assertThrows(FinalPriceException.class,
+                () -> api.calculate(TENANT, writeHeaders("idem-cap-missing"), request(false)));
+
+        assertEquals(FinalPriceErrorCode.PRICE_BOUNDARY_POLICY_MISSING, exception.code());
+    }
+
+    @Test
+    void PriceCapFloorEvaluator_warnActionFailsClosedUntilConfigured() {
+        configuration = new PricingConfigurationSnapshot(TENANT, List.of("adjustment-version-1", "cap-floor-version-warn"), null, null, null,
+                "BASE", "FINAL_PRICE", List.of(),
+                List.of(new CapFloorRule("cap-floor-version-warn", null, new BigDecimal("99.50000000"),
+                        CapFloorAction.WARN, 1, "WARN_REQUIRES_PRODUCT_COMPLIANCE_APPROVAL")), true);
+
+        FinalPriceException exception = assertThrows(FinalPriceException.class,
+                () -> api.calculate(TENANT, writeHeaders("idem-cap-warn"), request(false)));
+
+        assertEquals(FinalPriceErrorCode.PRICE_BOUNDARY_POLICY_NOT_SATISFIED, exception.code());
     }
 
     private FinalPriceRequest request(boolean dryRun) {

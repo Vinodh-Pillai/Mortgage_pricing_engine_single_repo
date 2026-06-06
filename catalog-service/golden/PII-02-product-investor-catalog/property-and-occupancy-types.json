@@ -1,0 +1,19 @@
+{
+  "storyId": "PII-02-S07",
+  "propertyTypes": [
+    { "code": "SINGLE_FAMILY", "displayName": "Single Family", "requiresProjectReview": false, "unitCountMin": 1, "unitCountMax": 1 },
+    { "code": "PUD", "displayName": "Planned Unit Development", "requiresProjectReview": false, "unitCountMin": 1, "unitCountMax": 1 },
+    { "code": "CONDO", "displayName": "Condominium", "requiresProjectReview": true, "unitCountMin": 1, "unitCountMax": 1 },
+    { "code": "TWO_TO_FOUR_UNIT", "displayName": "2-4 Unit", "requiresProjectReview": false, "unitCountMin": 2, "unitCountMax": 4 },
+    { "code": "MANUFACTURED_HOME", "displayName": "Manufactured Home", "requiresProjectReview": false, "unitCountMin": 1, "unitCountMax": 1, "seedDefaultStatus": "DISABLED_UNTIL_EXPLICITLY_REFERENCED" }
+  ],
+  "occupancyTypes": [
+    { "code": "PRIMARY_RESIDENCE", "displayName": "Primary Residence" },
+    { "code": "SECOND_HOME", "displayName": "Second Home" },
+    { "code": "INVESTMENT_PROPERTY", "displayName": "Investment Property" }
+  ],
+  "resolveExample": {
+    "request": { "asOf": "2026-02-01T00:00:00Z", "propertyType": "CONDO", "occupancyType": "PRIMARY_RESIDENCE" },
+    "expected": { "propertyType": { "code": "CONDO", "requiresProjectReview": true }, "occupancyType": { "code": "PRIMARY_RESIDENCE" } }
+  }
+}

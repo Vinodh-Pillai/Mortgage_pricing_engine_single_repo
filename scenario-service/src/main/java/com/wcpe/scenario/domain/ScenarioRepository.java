@@ -2,8 +2,11 @@ package com.wcpe.scenario.domain;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.*;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.http.HttpStatus;
@@ -20,13 +23,15 @@ class ScenarioRepository {
 
   private final JdbcTemplate jdbc;
   private final ObjectMapper mapper;
+  private final ThreadLocal<Boolean> replayed = ThreadLocal.withInitial(() -> false);
 
   ScenarioRepository(JdbcTemplate jdbc, ObjectMapper mapper) {
     this.jdbc = jdbc;
-    this.mapper = mapper.findAndRegisterModules();
+    this.mapper = mapper.findAndRegisterModules().configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
   }
 
   Optional<Object> idempotent(String scope, String key, Object request) {
+    replayed.set(false);
     if (key == null || key.isBlank()) return Optional.empty();
     UUID tenantId = tenant(scope);
     String scopedKey = scopedKey(scope, key);
@@ -37,6 +42,7 @@ class ScenarioRepository {
           where tenant_id = ? and idempotency_key = ?
           """, (rs, row) -> {
           if (!requestHash.equals(rs.getString("request_hash"))) throw new ScenarioException(HttpStatus.CONFLICT, "IDEMPOTENCY_CONFLICT", "Idempotency key was reused with a different request.", List.of());
+          replayed.set(true);
           return readResponse(rs.getString("response_type"), rs.getString("response_json"));
         }, tenantId, scopedKey));
     } catch (EmptyResultDataAccessException ex) {
@@ -61,6 +67,12 @@ class ScenarioRepository {
           """, String.class, tenantId, scopedKey);
       if (!hash.equals(existing)) throw new ScenarioException(HttpStatus.CONFLICT, "IDEMPOTENCY_CONFLICT", "Idempotency key was reused with a different response.", List.of());
     }
+  }
+
+  boolean consumeReplayFlag() {
+    boolean value = replayed.get();
+    replayed.set(false);
+    return value;
   }
 
   @Transactional
@@ -171,6 +183,35 @@ class ScenarioRepository {
         """, tenantId, vId, scenarioId, version, result.score(), result.rule(), traceJson, result.qualityStatus());
   }
 
+  void persistLoanStructure(UUID tenantId, UUID scenarioId, int version, LoanStructureRequest request, LoanMetricResult result) {
+    UUID vId = UUID.nameUUIDFromBytes((tenantId + ":" + scenarioId + ":" + version).getBytes());
+    jdbc.update("delete from scenario.scenario_loan_metric where tenant_id = ? and scenario_version_id = ?", tenantId, vId);
+    jdbc.update("delete from scenario.scenario_loan_terms where tenant_id = ? and scenario_version_id = ?", tenantId, vId);
+    jdbc.update("""
+        insert into scenario.scenario_loan_terms (tenant_id, scenario_loan_terms_id, scenario_id, scenario_version_id,
+          loan_purpose, loan_amount, lien_position, term_months, amortization_type, subordinate_financing_amount,
+          heloc_drawn_amount, heloc_limit_amount, requested_lock_period_days, property_value_for_ltv, calculation_trace_id, quality_status)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, tenantId, UUID.randomUUID(), scenarioId, vId, request.loanPurpose(), request.loanAmount(), request.lienPosition(), request.termMonths(),
+        request.amortizationType(), zero(request.subordinateFinancingAmount()), zero(request.helocDrawnAmount()), zero(request.helocLimitAmount()),
+        request.requestedLockPeriodDays(), request.temporaryPropertyValueForLtv(), result.calculationTraceId(), result.qualityStatus());
+    for (LoanMetric metric : result.metrics()) {
+      jdbc.update("""
+          insert into scenario.scenario_loan_metric (tenant_id, scenario_version_id, metric_code, ratio_value, bps_value,
+            numerator_amount, denominator_amount, rounding_rule, quality_status)
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          on conflict (tenant_id, scenario_version_id, metric_code) do update set
+            ratio_value = excluded.ratio_value,
+            bps_value = excluded.bps_value,
+            numerator_amount = excluded.numerator_amount,
+            denominator_amount = excluded.denominator_amount,
+            rounding_rule = excluded.rounding_rule,
+            quality_status = excluded.quality_status
+          """, tenantId, vId, metric.metricCode(), metric.ratioValue(), metric.bpsValue(), metric.numeratorAmount(),
+          metric.denominatorAmount(), metric.roundingRule(), metric.qualityStatus());
+    }
+  }
+
   private static String computeQualityStatus(BorrowerCredit b) {
     if (!"AVAILABLE".equals(b.creditStatus())) return "MISSING";
     if (b.creditScore() == null) return "MISSING";
@@ -225,14 +266,20 @@ class ScenarioRepository {
     snapshot.put("normalizedFacts", scenario.normalizedFacts());
     snapshot.put("derivedFields", scenario.derivedFields());
     snapshot.put("validationIssues", scenario.validationIssues());
+    snapshot.put("replayHash", version.hash());
     return snapshot;
   }
 
   private Object readResponse(String type, String json) {
     if ("BatchImportResponse".equals(type)) return read(json, BatchImportResponse.class);
+    if ("ImportJobResponse".equals(type)) return read(json, ImportJobResponse.class);
+    if ("SubmissionProfileResponse".equals(type)) return read(json, SubmissionProfileResponse.class);
     if ("BorrowerCreditResponse".equals(type)) return read(json, BorrowerCreditResponse.class);
+    if ("LoanStructureResponse".equals(type)) return read(json, LoanStructureResponse.class);
     return read(json, ScenarioResponse.class);
   }
+
+  private static BigDecimal zero(BigDecimal value) { return value == null ? BigDecimal.ZERO : value; }
 
   private static UUID tenant(String scope) {
     return UUID.fromString(scope.split(":", 2)[0]);
@@ -244,7 +291,7 @@ class ScenarioRepository {
   }
 
   private String requestHash(String scope, String key, Object request) {
-    return Hashing.sha256(scope + ":" + key + ":" + write(request == null ? Map.of() : request));
+    return IdempotencyRequestHasher.hash(mapper, scope, request);
   }
 
   private String write(Object value) {

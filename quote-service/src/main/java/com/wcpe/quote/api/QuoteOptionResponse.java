@@ -16,6 +16,9 @@ public record QuoteOptionResponse(
     BigDecimal totalAdjustmentBps,
     BigDecimal marginBps,
     List<String> rankReasons,
+    List<BigDecimal> criterionScores,
+    String tieBreakerTrace,
+    List<String> warnings,
     Map<String, String> upstreamRefs
 ) {
     public static QuoteOptionResponse from(QuoteOption option) {
@@ -30,6 +33,9 @@ public record QuoteOptionResponse(
             option.totalAdjustmentBps(),
             option.marginBps(),
             option.rankReasons(),
+            option.criterionScores(),
+            option.tieBreakerTrace(),
+            option.warnings(),
             option.upstreamRefs()
         );
     }

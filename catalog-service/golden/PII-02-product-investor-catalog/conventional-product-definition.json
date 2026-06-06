@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "story_id": "PII-02-S02",
+  "purpose": "Golden conventional product definition fixture shape for tenant-governed import/validation. Values shown here are examples from the story and must be resolved against tenant-published catalog references before publish.",
+  "products": [
+    { "productCode": "CONV_FIXED_30", "amortizationType": "FIXED", "termMonths": [360], "requiresTenantPublishedReferences": true },
+    { "productCode": "CONV_FIXED_20", "amortizationType": "FIXED", "termMonths": [240], "requiresTenantPublishedReferences": true },
+    { "productCode": "CONV_FIXED_15", "amortizationType": "FIXED", "termMonths": [180], "requiresTenantPublishedReferences": true },
+    { "productCode": "CONV_ARM_5_6", "amortizationType": "ARM", "fixedPeriodMonths": 60, "adjustmentPeriodMonths": 6, "requiresTenantPublishedReferences": true },
+    { "productCode": "CONV_ARM_7_6", "amortizationType": "ARM", "fixedPeriodMonths": 84, "adjustmentPeriodMonths": 6, "requiresTenantPublishedReferences": true },
+    { "productCode": "CONV_ARM_10_6", "amortizationType": "ARM", "fixedPeriodMonths": 120, "adjustmentPeriodMonths": 6, "requiresTenantPublishedReferences": true }
+  ],
+  "non_hardcoded_domain_policy": "Investor, channel, property, occupancy, loan purpose, market, ARM index, term, amount, and effective-date details are tenant-published configuration and are not encoded in this fixture."
+}

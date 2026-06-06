@@ -1,0 +1,5 @@
+{
+  "error": "VERSION_EFFECTIVE_OVERLAP",
+  "result": "fail_closed",
+  "reason": "two published versions share effective UTC window, scope specificity, and priority"
+}

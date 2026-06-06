@@ -1,0 +1,18 @@
+{
+  "storyId": "PII-02-S03",
+  "baselineChannelCodes": [
+    "RETAIL",
+    "WHOLESALE",
+    "CORRESPONDENT",
+    "CONSUMER_DIRECT",
+    "PARTNER_API"
+  ],
+  "draftEndpoint": "POST /api/v1/tenants/{tenantId}/product-catalog/channels/drafts",
+  "resolveEndpoint": "POST /api/v1/tenants/{tenantId}/product-catalog/channels/resolve",
+  "eventType": "ChannelCatalogChanged.v1",
+  "errorCodes": [
+    "DUPLICATE_SOURCE_MAPPING",
+    "CHANNEL_MAPPING_NOT_FOUND",
+    "CHANNEL_NOT_ASSIGNED_TO_ACTOR"
+  ]
+}

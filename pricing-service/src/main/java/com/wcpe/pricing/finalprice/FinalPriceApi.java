@@ -198,18 +198,32 @@ public final class FinalPriceApi {
             PricingConfigurationSnapshot configuration,
             List<FinalPriceLedgerEntry> ledger,
             BigDecimal subtotal) {
+        if (configuration.priceBoundaryPolicyRequired() && configuration.capFloorRules().isEmpty()) {
+            throw new FinalPriceException(FinalPriceErrorCode.PRICE_BOUNDARY_POLICY_MISSING,
+                    "published price boundary policy is required");
+        }
         List<CapFloorResult> results = new ArrayList<>();
         BigDecimal running = subtotal;
-        for (CapFloorRule rule : configuration.capFloorRules()) {
-            if (rule.minPrice() != null && running.compareTo(rule.minPrice()) < 0) {
-                throw new FinalPriceException(FinalPriceErrorCode.CAP_FLOOR_BLOCKED, rule.reasonCode());
+        for (CapFloorRule rule : configuration.capFloorRules().stream()
+                .sorted(Comparator.comparing(CapFloorRule::precedence).thenComparing(CapFloorRule::versionRef))
+                .toList()) {
+            BigDecimal input = running;
+            boolean belowFloor = rule.minPrice() != null && running.compareTo(rule.minPrice()) < 0;
+            boolean aboveCap = rule.maxPrice() != null && running.compareTo(rule.maxPrice()) > 0;
+            if (belowFloor || aboveCap) {
+                running = switch (rule.action()) {
+                    case ADJUST -> belowFloor ? rule.minPrice() : rule.maxPrice();
+                    case BLOCK -> throw new FinalPriceException(FinalPriceErrorCode.CAP_FLOOR_BLOCKED, rule.reasonCode());
+                    case WARN -> throw new FinalPriceException(FinalPriceErrorCode.PRICE_BOUNDARY_POLICY_NOT_SATISFIED,
+                            "WARN action is not enabled by pricing-service configuration");
+                };
             }
-            if (rule.maxPrice() != null && running.compareTo(rule.maxPrice()) > 0) {
-                throw new FinalPriceException(FinalPriceErrorCode.CAP_FLOOR_BLOCKED, rule.reasonCode());
-            }
-            CapFloorResult result = new CapFloorResult(rule.versionRef(), rule.reasonCode(), subtotal, running, false);
+            boolean adjusted = input.compareTo(running) != 0;
+            CapFloorResult result = new CapFloorResult(rule.versionRef(), rule.reasonCode(), input, running,
+                    adjusted, rule.action());
             results.add(result);
-            ledger.add(new FinalPriceLedgerEntry(ledger.size() + 1, "CAP_FLOOR_CHECK", running, "CHECK", running,
+            ledger.add(new FinalPriceLedgerEntry(ledger.size() + 1, "CAP_FLOOR_CHECK", input,
+                    adjusted ? "ADJUST" : "CHECK", running,
                     rule.versionRef(), rule.reasonCode(), null));
         }
         return results;
@@ -314,6 +328,9 @@ public final class FinalPriceApi {
         ADJUSTMENT_CONFIG_MISSING,
         ADJUSTMENT_CONFLICT,
         CAP_FLOOR_BLOCKED,
+        PRICE_BOUNDARY_POLICY_MISSING,
+        PRICE_BOUNDARY_POLICY_NOT_SATISFIED,
+        PRICE_BOUNDARY_CONFLICT,
         ROUNDING_POLICY_MISSING,
         SCENARIO_FACT_MISSING,
         IDEMPOTENCY_CONFLICT
@@ -381,10 +398,12 @@ public final class FinalPriceApi {
             String reasonCode,
             BigDecimal inputValue,
             BigDecimal outputValue,
-            boolean adjusted) {
+            boolean adjusted,
+            CapFloorAction action) {
         public CapFloorResult {
             inputValue = intermediateScale(inputValue);
             outputValue = intermediateScale(outputValue);
+            action = action == null ? CapFloorAction.BLOCK : action;
         }
     }
 
@@ -461,11 +480,32 @@ public final class FinalPriceApi {
         }
     }
 
-    public record CapFloorRule(String versionRef, BigDecimal minPrice, BigDecimal maxPrice, String reasonCode) {
+    public enum CapFloorAction {
+        ADJUST,
+        BLOCK,
+        WARN
+    }
+
+    public record CapFloorRule(
+            String versionRef,
+            BigDecimal minPrice,
+            BigDecimal maxPrice,
+            CapFloorAction action,
+            int precedence,
+            String reasonCode) {
+        public CapFloorRule(String versionRef, BigDecimal minPrice, BigDecimal maxPrice, String reasonCode) {
+            this(versionRef, minPrice, maxPrice, CapFloorAction.BLOCK, 0, reasonCode);
+        }
+
         public CapFloorRule {
             requireText(versionRef, "cap_floor version_ref is required");
             minPrice = minPrice == null ? null : intermediateScale(minPrice);
             maxPrice = maxPrice == null ? null : intermediateScale(maxPrice);
+            if (minPrice != null && maxPrice != null && minPrice.compareTo(maxPrice) > 0) {
+                throw new FinalPriceException(FinalPriceErrorCode.PRICE_BOUNDARY_CONFLICT,
+                        "price boundary floor cannot be greater than cap");
+            }
+            action = action == null ? CapFloorAction.BLOCK : action;
             requireText(reasonCode, "reason_code is required");
         }
     }
@@ -479,7 +519,22 @@ public final class FinalPriceApi {
             String roundingScope,
             String roundingOutputContext,
             List<AdjustmentRule> adjustmentRules,
-            List<CapFloorRule> capFloorRules) {
+            List<CapFloorRule> capFloorRules,
+            boolean priceBoundaryPolicyRequired) {
+        public PricingConfigurationSnapshot(
+                String tenantId,
+                List<String> versionRefs,
+                String productCode,
+                String investorCode,
+                String channelCode,
+                String roundingScope,
+                String roundingOutputContext,
+                List<AdjustmentRule> adjustmentRules,
+                List<CapFloorRule> capFloorRules) {
+            this(tenantId, versionRefs, productCode, investorCode, channelCode, roundingScope, roundingOutputContext,
+                    adjustmentRules, capFloorRules, false);
+        }
+
         public PricingConfigurationSnapshot {
             versionRefs = versionRefs == null ? List.of() : List.copyOf(versionRefs);
             adjustmentRules = adjustmentRules == null ? List.of() : List.copyOf(adjustmentRules);

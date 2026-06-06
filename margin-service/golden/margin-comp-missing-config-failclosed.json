@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "storyId": "PII-07-S10",
+  "fixtureId": "margin-comp-missing-config-failclosed",
+  "tenant": "tenant-a",
+  "expectedError": "REPLAY_VERSION_MANIFEST_INCOMPLETE",
+  "notes": "Missing configuration replay must fail closed and preserve audit evidence."
+}
