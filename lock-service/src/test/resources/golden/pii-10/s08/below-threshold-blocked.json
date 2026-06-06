@@ -1,0 +1,5 @@
+{
+  "scenario": "below-threshold-blocked",
+  "expectedError": "POLICY_NOT_SATISFIED",
+  "reason": "selected terms must come from configured original/current comparison snapshot"
+}

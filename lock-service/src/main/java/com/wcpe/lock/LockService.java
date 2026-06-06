@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -25,6 +26,21 @@ public final class LockService {
   private long lockConfirmationTotal;
   private long pendingInvestorConfirmationTotal;
   private long investorMismatchTotal;
+  private long lockExpirationRunTotal;
+  private long locksExpiringSoonTotal;
+  private long locksExpiredTotal;
+  private long extensionRequestTotal;
+  private long extensionApprovalTotal;
+  private long extensionRejectionTotal;
+  private long extensionCancellationTotal;
+  private long extensionConfirmationFailureTotal;
+  private long extensionRequestedDaysTotal;
+  private long lockSyncSentTotal;
+  private long lockSyncAckedTotal;
+  private long lockSyncFailedTotal;
+  private long lockSyncDlqTotal;
+  private long lockSyncReconciledTotal;
+  private final Map<String, String> extensionFeeConfigRefsByReason = new LinkedHashMap<>();
 
   public LockService() {
     this(new LockRepository());
@@ -64,7 +80,7 @@ public final class LockService {
     );
     LockModels.RateLockRecord record = new LockModels.RateLockRecord(
       command.tenantId(), lockId, command.requestId(), command.quoteId(), command.loanId(),
-      command.scenarioHash(), status, 1, now, now, command.idempotencyKey(),
+      command.scenarioHash(), status, 1, now, now, null, command.idempotencyKey(),
       command.correlationId(), command.lockPolicyVersionId(), requestHash, auditRef,
       replayRef, "lock.requested.v1"
     );
@@ -110,7 +126,7 @@ public final class LockService {
     LockModels.RateLockRecord updated = new LockModels.RateLockRecord(
       current.tenantId(), current.lockId(), current.requestId(), current.quoteId(),
       current.loanId(), current.scenarioHash(), nextStatus, current.version() + 1,
-      current.createdAt(), Instant.now(), current.idempotencyKey(), current.correlationId(),
+      current.createdAt(), Instant.now(), current.expiresAt(), current.idempotencyKey(), current.correlationId(),
       current.lockPolicyVersionId(), current.requestHash(), current.auditRef(),
       current.replayRef(), current.outboxEventType()
     );
@@ -155,7 +171,7 @@ public final class LockService {
     LockModels.RateLockRecord updated = new LockModels.RateLockRecord(
       current.tenantId(), current.lockId(), current.requestId(), current.quoteId(),
       current.loanId(), current.scenarioHash(), nextStatus, current.version() + 1,
-      current.createdAt(), command.decidedAt(), current.idempotencyKey(), command.correlationId(),
+      current.createdAt(), command.decidedAt(), current.expiresAt(), current.idempotencyKey(), command.correlationId(),
       command.policyVersionId(), current.requestHash(), auditRef, replayRef,
       decisionEventType(command.decision())
     );
@@ -294,7 +310,7 @@ public final class LockService {
     String replayRef = "REPLAY-LOCK-CONFIRMATION-" + confirmationHash.substring(0, 16);
     LockModels.RateLockRecord updated = new LockModels.RateLockRecord(
       current.tenantId(), current.lockId(), current.requestId(), current.quoteId(), current.loanId(),
-      current.scenarioHash(), nextStatus, current.version() + 1, current.createdAt(), command.confirmedAt(),
+      current.scenarioHash(), nextStatus, current.version() + 1, current.createdAt(), command.confirmedAt(), command.expiresAt(),
       current.idempotencyKey(), command.correlationId(), command.requestedPolicyVersionId(), current.requestHash(),
       auditRef, replayRef, confirmationEventType(nextStatus)
     );
@@ -351,6 +367,674 @@ public final class LockService {
       .orElseThrow(() -> new LockServiceException("NOT_FOUND", "Lock confirmation was not found for tenant"));
   }
 
+  public LockModels.LockExtensionPreviewResponse previewExtension(LockModels.LockExtensionPreviewCommand command) {
+    validateExtensionPreviewRequired(command);
+    LockModels.RateLockRecord current = getLock(command.tenantId(), command.lockId());
+    validateExtensionEligibility(current, command.expectedVersion(), command.requestedDays(), command.requestedExpiresAt(), command.costSnapshot());
+    validateExtensionPolicy(
+      command.permissionGranted(), command.extensionPolicyResolved(), command.compliancePermitsAmendedTerms(), command.investorSupportsExtension(),
+      "LOCK_EXTENSION_REQUEST"
+    );
+    String resultHash = hash(command);
+    return new LockModels.LockExtensionPreviewResponse(
+      command.tenantId(), command.lockId(), command.requestedDays(), command.requestedExpiresAt(), command.costSnapshot(),
+      List.of("Extension preview calculated from provided tenant/investor policy snapshot"), command.correlationId(), resultHash
+    );
+  }
+
+  public LockModels.LockExtensionResponse requestExtension(LockModels.LockExtensionRequestCommand command) {
+    validateExtensionRequestRequired(command);
+    String resultHash = hash(command);
+    repository.findExtensionIdempotency(command.tenantId(), command.idempotencyKey(), resultHash)
+      .ifPresent(response -> { throw new ExtensionIdempotencyReplay(response); });
+
+    LockModels.RateLockRecord current = getLock(command.tenantId(), command.lockId());
+    validateExtensionEligibility(current, command.expectedVersion(), command.requestedDays(), command.requestedExpiresAt(), command.costSnapshot());
+    validateExtensionPolicy(
+      command.permissionGranted(), command.extensionPolicyResolved(), command.compliancePermitsAmendedTerms(), command.investorSupportsExtension(),
+      "LOCK_EXTENSION_REQUEST"
+    );
+    if (repository.hasOpenExtension(command.tenantId(), command.lockId())) {
+      throw new LockServiceException("OPEN_EXTENSION_EXISTS", "Only one open extension request is allowed per lock");
+    }
+
+    String extensionId = stableId(command.tenantId(), command.requestId(), command.idempotencyKey());
+    String replayRef = "REPLAY-LOCK-EXTENSION-" + resultHash.substring(0, 16);
+    String auditRef = "AUDIT-LOCK-EXTENSION-" + extensionId;
+    LockModels.RateLockRecord updated = extensionLockRecord(
+      current, LockModels.RateLockStatus.EXTENSION_REQUESTED, current.expiresAt(), command.correlationId(), command.costSnapshot().policyVersionId(),
+      resultHash, auditRef, replayRef, "lock.extension_requested.v1", command.requestedAt()
+    );
+    LockModels.LockExtensionRecord extension = new LockModels.LockExtensionRecord(
+      command.tenantId(), extensionId, command.lockId(), LockModels.LockExtensionStatus.REQUESTED, updated.version(),
+      command.requestedDays(), current.expiresAt(), command.requestedExpiresAt(), LockModels.upper(command.reasonCode()), command.actorId(), null,
+      command.requestedAt(), null, null, command.costSnapshot().policyVersionId(), costSnapshotHash(command.costSnapshot()),
+      command.idempotencyKey(), command.correlationId(), replayRef
+    );
+    LockModels.LockExtensionResponse response = extensionResponse(
+      updated, extension, command.costSnapshot(), "Lock extension requested using tenant/investor policy configuration", List.of(), auditRef,
+      replayRef, command.correlationId(), "lock.extension_requested.v1", resultHash
+    );
+    repository.saveExtensionRequest(
+      updated, extension, response, resultHash,
+      extensionEvent("lock.extension_requested.v1", command.tenantId(), command.lockId(), extensionId, command.actorId(), command.correlationId(), command.requestId(), command.idempotencyKey(), command.requestedAt(), updated.status(), updated.version(), command.costSnapshot(), resultHash),
+      extensionAudit(auditRef, command.tenantId(), command.lockId(), "LOCK_EXTENSION_REQUESTED", command.actorId(), current.status().name(), updated.status().name(), command.costSnapshot().policyVersionId(), command.complianceEvidenceRef(), command.correlationId(), resultHash)
+    );
+    recordExtensionRequestMetrics(command.reasonCode(), command.costSnapshot(), command.requestedDays());
+    return response;
+  }
+
+  public LockModels.LockExtensionResponse requestExtensionReplayAware(LockModels.LockExtensionRequestCommand command) {
+    try {
+      return requestExtension(command);
+    } catch (ExtensionIdempotencyReplay replay) {
+      return replay.response;
+    }
+  }
+
+  public LockModels.LockExtensionResponse decideExtension(LockModels.LockExtensionDecisionCommand command) {
+    validateExtensionDecisionRequired(command);
+    String resultHash = hash(command);
+    repository.findExtensionIdempotency(command.tenantId(), command.idempotencyKey(), resultHash)
+      .ifPresent(response -> { throw new ExtensionIdempotencyReplay(response); });
+    LockModels.RateLockRecord current = getLock(command.tenantId(), command.lockId());
+    LockModels.LockExtensionRecord extension = getExtension(command.tenantId(), command.extensionId());
+    if (current.version() != command.expectedVersion()) {
+      throw new LockServiceException("VERSION_CONFLICT", "Extension decision expected aggregate version " + command.expectedVersion() + " but current version is " + current.version());
+    }
+    if (current.status() != LockModels.RateLockStatus.EXTENSION_REQUESTED || extension.status() != LockModels.LockExtensionStatus.REQUESTED) {
+      throw new LockServiceException("LOCK_STATE_CONFLICT", "Extension decision requires an open requested extension");
+    }
+    if (!command.permissionGranted()) {
+      throw new LockServiceException("TENANT_ACCESS_DENIED", "LOCK_EXTENSION_APPROVE permission is required");
+    }
+    if (command.decision() == LockModels.LockExtensionDecisionType.REJECT && normalizedReasons(command.reasonCodes()).isEmpty()) {
+      throw new LockServiceException("VALIDATION_FAILED", "Configured extension rejection reason code is required");
+    }
+    if (command.decision() == LockModels.LockExtensionDecisionType.APPROVE && command.separationOfDutiesConfigured()
+      && LockModels.normalized(command.actorId()).equals(LockModels.normalized(command.requesterActorId()))) {
+      throw new LockServiceException("SEPARATION_OF_DUTIES_VIOLATION", "Requester cannot approve their own lock extension");
+    }
+    if (!command.decisionPolicyCurrent()) {
+      throw new LockServiceException("POLICY_NOT_SATISFIED", "Extension decision policy configuration is missing or stale");
+    }
+
+    boolean approve = command.decision() == LockModels.LockExtensionDecisionType.APPROVE;
+    LockModels.RateLockStatus nextStatus = approve
+      ? (command.investorConfirmationRequired() ? LockModels.RateLockStatus.PENDING_INVESTOR_EXTENSION_CONFIRMATION : LockModels.RateLockStatus.ACTIVE)
+      : LockModels.RateLockStatus.ACTIVE;
+    LockModels.LockExtensionStatus extensionStatus = approve
+      ? (command.investorConfirmationRequired() ? LockModels.LockExtensionStatus.PENDING_INVESTOR_CONFIRMATION : LockModels.LockExtensionStatus.CONFIRMED)
+      : LockModels.LockExtensionStatus.REJECTED;
+    Instant expiresAt = approve && !command.investorConfirmationRequired() ? extension.requestedExpiresAt() : extension.previousExpiresAt();
+    String eventType = approve ? "lock.extension_approved.v1" : "lock.extension_rejected.v1";
+    String auditAction = approve ? "LOCK_EXTENSION_APPROVED" : "LOCK_EXTENSION_REJECTED";
+    String auditRef = "AUDIT-LOCK-EXTENSION-DECISION-" + command.extensionId();
+    String replayRef = "REPLAY-LOCK-EXTENSION-DECISION-" + resultHash.substring(0, 16);
+    LockModels.RateLockRecord updated = extensionLockRecord(current, nextStatus, expiresAt, command.correlationId(), extension.policyVersionId(), resultHash, auditRef, replayRef, eventType, command.decidedAt());
+    LockModels.LockExtensionRecord updatedExtension = new LockModels.LockExtensionRecord(
+      extension.tenantId(), extension.extensionId(), extension.lockId(), extensionStatus, updated.version(), extension.requestedDays(),
+      extension.previousExpiresAt(), extension.requestedExpiresAt(), extension.reasonCode(), extension.requestedBy(), approve ? command.actorId() : null,
+      extension.requestedAt(), command.decidedAt(), approve && !command.investorConfirmationRequired() ? command.decidedAt() : null,
+      extension.policyVersionId(), extension.costSnapshotHash(), extension.idempotencyKey(), command.correlationId(), replayRef
+    );
+    LockModels.LockExtensionResponse response = extensionResponse(
+      updated, updatedExtension, extensionCostFromRecord(updatedExtension), approve ? "Lock extension approved using configured policy" : "Lock extension rejected using configured reason codes",
+      List.of(), auditRef, replayRef, command.correlationId(), eventType, resultHash
+    );
+    repository.saveExtensionUpdate(
+      updated, updatedExtension, response, command.idempotencyKey(), resultHash,
+      extensionEvent(eventType, command.tenantId(), command.lockId(), command.extensionId(), command.actorId(), command.correlationId(), command.extensionId(), command.idempotencyKey(), command.decidedAt(), updated.status(), updated.version(), extensionCostFromRecord(updatedExtension), resultHash),
+      extensionAudit(auditRef, command.tenantId(), command.lockId(), auditAction, command.actorId(), current.status().name(), updated.status().name(), extension.policyVersionId(), command.complianceEvidenceRef(), command.correlationId(), resultHash)
+    );
+    if (approve) {
+      extensionApprovalTotal++;
+    } else {
+      extensionRejectionTotal++;
+    }
+    return response;
+  }
+
+  public LockModels.LockExtensionResponse confirmExtension(LockModels.LockExtensionConfirmationCommand command) {
+    validateExtensionConfirmationRequired(command);
+    String resultHash = hash(command);
+    repository.findExtensionIdempotency(command.tenantId(), command.idempotencyKey(), resultHash)
+      .ifPresent(response -> { throw new ExtensionIdempotencyReplay(response); });
+    LockModels.RateLockRecord current = getLock(command.tenantId(), command.lockId());
+    LockModels.LockExtensionRecord extension = getExtension(command.tenantId(), command.extensionId());
+    if (current.version() != command.expectedVersion()) {
+      throw new LockServiceException("VERSION_CONFLICT", "Extension confirmation expected aggregate version " + command.expectedVersion() + " but current version is " + current.version());
+    }
+    if (current.status() != LockModels.RateLockStatus.PENDING_INVESTOR_EXTENSION_CONFIRMATION
+      || extension.status() != LockModels.LockExtensionStatus.PENDING_INVESTOR_CONFIRMATION) {
+      throw new LockServiceException("LOCK_STATE_CONFLICT", "Investor extension confirmation requires a pending investor extension");
+    }
+    if (!command.permissionGranted()) {
+      throw new LockServiceException("TENANT_ACCESS_DENIED", "LOCK_EXTENSION_CONFIRM permission is required");
+    }
+    if (!command.investorResponseMatches()) {
+      extensionConfirmationFailureTotal++;
+      throw new LockServiceException("POLICY_NOT_SATISFIED", "Investor extension response does not match configured days/date/cost tolerance");
+    }
+    String auditRef = "AUDIT-LOCK-EXTENSION-CONFIRMATION-" + command.extensionId();
+    String replayRef = "REPLAY-LOCK-EXTENSION-CONFIRMATION-" + resultHash.substring(0, 16);
+    LockModels.RateLockRecord updated = extensionLockRecord(current, LockModels.RateLockStatus.ACTIVE, extension.requestedExpiresAt(), command.correlationId(), extension.policyVersionId(), resultHash, auditRef, replayRef, "lock.extension_confirmed.v1", command.confirmedAt());
+    LockModels.LockExtensionRecord updatedExtension = new LockModels.LockExtensionRecord(
+      extension.tenantId(), extension.extensionId(), extension.lockId(), LockModels.LockExtensionStatus.CONFIRMED, updated.version(),
+      extension.requestedDays(), extension.previousExpiresAt(), extension.requestedExpiresAt(), extension.reasonCode(), extension.requestedBy(),
+      extension.approvedBy(), extension.requestedAt(), extension.decidedAt(), command.confirmedAt(), extension.policyVersionId(),
+      extension.costSnapshotHash(), extension.idempotencyKey(), command.correlationId(), replayRef
+    );
+    LockModels.LockExtensionResponse response = extensionResponse(
+      updated, updatedExtension, extensionCostFromRecord(updatedExtension), "Investor extension confirmation accepted and expiration amended", List.of(),
+      auditRef, replayRef, command.correlationId(), "lock.extension_confirmed.v1", resultHash
+    );
+    repository.saveExtensionUpdate(
+      updated, updatedExtension, response, command.idempotencyKey(), resultHash,
+      extensionEvent("lock.extension_confirmed.v1", command.tenantId(), command.lockId(), command.extensionId(), command.actorId(), command.correlationId(), command.investorConfirmationRef(), command.idempotencyKey(), command.confirmedAt(), updated.status(), updated.version(), extensionCostFromRecord(updatedExtension), resultHash),
+      extensionAudit(auditRef, command.tenantId(), command.lockId(), "LOCK_EXTENSION_CONFIRMED", command.actorId(), current.status().name(), updated.status().name(), extension.policyVersionId(), command.complianceEvidenceRef(), command.correlationId(), resultHash)
+    );
+    return response;
+  }
+
+  public LockModels.LockExtensionResponse cancelExtension(LockModels.LockExtensionCancelCommand command) {
+    validateExtensionCancelRequired(command);
+    String resultHash = hash(command);
+    repository.findExtensionIdempotency(command.tenantId(), command.idempotencyKey(), resultHash)
+      .ifPresent(response -> { throw new ExtensionIdempotencyReplay(response); });
+    LockModels.RateLockRecord current = getLock(command.tenantId(), command.lockId());
+    LockModels.LockExtensionRecord extension = getExtension(command.tenantId(), command.extensionId());
+    if (current.version() != command.expectedVersion()) {
+      throw new LockServiceException("VERSION_CONFLICT", "Extension cancellation expected aggregate version " + command.expectedVersion() + " but current version is " + current.version());
+    }
+    boolean cancellableState = current.status() == LockModels.RateLockStatus.EXTENSION_REQUESTED
+      && extension.status() == LockModels.LockExtensionStatus.REQUESTED;
+    boolean cancellableInvestorPending = current.status() == LockModels.RateLockStatus.PENDING_INVESTOR_EXTENSION_CONFIRMATION
+      && extension.status() == LockModels.LockExtensionStatus.PENDING_INVESTOR_CONFIRMATION;
+    if (!cancellableState && !cancellableInvestorPending) {
+      throw new LockServiceException("LOCK_STATE_CONFLICT", "Extension cancellation requires an open requested or pending investor extension");
+    }
+    if (!command.permissionGranted()) {
+      throw new LockServiceException("TENANT_ACCESS_DENIED", "LOCK_EXTENSION_CANCEL permission is required");
+    }
+    if (normalizedReasons(command.reasonCodes()).isEmpty()) {
+      throw new LockServiceException("VALIDATION_FAILED", "Configured extension cancellation reason code is required");
+    }
+
+    String auditRef = "AUDIT-LOCK-EXTENSION-CANCEL-" + command.extensionId();
+    String replayRef = "REPLAY-LOCK-EXTENSION-CANCEL-" + resultHash.substring(0, 16);
+    LockModels.RateLockRecord updated = extensionLockRecord(
+      current, LockModels.RateLockStatus.ACTIVE, extension.previousExpiresAt(), command.correlationId(), extension.policyVersionId(),
+      resultHash, auditRef, replayRef, "lock.extension_cancelled.v1", command.cancelledAt()
+    );
+    LockModels.LockExtensionRecord updatedExtension = new LockModels.LockExtensionRecord(
+      extension.tenantId(), extension.extensionId(), extension.lockId(), LockModels.LockExtensionStatus.CANCELLED, updated.version(),
+      extension.requestedDays(), extension.previousExpiresAt(), extension.requestedExpiresAt(), extension.reasonCode(), extension.requestedBy(),
+      extension.approvedBy(), extension.requestedAt(), command.cancelledAt(), null, extension.policyVersionId(), extension.costSnapshotHash(),
+      extension.idempotencyKey(), command.correlationId(), replayRef
+    );
+    LockModels.LockExtensionResponse response = extensionResponse(
+      updated, updatedExtension, extensionCostFromRecord(updatedExtension), "Lock extension request cancelled using configured reason codes", List.of(),
+      auditRef, replayRef, command.correlationId(), "lock.extension_cancelled.v1", resultHash
+    );
+    repository.saveExtensionUpdate(
+      updated, updatedExtension, response, command.idempotencyKey(), resultHash,
+      extensionEvent("lock.extension_cancelled.v1", command.tenantId(), command.lockId(), command.extensionId(), command.actorId(), command.correlationId(), command.extensionId(), command.idempotencyKey(), command.cancelledAt(), updated.status(), updated.version(), extensionCostFromRecord(updatedExtension), resultHash),
+      extensionAudit(auditRef, command.tenantId(), command.lockId(), "LOCK_EXTENSION_CANCELLED", command.actorId(), current.status().name(), updated.status().name(), extension.policyVersionId(), command.complianceEvidenceRef(), command.correlationId(), resultHash)
+    );
+    extensionCancellationTotal++;
+    return response;
+  }
+
+  public LockModels.LockExtensionRecord getExtension(UUID tenantId, String extensionId) {
+    return repository.findExtension(tenantId, extensionId)
+      .orElseThrow(() -> new LockServiceException("NOT_FOUND", "Lock extension was not found for tenant"));
+  }
+
+  public LockModels.RelockResponse previewRelock(LockModels.RelockPreviewCommand command) {
+    validateRelockPreviewRequired(command);
+    LockModels.RateLockRecord source = getLock(command.tenantId(), command.sourceLockId());
+    validateRelockEligibility(source, command.expectedVersion(), command.policySnapshot(), command.originalTerms(), command.currentTerms(), command.selectedTerms());
+    String resultHash = hash(command);
+    return new LockModels.RelockResponse(
+      command.tenantId(), previewRelockId(command.tenantId(), command.sourceLockId(), command.idempotencyKey()), command.sourceLockId(), null,
+      LockModels.RelockStatus.PREVIEWED, source.status(), null, source.version(),
+      "Relock preview calculated from tenant/investor policy snapshot", List.of(), null,
+      "REPLAY-LOCK-RELOCK-PREVIEW-" + resultHash.substring(0, 16), command.correlationId(), null, resultHash
+    );
+  }
+
+  public LockModels.RelockResponse requestRelock(LockModels.RelockRequestCommand command) {
+    validateRelockRequestRequired(command);
+    String resultHash = hash(command);
+    repository.findRelockIdempotency(command.tenantId(), command.idempotencyKey(), resultHash)
+      .ifPresent(response -> { throw new RelockIdempotencyReplay(response); });
+    LockModels.RateLockRecord source = getLock(command.tenantId(), command.sourceLockId());
+    validateRelockEligibility(source, command.expectedVersion(), command.policySnapshot(), command.originalTerms(), command.currentTerms(), command.selectedTerms());
+    if (repository.hasOpenRelock(command.tenantId(), command.sourceLockId())) {
+      throw new LockServiceException("OPEN_RELOCK_EXISTS", "Only one open relock request is allowed per source lock");
+    }
+    if (repository.hasActiveQuote(command.tenantId(), command.currentQuoteId())) {
+      throw new LockServiceException("REPLACEMENT_LOCK_CONFLICT", "Current quote already has an active tenant lock");
+    }
+
+    String relockId = stableId(command.tenantId(), command.requestId(), command.idempotencyKey());
+    String replacementLockId = "RELOCK-" + hash(command.tenantId() + "|" + relockId + "|" + command.currentQuoteId()).substring(0, 16).toUpperCase();
+    String auditRef = "AUDIT-LOCK-RELOCK-" + relockId;
+    String replayRef = "REPLAY-LOCK-RELOCK-" + resultHash.substring(0, 16);
+    LockModels.RateLockRecord updatedSource = relockLockRecord(
+      source, LockModels.RateLockStatus.RELOCK_REQUESTED, command.correlationId(), command.policySnapshot().policyVersionId(),
+      resultHash, auditRef, replayRef, "lock.relock_requested.v1", command.requestedAt()
+    );
+    LockModels.RateLockRecord replacement = new LockModels.RateLockRecord(
+      command.tenantId(), replacementLockId, command.requestId(), command.currentQuoteId(), source.loanId(), source.scenarioHash(),
+      LockModels.RateLockStatus.PENDING_APPROVAL, 1, command.requestedAt(), command.requestedAt(), null, command.idempotencyKey(),
+      command.correlationId(), command.policySnapshot().policyVersionId(), resultHash, auditRef, replayRef, "lock.relock_requested.v1"
+    );
+    LockModels.RelockRecord relock = new LockModels.RelockRecord(
+      command.tenantId(), relockId, command.sourceLockId(), replacementLockId, command.currentQuoteId(), LockModels.RelockStatus.REQUESTED,
+      updatedSource.version(), command.actorId(), null, command.requestedAt(), null, null, LockModels.upper(command.reasonCode()),
+      command.policySnapshot().policyVersionId(), command.policySnapshot().investorConfirmationRequired(), resultHash,
+      command.idempotencyKey(), command.correlationId(), replayRef
+    );
+    LockModels.RelockResponse response = relockResponse(
+      updatedSource, replacement, relock, "Relock requested using configured worse-case/better-case policy snapshot", List.of(),
+      auditRef, replayRef, command.correlationId(), "lock.relock_requested.v1", resultHash
+    );
+    repository.saveRelockRequest(
+      updatedSource, replacement, relock, response, resultHash,
+      relockEvent("lock.relock_requested.v1", command.tenantId(), command.sourceLockId(), relockId, replacementLockId, command.actorId(), command.correlationId(), command.requestId(), command.idempotencyKey(), command.requestedAt(), updatedSource.status(), replacement.status(), updatedSource.version(), command.policySnapshot(), resultHash),
+      relockAudit(auditRef, command.tenantId(), command.sourceLockId(), "LOCK_RELOCK_REQUESTED", command.actorId(), source.status().name(), updatedSource.status().name(), command.policySnapshot().policyVersionId(), command.complianceEvidenceRef(), command.correlationId(), resultHash)
+    );
+    return response;
+  }
+
+  public LockModels.RelockResponse requestRelockReplayAware(LockModels.RelockRequestCommand command) {
+    try {
+      return requestRelock(command);
+    } catch (RelockIdempotencyReplay replay) {
+      return replay.response;
+    }
+  }
+
+  public LockModels.RelockResponse decideRelock(LockModels.RelockDecisionCommand command) {
+    validateRelockDecisionRequired(command);
+    String resultHash = hash(command);
+    repository.findRelockIdempotency(command.tenantId(), command.idempotencyKey(), resultHash)
+      .ifPresent(response -> { throw new RelockIdempotencyReplay(response); });
+    LockModels.RateLockRecord source = getLock(command.tenantId(), command.sourceLockId());
+    LockModels.RelockRecord relock = getRelock(command.tenantId(), command.relockId());
+    LockModels.RateLockRecord replacement = getLock(command.tenantId(), relock.replacementLockId());
+    if (source.version() != command.expectedVersion()) {
+      throw new LockServiceException("VERSION_CONFLICT", "Relock decision expected aggregate version " + command.expectedVersion() + " but current version is " + source.version());
+    }
+    if (source.status() != LockModels.RateLockStatus.RELOCK_REQUESTED || relock.status() != LockModels.RelockStatus.REQUESTED) {
+      throw new LockServiceException("LOCK_STATE_CONFLICT", "Relock decision requires an open requested relock");
+    }
+    if (!command.permissionGranted()) {
+      throw new LockServiceException("TENANT_ACCESS_DENIED", "LOCK_RELOCK_APPROVE permission is required");
+    }
+    if (command.decision() == LockModels.RelockDecisionType.REJECT && normalizedReasons(command.reasonCodes()).isEmpty()) {
+      throw new LockServiceException("VALIDATION_FAILED", "Configured relock rejection reason code is required");
+    }
+    if (command.decision() == LockModels.RelockDecisionType.APPROVE && command.separationOfDutiesConfigured()
+      && LockModels.normalized(command.actorId()).equals(LockModels.normalized(command.requesterActorId()))) {
+      throw new LockServiceException("SEPARATION_OF_DUTIES_VIOLATION", "Requester cannot approve their own relock request");
+    }
+    if (!command.decisionPolicyCurrent()) {
+      throw new LockServiceException("POLICY_NOT_SATISFIED", "Relock decision policy configuration is missing or stale");
+    }
+
+    boolean approve = command.decision() == LockModels.RelockDecisionType.APPROVE;
+    LockModels.RateLockStatus sourceStatus = approve
+      ? (relock.investorConfirmationRequired() ? LockModels.RateLockStatus.PENDING_INVESTOR_RELOCK_CONFIRMATION : LockModels.RateLockStatus.RELOCK_APPROVED)
+      : LockModels.RateLockStatus.RELOCK_REJECTED;
+    LockModels.RateLockStatus replacementStatus = approve
+      ? (relock.investorConfirmationRequired() ? LockModels.RateLockStatus.PENDING_INVESTOR_CONFIRMATION : LockModels.RateLockStatus.APPROVED)
+      : LockModels.RateLockStatus.REJECTED;
+    LockModels.RelockStatus relockStatus = approve
+      ? (relock.investorConfirmationRequired() ? LockModels.RelockStatus.PENDING_INVESTOR_CONFIRMATION : LockModels.RelockStatus.APPROVED)
+      : LockModels.RelockStatus.REJECTED;
+    String eventType = approve ? "lock.relock_approved.v1" : "lock.relock_rejected.v1";
+    String auditAction = approve ? "LOCK_RELOCK_APPROVED" : "LOCK_RELOCK_REJECTED";
+    String auditRef = "AUDIT-LOCK-RELOCK-DECISION-" + command.relockId();
+    String replayRef = "REPLAY-LOCK-RELOCK-DECISION-" + resultHash.substring(0, 16);
+    LockModels.RateLockRecord updatedSource = relockLockRecord(source, sourceStatus, command.correlationId(), relock.policyVersionId(), resultHash, auditRef, replayRef, eventType, command.decidedAt());
+    LockModels.RateLockRecord updatedReplacement = relockLockRecord(replacement, replacementStatus, command.correlationId(), relock.policyVersionId(), resultHash, auditRef, replayRef, eventType, command.decidedAt());
+    LockModels.RelockRecord updatedRelock = new LockModels.RelockRecord(
+      relock.tenantId(), relock.relockId(), relock.sourceLockId(), relock.replacementLockId(), relock.currentQuoteId(), relockStatus,
+      updatedSource.version(), relock.requestedBy(), approve ? command.actorId() : null, relock.requestedAt(), command.decidedAt(),
+      approve && !relock.investorConfirmationRequired() ? command.decidedAt() : null, relock.reasonCode(), relock.policyVersionId(),
+      relock.investorConfirmationRequired(), relock.comparisonHash(), relock.idempotencyKey(), command.correlationId(), replayRef
+    );
+    LockModels.RelockResponse response = relockResponse(
+      updatedSource, updatedReplacement, updatedRelock, approve ? "Relock approved using configured policy" : "Relock rejected using configured reason codes",
+      List.of(), auditRef, replayRef, command.correlationId(), eventType, resultHash
+    );
+    repository.saveRelockUpdate(
+      updatedSource, updatedReplacement, updatedRelock, response, command.idempotencyKey(), resultHash,
+      relockEvent(eventType, command.tenantId(), command.sourceLockId(), command.relockId(), relock.replacementLockId(), command.actorId(), command.correlationId(), command.relockId(), command.idempotencyKey(), command.decidedAt(), updatedSource.status(), updatedReplacement.status(), updatedSource.version(), relockPolicyFromRecord(updatedRelock), resultHash),
+      relockAudit(auditRef, command.tenantId(), command.sourceLockId(), auditAction, command.actorId(), source.status().name(), updatedSource.status().name(), relock.policyVersionId(), command.complianceEvidenceRef(), command.correlationId(), resultHash)
+    );
+    return response;
+  }
+
+  public LockModels.RelockResponse confirmRelock(LockModels.RelockConfirmationCommand command) {
+    validateRelockConfirmationRequired(command);
+    String resultHash = hash(command);
+    repository.findRelockIdempotency(command.tenantId(), command.idempotencyKey(), resultHash)
+      .ifPresent(response -> { throw new RelockIdempotencyReplay(response); });
+    LockModels.RateLockRecord source = getLock(command.tenantId(), command.sourceLockId());
+    LockModels.RelockRecord relock = getRelock(command.tenantId(), command.relockId());
+    LockModels.RateLockRecord replacement = getLock(command.tenantId(), relock.replacementLockId());
+    if (source.version() != command.expectedVersion()) {
+      throw new LockServiceException("VERSION_CONFLICT", "Relock confirmation expected aggregate version " + command.expectedVersion() + " but current version is " + source.version());
+    }
+    boolean immediateApproved = source.status() == LockModels.RateLockStatus.RELOCK_APPROVED && relock.status() == LockModels.RelockStatus.APPROVED;
+    boolean investorPending = source.status() == LockModels.RateLockStatus.PENDING_INVESTOR_RELOCK_CONFIRMATION
+      && relock.status() == LockModels.RelockStatus.PENDING_INVESTOR_CONFIRMATION;
+    if (!immediateApproved && !investorPending) {
+      throw new LockServiceException("LOCK_STATE_CONFLICT", "Relock confirmation requires an approved relock");
+    }
+    if (!command.permissionGranted()) {
+      throw new LockServiceException("TENANT_ACCESS_DENIED", "LOCK_RELOCK_CONFIRM permission is required");
+    }
+    if (!command.investorResponseMatches()) {
+      throw new LockServiceException("POLICY_NOT_SATISFIED", "Investor relock confirmation does not match configured selected terms tolerance");
+    }
+    String auditRef = "AUDIT-LOCK-RELOCK-CONFIRMATION-" + command.relockId();
+    String replayRef = "REPLAY-LOCK-RELOCK-CONFIRMATION-" + resultHash.substring(0, 16);
+    LockModels.RateLockRecord updatedSource = relockLockRecord(source, LockModels.RateLockStatus.RELOCKED, command.correlationId(), relock.policyVersionId(), resultHash, auditRef, replayRef, "lock.relocked.v1", command.confirmedAt());
+    LockModels.RateLockRecord updatedReplacement = relockLockRecord(replacement, LockModels.RateLockStatus.ACTIVE, command.correlationId(), relock.policyVersionId(), resultHash, auditRef, replayRef, "lock.relocked.v1", command.confirmedAt());
+    LockModels.RelockRecord updatedRelock = new LockModels.RelockRecord(
+      relock.tenantId(), relock.relockId(), relock.sourceLockId(), relock.replacementLockId(), relock.currentQuoteId(), LockModels.RelockStatus.CONFIRMED,
+      updatedSource.version(), relock.requestedBy(), relock.approvedBy(), relock.requestedAt(), relock.decidedAt(), command.confirmedAt(),
+      relock.reasonCode(), relock.policyVersionId(), relock.investorConfirmationRequired(), relock.comparisonHash(), relock.idempotencyKey(),
+      command.correlationId(), replayRef
+    );
+    LockModels.RelockResponse response = relockResponse(
+      updatedSource, updatedReplacement, updatedRelock, "Relock confirmed and source/replacement lock linkage completed", List.of(),
+      auditRef, replayRef, command.correlationId(), "lock.relocked.v1", resultHash
+    );
+    repository.saveRelockUpdate(
+      updatedSource, updatedReplacement, updatedRelock, response, command.idempotencyKey(), resultHash,
+      relockEvent("lock.relocked.v1", command.tenantId(), command.sourceLockId(), command.relockId(), relock.replacementLockId(), command.actorId(), command.correlationId(), command.investorConfirmationRef(), command.idempotencyKey(), command.confirmedAt(), updatedSource.status(), updatedReplacement.status(), updatedSource.version(), relockPolicyFromRecord(updatedRelock), resultHash),
+      relockAudit(auditRef, command.tenantId(), command.sourceLockId(), "LOCK_RELOCKED", command.actorId(), source.status().name(), updatedSource.status().name(), relock.policyVersionId(), command.complianceEvidenceRef(), command.correlationId(), resultHash)
+    );
+    return response;
+  }
+
+  public LockModels.RelockResponse cancelRelock(LockModels.RelockCancelCommand command) {
+    validateRelockCancelRequired(command);
+    String resultHash = hash(command);
+    repository.findRelockIdempotency(command.tenantId(), command.idempotencyKey(), resultHash)
+      .ifPresent(response -> { throw new RelockIdempotencyReplay(response); });
+    LockModels.RateLockRecord source = getLock(command.tenantId(), command.sourceLockId());
+    LockModels.RelockRecord relock = getRelock(command.tenantId(), command.relockId());
+    LockModels.RateLockRecord replacement = getLock(command.tenantId(), relock.replacementLockId());
+    if (source.version() != command.expectedVersion()) {
+      throw new LockServiceException("VERSION_CONFLICT", "Relock cancellation expected aggregate version " + command.expectedVersion() + " but current version is " + source.version());
+    }
+    if (relock.status() != LockModels.RelockStatus.REQUESTED && relock.status() != LockModels.RelockStatus.APPROVED) {
+      throw new LockServiceException("LOCK_STATE_CONFLICT", "Relock cancellation requires an open requested or approved relock");
+    }
+    if (!command.permissionGranted()) {
+      throw new LockServiceException("TENANT_ACCESS_DENIED", "LOCK_RELOCK_CANCEL permission is required");
+    }
+    if (normalizedReasons(command.reasonCodes()).isEmpty()) {
+      throw new LockServiceException("VALIDATION_FAILED", "Configured relock cancellation reason code is required");
+    }
+    String auditRef = "AUDIT-LOCK-RELOCK-CANCEL-" + command.relockId();
+    String replayRef = "REPLAY-LOCK-RELOCK-CANCEL-" + resultHash.substring(0, 16);
+    LockModels.RateLockStatus restoredStatus = source.expiresAt() != null && source.expiresAt().isAfter(command.cancelledAt())
+      ? LockModels.RateLockStatus.ACTIVE
+      : LockModels.RateLockStatus.EXPIRED;
+    LockModels.RateLockRecord updatedSource = relockLockRecord(source, restoredStatus, command.correlationId(), relock.policyVersionId(), resultHash, auditRef, replayRef, "lock.relock_cancelled.v1", command.cancelledAt());
+    LockModels.RateLockRecord updatedReplacement = relockLockRecord(replacement, LockModels.RateLockStatus.CANCELLED, command.correlationId(), relock.policyVersionId(), resultHash, auditRef, replayRef, "lock.relock_cancelled.v1", command.cancelledAt());
+    LockModels.RelockRecord updatedRelock = new LockModels.RelockRecord(
+      relock.tenantId(), relock.relockId(), relock.sourceLockId(), relock.replacementLockId(), relock.currentQuoteId(), LockModels.RelockStatus.CANCELLED,
+      updatedSource.version(), relock.requestedBy(), relock.approvedBy(), relock.requestedAt(), command.cancelledAt(), null,
+      relock.reasonCode(), relock.policyVersionId(), relock.investorConfirmationRequired(), relock.comparisonHash(), relock.idempotencyKey(),
+      command.correlationId(), replayRef
+    );
+    LockModels.RelockResponse response = relockResponse(
+      updatedSource, updatedReplacement, updatedRelock, "Relock request cancelled using configured reason codes", List.of(),
+      auditRef, replayRef, command.correlationId(), "lock.relock_cancelled.v1", resultHash
+    );
+    repository.saveRelockUpdate(
+      updatedSource, updatedReplacement, updatedRelock, response, command.idempotencyKey(), resultHash,
+      relockEvent("lock.relock_cancelled.v1", command.tenantId(), command.sourceLockId(), command.relockId(), relock.replacementLockId(), command.actorId(), command.correlationId(), command.relockId(), command.idempotencyKey(), command.cancelledAt(), updatedSource.status(), updatedReplacement.status(), updatedSource.version(), relockPolicyFromRecord(updatedRelock), resultHash),
+      relockAudit(auditRef, command.tenantId(), command.sourceLockId(), "LOCK_RELOCK_CANCELLED", command.actorId(), source.status().name(), updatedSource.status().name(), relock.policyVersionId(), command.complianceEvidenceRef(), command.correlationId(), resultHash)
+    );
+    return response;
+  }
+
+  public LockModels.RelockRecord getRelock(UUID tenantId, String relockId) {
+    return repository.findRelock(tenantId, relockId)
+      .orElseThrow(() -> new LockServiceException("NOT_FOUND", "Relock request was not found for tenant"));
+  }
+
+  public LockModels.LockExpirationRunResponse runExpiration(LockModels.LockExpirationRunCommand command) {
+    validateExpirationRunRequired(command);
+    String runHash = hash(command);
+    String auditRef = "AUDIT-LOCK-EXPIRATION-RUN-" + command.runId();
+    String replayRef = "REPLAY-LOCK-EXPIRATION-" + runHash.substring(0, 16);
+    var priorRun = repository.findExpirationRun(command.tenantId(), command.runId());
+    if (priorRun.isPresent()) {
+      LockModels.LockExpirationRunRecord prior = priorRun.get();
+      if (!prior.replayRef().equals(replayRef)) {
+        throw new LockServiceException("IDEMPOTENCY_CONFLICT", "Expiration runId was reused with a different payload");
+      }
+      return new LockModels.LockExpirationRunResponse(
+        prior.tenantId(), prior.runId(), prior.startedAt(), prior.completedAt(), prior.status(), prior.processedCount(),
+        prior.expiringSoonCount(), prior.expiredCount(), prior.noOpCount(), List.of(), auditRef, prior.replayRef(), prior.correlationId()
+      );
+    }
+    int processed = 0;
+    int expiringSoon = 0;
+    int expired = 0;
+    int noOp = 0;
+
+    for (LockModels.LockConfirmationRecord confirmation : repository.activeConfirmations(command.tenantId())) {
+      LockModels.RateLockRecord current = getLock(command.tenantId(), confirmation.lockId());
+      LockModels.RateLockStatus nextStatus = expirationStatus(current.status(), confirmation.expiresAt(), command.evaluatedAt(), command.warningThresholdSeconds());
+      if (nextStatus == current.status()) {
+        noOp++;
+        continue;
+      }
+      processed++;
+      if (nextStatus == LockModels.RateLockStatus.EXPIRING_SOON) {
+        expiringSoon++;
+      } else if (nextStatus == LockModels.RateLockStatus.EXPIRED) {
+        expired++;
+      }
+      if (!command.dryRun()) {
+        saveExpirationTransition(command, confirmation, current, nextStatus, runHash);
+      }
+    }
+
+    Instant completedAt = command.evaluatedAt();
+    LockModels.LockExpirationRunRecord runRecord = new LockModels.LockExpirationRunRecord(
+      command.tenantId(), command.runId(), command.evaluatedAt(), completedAt, command.dryRun() ? "DRY_RUN" : "COMPLETED",
+      processed, expiringSoon, expired, noOp, replayRef, command.correlationId()
+    );
+    repository.saveExpirationRun(runRecord);
+    lockExpirationRunTotal++;
+    locksExpiringSoonTotal += expiringSoon;
+    locksExpiredTotal += expired;
+    return new LockModels.LockExpirationRunResponse(
+      command.tenantId(), command.runId(), command.evaluatedAt(), completedAt, runRecord.status(), processed,
+      expiringSoon, expired, noOp, List.of(), auditRef, replayRef, command.correlationId()
+    );
+  }
+
+  public LockModels.LockExpirationRunRecord getExpirationRun(UUID tenantId, String runId) {
+    return repository.findExpirationRun(tenantId, runId)
+      .orElseThrow(() -> new LockServiceException("NOT_FOUND", "Lock expiration run was not found for tenant"));
+  }
+
+  public LockModels.LockExpirationSchedule getExpirationSchedule(UUID tenantId, String lockId) {
+    return repository.findExpirationSchedule(tenantId, lockId)
+      .orElseThrow(() -> new LockServiceException("NOT_FOUND", "Lock expiration schedule was not found for tenant"));
+  }
+
+  public LockModels.LockSyncAttemptResponse syncLockStatusReplayAware(LockModels.LockStatusSyncCommand command) {
+    validateStatusSyncRequired(command);
+    String payloadHash = hash(command);
+    LockModels.LockSyncTarget target = command.target();
+    var existingAttempt = repository.findSyncAttemptByEventTarget(command.tenantId(), command.eventId(), target.targetId());
+    if (existingAttempt.isPresent()) {
+      LockModels.LockSyncAttempt existing = existingAttempt.get();
+      if (!existing.payloadHash().equals(payloadHash)) {
+        throw new LockServiceException("IDEMPOTENCY_CONFLICT", "Sync event and target were reused with a different payload");
+      }
+      return responseFor(existing, "Lock status sync replayed for existing event target", List.of(), existingPayloadEvent(existing), payloadHash);
+    }
+    if (!command.permissionGranted()) {
+      throw new LockServiceException("TENANT_ACCESS_DENIED", "LOCK_SYNC_RETRY permission is required");
+    }
+    validateSyncTarget(target);
+    if (!command.tenantId().equals(target.tenantId())) {
+      throw new LockServiceException("TENANT_ACCESS_DENIED", "Sync target tenant does not match command tenant");
+    }
+    LockModels.RateLockRecord lock = getLock(command.tenantId(), command.lockId());
+
+    String attemptId = "SYNC-" + hash(command.tenantId() + "|" + command.eventId() + "|" + target.targetId()).substring(0, 16).toUpperCase();
+    String auditRef = "AUDIT-LOCK-SYNC-" + attemptId;
+    String replayRef = "REPLAY-LOCK-SYNC-" + payloadHash.substring(0, 16);
+    LockModels.LockSyncAttempt attempt = new LockModels.LockSyncAttempt(
+      command.tenantId(), attemptId, command.lockId(), command.eventId(), target.targetId(),
+      LockModels.LockSyncStatus.SENT, payloadHash, 0, null, null, command.correlationId(),
+      target.policyVersion(), target.contractVersion(), command.requestedAt()
+    );
+    LockModels.LockEvent event = new LockModels.LockEvent(
+      "lock.status_sync.sent.v1", "1", command.tenantId() + ":" + attemptId, command.tenantId(),
+      command.lockId(), command.actorId(), command.correlationId(), command.eventId(), command.idempotencyKey(),
+      command.requestedAt(), Map.of(
+        "attemptId", attemptId,
+        "eventId", command.eventId(),
+        "targetId", target.targetId(),
+        "targetSystem", target.system(),
+        "lockStatus", lock.status().name(),
+        "lockVersion", String.valueOf(lock.version()),
+        "payloadHash", payloadHash,
+        "contractVersion", target.contractVersion(),
+        "policyVersion", target.policyVersion()
+      )
+    );
+    LockModels.AuditSnapshot audit = new LockModels.AuditSnapshot(
+      auditRef, command.tenantId(), command.lockId(), "LOCK_STATUS_SYNC_SENT", command.actorId(),
+      null, LockModels.LockSyncStatus.SENT.name(), target.policyVersion(), null, command.correlationId(), payloadHash
+    );
+    repository.saveSyncAttempt(attempt, event, audit);
+    lockSyncSentTotal++;
+    return responseFor(attempt, "Lock status sync sent to configured target", List.of(), event.eventType(), payloadHash);
+  }
+
+  public LockModels.LockSyncAttemptResponse acknowledgeLockStatus(LockModels.LockStatusAckCommand command) {
+    validateStatusAckRequired(command);
+    String payloadHash = hash(command);
+    if (!command.permissionGranted()) {
+      throw new LockServiceException("TENANT_ACCESS_DENIED", "LOCK_SYNC_ACK_WRITE permission is required");
+    }
+    if (!command.sourceTrusted()) {
+      throw new LockServiceException("POLICY_NOT_SATISFIED", "Configured source trust is required for lock sync acknowledgement");
+    }
+    requirePolicyVersion(command.policyVersion());
+    LockModels.RateLockRecord current = getLock(command.tenantId(), command.lockId());
+    if (command.expectedCurrentStatus() != null && current.status() != command.expectedCurrentStatus()) {
+      throw new LockServiceException("LOCK_STATE_CONFLICT", "Acknowledgement expected lock status " + command.expectedCurrentStatus() + " but current status is " + current.status());
+    }
+    LockModels.LockSyncAttempt currentAttempt = repository.findSyncAttemptByEventTarget(command.tenantId(), command.eventId(), command.targetId())
+      .orElseThrow(() -> new LockServiceException("NOT_FOUND", "Sync attempt was not found for tenant event target"));
+    if (repository.findSyncAcknowledgement(command.tenantId(), command.ackId()).isPresent()) {
+      LockModels.LockSyncAttempt replayAttempt = repository.findSyncAttempt(command.tenantId(), currentAttempt.attemptId()).orElse(currentAttempt);
+      return responseFor(replayAttempt, "Lock sync acknowledgement replayed", List.of(), ackEventType(replayAttempt.status()), replayAttempt.payloadHash());
+    }
+
+    LockModels.RateLockStatus nextLockStatus = command.requestedLockStatus();
+    if (nextLockStatus != null && nextLockStatus != current.status() && !current.status().allowedNextStates().contains(nextLockStatus)) {
+      throw new LockServiceException("LOCK_STATE_CONFLICT", "External correction cannot transition from " + current.status() + " to " + nextLockStatus);
+    }
+    LockModels.LockSyncStatus nextSyncStatus = command.ackStatus() == LockModels.LockSyncStatus.RECONCILED
+      ? LockModels.LockSyncStatus.RECONCILED
+      : LockModels.LockSyncStatus.ACKED;
+    LockModels.RateLockRecord updatedLock = nextLockStatus == null || nextLockStatus == current.status()
+      ? current
+      : new LockModels.RateLockRecord(
+        current.tenantId(), current.lockId(), current.requestId(), current.quoteId(), current.loanId(), current.scenarioHash(),
+        nextLockStatus, current.version() + 1, current.createdAt(), command.receivedAt(), current.expiresAt(), current.idempotencyKey(),
+        command.correlationId(), command.policyVersion(), current.requestHash(), "AUDIT-LOCK-SYNC-ACK-" + command.ackId(),
+        "REPLAY-LOCK-SYNC-ACK-" + payloadHash.substring(0, 16), "lock.sync_reconciled.v1"
+      );
+    LockModels.LockSyncAttempt updatedAttempt = new LockModels.LockSyncAttempt(
+      currentAttempt.tenantId(), currentAttempt.attemptId(), currentAttempt.lockId(), currentAttempt.eventId(), currentAttempt.targetId(),
+      nextSyncStatus, currentAttempt.payloadHash(), currentAttempt.retryCount(), null, command.ackRef(), command.correlationId(),
+      command.policyVersion(), command.contractVersion(), command.receivedAt()
+    );
+    LockModels.LockSyncAcknowledgement acknowledgement = new LockModels.LockSyncAcknowledgement(
+      command.tenantId(), command.ackId(), command.lockId(), command.eventId(), command.targetId(), nextSyncStatus,
+      command.ackRef(), payloadHash, command.receivedAt(), command.correlationId()
+    );
+    LockModels.LockReconciliationRecord reconciliation = null;
+    if (nextSyncStatus == LockModels.LockSyncStatus.RECONCILED || updatedLock.status() != current.status()) {
+      reconciliation = new LockModels.LockReconciliationRecord(
+        command.tenantId(), "RECON-" + hash(command.tenantId() + "|" + command.ackId()).substring(0, 16).toUpperCase(),
+        command.lockId(), command.targetId(), updatedLock.status() == current.status() ? "ACK_ONLY" : "STATUS_DRIFT",
+        updatedLock.status() == current.status() ? "ACK_RECORDED" : "STATE_MACHINE_VALIDATED", command.actorId(),
+        command.receivedAt(), "REPLAY-LOCK-SYNC-ACK-" + payloadHash.substring(0, 16), command.correlationId()
+      );
+    }
+    String eventType = ackEventType(nextSyncStatus);
+    LockModels.LockEvent event = new LockModels.LockEvent(
+      eventType, "1", command.tenantId() + ":" + updatedAttempt.attemptId(), command.tenantId(), command.lockId(),
+      command.actorId(), command.correlationId(), command.ackId(), command.idempotencyKey(), command.receivedAt(), Map.of(
+        "attemptId", updatedAttempt.attemptId(),
+        "ackId", command.ackId(),
+        "targetId", command.targetId(),
+        "syncStatus", nextSyncStatus.name(),
+        "lockStatus", updatedLock.status().name(),
+        "payloadHash", payloadHash,
+        "policyVersion", command.policyVersion()
+      )
+    );
+    LockModels.AuditSnapshot audit = new LockModels.AuditSnapshot(
+      "AUDIT-LOCK-SYNC-ACK-" + command.ackId(), command.tenantId(), command.lockId(),
+      nextSyncStatus == LockModels.LockSyncStatus.RECONCILED ? "LOCK_SYNC_RECONCILED" : "LOCK_SYNC_ACKED",
+      command.actorId(), current.status().name(), updatedLock.status().name(), command.policyVersion(),
+      null, command.correlationId(), payloadHash
+    );
+    repository.saveSyncAcknowledgement(updatedLock, updatedAttempt, acknowledgement, reconciliation, event, audit);
+    if (nextSyncStatus == LockModels.LockSyncStatus.RECONCILED) {
+      lockSyncReconciledTotal++;
+    } else {
+      lockSyncAckedTotal++;
+    }
+    return responseFor(updatedAttempt, "Lock sync acknowledgement accepted through state-machine validation", List.of(), eventType, payloadHash);
+  }
+
+  public LockModels.LockSyncAttempt getSyncAttempt(UUID tenantId, String attemptId) {
+    return repository.findSyncAttempt(tenantId, attemptId)
+      .orElseThrow(() -> new LockServiceException("NOT_FOUND", "Sync attempt was not found for tenant"));
+  }
+
+  public List<LockModels.LockSyncAttempt> syncStatus(UUID tenantId, String lockId) {
+    getLock(tenantId, lockId);
+    return repository.syncAttemptsForLock(tenantId, lockId);
+  }
+
+  public int committedSyncAttemptCount() {
+    return repository.syncAttemptCount();
+  }
+
+  public int committedSyncAcknowledgementCount() {
+    return repository.syncAcknowledgementCount();
+  }
+
+  public int committedReconciliationCount() {
+    return repository.reconciliationCount();
+  }
+
   public List<LockModels.LockEvent> outboxEvents() {
     return repository.outboxEvents();
   }
@@ -371,13 +1055,660 @@ public final class LockService {
     return repository.confirmationCount();
   }
 
+  public int committedExpirationRunCount() {
+    return repository.expirationRunCount();
+  }
+
+  public int committedExtensionCount() {
+    return repository.extensionCount();
+  }
+
+  public int committedRelockCount() {
+    return repository.relockCount();
+  }
+
   public LockModels.MetricsSnapshot metrics() {
     return new LockModels.MetricsSnapshot(
       lockRequestTotal, lockRequestRejectedTotal, lockApprovalTotal, lockRejectionTotal,
       lockDecisionPolicyBlockedTotal, freshnessCheckTotal, freshnessPolicyResolutionFailureTotal,
       freshnessExpiresSoonTotal, lockConfirmationTotal, pendingInvestorConfirmationTotal,
-      investorMismatchTotal, 0
+      investorMismatchTotal, lockExpirationRunTotal, locksExpiringSoonTotal, locksExpiredTotal, 0,
+      extensionRequestTotal, extensionApprovalTotal, extensionRejectionTotal, extensionCancellationTotal,
+      extensionConfirmationFailureTotal, extensionRequestTotal == 0 ? 0.0 : (double) extensionRequestedDaysTotal / extensionRequestTotal,
+      Map.copyOf(extensionFeeConfigRefsByReason), lockSyncSentTotal, lockSyncAckedTotal, lockSyncFailedTotal,
+      lockSyncDlqTotal, lockSyncReconciledTotal
     );
+  }
+
+  private static void validateExtensionPreviewRequired(LockModels.LockExtensionPreviewCommand command) {
+    if (command == null) {
+      throw new LockServiceException("VALIDATION_FAILED", "extension preview command is required");
+    }
+    List<String> missing = new ArrayList<>();
+    require(command.tenantId(), "tenantId", missing);
+    require(command.lockId(), "lockId", missing);
+    require(command.actorId(), "actorId", missing);
+    require(command.requestedExpiresAt(), "requestedExpiresAt", missing);
+    require(command.reasonCode(), "reasonCode", missing);
+    require(command.idempotencyKey(), "idempotencyKey", missing);
+    require(command.correlationId(), "correlationId", missing);
+    validateCostSnapshot(command.costSnapshot(), missing);
+    if (command.expectedVersion() <= 0) missing.add("expectedVersion");
+    if (command.requestedDays() <= 0) missing.add("requestedDays");
+    if (!missing.isEmpty()) {
+      throw new LockServiceException("VALIDATION_FAILED", "Missing or invalid fields: " + String.join(", ", missing));
+    }
+  }
+
+  private static void validateStatusSyncRequired(LockModels.LockStatusSyncCommand command) {
+    if (command == null) {
+      throw new LockServiceException("VALIDATION_FAILED", "lock status sync command is required");
+    }
+    List<String> missing = new ArrayList<>();
+    require(command.tenantId(), "tenantId", missing);
+    require(command.lockId(), "lockId", missing);
+    require(command.eventId(), "eventId", missing);
+    require(command.actorId(), "actorId", missing);
+    require(command.target(), "target", missing);
+    require(command.requestedAt(), "requestedAt", missing);
+    require(command.idempotencyKey(), "idempotencyKey", missing);
+    require(command.correlationId(), "correlationId", missing);
+    if (!missing.isEmpty()) {
+      throw new LockServiceException("VALIDATION_FAILED", "Missing or invalid fields: " + String.join(", ", missing));
+    }
+  }
+
+  private static void validateStatusAckRequired(LockModels.LockStatusAckCommand command) {
+    if (command == null) {
+      throw new LockServiceException("VALIDATION_FAILED", "lock status ack command is required");
+    }
+    List<String> missing = new ArrayList<>();
+    require(command.tenantId(), "tenantId", missing);
+    require(command.ackId(), "ackId", missing);
+    require(command.lockId(), "lockId", missing);
+    require(command.eventId(), "eventId", missing);
+    require(command.targetId(), "targetId", missing);
+    require(command.actorId(), "actorId", missing);
+    require(command.ackStatus(), "ackStatus", missing);
+    require(command.ackRef(), "ackRef", missing);
+    require(command.policyVersion(), "policyVersion", missing);
+    require(command.contractVersion(), "contractVersion", missing);
+    require(command.receivedAt(), "receivedAt", missing);
+    require(command.idempotencyKey(), "idempotencyKey", missing);
+    require(command.correlationId(), "correlationId", missing);
+    if (command.ackStatus() != LockModels.LockSyncStatus.ACKED && command.ackStatus() != LockModels.LockSyncStatus.RECONCILED) {
+      missing.add("ackStatus ACKED or RECONCILED");
+    }
+    if (!missing.isEmpty()) {
+      throw new LockServiceException("VALIDATION_FAILED", "Missing or invalid fields: " + String.join(", ", missing));
+    }
+  }
+
+  private static void validateSyncTarget(LockModels.LockSyncTarget target) {
+    List<String> missing = new ArrayList<>();
+    require(target.tenantId(), "target.tenantId", missing);
+    require(target.targetId(), "target.targetId", missing);
+    require(target.system(), "target.system", missing);
+    require(target.contractVersion(), "target.contractVersion", missing);
+    require(target.policyVersion(), "target.policyVersion", missing);
+    if (!missing.isEmpty()) {
+      throw new LockServiceException("VALIDATION_FAILED", "Missing or invalid fields: " + String.join(", ", missing));
+    }
+    if (!target.enabled()) {
+      throw new LockServiceException("POLICY_NOT_SATISFIED", "Configured sync target is disabled");
+    }
+    requirePolicyVersion(target.policyVersion());
+  }
+
+  private static void requirePolicyVersion(String policyVersion) {
+    if (LockModels.normalized(policyVersion).isEmpty()) {
+      throw new LockServiceException("POLICY_NOT_SATISFIED", "Tenant-scoped lock sync policy version is required");
+    }
+  }
+
+  private static LockModels.LockSyncAttemptResponse responseFor(
+    LockModels.LockSyncAttempt attempt,
+    String summary,
+    List<String> validationMessages,
+    String eventType,
+    String payloadHash
+  ) {
+    return new LockModels.LockSyncAttemptResponse(
+      attempt.tenantId(), attempt.attemptId(), attempt.lockId(), attempt.eventId(), attempt.targetId(),
+      attempt.status(), payloadHash, attempt.retryCount(), attempt.nextRetryAt(), attempt.ackRef(), summary,
+      validationMessages, "AUDIT-LOCK-SYNC-" + attempt.attemptId(), "REPLAY-LOCK-SYNC-" + payloadHash.substring(0, 16),
+      attempt.correlationId(), eventType
+    );
+  }
+
+  private static String existingPayloadEvent(LockModels.LockSyncAttempt attempt) {
+    return switch (attempt.status()) {
+      case ACKED -> "lock.sync_acknowledged.v1";
+      case RECONCILED -> "lock.sync_reconciled.v1";
+      case FAILED -> "lock.sync_failed.v1";
+      case DLQ -> "lock.sync_dlq.v1";
+      default -> "lock.status_sync.sent.v1";
+    };
+  }
+
+  private static String ackEventType(LockModels.LockSyncStatus status) {
+    return status == LockModels.LockSyncStatus.RECONCILED ? "lock.sync_reconciled.v1" : "lock.sync_acknowledged.v1";
+  }
+
+  private static void validateExtensionRequestRequired(LockModels.LockExtensionRequestCommand command) {
+    if (command == null) {
+      throw new LockServiceException("VALIDATION_FAILED", "extension request command is required");
+    }
+    List<String> missing = new ArrayList<>();
+    require(command.tenantId(), "tenantId", missing);
+    require(command.lockId(), "lockId", missing);
+    require(command.requestId(), "requestId", missing);
+    require(command.actorId(), "actorId", missing);
+    require(command.requestedAt(), "requestedAt", missing);
+    require(command.requestedExpiresAt(), "requestedExpiresAt", missing);
+    require(command.reasonCode(), "reasonCode", missing);
+    require(command.complianceEvidenceRef(), "complianceEvidenceRef", missing);
+    require(command.idempotencyKey(), "idempotencyKey", missing);
+    require(command.correlationId(), "correlationId", missing);
+    validateCostSnapshot(command.costSnapshot(), missing);
+    if (command.expectedVersion() <= 0) missing.add("expectedVersion");
+    if (command.requestedDays() <= 0) missing.add("requestedDays");
+    if (!missing.isEmpty()) {
+      throw new LockServiceException("VALIDATION_FAILED", "Missing or invalid fields: " + String.join(", ", missing));
+    }
+  }
+
+  private static void validateExtensionDecisionRequired(LockModels.LockExtensionDecisionCommand command) {
+    if (command == null) {
+      throw new LockServiceException("VALIDATION_FAILED", "extension decision command is required");
+    }
+    List<String> missing = new ArrayList<>();
+    require(command.tenantId(), "tenantId", missing);
+    require(command.lockId(), "lockId", missing);
+    require(command.extensionId(), "extensionId", missing);
+    require(command.decision(), "decision", missing);
+    require(command.actorId(), "actorId", missing);
+    require(command.complianceEvidenceRef(), "complianceEvidenceRef", missing);
+    require(command.idempotencyKey(), "idempotencyKey", missing);
+    require(command.correlationId(), "correlationId", missing);
+    require(command.decidedAt(), "decidedAt", missing);
+    if (command.expectedVersion() <= 0) missing.add("expectedVersion");
+    if (!missing.isEmpty()) {
+      throw new LockServiceException("VALIDATION_FAILED", "Missing or invalid fields: " + String.join(", ", missing));
+    }
+  }
+
+  private static void validateExtensionConfirmationRequired(LockModels.LockExtensionConfirmationCommand command) {
+    if (command == null) {
+      throw new LockServiceException("VALIDATION_FAILED", "extension confirmation command is required");
+    }
+    List<String> missing = new ArrayList<>();
+    require(command.tenantId(), "tenantId", missing);
+    require(command.lockId(), "lockId", missing);
+    require(command.extensionId(), "extensionId", missing);
+    require(command.actorId(), "actorId", missing);
+    require(command.investorConfirmationRef(), "investorConfirmationRef", missing);
+    require(command.complianceEvidenceRef(), "complianceEvidenceRef", missing);
+    require(command.idempotencyKey(), "idempotencyKey", missing);
+    require(command.correlationId(), "correlationId", missing);
+    require(command.confirmedAt(), "confirmedAt", missing);
+    if (command.expectedVersion() <= 0) missing.add("expectedVersion");
+    if (!missing.isEmpty()) {
+      throw new LockServiceException("VALIDATION_FAILED", "Missing or invalid fields: " + String.join(", ", missing));
+    }
+  }
+
+  private static void validateExtensionCancelRequired(LockModels.LockExtensionCancelCommand command) {
+    if (command == null) {
+      throw new LockServiceException("VALIDATION_FAILED", "extension cancellation command is required");
+    }
+    List<String> missing = new ArrayList<>();
+    require(command.tenantId(), "tenantId", missing);
+    require(command.lockId(), "lockId", missing);
+    require(command.extensionId(), "extensionId", missing);
+    require(command.actorId(), "actorId", missing);
+    require(command.complianceEvidenceRef(), "complianceEvidenceRef", missing);
+    require(command.idempotencyKey(), "idempotencyKey", missing);
+    require(command.correlationId(), "correlationId", missing);
+    require(command.cancelledAt(), "cancelledAt", missing);
+    if (command.expectedVersion() <= 0) missing.add("expectedVersion");
+    if (!missing.isEmpty()) {
+      throw new LockServiceException("VALIDATION_FAILED", "Missing or invalid fields: " + String.join(", ", missing));
+    }
+  }
+
+  private void recordExtensionRequestMetrics(String reasonCode, LockModels.ExtensionCostSnapshot costSnapshot, int requestedDays) {
+    extensionRequestTotal++;
+    extensionRequestedDaysTotal += requestedDays;
+    extensionFeeConfigRefsByReason.put(LockModels.upper(reasonCode), LockModels.normalized(costSnapshot.feeAmount()));
+  }
+
+  private static void validateCostSnapshot(LockModels.ExtensionCostSnapshot costSnapshot, List<String> missing) {
+    if (costSnapshot == null) {
+      missing.add("costSnapshot");
+      return;
+    }
+    require(costSnapshot.priceAdjustment(), "costSnapshot.priceAdjustment", missing);
+    require(costSnapshot.feeAmount(), "costSnapshot.feeAmount", missing);
+    require(costSnapshot.payerType(), "costSnapshot.payerType", missing);
+    require(costSnapshot.roundingMode(), "costSnapshot.roundingMode", missing);
+    require(costSnapshot.reasonCode(), "costSnapshot.reasonCode", missing);
+    require(costSnapshot.policyVersionId(), "costSnapshot.policyVersionId", missing);
+  }
+
+  private static void validateExtensionEligibility(
+    LockModels.RateLockRecord current,
+    int expectedVersion,
+    int requestedDays,
+    Instant requestedExpiresAt,
+    LockModels.ExtensionCostSnapshot costSnapshot
+  ) {
+    if (current.version() != expectedVersion) {
+      throw new LockServiceException("VERSION_CONFLICT", "Extension expected aggregate version " + expectedVersion + " but current version is " + current.version());
+    }
+    if (current.status() != LockModels.RateLockStatus.ACTIVE && current.status() != LockModels.RateLockStatus.EXPIRING_SOON) {
+      throw new LockServiceException("LOCK_STATE_CONFLICT", "Lock extension requires an active or expiring lock");
+    }
+    if (current.expiresAt() == null || requestedExpiresAt == null || !requestedExpiresAt.isAfter(current.expiresAt())) {
+      throw new LockServiceException("POLICY_NOT_SATISFIED", "Requested extension expiration must be after current configured expiration");
+    }
+    if (requestedDays <= 0) {
+      throw new LockServiceException("VALIDATION_FAILED", "requestedDays must be a configured positive value");
+    }
+    if (costSnapshot == null || LockModels.normalized(costSnapshot.policyVersionId()).isEmpty()) {
+      throw new LockServiceException("POLICY_NOT_SATISFIED", "Extension cost policy snapshot is required");
+    }
+  }
+
+  private static void validateExtensionPolicy(
+    boolean permissionGranted,
+    boolean extensionPolicyResolved,
+    boolean compliancePermitsAmendedTerms,
+    boolean investorSupportsExtension,
+    String permission
+  ) {
+    if (!permissionGranted) {
+      throw new LockServiceException("TENANT_ACCESS_DENIED", permission + " permission is required");
+    }
+    if (!extensionPolicyResolved) {
+      throw new LockServiceException("POLICY_NOT_SATISFIED", "Extension policy configuration is missing or ambiguous");
+    }
+    if (!compliancePermitsAmendedTerms) {
+      throw new LockServiceException("POLICY_NOT_SATISFIED", "Compliance evidence does not permit amended lock terms");
+    }
+    if (!investorSupportsExtension) {
+      throw new LockServiceException("POLICY_NOT_SATISFIED", "Investor policy does not support lock extension for this product/channel");
+    }
+  }
+
+  private static LockModels.RateLockRecord extensionLockRecord(
+    LockModels.RateLockRecord current,
+    LockModels.RateLockStatus nextStatus,
+    Instant expiresAt,
+    String correlationId,
+    String policyVersionId,
+    String resultHash,
+    String auditRef,
+    String replayRef,
+    String eventType,
+    Instant updatedAt
+  ) {
+    return new LockModels.RateLockRecord(
+      current.tenantId(), current.lockId(), current.requestId(), current.quoteId(), current.loanId(), current.scenarioHash(),
+      nextStatus, current.version() + 1, current.createdAt(), updatedAt, expiresAt, current.idempotencyKey(), correlationId,
+      policyVersionId, resultHash, auditRef, replayRef, eventType
+    );
+  }
+
+  private static LockModels.LockExtensionResponse extensionResponse(
+    LockModels.RateLockRecord lockRecord,
+    LockModels.LockExtensionRecord extension,
+    LockModels.ExtensionCostSnapshot costSnapshot,
+    String summary,
+    List<String> validationMessages,
+    String auditRef,
+    String replayRef,
+    String correlationId,
+    String eventType,
+    String resultHash
+  ) {
+    return new LockModels.LockExtensionResponse(
+      extension.tenantId(), extension.lockId(), extension.extensionId(), extension.status(), lockRecord.status(), lockRecord.version(),
+      lockRecord.expiresAt(), extension.requestedDays(), extension.requestedExpiresAt(), costSnapshot, summary, validationMessages,
+      auditRef, replayRef, correlationId, eventType, resultHash
+    );
+  }
+
+  private static LockModels.LockEvent extensionEvent(
+    String eventType,
+    UUID tenantId,
+    String lockId,
+    String extensionId,
+    String actorId,
+    String correlationId,
+    String causationId,
+    String idempotencyKey,
+    Instant occurredAt,
+    LockModels.RateLockStatus status,
+    int version,
+    LockModels.ExtensionCostSnapshot costSnapshot,
+    String resultHash
+  ) {
+    return new LockModels.LockEvent(
+      eventType, "1", tenantId + ":" + lockId + ":" + extensionId, tenantId, lockId, actorId, correlationId,
+      causationId, idempotencyKey, occurredAt, Map.of(
+        "extensionId", extensionId,
+        "status", status.name(),
+        "version", String.valueOf(version),
+        "policyVersion", LockModels.normalized(costSnapshot.policyVersionId()),
+        "costSnapshotHash", costSnapshotHash(costSnapshot),
+        "resultHash", resultHash
+      )
+    );
+  }
+
+  private static LockModels.AuditSnapshot extensionAudit(
+    String auditRef,
+    UUID tenantId,
+    String lockId,
+    String action,
+    String actorId,
+    String beforeState,
+    String afterState,
+    String policyVersionId,
+    String complianceEvidenceRef,
+    String correlationId,
+    String replayHash
+  ) {
+    return new LockModels.AuditSnapshot(
+      auditRef, tenantId, lockId, action, actorId, beforeState, afterState, policyVersionId, complianceEvidenceRef, correlationId, replayHash
+    );
+  }
+
+  private static String costSnapshotHash(LockModels.ExtensionCostSnapshot costSnapshot) {
+    return hash(String.join("|",
+      LockModels.normalized(costSnapshot.priceAdjustment()), LockModels.normalized(costSnapshot.feeAmount()),
+      LockModels.normalized(costSnapshot.payerType()), LockModels.normalized(costSnapshot.roundingMode()),
+      LockModels.normalized(costSnapshot.reasonCode()), LockModels.normalized(costSnapshot.policyVersionId())
+    ));
+  }
+
+  private static LockModels.ExtensionCostSnapshot extensionCostFromRecord(LockModels.LockExtensionRecord extension) {
+    return new LockModels.ExtensionCostSnapshot(
+      "configured-snapshot", "configured-snapshot", "configured-snapshot", "configured-snapshot",
+      extension.reasonCode(), extension.policyVersionId()
+    );
+  }
+
+  private static void validateRelockPreviewRequired(LockModels.RelockPreviewCommand command) {
+    if (command == null) {
+      throw new LockServiceException("VALIDATION_FAILED", "relock preview command is required");
+    }
+    List<String> missing = new ArrayList<>();
+    require(command.tenantId(), "tenantId", missing);
+    require(command.sourceLockId(), "sourceLockId", missing);
+    require(command.actorId(), "actorId", missing);
+    require(command.currentQuoteId(), "currentQuoteId", missing);
+    require(command.reasonCode(), "reasonCode", missing);
+    require(command.idempotencyKey(), "idempotencyKey", missing);
+    require(command.correlationId(), "correlationId", missing);
+    validateRelockSnapshots(command.originalTerms(), command.currentTerms(), command.selectedTerms(), command.policySnapshot(), missing);
+    if (command.expectedVersion() <= 0) missing.add("expectedVersion");
+    if (!missing.isEmpty()) {
+      throw new LockServiceException("VALIDATION_FAILED", "Missing or invalid fields: " + String.join(", ", missing));
+    }
+  }
+
+  private static void validateRelockRequestRequired(LockModels.RelockRequestCommand command) {
+    if (command == null) {
+      throw new LockServiceException("VALIDATION_FAILED", "relock request command is required");
+    }
+    List<String> missing = new ArrayList<>();
+    require(command.tenantId(), "tenantId", missing);
+    require(command.sourceLockId(), "sourceLockId", missing);
+    require(command.requestId(), "requestId", missing);
+    require(command.actorId(), "actorId", missing);
+    require(command.currentQuoteId(), "currentQuoteId", missing);
+    require(command.requestedAt(), "requestedAt", missing);
+    require(command.reasonCode(), "reasonCode", missing);
+    require(command.complianceEvidenceRef(), "complianceEvidenceRef", missing);
+    require(command.idempotencyKey(), "idempotencyKey", missing);
+    require(command.correlationId(), "correlationId", missing);
+    validateRelockSnapshots(command.originalTerms(), command.currentTerms(), command.selectedTerms(), command.policySnapshot(), missing);
+    if (command.expectedVersion() <= 0) missing.add("expectedVersion");
+    if (!missing.isEmpty()) {
+      throw new LockServiceException("VALIDATION_FAILED", "Missing or invalid fields: " + String.join(", ", missing));
+    }
+  }
+
+  private static void validateRelockDecisionRequired(LockModels.RelockDecisionCommand command) {
+    if (command == null) {
+      throw new LockServiceException("VALIDATION_FAILED", "relock decision command is required");
+    }
+    List<String> missing = new ArrayList<>();
+    require(command.tenantId(), "tenantId", missing);
+    require(command.sourceLockId(), "sourceLockId", missing);
+    require(command.relockId(), "relockId", missing);
+    require(command.decision(), "decision", missing);
+    require(command.actorId(), "actorId", missing);
+    require(command.complianceEvidenceRef(), "complianceEvidenceRef", missing);
+    require(command.idempotencyKey(), "idempotencyKey", missing);
+    require(command.correlationId(), "correlationId", missing);
+    require(command.decidedAt(), "decidedAt", missing);
+    if (command.expectedVersion() <= 0) missing.add("expectedVersion");
+    if (!missing.isEmpty()) {
+      throw new LockServiceException("VALIDATION_FAILED", "Missing or invalid fields: " + String.join(", ", missing));
+    }
+  }
+
+  private static void validateRelockConfirmationRequired(LockModels.RelockConfirmationCommand command) {
+    if (command == null) {
+      throw new LockServiceException("VALIDATION_FAILED", "relock confirmation command is required");
+    }
+    List<String> missing = new ArrayList<>();
+    require(command.tenantId(), "tenantId", missing);
+    require(command.sourceLockId(), "sourceLockId", missing);
+    require(command.relockId(), "relockId", missing);
+    require(command.actorId(), "actorId", missing);
+    require(command.investorConfirmationRef(), "investorConfirmationRef", missing);
+    require(command.complianceEvidenceRef(), "complianceEvidenceRef", missing);
+    require(command.idempotencyKey(), "idempotencyKey", missing);
+    require(command.correlationId(), "correlationId", missing);
+    require(command.confirmedAt(), "confirmedAt", missing);
+    if (command.expectedVersion() <= 0) missing.add("expectedVersion");
+    if (!missing.isEmpty()) {
+      throw new LockServiceException("VALIDATION_FAILED", "Missing or invalid fields: " + String.join(", ", missing));
+    }
+  }
+
+  private static void validateRelockCancelRequired(LockModels.RelockCancelCommand command) {
+    if (command == null) {
+      throw new LockServiceException("VALIDATION_FAILED", "relock cancellation command is required");
+    }
+    List<String> missing = new ArrayList<>();
+    require(command.tenantId(), "tenantId", missing);
+    require(command.sourceLockId(), "sourceLockId", missing);
+    require(command.relockId(), "relockId", missing);
+    require(command.actorId(), "actorId", missing);
+    require(command.complianceEvidenceRef(), "complianceEvidenceRef", missing);
+    require(command.idempotencyKey(), "idempotencyKey", missing);
+    require(command.correlationId(), "correlationId", missing);
+    require(command.cancelledAt(), "cancelledAt", missing);
+    if (command.expectedVersion() <= 0) missing.add("expectedVersion");
+    if (!missing.isEmpty()) {
+      throw new LockServiceException("VALIDATION_FAILED", "Missing or invalid fields: " + String.join(", ", missing));
+    }
+  }
+
+  private static void validateRelockSnapshots(
+    LockModels.RelockTermsSnapshot originalTerms,
+    LockModels.RelockTermsSnapshot currentTerms,
+    LockModels.RelockTermsSnapshot selectedTerms,
+    LockModels.RelockPolicySnapshot policySnapshot,
+    List<String> missing
+  ) {
+    validateRelockTerms(originalTerms, "originalTerms", missing);
+    validateRelockTerms(currentTerms, "currentTerms", missing);
+    validateRelockTerms(selectedTerms, "selectedTerms", missing);
+    if (policySnapshot == null) {
+      missing.add("policySnapshot");
+      return;
+    }
+    require(policySnapshot.policyVersionId(), "policySnapshot.policyVersionId", missing);
+    require(policySnapshot.selectionModeRef(), "policySnapshot.selectionModeRef", missing);
+    require(policySnapshot.waitingPeriodRef(), "policySnapshot.waitingPeriodRef", missing);
+    require(policySnapshot.feeTreatmentRef(), "policySnapshot.feeTreatmentRef", missing);
+    require(policySnapshot.eligibilityThresholdRef(), "policySnapshot.eligibilityThresholdRef", missing);
+    require(policySnapshot.benefitLedgerRef(), "policySnapshot.benefitLedgerRef", missing);
+  }
+
+  private static void validateRelockTerms(LockModels.RelockTermsSnapshot terms, String prefix, List<String> missing) {
+    if (terms == null) {
+      missing.add(prefix);
+      return;
+    }
+    require(terms.productId(), prefix + ".productId", missing);
+    require(terms.investorId(), prefix + ".investorId", missing);
+    require(terms.rateSheetVersion(), prefix + ".rateSheetVersion", missing);
+    require(terms.priceRef(), prefix + ".priceRef", missing);
+    require(terms.rateRef(), prefix + ".rateRef", missing);
+    require(terms.feeRef(), prefix + ".feeRef", missing);
+    require(terms.lockPeriodRef(), prefix + ".lockPeriodRef", missing);
+    require(terms.termsHash(), prefix + ".termsHash", missing);
+  }
+
+  private static void validateRelockEligibility(
+    LockModels.RateLockRecord source,
+    int expectedVersion,
+    LockModels.RelockPolicySnapshot policySnapshot,
+    LockModels.RelockTermsSnapshot originalTerms,
+    LockModels.RelockTermsSnapshot currentTerms,
+    LockModels.RelockTermsSnapshot selectedTerms
+  ) {
+    if (source.version() != expectedVersion) {
+      throw new LockServiceException("VERSION_CONFLICT", "Relock expected aggregate version " + expectedVersion + " but current version is " + source.version());
+    }
+    if (source.status() != LockModels.RateLockStatus.ACTIVE
+      && source.status() != LockModels.RateLockStatus.EXPIRED
+      && source.status() != LockModels.RateLockStatus.CANCELLED) {
+      throw new LockServiceException("LOCK_STATE_CONFLICT", "Relock requires an active, expired, or cancelled source lock");
+    }
+    if (!policySnapshot.sourceStateEligible() || !policySnapshot.currentQuoteFresh()) {
+      throw new LockServiceException("POLICY_NOT_SATISFIED", "Relock source state and current quote freshness must satisfy configured policy");
+    }
+    if (!policySnapshot.waitingPeriodSatisfied()) {
+      throw new LockServiceException("POLICY_NOT_SATISFIED", "Relock waiting period and cutoff must satisfy configured policy");
+    }
+    if (!policySnapshot.relockPolicyResolved()) {
+      throw new LockServiceException("POLICY_NOT_SATISFIED", "Relock policy configuration is missing or ambiguous");
+    }
+    if (!policySnapshot.compliancePermitsSelectedTerms()) {
+      throw new LockServiceException("POLICY_NOT_SATISFIED", "Compliance evidence does not permit selected relock terms");
+    }
+    if (!source.requestHash().equals(originalTerms.termsHash())) {
+      throw new LockServiceException("POLICY_NOT_SATISFIED", "Original lock terms hash must match source lock replay hash");
+    }
+    if (!selectedTerms.termsHash().equals(originalTerms.termsHash()) && !selectedTerms.termsHash().equals(currentTerms.termsHash())) {
+      throw new LockServiceException("POLICY_NOT_SATISFIED", "Selected relock terms must come from configured original/current comparison snapshot");
+    }
+  }
+
+  private static LockModels.RateLockRecord relockLockRecord(
+    LockModels.RateLockRecord current,
+    LockModels.RateLockStatus nextStatus,
+    String correlationId,
+    String policyVersionId,
+    String resultHash,
+    String auditRef,
+    String replayRef,
+    String eventType,
+    Instant updatedAt
+  ) {
+    return new LockModels.RateLockRecord(
+      current.tenantId(), current.lockId(), current.requestId(), current.quoteId(), current.loanId(), current.scenarioHash(),
+      nextStatus, current.version() + 1, current.createdAt(), updatedAt, current.expiresAt(), current.idempotencyKey(), correlationId,
+      policyVersionId, resultHash, auditRef, replayRef, eventType
+    );
+  }
+
+  private static LockModels.RelockResponse relockResponse(
+    LockModels.RateLockRecord source,
+    LockModels.RateLockRecord replacement,
+    LockModels.RelockRecord relock,
+    String summary,
+    List<String> validationMessages,
+    String auditRef,
+    String replayRef,
+    String correlationId,
+    String eventType,
+    String resultHash
+  ) {
+    return new LockModels.RelockResponse(
+      relock.tenantId(), relock.relockId(), relock.sourceLockId(), relock.replacementLockId(), relock.status(), source.status(),
+      replacement.status(), source.version(), summary, validationMessages, auditRef, replayRef, correlationId, eventType, resultHash
+    );
+  }
+
+  private static LockModels.LockEvent relockEvent(
+    String eventType,
+    UUID tenantId,
+    String sourceLockId,
+    String relockId,
+    String replacementLockId,
+    String actorId,
+    String correlationId,
+    String causationId,
+    String idempotencyKey,
+    Instant occurredAt,
+    LockModels.RateLockStatus sourceStatus,
+    LockModels.RateLockStatus replacementStatus,
+    int version,
+    LockModels.RelockPolicySnapshot policySnapshot,
+    String resultHash
+  ) {
+    return new LockModels.LockEvent(
+      eventType, "1", tenantId + ":" + sourceLockId + ":" + relockId, tenantId, sourceLockId, actorId, correlationId,
+      causationId, idempotencyKey, occurredAt, Map.of(
+        "relockId", relockId,
+        "replacementLockId", replacementLockId,
+        "sourceStatus", sourceStatus.name(),
+        "replacementStatus", replacementStatus.name(),
+        "version", String.valueOf(version),
+        "policyVersion", policySnapshot.policyVersionId(),
+        "eligibilityThresholdRef", policySnapshot.eligibilityThresholdRef(),
+        "benefitLedgerRef", policySnapshot.benefitLedgerRef(),
+        "comparisonHash", resultHash
+      )
+    );
+  }
+
+  private static LockModels.AuditSnapshot relockAudit(
+    String auditRef,
+    UUID tenantId,
+    String lockId,
+    String action,
+    String actorId,
+    String beforeState,
+    String afterState,
+    String policyVersionId,
+    String complianceEvidenceRef,
+    String correlationId,
+    String replayHash
+  ) {
+    return new LockModels.AuditSnapshot(
+      auditRef, tenantId, lockId, action, actorId, beforeState, afterState, policyVersionId, complianceEvidenceRef, correlationId, replayHash
+    );
+  }
+
+  private static LockModels.RelockPolicySnapshot relockPolicyFromRecord(LockModels.RelockRecord relock) {
+    return new LockModels.RelockPolicySnapshot(
+      relock.policyVersionId(), "configured-snapshot", "configured-snapshot", "configured-snapshot", "configured-snapshot",
+      "configured-snapshot", true, true, true, true, true, relock.investorConfirmationRequired()
+    );
+  }
+
+  private static String previewRelockId(UUID tenantId, String sourceLockId, String idempotencyKey) {
+    return "RELOCK-PREVIEW-" + hash(tenantId + "|" + sourceLockId + "|" + idempotencyKey).substring(0, 16).toUpperCase();
   }
 
   private static void validateRequired(LockModels.LockRequestCommand command) {
@@ -506,6 +1837,93 @@ public final class LockService {
     if (!command.freshnessLockable() && command.confirmationType() != LockModels.LockConfirmationType.INVESTOR_CALLBACK) {
       throw new LockServiceException("POLICY_NOT_SATISFIED", "Freshness guard must be lockable immediately before confirmation");
     }
+  }
+
+  private static void validateExpirationRunRequired(LockModels.LockExpirationRunCommand command) {
+    if (command == null) {
+      throw new LockServiceException("VALIDATION_FAILED", "command is required");
+    }
+    List<String> missing = new ArrayList<>();
+    require(command.tenantId(), "tenantId", missing);
+    require(command.runId(), "runId", missing);
+    require(command.actorId(), "actorId", missing);
+    require(command.evaluatedAt(), "evaluatedAt", missing);
+    require(command.policyVersionId(), "policyVersionId", missing);
+    require(command.correlationId(), "correlationId", missing);
+    if (command.warningThresholdSeconds() <= 0) {
+      missing.add("warningThresholdSeconds");
+    }
+    if (!missing.isEmpty()) {
+      throw new LockServiceException("VALIDATION_FAILED", "Missing or invalid fields: " + String.join(", ", missing));
+    }
+    if (!command.permissionGranted()) {
+      throw new LockServiceException("TENANT_ACCESS_DENIED", "LOCK_EXPIRATION_RUN permission is required");
+    }
+    if (!command.expirationPolicyResolved()) {
+      throw new LockServiceException("POLICY_NOT_SATISFIED", "Expiration policy configuration is missing or ambiguous");
+    }
+  }
+
+  private void saveExpirationTransition(
+    LockModels.LockExpirationRunCommand command,
+    LockModels.LockConfirmationRecord confirmation,
+    LockModels.RateLockRecord current,
+    LockModels.RateLockStatus nextStatus,
+    String runHash
+  ) {
+    LockModels.RateLockRecord updated = new LockModels.RateLockRecord(
+      current.tenantId(), current.lockId(), current.requestId(), current.quoteId(), current.loanId(), current.scenarioHash(),
+      nextStatus, current.version() + 1, current.createdAt(), command.evaluatedAt(), confirmation.expiresAt(), current.idempotencyKey(),
+      command.correlationId(), command.policyVersionId(), current.requestHash(), "AUDIT-LOCK-EXPIRATION-" + command.runId() + "-" + current.lockId(),
+      "REPLAY-LOCK-EXPIRATION-" + runHash.substring(0, 16), expirationEventType(nextStatus)
+    );
+    LockModels.LockExpirationSchedule schedule = new LockModels.LockExpirationSchedule(
+      command.tenantId(), current.lockId(), confirmation.expiresAt(),
+      nextStatus == LockModels.RateLockStatus.EXPIRING_SOON ? null : confirmation.expiresAt().minusSeconds(command.warningThresholdSeconds()),
+      command.policyVersionId(), command.evaluatedAt()
+    );
+    LockModels.LockEvent event = new LockModels.LockEvent(
+      expirationEventType(nextStatus), "1", command.tenantId() + ":" + current.lockId(), command.tenantId(),
+      current.lockId(), command.actorId(), command.correlationId(), command.runId(), command.runId(),
+      command.evaluatedAt(), Map.of(
+        "runId", command.runId(),
+        "previousStatus", current.status().name(),
+        "status", nextStatus.name(),
+        "version", String.valueOf(updated.version()),
+        "expiresAt", confirmation.expiresAt().toString(),
+        "policyVersion", command.policyVersionId()
+      )
+    );
+    LockModels.AuditSnapshot audit = new LockModels.AuditSnapshot(
+      updated.auditRef(), command.tenantId(), current.lockId(), expirationAuditAction(nextStatus), command.actorId(),
+      current.status().name(), nextStatus.name(), command.policyVersionId(), "expiration-run:" + command.runId(),
+      command.correlationId(), runHash
+    );
+    repository.saveExpirationEvaluation(updated, schedule, event, audit);
+  }
+
+  private static LockModels.RateLockStatus expirationStatus(
+    LockModels.RateLockStatus currentStatus,
+    Instant expiresAt,
+    Instant evaluatedAt,
+    long warningThresholdSeconds
+  ) {
+    if (currentStatus == LockModels.RateLockStatus.EXPIRED
+      || currentStatus == LockModels.RateLockStatus.CANCELLED
+      || currentStatus == LockModels.RateLockStatus.REJECTED
+      || currentStatus == LockModels.RateLockStatus.INVESTOR_REJECTED) {
+      return currentStatus;
+    }
+    if (currentStatus != LockModels.RateLockStatus.ACTIVE && currentStatus != LockModels.RateLockStatus.EXPIRING_SOON) {
+      return currentStatus;
+    }
+    if (!expiresAt.isAfter(evaluatedAt)) {
+      return LockModels.RateLockStatus.EXPIRED;
+    }
+    if (Duration.between(evaluatedAt, expiresAt).getSeconds() <= warningThresholdSeconds) {
+      return LockModels.RateLockStatus.EXPIRING_SOON;
+    }
+    return LockModels.RateLockStatus.ACTIVE;
   }
 
   private static FreshnessEvaluation evaluateFreshness(LockModels.FreshnessCheckCommand command) {
@@ -648,6 +2066,22 @@ public final class LockService {
     };
   }
 
+  private static String expirationEventType(LockModels.RateLockStatus status) {
+    return switch (status) {
+      case EXPIRING_SOON -> "lock.expiring_soon.v1";
+      case EXPIRED -> "lock.expired.v1";
+      default -> throw new IllegalArgumentException("Unsupported expiration status " + status);
+    };
+  }
+
+  private static String expirationAuditAction(LockModels.RateLockStatus status) {
+    return switch (status) {
+      case EXPIRING_SOON -> "LOCK_EXPIRING_SOON";
+      case EXPIRED -> "LOCK_EXPIRED";
+      default -> throw new IllegalArgumentException("Unsupported expiration status " + status);
+    };
+  }
+
   private static String decisionSummary(LockModels.LockDecisionType decision) {
     return switch (decision) {
       case APPROVE -> "Lock decision approved using current tenant policy configuration";
@@ -707,11 +2141,153 @@ public final class LockService {
     ));
   }
 
+  private static String hash(LockModels.LockStatusSyncCommand command) {
+    LockModels.LockSyncTarget target = command.target();
+    return hash(String.join("|",
+      command.tenantId().toString(), command.lockId(), command.eventId(), command.actorId(),
+      target.targetId(), target.system(), String.valueOf(target.enabled()), target.contractVersion(),
+      target.policyVersion(), command.requestedAt().toString(), String.valueOf(Objects.hashCode(command.sourceRefs()))
+    ));
+  }
+
+  private static String hash(LockModels.LockStatusAckCommand command) {
+    return hash(String.join("|",
+      command.tenantId().toString(), command.ackId(), command.lockId(), command.eventId(), command.targetId(),
+      command.actorId(), String.valueOf(command.sourceTrusted()), String.valueOf(command.expectedCurrentStatus()),
+      String.valueOf(command.requestedLockStatus()), command.ackStatus().name(), command.ackRef(),
+      command.policyVersion(), command.contractVersion(), command.receivedAt().toString(),
+      String.valueOf(Objects.hashCode(command.sourceRefs()))
+    ));
+  }
+
+  private static String hash(LockModels.LockExtensionPreviewCommand command) {
+    return hash(String.join("|",
+      command.tenantId().toString(), command.lockId(), command.actorId(), String.valueOf(command.expectedVersion()),
+      String.valueOf(command.requestedDays()), command.requestedExpiresAt().toString(), LockModels.upper(command.reasonCode()),
+      costSnapshotHash(command.costSnapshot()), String.valueOf(command.extensionPolicyResolved()),
+      String.valueOf(command.compliancePermitsAmendedTerms()), String.valueOf(command.investorSupportsExtension()),
+      String.valueOf(Objects.hashCode(command.sourceRefs()))
+    ));
+  }
+
+  private static String hash(LockModels.LockExtensionRequestCommand command) {
+    return hash(String.join("|",
+      command.tenantId().toString(), command.lockId(), command.requestId(), command.actorId(), String.valueOf(command.expectedVersion()),
+      String.valueOf(command.requestedDays()), command.requestedAt().toString(), command.requestedExpiresAt().toString(),
+      LockModels.upper(command.reasonCode()), costSnapshotHash(command.costSnapshot()), String.valueOf(command.extensionPolicyResolved()),
+      String.valueOf(command.compliancePermitsAmendedTerms()), String.valueOf(command.investorSupportsExtension()),
+      command.complianceEvidenceRef(), String.valueOf(Objects.hashCode(command.sourceRefs()))
+    ));
+  }
+
+  private static String hash(LockModels.LockExtensionDecisionCommand command) {
+    return hash(String.join("|",
+      command.tenantId().toString(), command.lockId(), command.extensionId(), command.decision().name(), command.actorId(),
+      LockModels.normalized(command.requesterActorId()), String.valueOf(command.expectedVersion()),
+      String.valueOf(command.investorConfirmationRequired()), String.valueOf(command.separationOfDutiesConfigured()),
+      String.valueOf(command.decisionPolicyCurrent()), String.join(",", normalizedReasons(command.reasonCodes())),
+      command.complianceEvidenceRef(), command.decidedAt().toString()
+    ));
+  }
+
+  private static String hash(LockModels.LockExtensionConfirmationCommand command) {
+    return hash(String.join("|",
+      command.tenantId().toString(), command.lockId(), command.extensionId(), command.actorId(), String.valueOf(command.expectedVersion()),
+      String.valueOf(command.investorResponseMatches()), command.investorConfirmationRef(), command.complianceEvidenceRef(),
+      command.confirmedAt().toString(), String.valueOf(Objects.hashCode(command.sourceRefs()))
+    ));
+  }
+
+  private static String hash(LockModels.LockExtensionCancelCommand command) {
+    return hash(String.join("|",
+      command.tenantId().toString(), command.lockId(), command.extensionId(), command.actorId(), String.valueOf(command.expectedVersion()),
+      String.join(",", normalizedReasons(command.reasonCodes())), command.complianceEvidenceRef(), command.cancelledAt().toString()
+    ));
+  }
+
+  private static String hash(LockModels.LockExpirationRunCommand command) {
+    return hash(String.join("|",
+      command.tenantId().toString(), command.runId(), command.actorId(), command.evaluatedAt().toString(),
+      String.valueOf(command.warningThresholdSeconds()), command.policyVersionId(), String.valueOf(command.dryRun())
+    ));
+  }
+
+  private static String hash(LockModels.RelockPreviewCommand command) {
+    return hash(String.join("|",
+      command.tenantId().toString(), command.sourceLockId(), command.actorId(), String.valueOf(command.expectedVersion()),
+      command.currentQuoteId(), relockTermsHash(command.originalTerms()), relockTermsHash(command.currentTerms()),
+      relockTermsHash(command.selectedTerms()), relockPolicyHash(command.policySnapshot()), LockModels.upper(command.reasonCode()),
+      String.valueOf(Objects.hashCode(command.sourceRefs()))
+    ));
+  }
+
+  private static String hash(LockModels.RelockRequestCommand command) {
+    return hash(String.join("|",
+      command.tenantId().toString(), command.sourceLockId(), command.requestId(), command.actorId(), String.valueOf(command.expectedVersion()),
+      command.currentQuoteId(), command.requestedAt().toString(), relockTermsHash(command.originalTerms()),
+      relockTermsHash(command.currentTerms()), relockTermsHash(command.selectedTerms()), relockPolicyHash(command.policySnapshot()),
+      LockModels.upper(command.reasonCode()), command.complianceEvidenceRef(), String.valueOf(Objects.hashCode(command.sourceRefs()))
+    ));
+  }
+
+  private static String hash(LockModels.RelockDecisionCommand command) {
+    return hash(String.join("|",
+      command.tenantId().toString(), command.sourceLockId(), command.relockId(), command.decision().name(), command.actorId(),
+      LockModels.normalized(command.requesterActorId()), String.valueOf(command.expectedVersion()),
+      String.valueOf(command.separationOfDutiesConfigured()), String.valueOf(command.decisionPolicyCurrent()),
+      String.join(",", normalizedReasons(command.reasonCodes())), command.complianceEvidenceRef(), command.decidedAt().toString()
+    ));
+  }
+
+  private static String hash(LockModels.RelockConfirmationCommand command) {
+    return hash(String.join("|",
+      command.tenantId().toString(), command.sourceLockId(), command.relockId(), command.actorId(), String.valueOf(command.expectedVersion()),
+      String.valueOf(command.investorResponseMatches()), command.investorConfirmationRef(), command.complianceEvidenceRef(),
+      command.confirmedAt().toString(), String.valueOf(Objects.hashCode(command.sourceRefs()))
+    ));
+  }
+
+  private static String hash(LockModels.RelockCancelCommand command) {
+    return hash(String.join("|",
+      command.tenantId().toString(), command.sourceLockId(), command.relockId(), command.actorId(), String.valueOf(command.expectedVersion()),
+      String.join(",", normalizedReasons(command.reasonCodes())), command.complianceEvidenceRef(), command.cancelledAt().toString()
+    ));
+  }
+
+  private static String relockTermsHash(LockModels.RelockTermsSnapshot terms) {
+    return hash(String.join("|",
+      LockModels.normalized(terms.productId()), LockModels.normalized(terms.investorId()),
+      LockModels.normalized(terms.rateSheetVersion()), LockModels.normalized(terms.priceRef()),
+      LockModels.normalized(terms.rateRef()), LockModels.normalized(terms.feeRef()),
+      LockModels.normalized(terms.lockPeriodRef()), LockModels.normalized(terms.termsHash())
+    ));
+  }
+
+  private static String relockPolicyHash(LockModels.RelockPolicySnapshot policy) {
+    return hash(String.join("|",
+      LockModels.normalized(policy.policyVersionId()), LockModels.normalized(policy.selectionModeRef()),
+      LockModels.normalized(policy.waitingPeriodRef()), LockModels.normalized(policy.feeTreatmentRef()),
+      String.valueOf(policy.sourceStateEligible()), String.valueOf(policy.currentQuoteFresh()),
+      String.valueOf(policy.waitingPeriodSatisfied()), String.valueOf(policy.relockPolicyResolved()), String.valueOf(policy.compliancePermitsSelectedTerms()),
+      String.valueOf(policy.investorConfirmationRequired())
+    ));
+  }
+
   private static List<String> normalizedReasonCodes(LockModels.LockDecisionCommand command) {
     if (command.reasonCodes() == null) {
       return List.of();
     }
     return command.reasonCodes().stream()
+      .map(LockModels::upper)
+      .filter(reason -> !reason.isEmpty())
+      .toList();
+  }
+
+  private static List<String> normalizedReasons(List<String> reasonCodes) {
+    if (reasonCodes == null) {
+      return List.of();
+    }
+    return reasonCodes.stream()
       .map(LockModels::upper)
       .filter(reason -> !reason.isEmpty())
       .toList();
@@ -762,6 +2338,22 @@ public final class LockService {
     private final LockModels.LockConfirmationResponse response;
 
     private ConfirmationIdempotencyReplay(LockModels.LockConfirmationResponse response) {
+      this.response = response;
+    }
+  }
+
+  private static final class ExtensionIdempotencyReplay extends RuntimeException {
+    private final LockModels.LockExtensionResponse response;
+
+    private ExtensionIdempotencyReplay(LockModels.LockExtensionResponse response) {
+      this.response = response;
+    }
+  }
+
+  private static final class RelockIdempotencyReplay extends RuntimeException {
+    private final LockModels.RelockResponse response;
+
+    private RelockIdempotencyReplay(LockModels.RelockResponse response) {
       this.response = response;
     }
   }

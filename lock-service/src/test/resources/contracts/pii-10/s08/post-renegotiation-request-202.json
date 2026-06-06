@@ -1,0 +1,12 @@
+{
+  "id": "REN-PII10-S08",
+  "lockId": "LOCK-PII10-S08",
+  "replacementLockId": "RELOCK-PII10-S08",
+  "renegotiationStatus": "REQUESTED",
+  "lockStatus": "RELOCK_REQUESTED",
+  "replacementStatus": "PENDING_APPROVAL",
+  "version": 4,
+  "resultSummary": "Renegotiation requested using configured policy snapshot",
+  "eventType": "lock.renegotiation_requested.v1",
+  "benefitLedgerHash": "benefit-ledger-config-ref"
+}

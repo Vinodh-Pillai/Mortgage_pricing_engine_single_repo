@@ -1,0 +1,6 @@
+{
+  "story_id": "PII-08-S08",
+  "scenario": "selection-expired-rejected",
+  "expected_status": "REJECTED",
+  "rejected_reason": "QUOTE_NOT_READY_OR_EXPIRED"
+}

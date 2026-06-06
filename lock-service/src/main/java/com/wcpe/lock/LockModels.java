@@ -11,21 +11,51 @@ public final class LockModels {
   private LockModels() {}
 
   public enum RateLockStatus {
-    REQUESTED, PENDING_APPROVAL, APPROVED, PENDING_INVESTOR_CONFIRMATION, ACTIVE, INVESTOR_REJECTED, REJECTED, CANCELLED;
+    REQUESTED, PENDING_APPROVAL, APPROVED, PENDING_INVESTOR_CONFIRMATION, ACTIVE, EXPIRING_SOON,
+    EXTENSION_REQUESTED, EXTENSION_APPROVED, PENDING_INVESTOR_EXTENSION_CONFIRMATION,
+    RELOCK_REQUESTED, RELOCK_APPROVED, RELOCK_REJECTED, PENDING_INVESTOR_RELOCK_CONFIRMATION, RELOCKED,
+    INVESTOR_REJECTED, REJECTED, CANCELLED, EXPIRED;
 
     public Set<RateLockStatus> allowedNextStates() {
       return switch (this) {
         case REQUESTED, PENDING_APPROVAL -> Set.of(APPROVED, REJECTED, CANCELLED);
         case APPROVED -> Set.of(PENDING_INVESTOR_CONFIRMATION, ACTIVE, CANCELLED);
         case PENDING_INVESTOR_CONFIRMATION -> Set.of(ACTIVE, INVESTOR_REJECTED, CANCELLED);
-        case ACTIVE, INVESTOR_REJECTED, REJECTED, CANCELLED -> Set.of();
+        case ACTIVE -> Set.of(EXPIRING_SOON, EXTENSION_REQUESTED, RELOCK_REQUESTED, EXPIRED, CANCELLED);
+        case EXPIRING_SOON -> Set.of(ACTIVE, EXTENSION_REQUESTED, RELOCK_REQUESTED, EXPIRED, CANCELLED);
+        case EXTENSION_REQUESTED -> Set.of(EXTENSION_APPROVED, ACTIVE, CANCELLED);
+        case EXTENSION_APPROVED -> Set.of(PENDING_INVESTOR_EXTENSION_CONFIRMATION, ACTIVE, CANCELLED);
+        case PENDING_INVESTOR_EXTENSION_CONFIRMATION -> Set.of(ACTIVE, INVESTOR_REJECTED, CANCELLED);
+        case EXPIRED, CANCELLED -> Set.of(RELOCK_REQUESTED);
+        case RELOCK_REQUESTED -> Set.of(RELOCK_APPROVED, RELOCK_REJECTED, CANCELLED);
+        case RELOCK_APPROVED -> Set.of(PENDING_INVESTOR_RELOCK_CONFIRMATION, RELOCKED, ACTIVE);
+        case PENDING_INVESTOR_RELOCK_CONFIRMATION -> Set.of(RELOCKED, INVESTOR_REJECTED, CANCELLED);
+        case INVESTOR_REJECTED, REJECTED, RELOCK_REJECTED, RELOCKED -> Set.of();
       };
     }
 
     public boolean active() {
       return this == REQUESTED || this == PENDING_APPROVAL || this == APPROVED
-        || this == PENDING_INVESTOR_CONFIRMATION || this == ACTIVE;
+        || this == PENDING_INVESTOR_CONFIRMATION || this == ACTIVE || this == EXPIRING_SOON
+        || this == EXTENSION_REQUESTED || this == EXTENSION_APPROVED || this == PENDING_INVESTOR_EXTENSION_CONFIRMATION
+        || this == RELOCK_REQUESTED || this == RELOCK_APPROVED || this == PENDING_INVESTOR_RELOCK_CONFIRMATION;
     }
+  }
+
+  public enum LockExtensionStatus {
+    PREVIEWED, REQUESTED, APPROVED, REJECTED, PENDING_INVESTOR_CONFIRMATION, CONFIRMED, CANCELLED
+  }
+
+  public enum LockExtensionDecisionType {
+    APPROVE, REJECT
+  }
+
+  public enum RelockStatus {
+    PREVIEWED, REQUESTED, APPROVED, REJECTED, PENDING_INVESTOR_CONFIRMATION, CONFIRMED, CANCELLED
+  }
+
+  public enum RelockDecisionType {
+    APPROVE, REJECT
   }
 
   public enum LockDecisionType {
@@ -42,6 +72,10 @@ public final class LockModels {
 
   public enum LockConfirmationType {
     INTERNAL, INVESTOR_REQUEST, INVESTOR_CALLBACK
+  }
+
+  public enum LockSyncStatus {
+    PENDING, SENT, ACKED, FAILED, DLQ, RECONCILED
   }
 
   public record LockRequestCommand(
@@ -88,6 +122,7 @@ public final class LockModels {
     int version,
     Instant createdAt,
     Instant updatedAt,
+    Instant expiresAt,
     String idempotencyKey,
     String correlationId,
     String lockPolicyVersionId,
@@ -278,6 +313,464 @@ public final class LockModels {
     String confirmedTermsHash
   ) {}
 
+  public record ExtensionCostSnapshot(
+    String priceAdjustment,
+    String feeAmount,
+    String payerType,
+    String roundingMode,
+    String reasonCode,
+    String policyVersionId
+  ) {}
+
+  public record LockExtensionPreviewCommand(
+    UUID tenantId,
+    String lockId,
+    String actorId,
+    int expectedVersion,
+    int requestedDays,
+    Instant requestedExpiresAt,
+    String reasonCode,
+    ExtensionCostSnapshot costSnapshot,
+    boolean permissionGranted,
+    boolean extensionPolicyResolved,
+    boolean compliancePermitsAmendedTerms,
+    boolean investorSupportsExtension,
+    String idempotencyKey,
+    String correlationId,
+    Map<String, String> sourceRefs
+  ) {}
+
+  public record LockExtensionPreviewResponse(
+    UUID tenantId,
+    String lockId,
+    int requestedDays,
+    Instant requestedExpiresAt,
+    ExtensionCostSnapshot costSnapshot,
+    List<String> validationMessages,
+    String correlationId,
+    String resultHash
+  ) {}
+
+  public record LockExtensionRequestCommand(
+    UUID tenantId,
+    String lockId,
+    String requestId,
+    String actorId,
+    int expectedVersion,
+    int requestedDays,
+    Instant requestedAt,
+    Instant requestedExpiresAt,
+    String reasonCode,
+    ExtensionCostSnapshot costSnapshot,
+    boolean permissionGranted,
+    boolean extensionPolicyResolved,
+    boolean compliancePermitsAmendedTerms,
+    boolean investorSupportsExtension,
+    String complianceEvidenceRef,
+    String idempotencyKey,
+    String correlationId,
+    Map<String, String> sourceRefs
+  ) {}
+
+  public record LockExtensionDecisionCommand(
+    UUID tenantId,
+    String lockId,
+    String extensionId,
+    LockExtensionDecisionType decision,
+    String actorId,
+    String requesterActorId,
+    int expectedVersion,
+    boolean investorConfirmationRequired,
+    boolean permissionGranted,
+    boolean separationOfDutiesConfigured,
+    boolean decisionPolicyCurrent,
+    List<String> reasonCodes,
+    String complianceEvidenceRef,
+    String idempotencyKey,
+    String correlationId,
+    Instant decidedAt
+  ) {}
+
+  public record LockExtensionConfirmationCommand(
+    UUID tenantId,
+    String lockId,
+    String extensionId,
+    String actorId,
+    int expectedVersion,
+    boolean permissionGranted,
+    boolean investorResponseMatches,
+    String investorConfirmationRef,
+    String complianceEvidenceRef,
+    String idempotencyKey,
+    String correlationId,
+    Instant confirmedAt,
+    Map<String, String> sourceRefs
+  ) {}
+
+  public record LockExtensionCancelCommand(
+    UUID tenantId,
+    String lockId,
+    String extensionId,
+    String actorId,
+    int expectedVersion,
+    boolean permissionGranted,
+    List<String> reasonCodes,
+    String complianceEvidenceRef,
+    String idempotencyKey,
+    String correlationId,
+    Instant cancelledAt
+  ) {}
+
+  public record LockExtensionRecord(
+    UUID tenantId,
+    String extensionId,
+    String lockId,
+    LockExtensionStatus status,
+    int lockVersion,
+    int requestedDays,
+    Instant previousExpiresAt,
+    Instant requestedExpiresAt,
+    String reasonCode,
+    String requestedBy,
+    String approvedBy,
+    Instant requestedAt,
+    Instant decidedAt,
+    Instant confirmedAt,
+    String policyVersionId,
+    String costSnapshotHash,
+    String idempotencyKey,
+    String correlationId,
+    String replayRef
+  ) {}
+
+  public record LockExtensionResponse(
+    UUID tenantId,
+    String lockId,
+    String extensionId,
+    LockExtensionStatus extensionStatus,
+    RateLockStatus status,
+    int version,
+    Instant expiresAt,
+    int requestedDays,
+    Instant requestedExpiresAt,
+    ExtensionCostSnapshot costSnapshot,
+    String resultSummary,
+    List<String> validationMessages,
+    String auditRef,
+    String replayRef,
+    String correlationId,
+    String outboxEventType,
+    String resultHash
+  ) {}
+
+  public record RelockTermsSnapshot(
+    String productId,
+    String investorId,
+    String rateSheetVersion,
+    String priceRef,
+    String rateRef,
+    String feeRef,
+    String lockPeriodRef,
+    String termsHash
+  ) {}
+
+  public record RelockPolicySnapshot(
+    String policyVersionId,
+    String selectionModeRef,
+    String waitingPeriodRef,
+    String feeTreatmentRef,
+    String eligibilityThresholdRef,
+    String benefitLedgerRef,
+    boolean sourceStateEligible,
+    boolean currentQuoteFresh,
+    boolean waitingPeriodSatisfied,
+    boolean relockPolicyResolved,
+    boolean compliancePermitsSelectedTerms,
+    boolean investorConfirmationRequired
+  ) {}
+
+  public record RelockPreviewCommand(
+    UUID tenantId,
+    String sourceLockId,
+    String actorId,
+    int expectedVersion,
+    String currentQuoteId,
+    RelockTermsSnapshot originalTerms,
+    RelockTermsSnapshot currentTerms,
+    RelockTermsSnapshot selectedTerms,
+    RelockPolicySnapshot policySnapshot,
+    String reasonCode,
+    boolean permissionGranted,
+    String idempotencyKey,
+    String correlationId,
+    Map<String, String> sourceRefs
+  ) {}
+
+  public record RelockRequestCommand(
+    UUID tenantId,
+    String sourceLockId,
+    String requestId,
+    String actorId,
+    int expectedVersion,
+    String currentQuoteId,
+    Instant requestedAt,
+    RelockTermsSnapshot originalTerms,
+    RelockTermsSnapshot currentTerms,
+    RelockTermsSnapshot selectedTerms,
+    RelockPolicySnapshot policySnapshot,
+    String reasonCode,
+    String complianceEvidenceRef,
+    boolean permissionGranted,
+    String idempotencyKey,
+    String correlationId,
+    Map<String, String> sourceRefs
+  ) {}
+
+  public record RelockDecisionCommand(
+    UUID tenantId,
+    String sourceLockId,
+    String relockId,
+    RelockDecisionType decision,
+    String actorId,
+    String requesterActorId,
+    int expectedVersion,
+    boolean permissionGranted,
+    boolean separationOfDutiesConfigured,
+    boolean decisionPolicyCurrent,
+    List<String> reasonCodes,
+    String complianceEvidenceRef,
+    String idempotencyKey,
+    String correlationId,
+    Instant decidedAt
+  ) {}
+
+  public record RelockConfirmationCommand(
+    UUID tenantId,
+    String sourceLockId,
+    String relockId,
+    String actorId,
+    int expectedVersion,
+    boolean permissionGranted,
+    boolean investorResponseMatches,
+    String investorConfirmationRef,
+    String complianceEvidenceRef,
+    String idempotencyKey,
+    String correlationId,
+    Instant confirmedAt,
+    Map<String, String> sourceRefs
+  ) {}
+
+  public record RelockCancelCommand(
+    UUID tenantId,
+    String sourceLockId,
+    String relockId,
+    String actorId,
+    int expectedVersion,
+    boolean permissionGranted,
+    List<String> reasonCodes,
+    String complianceEvidenceRef,
+    String idempotencyKey,
+    String correlationId,
+    Instant cancelledAt
+  ) {}
+
+  public record RelockRecord(
+    UUID tenantId,
+    String relockId,
+    String sourceLockId,
+    String replacementLockId,
+    String currentQuoteId,
+    RelockStatus status,
+    int sourceLockVersion,
+    String requestedBy,
+    String approvedBy,
+    Instant requestedAt,
+    Instant decidedAt,
+    Instant confirmedAt,
+    String reasonCode,
+    String policyVersionId,
+    boolean investorConfirmationRequired,
+    String comparisonHash,
+    String idempotencyKey,
+    String correlationId,
+    String replayRef
+  ) {}
+
+  public record RelockResponse(
+    UUID tenantId,
+    String relockId,
+    String sourceLockId,
+    String replacementLockId,
+    RelockStatus relockStatus,
+    RateLockStatus sourceStatus,
+    RateLockStatus replacementStatus,
+    int version,
+    String resultSummary,
+    List<String> validationMessages,
+    String auditRef,
+    String replayRef,
+    String correlationId,
+    String outboxEventType,
+    String comparisonHash
+  ) {}
+
+  public record LockExpirationRunCommand(
+    UUID tenantId,
+    String runId,
+    String actorId,
+    Instant evaluatedAt,
+    long warningThresholdSeconds,
+    String policyVersionId,
+    boolean permissionGranted,
+    boolean expirationPolicyResolved,
+    boolean dryRun,
+    String correlationId
+  ) {}
+
+  public record LockExpirationRunResponse(
+    UUID tenantId,
+    String runId,
+    Instant startedAt,
+    Instant completedAt,
+    String status,
+    int processedCount,
+    int expiringSoonCount,
+    int expiredCount,
+    int noOpCount,
+    List<String> validationMessages,
+    String auditRef,
+    String replayRef,
+    String correlationId
+  ) {}
+
+  public record LockExpirationSchedule(
+    UUID tenantId,
+    String lockId,
+    Instant expiresAt,
+    Instant nextWarningAt,
+    String policyVersionId,
+    Instant lastEvaluatedAt
+  ) {}
+
+  public record LockExpirationRunRecord(
+    UUID tenantId,
+    String runId,
+    Instant startedAt,
+    Instant completedAt,
+    String status,
+    int processedCount,
+    int expiringSoonCount,
+    int expiredCount,
+    int noOpCount,
+    String replayRef,
+    String correlationId
+  ) {}
+
+  public record LockSyncTarget(
+    UUID tenantId,
+    String targetId,
+    String system,
+    boolean enabled,
+    String contractVersion,
+    String policyVersion
+  ) {}
+
+  public record LockStatusSyncCommand(
+    UUID tenantId,
+    String lockId,
+    String eventId,
+    String actorId,
+    LockSyncTarget target,
+    boolean permissionGranted,
+    Instant requestedAt,
+    String idempotencyKey,
+    String correlationId,
+    Map<String, String> sourceRefs
+  ) {}
+
+  public record LockSyncAttempt(
+    UUID tenantId,
+    String attemptId,
+    String lockId,
+    String eventId,
+    String targetId,
+    LockSyncStatus status,
+    String payloadHash,
+    int retryCount,
+    Instant nextRetryAt,
+    String ackRef,
+    String correlationId,
+    String policyVersion,
+    String contractVersion,
+    Instant updatedAt
+  ) {}
+
+  public record LockSyncAttemptResponse(
+    UUID tenantId,
+    String attemptId,
+    String lockId,
+    String eventId,
+    String targetId,
+    LockSyncStatus status,
+    String payloadHash,
+    int retryCount,
+    Instant nextRetryAt,
+    String ackRef,
+    String resultSummary,
+    List<String> validationMessages,
+    String auditRef,
+    String replayRef,
+    String correlationId,
+    String outboxEventType
+  ) {}
+
+  public record LockStatusAckCommand(
+    UUID tenantId,
+    String ackId,
+    String lockId,
+    String eventId,
+    String targetId,
+    String actorId,
+    boolean permissionGranted,
+    boolean sourceTrusted,
+    RateLockStatus expectedCurrentStatus,
+    RateLockStatus requestedLockStatus,
+    LockSyncStatus ackStatus,
+    String ackRef,
+    String policyVersion,
+    String contractVersion,
+    Instant receivedAt,
+    String idempotencyKey,
+    String correlationId,
+    Map<String, String> sourceRefs
+  ) {}
+
+  public record LockSyncAcknowledgement(
+    UUID tenantId,
+    String ackId,
+    String lockId,
+    String eventId,
+    String targetId,
+    LockSyncStatus ackStatus,
+    String ackRef,
+    String payloadHash,
+    Instant receivedAt,
+    String correlationId
+  ) {}
+
+  public record LockReconciliationRecord(
+    UUID tenantId,
+    String recordId,
+    String lockId,
+    String targetSystem,
+    String driftType,
+    String resolution,
+    String actorId,
+    Instant reconciledAt,
+    String replayRef,
+    String correlationId
+  ) {}
+
   public record LockEvent(
     String eventType,
     String eventVersion,
@@ -318,7 +811,22 @@ public final class LockModels {
     long lockConfirmationTotal,
     long pendingInvestorConfirmationTotal,
     long investorMismatchTotal,
-    long lockOutboxLagSeconds
+    long lockExpirationRunTotal,
+    long locksExpiringSoonTotal,
+    long locksExpiredTotal,
+    long lockOutboxLagSeconds,
+    long extensionRequestTotal,
+    long extensionApprovalTotal,
+    long extensionRejectionTotal,
+    long extensionCancellationTotal,
+    long extensionConfirmationFailureTotal,
+    double extensionAverageRequestedDays,
+    Map<String, String> extensionFeeConfigRefsByReason,
+    long lockSyncSentTotal,
+    long lockSyncAckedTotal,
+    long lockSyncFailedTotal,
+    long lockSyncDlqTotal,
+    long lockSyncReconciledTotal
   ) {}
 
   static String normalized(String value) {

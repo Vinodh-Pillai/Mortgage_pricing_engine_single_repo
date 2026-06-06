@@ -1,0 +1,6 @@
+{
+  "eventType": "lock.sync_failed.v1",
+  "eventVersion": "1",
+  "requiredPayload": ["attemptId", "eventId", "targetId", "syncStatus", "payloadHash", "policyVersion"],
+  "dlqStatus": "DLQ"
+}

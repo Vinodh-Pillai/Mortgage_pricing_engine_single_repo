@@ -1,0 +1,17 @@
+{
+  "storyId": "PII-09-S07",
+  "tenantId": "tenant-001",
+  "sourceQuoteId": "quote-123",
+  "sourceQuoteVersion": 4,
+  "pricingConfigVersion": "pricing-config-v8",
+  "name": "FICO LTV comparison",
+  "reasonCode": "borrower-retention",
+  "selectedVariantIds": ["variant-001", "variant-002"],
+  "selectedGridCellIds": ["grid-cell-001"],
+  "tags": ["fico-ltv", "branch-a"],
+  "visibility": "private",
+  "retentionCategory": "standard-audit",
+  "linkedToQuoteDecision": true,
+  "expectedStatus": "SAVED",
+  "expectedHashPrefix": "sha256:"
+}

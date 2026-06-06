@@ -1,0 +1,7 @@
+{
+  "story_id": "PII-08-S08",
+  "scenario": "selection-top-ranked",
+  "expected_status": "SELECTED",
+  "event_type": "quote_option.selected.v1",
+  "lock_confirmation": false
+}

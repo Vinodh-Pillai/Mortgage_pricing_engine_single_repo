@@ -1,0 +1,7 @@
+{
+  "story_id": "PII-08-S08",
+  "scenario": "selection-non-top-with-reason",
+  "expected_status": "SELECTED",
+  "requires_configured_policy": true,
+  "requires_reason": true
+}

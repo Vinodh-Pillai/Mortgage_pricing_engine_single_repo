@@ -9,6 +9,7 @@ create table rate_locks (
   version int not null default 1,
   created_at timestamptz not null,
   updated_at timestamptz not null,
+  expires_at timestamptz,
   idempotency_key varchar(160) not null,
   correlation_id varchar(128) not null,
   lock_policy_version_id varchar(128) not null,
@@ -16,13 +17,15 @@ create table rate_locks (
   audit_ref varchar(128) not null,
   replay_ref varchar(128) not null,
   constraint rate_locks_tenant_lock unique (tenant_id, lock_id),
-  constraint rate_locks_status check (status in ('REQUESTED', 'PENDING_APPROVAL', 'APPROVED', 'PENDING_INVESTOR_CONFIRMATION', 'ACTIVE', 'INVESTOR_REJECTED', 'REJECTED', 'CANCELLED'))
+  constraint rate_locks_status check (status in ('REQUESTED', 'PENDING_APPROVAL', 'APPROVED', 'PENDING_INVESTOR_CONFIRMATION', 'ACTIVE', 'EXPIRING_SOON', 'INVESTOR_REJECTED', 'REJECTED', 'CANCELLED', 'EXPIRED'))
 );
 
 create unique index rate_locks_tenant_idempotency_idx on rate_locks (tenant_id, idempotency_key);
 create index rate_locks_tenant_status_updated_idx on rate_locks (tenant_id, status, updated_at desc);
 create unique index rate_locks_active_quote_idx on rate_locks (tenant_id, quote_id)
-  where status in ('REQUESTED', 'PENDING_APPROVAL', 'APPROVED');
+  where status in ('REQUESTED', 'PENDING_APPROVAL', 'APPROVED', 'PENDING_INVESTOR_CONFIRMATION', 'ACTIVE', 'EXPIRING_SOON');
+create index rate_locks_tenant_status_expires_idx on rate_locks (tenant_id, status, expires_at)
+  where status in ('ACTIVE', 'EXPIRING_SOON');
 
 create table lock_events (
   tenant_id uuid not null,
@@ -106,3 +109,31 @@ create unique index lock_confirmations_tenant_number_idx on lock_confirmations (
 create unique index lock_confirmations_investor_ref_idx on lock_confirmations (tenant_id, investor_id, investor_confirmation_ref)
   where status = 'ACTIVE' and investor_id is not null and investor_confirmation_ref is not null;
 create index lock_confirmations_tenant_status_confirmed_idx on lock_confirmations (tenant_id, status, confirmed_at desc);
+
+create table lock_expiration_schedules (
+  tenant_id uuid not null,
+  lock_id varchar(64) not null,
+  expires_at timestamptz not null,
+  next_warning_at timestamptz,
+  policy_version varchar(128) not null,
+  last_evaluated_at timestamptz,
+  constraint lock_expiration_schedules_tenant_lock unique (tenant_id, lock_id)
+);
+
+create index lock_expiration_schedules_tenant_warning_idx on lock_expiration_schedules (tenant_id, next_warning_at)
+  where next_warning_at is not null;
+
+create table lock_expiration_runs (
+  tenant_id uuid not null,
+  run_id varchar(128) primary key,
+  started_at timestamptz not null,
+  completed_at timestamptz not null,
+  status varchar(40) not null,
+  processed_count int not null,
+  expiring_soon_count int not null,
+  expired_count int not null,
+  no_op_count int not null,
+  replay_ref varchar(128) not null,
+  correlation_id varchar(128) not null,
+  constraint lock_expiration_runs_tenant_run unique (tenant_id, run_id)
+);

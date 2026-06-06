@@ -2,6 +2,8 @@ package com.wcpe.lock;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -478,6 +480,717 @@ class LockServiceTest {
     assertEquals("NOT_FOUND", error.code());
   }
 
+  @Test
+  void ExpiringSoonThresholdFromConfigTest() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("EXP-001", TENANT_A);
+
+    LockModels.LockExpirationRunResponse run = service.runExpiration(expirationCommand(
+      "EXP-RUN-001", TENANT_A, Instant.parse("2026-07-04T20:51:00Z"), 900, true
+    ));
+
+    assertEquals("COMPLETED", run.status());
+    assertEquals(1, run.processedCount());
+    assertEquals(1, run.expiringSoonCount());
+    assertEquals(0, run.expiredCount());
+    assertEquals(LockModels.RateLockStatus.EXPIRING_SOON, service.getLock(TENANT_A, confirmation.lockId()).status());
+    assertEquals("lock.expiring_soon.v1", service.outboxEvents().get(3).eventType());
+    assertEquals("LOCK_EXPIRING_SOON", service.auditSnapshots().get(3).action());
+    assertEquals(1, service.metrics().locksExpiringSoonTotal());
+  }
+
+  @Test
+  void ExpirationComputesTimezoneCutoffTest() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("EXP-002", TENANT_A);
+
+    LockModels.LockExpirationRunResponse run = service.runExpiration(expirationCommand(
+      "EXP-RUN-002", TENANT_A, Instant.parse("2026-07-04T21:06:00Z"), 900, true
+    ));
+
+    assertEquals(1, run.processedCount());
+    assertEquals(1, run.expiredCount());
+    LockModels.RateLockRecord expired = service.getLock(TENANT_A, confirmation.lockId());
+    assertEquals(LockModels.RateLockStatus.EXPIRED, expired.status());
+    assertEquals(Instant.parse("2026-07-04T21:06:00Z"), expired.expiresAt());
+    assertEquals("lock.expired.v1", expired.outboxEventType());
+    assertEquals("lock.expired.v1", service.outboxEvents().get(3).eventType());
+    assertEquals("LOCK_EXPIRED", service.auditSnapshots().get(3).action());
+    assertEquals(1, service.metrics().locksExpiredTotal());
+  }
+
+  @Test
+  void ExpiredTerminalNoOpTest() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("EXP-003", TENANT_A);
+
+    service.runExpiration(expirationCommand("EXP-RUN-003A", TENANT_A, Instant.parse("2026-07-04T21:06:00Z"), 900, true));
+    LockModels.LockExpirationRunResponse rerun = service.runExpiration(expirationCommand(
+      "EXP-RUN-003B", TENANT_A, Instant.parse("2026-07-04T21:07:00Z"), 900, true
+    ));
+
+    assertEquals(LockModels.RateLockStatus.EXPIRED, service.getLock(TENANT_A, confirmation.lockId()).status());
+    assertEquals(0, rerun.processedCount());
+    assertEquals(0, rerun.expiredCount());
+    assertEquals(4, service.outboxEvents().size());
+  }
+
+  @Test
+  void expirationRunReplayIsIdempotentAndRejectsConflictingPayload() {
+    createActiveLock("EXP-IDEMP-001", TENANT_A);
+    LockModels.LockExpirationRunCommand command = expirationCommand(
+      "EXP-RUN-IDEMP-001", TENANT_A, Instant.parse("2026-07-04T21:06:00Z"), 900, true
+    );
+
+    LockModels.LockExpirationRunResponse first = service.runExpiration(command);
+    LockModels.LockExpirationRunResponse replay = service.runExpiration(command);
+
+    assertEquals(first.replayRef(), replay.replayRef());
+    assertEquals(first.expiredCount(), replay.expiredCount());
+    LockServiceException conflict = assertThrows(
+      LockServiceException.class,
+      () -> service.runExpiration(expirationCommand("EXP-RUN-IDEMP-001", TENANT_A, Instant.parse("2026-07-04T21:07:00Z"), 900, true))
+    );
+    assertEquals("IDEMPOTENCY_CONFLICT", conflict.code());
+  }
+
+  @Test
+  void expirationPolicyMissingFailsClosedWithoutStateChange() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("EXP-004", TENANT_A);
+
+    LockServiceException error = assertThrows(
+      LockServiceException.class,
+      () -> service.runExpiration(expirationCommand("EXP-RUN-004", TENANT_A, Instant.parse("2026-07-04T21:06:00Z"), 900, false))
+    );
+
+    assertEquals("POLICY_NOT_SATISFIED", error.code());
+    assertEquals(LockModels.RateLockStatus.ACTIVE, service.getLock(TENANT_A, confirmation.lockId()).status());
+    assertEquals(0, service.committedExpirationRunCount());
+  }
+
+  @Test
+  void internalLockExpirationApiMapsSchedulerCommand() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("EXP-API-001", TENANT_A);
+    LockExpirationApi api = new LockExpirationApi(service);
+
+    LockExpirationApi.ExpirationRunResponse response = api.postExpirationRun(new LockExpirationApi.ExpirationRunRequest(
+      TENANT_A,
+      "EXP-RUN-API-001",
+      "lock-expiration-scheduler",
+      Instant.parse("2026-07-04T21:06:00Z"),
+      900,
+      "lock-expiration-policy-v1",
+      true,
+      true,
+      false,
+      "corr-pii10-s05-api"
+    ));
+
+    assertEquals("POST", LockExpirationApi.POST_EXPIRATION_RUN_METHOD);
+    assertEquals("/internal/lock-expiration-runs", LockExpirationApi.POST_EXPIRATION_RUN_PATH);
+    assertEquals("LOCK_EXPIRATION_RUN", LockExpirationApi.SERVICE_PERMISSION);
+    assertEquals("COMPLETED", response.status());
+    assertEquals(1, response.expiredCount());
+    assertEquals(LockModels.RateLockStatus.EXPIRED, service.getLock(TENANT_A, confirmation.lockId()).status());
+    assertEquals("corr-pii10-s05-api", response.correlationId());
+  }
+
+  @Test
+  void ExtensionPreviewUsesConfiguredPolicyCostSnapshotTest() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("EXT-PREV-001", TENANT_A);
+
+    LockModels.LockExtensionPreviewResponse preview = service.previewExtension(extensionPreviewCommand(
+      confirmation.lockId(), confirmation.version(), TENANT_A
+    ));
+
+    assertEquals(3, preview.requestedDays());
+    assertEquals("extension-policy-v1", preview.costSnapshot().policyVersionId());
+    assertTrue(preview.validationMessages().contains("Extension preview calculated from provided tenant/investor policy snapshot"));
+  }
+
+  @Test
+  void ExtensionRequestCreatesRequestedStateAuditOutboxAndBlocksSecondOpenRequest() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("EXT-REQ-001", TENANT_A);
+
+    LockModels.LockExtensionResponse response = service.requestExtension(extensionRequestCommand(
+      confirmation.lockId(), confirmation.version(), "EXT-REQ-001", "IDEMP-EXT-REQ-001", TENANT_A
+    ));
+
+    assertEquals(LockModels.LockExtensionStatus.REQUESTED, response.extensionStatus());
+    assertEquals(LockModels.RateLockStatus.EXTENSION_REQUESTED, response.status());
+    assertEquals("lock.extension_requested.v1", response.outboxEventType());
+    assertEquals("LOCK_EXTENSION_REQUESTED", service.auditSnapshots().get(3).action());
+    assertEquals(1, service.committedExtensionCount());
+    LockServiceException duplicate = assertThrows(
+      LockServiceException.class,
+      () -> service.requestExtension(extensionRequestCommand(response.lockId(), response.version(), "EXT-REQ-001B", "IDEMP-EXT-REQ-001B", TENANT_A))
+    );
+    assertEquals("LOCK_STATE_CONFLICT", duplicate.code());
+  }
+
+  @Test
+  void ExtensionApprovalAmendsExpirationWithoutInventingPolicyValues() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("EXT-APR-001", TENANT_A);
+    LockModels.LockExtensionResponse requested = service.requestExtension(extensionRequestCommand(
+      confirmation.lockId(), confirmation.version(), "EXT-APR-001", "IDEMP-EXT-APR-REQ-001", TENANT_A
+    ));
+
+    LockModels.LockExtensionResponse approved = service.decideExtension(extensionDecisionCommand(
+      requested.lockId(), requested.extensionId(), LockModels.LockExtensionDecisionType.APPROVE, requested.version(), false,
+      "IDEMP-EXT-APR-DEC-001", TENANT_A
+    ));
+
+    assertEquals(LockModels.LockExtensionStatus.CONFIRMED, approved.extensionStatus());
+    assertEquals(LockModels.RateLockStatus.ACTIVE, approved.status());
+    assertEquals(Instant.parse("2026-07-07T21:06:00Z"), approved.expiresAt());
+    assertEquals("lock.extension_approved.v1", approved.outboxEventType());
+    assertEquals("LOCK_EXTENSION_APPROVED", service.auditSnapshots().get(4).action());
+  }
+
+  @Test
+  void InvestorExtensionConfirmationAmendsExpirationAfterApprovedPendingInvestor() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("EXT-INV-001", TENANT_A);
+    LockModels.LockExtensionResponse requested = service.requestExtension(extensionRequestCommand(
+      confirmation.lockId(), confirmation.version(), "EXT-INV-001", "IDEMP-EXT-INV-REQ-001", TENANT_A
+    ));
+    LockModels.LockExtensionResponse pending = service.decideExtension(extensionDecisionCommand(
+      requested.lockId(), requested.extensionId(), LockModels.LockExtensionDecisionType.APPROVE, requested.version(), true,
+      "IDEMP-EXT-INV-DEC-001", TENANT_A
+    ));
+
+    LockModels.LockExtensionResponse confirmed = service.confirmExtension(extensionConfirmationCommand(
+      pending.lockId(), pending.extensionId(), pending.version(), "IDEMP-EXT-INV-CONF-001", TENANT_A, true
+    ));
+
+    assertEquals(LockModels.LockExtensionStatus.PENDING_INVESTOR_CONFIRMATION, pending.extensionStatus());
+    assertEquals(LockModels.RateLockStatus.PENDING_INVESTOR_EXTENSION_CONFIRMATION, pending.status());
+    assertEquals(LockModels.LockExtensionStatus.CONFIRMED, confirmed.extensionStatus());
+    assertEquals(LockModels.RateLockStatus.ACTIVE, confirmed.status());
+    assertEquals("lock.extension_confirmed.v1", confirmed.outboxEventType());
+    assertEquals(Instant.parse("2026-07-07T21:06:00Z"), service.getExpirationSchedule(TENANT_A, confirmed.lockId()).expiresAt());
+  }
+
+  @Test
+  void ExtensionCancelRequestCancelsOpenExtensionEmitsAuditAndReleasesOpenIndex() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("EXT-CAN-001", TENANT_A);
+    LockModels.LockExtensionResponse requested = service.requestExtension(extensionRequestCommand(
+      confirmation.lockId(), confirmation.version(), "EXT-CAN-001", "IDEMP-EXT-CAN-REQ-001", TENANT_A
+    ));
+
+    LockModels.LockExtensionResponse cancelled = service.cancelExtension(extensionCancelCommand(
+      requested.lockId(), requested.extensionId(), requested.version(), "IDEMP-EXT-CAN-001", TENANT_A
+    ));
+    LockModels.LockExtensionResponse secondRequest = service.requestExtension(extensionRequestCommand(
+      cancelled.lockId(), cancelled.version(), "EXT-CAN-002", "IDEMP-EXT-CAN-REQ-002", TENANT_A
+    ));
+
+    assertEquals(LockModels.LockExtensionStatus.CANCELLED, cancelled.extensionStatus());
+    assertEquals(LockModels.RateLockStatus.ACTIVE, cancelled.status());
+    assertEquals(Instant.parse("2026-07-04T21:06:00Z"), cancelled.expiresAt());
+    assertEquals("lock.extension_cancelled.v1", cancelled.outboxEventType());
+    assertEquals("LOCK_EXTENSION_CANCELLED", service.auditSnapshots().get(service.auditSnapshots().size() - 2).action());
+    assertEquals(LockModels.LockExtensionStatus.REQUESTED, secondRequest.extensionStatus());
+    assertEquals(2, service.committedExtensionCount());
+  }
+
+  @Test
+  void ExtensionMetricsTrackRequestsDecisionsAverageDaysFeesAndConfirmationFailures() {
+    LockModels.LockConfirmationResponse approvedConfirmation = createActiveLock("EXT-MET-APR-001", TENANT_A);
+    LockModels.LockExtensionResponse approvedRequest = service.requestExtension(extensionRequestCommand(
+      approvedConfirmation.lockId(), approvedConfirmation.version(), "EXT-MET-APR-001", "IDEMP-EXT-MET-APR-REQ-001", TENANT_A
+    ));
+    service.decideExtension(extensionDecisionCommand(
+      approvedRequest.lockId(), approvedRequest.extensionId(), LockModels.LockExtensionDecisionType.APPROVE, approvedRequest.version(), false,
+      "IDEMP-EXT-MET-APR-DEC-001", TENANT_A
+    ));
+
+    LockModels.LockConfirmationResponse rejectedConfirmation = createActiveLock("EXT-MET-REJ-001", TENANT_B);
+    LockModels.LockExtensionResponse rejectedRequest = service.requestExtension(extensionRequestCommand(
+      rejectedConfirmation.lockId(), rejectedConfirmation.version(), "EXT-MET-REJ-001", "IDEMP-EXT-MET-REJ-REQ-001", TENANT_B
+    ));
+    service.decideExtension(extensionDecisionCommand(
+      rejectedRequest.lockId(), rejectedRequest.extensionId(), LockModels.LockExtensionDecisionType.REJECT, rejectedRequest.version(), false,
+      "IDEMP-EXT-MET-REJ-DEC-001", TENANT_B
+    ));
+
+    LockModels.LockConfirmationResponse pendingConfirmation = createActiveLock("EXT-MET-CONF-001", UUID.fromString("33333333-3333-3333-3333-333333333333"));
+    LockModels.LockExtensionResponse pendingRequest = service.requestExtension(extensionRequestCommand(
+      pendingConfirmation.lockId(), pendingConfirmation.version(), "EXT-MET-CONF-001", "IDEMP-EXT-MET-CONF-REQ-001", pendingConfirmation.tenantId()
+    ));
+    LockModels.LockExtensionResponse pending = service.decideExtension(extensionDecisionCommand(
+      pendingRequest.lockId(), pendingRequest.extensionId(), LockModels.LockExtensionDecisionType.APPROVE, pendingRequest.version(), true,
+      "IDEMP-EXT-MET-CONF-DEC-001", pendingConfirmation.tenantId()
+    ));
+    assertThrows(LockServiceException.class, () -> service.confirmExtension(extensionConfirmationCommand(
+      pending.lockId(), pending.extensionId(), pending.version(), "IDEMP-EXT-MET-CONF-FAIL-001", pendingConfirmation.tenantId(), false
+    )));
+
+    LockModels.MetricsSnapshot metrics = service.metrics();
+    assertEquals(3, metrics.extensionRequestTotal());
+    assertEquals(2, metrics.extensionApprovalTotal());
+    assertEquals(1, metrics.extensionRejectionTotal());
+    assertEquals(1, metrics.extensionConfirmationFailureTotal());
+    assertEquals(3.0, metrics.extensionAverageRequestedDays(), 0.001);
+    assertEquals("fee-config-ref:EXT-3D", metrics.extensionFeeConfigRefsByReason().get("EXTENSION_REASON_CONFIGURED"));
+  }
+
+  @Test
+  void ExtensionMissingPolicyFailsClosedWithoutStateChange() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("EXT-POL-001", TENANT_A);
+
+    LockServiceException error = assertThrows(
+      LockServiceException.class,
+      () -> service.requestExtension(withExtensionPolicy(extensionRequestCommand(
+        confirmation.lockId(), confirmation.version(), "EXT-POL-001", "IDEMP-EXT-POL-001", TENANT_A
+      ), false))
+    );
+
+    assertEquals("POLICY_NOT_SATISFIED", error.code());
+    assertEquals(LockModels.RateLockStatus.ACTIVE, service.getLock(TENANT_A, confirmation.lockId()).status());
+    assertEquals(0, service.committedExtensionCount());
+  }
+
+  @Test
+  void postLockExtensionApiMapsTenantScopedRoutesToServiceCommands() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("EXT-API-001", TENANT_A);
+    LockExtensionApi api = new LockExtensionApi(service);
+
+    LockExtensionApi.ExtensionPreviewResponse preview = api.postPreview(
+      TENANT_A, confirmation.lockId(), "IDEMP-EXT-API-PREV-001", "corr-pii10-s06-api", extensionPreviewApiRequest(confirmation.version())
+    );
+    LockExtensionApi.ExtensionResponse requested = api.postExtension(
+      TENANT_A, confirmation.lockId(), "IDEMP-EXT-API-REQ-001", "corr-pii10-s06-api", extensionApiRequest(confirmation.version())
+    );
+    LockExtensionApi.ExtensionResponse approved = api.postDecision(
+      TENANT_A, confirmation.lockId(), requested.id(), "IDEMP-EXT-API-DEC-001", "corr-pii10-s06-api",
+      extensionDecisionApiRequest(requested.version(), false)
+    );
+    LockExtensionApi.ExtensionResponse cancelRequested = api.postExtension(
+      TENANT_B, createActiveLock("EXT-API-CAN-001", TENANT_B).lockId(), "IDEMP-EXT-API-CAN-REQ-001", "corr-pii10-s06-api",
+      extensionApiRequest(3)
+    );
+    LockExtensionApi.ExtensionResponse cancelled = api.postCancel(
+      TENANT_B, cancelRequested.lockId(), cancelRequested.id(), "IDEMP-EXT-API-CAN-001", "corr-pii10-s06-api",
+      extensionCancelApiRequest(cancelRequested.version())
+    );
+
+    assertEquals("POST", LockExtensionApi.POST_PREVIEW_METHOD);
+    assertEquals("/api/v1/tenants/{tenantId}/locks/{lockId}/extensions/preview", LockExtensionApi.POST_PREVIEW_PATH);
+    assertEquals("/api/v1/tenants/{tenantId}/locks/{lockId}/extensions", LockExtensionApi.POST_EXTENSION_PATH);
+    assertEquals("/api/v1/tenants/{tenantId}/locks/{lockId}/extensions/{extensionId}/decisions", LockExtensionApi.POST_DECISION_PATH);
+    assertEquals("/api/v1/tenants/{tenantId}/locks/{lockId}/extensions/{extensionId}/cancel", LockExtensionApi.POST_CANCEL_PATH);
+    assertEquals("LOCK_EXTENSION_REQUEST", LockExtensionApi.REQUEST_PERMISSION);
+    assertEquals("LOCK_EXTENSION_CANCEL", LockExtensionApi.CANCEL_PERMISSION);
+    assertEquals("extension-policy-v1", preview.costSnapshot().policyVersionId());
+    assertEquals("CONFIRMED", approved.extensionStatus());
+    assertEquals("lock.extension_approved.v1", approved.eventType());
+    assertEquals("CANCELLED", cancelled.extensionStatus());
+    assertEquals("lock.extension_cancelled.v1", cancelled.eventType());
+  }
+
+  @Test
+  void RelockWorseCaseSelectionFromPolicyTest() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("REL-PREV-001", TENANT_A);
+    LockModels.RelockResponse preview = service.previewRelock(relockPreviewCommand(
+      confirmation.lockId(), confirmation.version(), "QUOTE-RELOCK-PREV-001", TENANT_A
+    ));
+
+    assertEquals(LockModels.RelockStatus.PREVIEWED, preview.relockStatus());
+    assertEquals(LockModels.RateLockStatus.ACTIVE, preview.sourceStatus());
+    assertTrue(preview.resultSummary().contains("policy snapshot"));
+    assertTrue(preview.replayRef().startsWith("REPLAY-LOCK-RELOCK-PREVIEW-"));
+  }
+
+  @Test
+  void RelockRequiresFreshCurrentQuoteTest() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("REL-FRESH-001", TENANT_A);
+
+    LockServiceException error = assertThrows(
+      LockServiceException.class,
+      () -> service.requestRelock(withRelockPolicy(relockRequestCommand(
+        confirmation.lockId(), confirmation.version(), "REL-FRESH-001", "IDEMP-REL-FRESH-001", "QUOTE-RELOCK-FRESH-001", TENANT_A
+      ), relockPolicy(false, true)))
+    );
+
+    assertEquals("POLICY_NOT_SATISFIED", error.code());
+    assertEquals(LockModels.RateLockStatus.ACTIVE, service.getLock(TENANT_A, confirmation.lockId()).status());
+    assertEquals(0, service.committedRelockCount());
+  }
+
+  @Test
+  void RelockBlocksBeforeWaitingPeriodTest() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("REL-WAIT-001", TENANT_A);
+
+    LockServiceException error = assertThrows(
+      LockServiceException.class,
+      () -> service.requestRelock(withRelockPolicy(relockRequestCommand(
+        confirmation.lockId(), confirmation.version(), "REL-WAIT-001", "IDEMP-REL-WAIT-001", "QUOTE-RELOCK-WAIT-001", TENANT_A
+      ), relockPolicy(true, true, false, false)))
+    );
+
+    assertEquals("POLICY_NOT_SATISFIED", error.code());
+    assertTrue(error.getMessage().contains("waiting period"));
+    assertEquals(LockModels.RateLockStatus.ACTIVE, service.getLock(TENANT_A, confirmation.lockId()).status());
+  }
+
+  @Test
+  void RelockLinksReplacementLockTest() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("REL-REQ-001", TENANT_A);
+
+    LockModels.RelockResponse requested = service.requestRelock(relockRequestCommand(
+      confirmation.lockId(), confirmation.version(), "REL-REQ-001", "IDEMP-REL-REQ-001", "QUOTE-RELOCK-REQ-001", TENANT_A
+    ));
+
+    assertEquals(LockModels.RelockStatus.REQUESTED, requested.relockStatus());
+    assertEquals(LockModels.RateLockStatus.RELOCK_REQUESTED, requested.sourceStatus());
+    assertEquals(LockModels.RateLockStatus.PENDING_APPROVAL, requested.replacementStatus());
+    assertEquals("lock.relock_requested.v1", requested.outboxEventType());
+    assertEquals("LOCK_RELOCK_REQUESTED", service.auditSnapshots().get(3).action());
+    assertEquals(requested.replacementLockId(), service.getRelock(TENANT_A, requested.relockId()).replacementLockId());
+  }
+
+  @Test
+  void RelockCreatesReplacementAtomicallyIT() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("REL-CONF-001", TENANT_A);
+    LockModels.RelockResponse requested = service.requestRelock(relockRequestCommand(
+      confirmation.lockId(), confirmation.version(), "REL-CONF-001", "IDEMP-REL-CONF-REQ-001", "QUOTE-RELOCK-CONF-001", TENANT_A
+    ));
+    LockModels.RelockResponse approved = service.decideRelock(relockDecisionCommand(
+      requested.sourceLockId(), requested.relockId(), LockModels.RelockDecisionType.APPROVE, requested.version(), "IDEMP-REL-CONF-DEC-001", TENANT_A
+    ));
+
+    LockModels.RelockResponse confirmed = service.confirmRelock(relockConfirmationCommand(
+      approved.sourceLockId(), approved.relockId(), approved.version(), "IDEMP-REL-CONF-INV-001", TENANT_A, true
+    ));
+
+    assertEquals(LockModels.RelockStatus.CONFIRMED, confirmed.relockStatus());
+    assertEquals(LockModels.RateLockStatus.RELOCKED, confirmed.sourceStatus());
+    assertEquals(LockModels.RateLockStatus.ACTIVE, confirmed.replacementStatus());
+    assertEquals("lock.relocked.v1", confirmed.outboxEventType());
+    assertEquals("LOCK_RELOCKED", service.auditSnapshots().get(service.auditSnapshots().size() - 1).action());
+  }
+
+  @Test
+  void investorRelockApprovalMovesToPendingInvestorConfirmation() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("REL-INV-001", TENANT_A);
+    LockModels.RelockResponse requested = service.requestRelock(withRelockPolicy(relockRequestCommand(
+      confirmation.lockId(), confirmation.version(), "REL-INV-001", "IDEMP-REL-INV-REQ-001", "QUOTE-RELOCK-INV-001", TENANT_A
+    ), relockPolicy(true, true, true, true)));
+
+    LockModels.RelockResponse pending = service.decideRelock(relockDecisionCommand(
+      requested.sourceLockId(), requested.relockId(), LockModels.RelockDecisionType.APPROVE, requested.version(), "IDEMP-REL-INV-DEC-001", TENANT_A
+    ));
+    LockModels.RelockResponse confirmed = service.confirmRelock(relockConfirmationCommand(
+      pending.sourceLockId(), pending.relockId(), pending.version(), "IDEMP-REL-INV-CONF-001", TENANT_A, true
+    ));
+
+    assertEquals(LockModels.RelockStatus.PENDING_INVESTOR_CONFIRMATION, pending.relockStatus());
+    assertEquals(LockModels.RateLockStatus.PENDING_INVESTOR_RELOCK_CONFIRMATION, pending.sourceStatus());
+    assertEquals(LockModels.RateLockStatus.PENDING_INVESTOR_CONFIRMATION, pending.replacementStatus());
+    assertEquals(LockModels.RelockStatus.CONFIRMED, confirmed.relockStatus());
+    assertEquals(LockModels.RateLockStatus.RELOCKED, confirmed.sourceStatus());
+    assertEquals(LockModels.RateLockStatus.ACTIVE, confirmed.replacementStatus());
+  }
+
+  @Test
+  void RelockTenantIsolationAndIdempotency() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("REL-IDEMP-001", TENANT_A);
+    LockModels.RelockRequestCommand command = relockRequestCommand(
+      confirmation.lockId(), confirmation.version(), "REL-IDEMP-001", "IDEMP-REL-IDEMP-001", "QUOTE-RELOCK-IDEMP-001", TENANT_A
+    );
+
+    LockModels.RelockResponse first = service.requestRelockReplayAware(command);
+    LockModels.RelockResponse replay = service.requestRelockReplayAware(command);
+
+    assertEquals(first.relockId(), replay.relockId());
+    assertThrows(LockServiceException.class, () -> service.getRelock(TENANT_B, first.relockId()));
+    LockServiceException conflict = assertThrows(
+      LockServiceException.class,
+      () -> service.requestRelock(relockRequestCommand(
+        confirmation.lockId(), confirmation.version(), "REL-IDEMP-CHANGED", "IDEMP-REL-IDEMP-001", "QUOTE-RELOCK-IDEMP-002", TENANT_A
+      ))
+    );
+    assertEquals("IDEMPOTENCY_CONFLICT", conflict.code());
+  }
+
+  @Test
+  void postRelockApiMapsTenantScopedRoutesToServiceCommands() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("REL-API-001", TENANT_A);
+    LockRelockApi api = new LockRelockApi(service);
+
+    LockRelockApi.RelockPreviewResponse preview = api.postPreview(
+      TENANT_A, confirmation.lockId(), "IDEMP-REL-API-PREV-001", "corr-pii10-s07-api",
+      relockPreviewApiRequest(confirmation.lockId(), confirmation.version(), "QUOTE-RELOCK-API-PREV-001")
+    );
+    LockRelockApi.RelockResponse requested = api.postRelock(
+      TENANT_A, confirmation.lockId(), "IDEMP-REL-API-REQ-001", "corr-pii10-s07-api",
+      relockApiRequest(confirmation.lockId(), confirmation.version(), "QUOTE-RELOCK-API-REQ-001")
+    );
+    LockRelockApi.RelockResponse approved = api.postDecision(
+      TENANT_A, confirmation.lockId(), requested.id(), "IDEMP-REL-API-DEC-001", "corr-pii10-s07-api",
+      relockDecisionApiRequest(requested.version())
+    );
+    LockRelockApi.RelockResponse confirmed = api.postConfirmation(
+      TENANT_A, confirmation.lockId(), approved.id(), "IDEMP-REL-API-CONF-001", "corr-pii10-s07-api",
+      relockConfirmationApiRequest(approved.version())
+    );
+
+    assertEquals("POST", LockRelockApi.POST_PREVIEW_METHOD);
+    assertEquals("/api/v1/tenants/{tenantId}/locks/{lockId}/relocks/preview", LockRelockApi.POST_PREVIEW_PATH);
+    assertEquals("/api/v1/tenants/{tenantId}/locks/{lockId}/relocks", LockRelockApi.POST_RELOCK_PATH);
+    assertEquals("/api/v1/tenants/{tenantId}/locks/{lockId}/relocks/{relockId}/decisions", LockRelockApi.POST_DECISION_PATH);
+    assertEquals("/api/v1/tenants/{tenantId}/locks/{lockId}/relocks/{relockId}/confirmations", LockRelockApi.POST_CONFIRMATION_PATH);
+    assertEquals("LOCK_RELOCK_REQUEST", LockRelockApi.REQUEST_PERMISSION);
+    assertEquals("RELOCK-PREVIEW", preview.relockId().substring(0, 14));
+    assertEquals("APPROVED", approved.relockStatus());
+    assertEquals("CONFIRMED", confirmed.relockStatus());
+    assertEquals("lock.relocked.v1", confirmed.eventType());
+  }
+
+  @Test
+  void FloatDownEligibilityThresholdFromPolicyTest() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("REN-PREV-001", TENANT_A);
+    LockRenegotiationApi api = new LockRenegotiationApi(service);
+
+    LockRenegotiationApi.RenegotiationPreviewResponse preview = api.postPreview(
+      TENANT_A, confirmation.lockId(), "IDEMP-REN-PREV-001", "corr-pii10-s08",
+      renegotiationPreviewApiRequest(confirmation.lockId(), confirmation.version(), "QUOTE-REN-PREV-001")
+    );
+
+    assertEquals("POST", LockRenegotiationApi.POST_PREVIEW_METHOD);
+    assertEquals("/api/v1/tenants/{tenantId}/locks/{lockId}/renegotiations/preview", LockRenegotiationApi.POST_PREVIEW_PATH);
+    assertEquals("LOCK_RENEGOTIATION_REQUEST", LockRenegotiationApi.REQUEST_PERMISSION);
+    assertTrue(preview.benefitLedgerHash().length() >= 16);
+    assertTrue(preview.resultSummary().contains("policy snapshot"));
+  }
+
+  @Test
+  void FloatDownBlocksNoImprovementTest() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("REN-BLOCK-001", TENANT_A);
+    LockModels.RelockTermsSnapshot invalidSelectedTerms = new LockModels.RelockTermsSnapshot(
+      "CONVENTIONAL-30Y", "INVESTOR-A", "rate-sheet-v2", "not-configured-price-ref", "not-configured-rate-ref",
+      "not-configured-fee-ref", "not-configured-lock-period-ref", "not-configured-benefit-hash"
+    );
+
+    LockServiceException error = assertThrows(
+      LockServiceException.class,
+      () -> service.previewRelock(withSelectedTerms(relockPreviewCommand(
+        confirmation.lockId(), confirmation.version(), "QUOTE-REN-BLOCK-001", TENANT_A
+      ), invalidSelectedTerms))
+    );
+
+    assertEquals("POLICY_NOT_SATISFIED", error.code());
+    assertTrue(error.getMessage().contains("comparison snapshot"));
+  }
+
+  @Test
+  void RenegotiationRequiresFreshQuoteTest() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("REN-FRESH-001", TENANT_A);
+
+    LockServiceException error = assertThrows(
+      LockServiceException.class,
+      () -> service.requestRelock(withRelockPolicy(relockRequestCommand(
+        confirmation.lockId(), confirmation.version(), "REN-FRESH-001", "IDEMP-REN-FRESH-001", "QUOTE-REN-FRESH-001", TENANT_A
+      ), relockPolicy(false, true)))
+    );
+
+    assertEquals("POLICY_NOT_SATISFIED", error.code());
+    assertEquals(LockModels.RateLockStatus.ACTIVE, service.getLock(TENANT_A, confirmation.lockId()).status());
+  }
+
+  @Test
+  void TermAmendmentIsImmutableTest() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("REN-IMM-001", TENANT_A);
+    LockModels.RelockResponse requested = service.requestRelock(relockRequestCommand(
+      confirmation.lockId(), confirmation.version(), "REN-IMM-001", "IDEMP-REN-IMM-REQ-001", "QUOTE-REN-IMM-001", TENANT_A
+    ));
+    LockModels.RelockResponse approved = service.decideRelock(relockDecisionCommand(
+      requested.sourceLockId(), requested.relockId(), LockModels.RelockDecisionType.APPROVE, requested.version(), "IDEMP-REN-IMM-DEC-001", TENANT_A
+    ));
+
+    LockModels.RelockResponse confirmed = service.confirmRelock(relockConfirmationCommand(
+      approved.sourceLockId(), approved.relockId(), approved.version(), "IDEMP-REN-IMM-CONF-001", TENANT_A, true
+    ));
+
+    assertNotEquals(confirmed.sourceLockId(), confirmed.replacementLockId());
+    assertEquals(LockModels.RateLockStatus.RELOCKED, service.getLock(TENANT_A, confirmed.sourceLockId()).status());
+    assertEquals(LockModels.RateLockStatus.ACTIVE, service.getLock(TENANT_A, confirmed.replacementLockId()).status());
+    assertEquals(1, service.committedRelockCount());
+  }
+
+  @Test
+  void RenegotiationApprovalOutboxIT() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("REN-API-001", TENANT_A);
+    LockRenegotiationApi api = new LockRenegotiationApi(service);
+
+    LockRenegotiationApi.RenegotiationResponse requested = api.postRenegotiation(
+      TENANT_A, confirmation.lockId(), "IDEMP-REN-API-REQ-001", "corr-pii10-s08",
+      renegotiationApiRequest(confirmation.lockId(), confirmation.version(), "QUOTE-REN-API-001")
+    );
+    LockRenegotiationApi.RenegotiationResponse approved = api.postDecision(
+      TENANT_A, confirmation.lockId(), requested.id(), "IDEMP-REN-API-DEC-001", "corr-pii10-s08",
+      renegotiationDecisionApiRequest(requested.version())
+    );
+    LockRenegotiationApi.RenegotiationResponse confirmed = api.postConfirmation(
+      TENANT_A, confirmation.lockId(), approved.id(), "IDEMP-REN-API-CONF-001", "corr-pii10-s08",
+      renegotiationConfirmationApiRequest(approved.version())
+    );
+
+    assertEquals("/api/v1/tenants/{tenantId}/locks/{lockId}/renegotiations", LockRenegotiationApi.POST_RENEGOTIATION_PATH);
+    assertEquals("/api/v1/tenants/{tenantId}/locks/{lockId}/renegotiations/{renegotiationId}/decisions", LockRenegotiationApi.POST_DECISION_PATH);
+    assertEquals("/api/v1/tenants/{tenantId}/locks/{lockId}/renegotiations/{renegotiationId}/confirmations", LockRenegotiationApi.POST_CONFIRMATION_PATH);
+    assertEquals("lock.renegotiation_requested.v1", requested.eventType());
+    assertEquals("lock.float_down_approved.v1", approved.eventType());
+    assertEquals("lock.terms_amended.v1", confirmed.eventType());
+    assertTrue(service.outboxEvents().get(service.outboxEvents().size() - 1).payload().containsKey("benefitLedgerRef"));
+  }
+
+  @Test
+  void InvestorFloatDownConfirmationIT() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("REN-INV-001", TENANT_A);
+    LockModels.RelockResponse requested = service.requestRelock(withRelockPolicy(relockRequestCommand(
+      confirmation.lockId(), confirmation.version(), "REN-INV-001", "IDEMP-REN-INV-REQ-001", "QUOTE-REN-INV-001", TENANT_A
+    ), relockPolicy(true, true, true, true)));
+    LockModels.RelockResponse pending = service.decideRelock(relockDecisionCommand(
+      requested.sourceLockId(), requested.relockId(), LockModels.RelockDecisionType.APPROVE, requested.version(), "IDEMP-REN-INV-DEC-001", TENANT_A
+    ));
+
+    LockServiceException mismatch = assertThrows(
+      LockServiceException.class,
+      () -> service.confirmRelock(relockConfirmationCommand(
+        pending.sourceLockId(), pending.relockId(), pending.version(), "IDEMP-REN-INV-BAD-001", TENANT_A, false
+      ))
+    );
+    LockModels.RelockResponse confirmed = service.confirmRelock(relockConfirmationCommand(
+      pending.sourceLockId(), pending.relockId(), pending.version(), "IDEMP-REN-INV-CONF-001", TENANT_A, true
+    ));
+
+    assertEquals("POLICY_NOT_SATISFIED", mismatch.code());
+    assertEquals(LockModels.RelockStatus.PENDING_INVESTOR_CONFIRMATION, pending.relockStatus());
+    assertEquals(LockModels.RelockStatus.CONFIRMED, confirmed.relockStatus());
+  }
+
+  @Test
+  void RenegotiationTenantIsolationIT() {
+    LockModels.LockConfirmationResponse confirmation = createActiveLock("REN-ISO-001", TENANT_A);
+    LockModels.RelockResponse requested = service.requestRelock(relockRequestCommand(
+      confirmation.lockId(), confirmation.version(), "REN-ISO-001", "IDEMP-REN-ISO-001", "QUOTE-REN-ISO-001", TENANT_A
+    ));
+
+    assertThrows(LockServiceException.class, () -> service.getRelock(TENANT_B, requested.relockId()));
+    assertThrows(LockServiceException.class, () -> service.getLock(TENANT_B, requested.replacementLockId()));
+  }
+
+  @Test
+  void SyncAttemptIdempotencyTest() {
+    LockModels.LockConfirmationResponse active = createActiveLock("SYNC-IDEMP-001", TENANT_A);
+    LockModels.LockStatusSyncCommand command = syncCommand(active.lockId(), "lock.confirmed.v1:SYNC-IDEMP-001", "IDEMP-SYNC-001", TENANT_A);
+
+    LockModels.LockSyncAttemptResponse first = service.syncLockStatusReplayAware(command);
+    LockModels.LockSyncAttemptResponse replay = service.syncLockStatusReplayAware(command);
+
+    assertEquals(first.attemptId(), replay.attemptId());
+    assertEquals(LockModels.LockSyncStatus.SENT, first.status());
+    assertEquals("lock.status_sync.sent.v1", first.outboxEventType());
+    assertEquals(1, service.committedSyncAttemptCount());
+    assertEquals(1, service.metrics().lockSyncSentTotal());
+
+    LockServiceException conflict = assertThrows(
+      LockServiceException.class,
+      () -> service.syncLockStatusReplayAware(new LockModels.LockStatusSyncCommand(
+        TENANT_A,
+        active.lockId(),
+        "lock.confirmed.v1:SYNC-IDEMP-001",
+        "lock-sync-service",
+        new LockModels.LockSyncTarget(TENANT_A, "LOS-LOCK-STATUS", "LOS-LOCK-STATUS-V2", true, "lock-status-sync-contract-v1", "lock-sync-policy-v1"),
+        true,
+        Instant.parse("2026-07-04T22:00:00Z"),
+        "IDEMP-SYNC-001B",
+        "corr-pii10-s09",
+        Map.of("lockEvent", "lock.confirmed.v1:SYNC-IDEMP-001", "snapshot", "lock-status-snapshot-v2")
+      ))
+    );
+    assertEquals("IDEMPOTENCY_CONFLICT", conflict.code());
+  }
+
+  @Test
+  void InboundAckValidatesSourceTrustTest() {
+    LockModels.LockConfirmationResponse active = createActiveLock("SYNC-ACK-001", TENANT_A);
+    service.syncLockStatusReplayAware(syncCommand(active.lockId(), "lock.confirmed.v1:SYNC-ACK-001", "IDEMP-SYNC-ACK-001", TENANT_A));
+
+    LockServiceException untrusted = assertThrows(
+      LockServiceException.class,
+      () -> service.acknowledgeLockStatus(ackCommand(active.lockId(), "lock.confirmed.v1:SYNC-ACK-001", "ACK-001", false, null, TENANT_A))
+    );
+    assertEquals("POLICY_NOT_SATISFIED", untrusted.code());
+
+    LockModels.LockSyncAttemptResponse acked = service.acknowledgeLockStatus(ackCommand(
+      active.lockId(), "lock.confirmed.v1:SYNC-ACK-001", "ACK-002", true, null, TENANT_A
+    ));
+    assertEquals(LockModels.LockSyncStatus.ACKED, acked.status());
+    assertEquals(1, service.committedSyncAcknowledgementCount());
+    assertEquals("LOCK_SYNC_ACKED", service.auditSnapshots().get(service.auditSnapshots().size() - 1).action());
+  }
+
+  @Test
+  void ExternalCorrectionStateGuardTest() {
+    LockModels.LockConfirmationResponse active = createActiveLock("SYNC-GUARD-001", TENANT_A);
+    service.syncLockStatusReplayAware(syncCommand(active.lockId(), "lock.confirmed.v1:SYNC-GUARD-001", "IDEMP-SYNC-GUARD-001", TENANT_A));
+
+    LockServiceException invalid = assertThrows(
+      LockServiceException.class,
+      () -> service.acknowledgeLockStatus(ackCommand(
+        active.lockId(), "lock.confirmed.v1:SYNC-GUARD-001", "ACK-GUARD-001", true, LockModels.RateLockStatus.REQUESTED, TENANT_A
+      ))
+    );
+    assertEquals("LOCK_STATE_CONFLICT", invalid.code());
+
+    LockModels.LockSyncAttemptResponse reconciled = service.acknowledgeLockStatus(ackCommand(
+      active.lockId(), "lock.confirmed.v1:SYNC-GUARD-001", "ACK-GUARD-002", true, LockModels.RateLockStatus.CANCELLED, TENANT_A,
+      LockModels.LockSyncStatus.RECONCILED
+    ));
+    assertEquals(LockModels.LockSyncStatus.RECONCILED, reconciled.status());
+    assertEquals(LockModels.RateLockStatus.CANCELLED, service.getLock(TENANT_A, active.lockId()).status());
+    assertEquals(1, service.committedReconciliationCount());
+  }
+
+  @Test
+  void SyncTenantIsolationIT() {
+    LockModels.LockConfirmationResponse active = createActiveLock("SYNC-ISO-001", TENANT_A);
+    LockModels.LockSyncAttemptResponse response = service.syncLockStatusReplayAware(syncCommand(
+      active.lockId(), "lock.confirmed.v1:SYNC-ISO-001", "IDEMP-SYNC-ISO-001", TENANT_A
+    ));
+
+    assertThrows(LockServiceException.class, () -> service.syncStatus(TENANT_B, active.lockId()));
+    assertThrows(LockServiceException.class, () -> service.getSyncAttempt(TENANT_B, response.attemptId()));
+  }
+
+  @Test
+  void LockStatusSyncApiContractsAndFixturesPass() throws IOException {
+    LockModels.LockConfirmationResponse active = createActiveLock("SYNC-API-001", TENANT_A);
+    service.syncLockStatusReplayAware(syncCommand(active.lockId(), "lock.confirmed.v1:SYNC-API-001", "IDEMP-SYNC-API-001", TENANT_A));
+    LockStatusSyncApi api = new LockStatusSyncApi(service);
+
+    assertEquals(LockStatusSyncApi.GET_SYNC_STATUS_PATH, "/api/v1/tenants/{tenantId}/locks/{lockId}/sync-status");
+    assertEquals(LockStatusSyncApi.POST_ACK_PATH, "/api/v1/tenants/{tenantId}/integrations/lock-status-acks");
+    assertEquals(1, api.getSyncStatus(TENANT_A, active.lockId(), true).size());
+    assertThrows(LockServiceException.class, () -> api.getSyncStatus(TENANT_A, active.lockId(), false));
+    assertResourceContains("contracts/pii-10/s09/los-lock-status-update.v1.json", "lock.status_sync.sent.v1");
+    assertResourceContains("contracts/pii-10/s09/investor-lock-ack.v1.json", "LOCK_SYNC_ACK_WRITE");
+    assertResourceContains("contracts/pii-10/s09/lock.sync_failed.v1.event.json", "lock.sync_failed.v1");
+    assertResourceContains("golden/pii-10/s09/confirmed-lock-los-sync.json", "payloadHash");
+    assertResourceContains("golden/pii-10/s09/investor-ack-reconciled.json", "RECONCILED");
+    assertResourceContains("golden/pii-10/s09/external-cancel-blocked-invalid-state.json", "LOCK_STATE_CONFLICT");
+  }
+
+  @Test
+  void AuditReplayGoldenFixturesPass() throws IOException {
+    assertResourceContains("contracts/pii-10/s08/post-renegotiation-preview-200.json", "benefitLedgerHash");
+    assertResourceContains("contracts/pii-10/s08/post-renegotiation-request-202.json", "lock.renegotiation_requested.v1");
+    assertResourceContains("contracts/pii-10/s08/lock.terms_amended.v1.event.json", "lock.terms_amended.v1");
+    assertResourceContains("golden/pii-10/s08/eligible-float-down.json", "benefit-ledger-config-ref");
+    assertResourceContains("golden/pii-10/s08/below-threshold-blocked.json", "POLICY_NOT_SATISFIED");
+    assertResourceContains("golden/pii-10/s08/compliance-apr-blocked.json", "compliance-relock-evidence-v1");
+    assertResourceContains("golden/pii-10/s08/investor-float-down-confirmed.json", "lock.terms_amended.v1");
+  }
+
   private static LockModels.LockRequestCommand validCommand(String requestId, String idempotencyKey, UUID tenantId) {
     return new LockModels.LockRequestCommand(
       tenantId,
@@ -510,6 +1223,121 @@ class LockServiceTest {
       "lock-policy-v1",
       "compliance-evidence-v1",
       Map.of("quoteSnapshot", "quote-snapshot-v1", "pricingSnapshot", "pricing-snapshot-v1")
+    );
+  }
+
+  private LockModels.LockConfirmationResponse createActiveLock(String suffix, UUID tenantId) {
+    LockModels.LockRequestResponse request = service.requestLock(validCommand("REQ-" + suffix, "IDEMP-REQ-" + suffix, tenantId));
+    LockModels.LockDecisionResponse approval = service.decideLock(decisionCommand(
+      request.lockId(), LockModels.LockDecisionType.APPROVE, request.version(), "IDEMP-DEC-" + suffix, tenantId
+    ));
+    return service.confirmLock(withLockNumber(
+      confirmationCommand(approval.lockId(), approval.version(), "IDEMP-CONF-" + suffix, tenantId, LockModels.LockConfirmationType.INTERNAL, true),
+      "LOCK-" + suffix
+    ));
+  }
+
+  private static LockModels.LockStatusSyncCommand syncCommand(
+    String lockId,
+    String eventId,
+    String idempotencyKey,
+    UUID tenantId
+  ) {
+    return syncCommand(lockId, eventId, idempotencyKey, tenantId, "LOS-LOCK-STATUS");
+  }
+
+  private static LockModels.LockStatusSyncCommand syncCommand(
+    String lockId,
+    String eventId,
+    String idempotencyKey,
+    UUID tenantId,
+    String targetId
+  ) {
+    return new LockModels.LockStatusSyncCommand(
+      tenantId,
+      lockId,
+      eventId,
+      "lock-sync-service",
+      syncTarget(tenantId, targetId),
+      true,
+      Instant.parse("2026-07-04T22:00:00Z"),
+      idempotencyKey,
+      "corr-pii10-s09",
+      Map.of("lockEvent", eventId, "snapshot", "lock-status-snapshot-v1")
+    );
+  }
+
+  private static LockModels.LockSyncTarget syncTarget(UUID tenantId, String targetId) {
+    return new LockModels.LockSyncTarget(
+      tenantId,
+      targetId,
+      targetId,
+      true,
+      "lock-status-sync-contract-v1",
+      "lock-sync-policy-v1"
+    );
+  }
+
+  private static LockModels.LockStatusAckCommand ackCommand(
+    String lockId,
+    String eventId,
+    String ackId,
+    boolean sourceTrusted,
+    LockModels.RateLockStatus requestedLockStatus,
+    UUID tenantId
+  ) {
+    return ackCommand(lockId, eventId, ackId, sourceTrusted, requestedLockStatus, tenantId, LockModels.LockSyncStatus.ACKED);
+  }
+
+  private static LockModels.LockStatusAckCommand ackCommand(
+    String lockId,
+    String eventId,
+    String ackId,
+    boolean sourceTrusted,
+    LockModels.RateLockStatus requestedLockStatus,
+    UUID tenantId,
+    LockModels.LockSyncStatus ackStatus
+  ) {
+    return new LockModels.LockStatusAckCommand(
+      tenantId,
+      ackId,
+      lockId,
+      eventId,
+      "LOS-LOCK-STATUS",
+      "los-adapter-service",
+      true,
+      sourceTrusted,
+      LockModels.RateLockStatus.ACTIVE,
+      requestedLockStatus,
+      ackStatus,
+      "LOS-ACK-REF-" + ackId,
+      "lock-sync-policy-v1",
+      "lock-status-sync-contract-v1",
+      Instant.parse("2026-07-04T22:01:00Z"),
+      "IDEMP-" + ackId,
+      "corr-pii10-s09",
+      Map.of("ackPayload", "los-lock-status-ack-v1")
+    );
+  }
+
+  private static LockModels.LockExpirationRunCommand expirationCommand(
+    String runId,
+    UUID tenantId,
+    Instant evaluatedAt,
+    long warningThresholdSeconds,
+    boolean policyResolved
+  ) {
+    return new LockModels.LockExpirationRunCommand(
+      tenantId,
+      runId,
+      "lock-expiration-scheduler",
+      evaluatedAt,
+      warningThresholdSeconds,
+      "lock-expiration-policy-v1",
+      true,
+      policyResolved,
+      false,
+      "corr-pii10-s05"
     );
   }
 
@@ -597,6 +1425,519 @@ class LockServiceTest {
       true,
       "compliance-evidence-v1",
       Map.of("quoteSnapshot", "quote-snapshot-v1", "freshnessCheck", "freshness-check-v1")
+    );
+  }
+
+  private static LockModels.ExtensionCostSnapshot extensionCostSnapshot() {
+    return new LockModels.ExtensionCostSnapshot(
+      "price-adjustment-config-ref:EXT-3D",
+      "fee-config-ref:EXT-3D",
+      "BORROWER_PAID",
+      "policy-rounding-v1",
+      "EXTENSION_REASON_CONFIGURED",
+      "extension-policy-v1"
+    );
+  }
+
+  private static LockModels.LockExtensionPreviewCommand extensionPreviewCommand(String lockId, int expectedVersion, UUID tenantId) {
+    return new LockModels.LockExtensionPreviewCommand(
+      tenantId,
+      lockId,
+      "lock-desk-user-1",
+      expectedVersion,
+      3,
+      Instant.parse("2026-07-07T21:06:00Z"),
+      "EXTENSION_REASON_CONFIGURED",
+      extensionCostSnapshot(),
+      true,
+      true,
+      true,
+      true,
+      "IDEMP-EXT-PREVIEW-001",
+      "corr-pii10-s06",
+      Map.of("policyConfig", "extension-policy-v1", "costSnapshot", "extension-cost-snapshot-v1")
+    );
+  }
+
+  private static LockModels.LockExtensionRequestCommand extensionRequestCommand(
+    String lockId,
+    int expectedVersion,
+    String requestId,
+    String idempotencyKey,
+    UUID tenantId
+  ) {
+    return new LockModels.LockExtensionRequestCommand(
+      tenantId,
+      lockId,
+      requestId,
+      "lock-desk-user-1",
+      expectedVersion,
+      3,
+      Instant.parse("2026-07-04T21:07:00Z"),
+      Instant.parse("2026-07-07T21:06:00Z"),
+      "EXTENSION_REASON_CONFIGURED",
+      extensionCostSnapshot(),
+      true,
+      true,
+      true,
+      true,
+      "compliance-extension-evidence-v1",
+      idempotencyKey,
+      "corr-pii10-s06",
+      Map.of("policyConfig", "extension-policy-v1", "costSnapshot", "extension-cost-snapshot-v1")
+    );
+  }
+
+  private static LockModels.LockExtensionRequestCommand withExtensionPolicy(
+    LockModels.LockExtensionRequestCommand command,
+    boolean extensionPolicyResolved
+  ) {
+    return new LockModels.LockExtensionRequestCommand(
+      command.tenantId(), command.lockId(), command.requestId(), command.actorId(), command.expectedVersion(), command.requestedDays(),
+      command.requestedAt(), command.requestedExpiresAt(), command.reasonCode(), command.costSnapshot(), command.permissionGranted(),
+      extensionPolicyResolved, command.compliancePermitsAmendedTerms(), command.investorSupportsExtension(),
+      command.complianceEvidenceRef(), command.idempotencyKey(), command.correlationId(), command.sourceRefs()
+    );
+  }
+
+  private static LockModels.LockExtensionDecisionCommand extensionDecisionCommand(
+    String lockId,
+    String extensionId,
+    LockModels.LockExtensionDecisionType decision,
+    int expectedVersion,
+    boolean investorConfirmationRequired,
+    String idempotencyKey,
+    UUID tenantId
+  ) {
+    return new LockModels.LockExtensionDecisionCommand(
+      tenantId,
+      lockId,
+      extensionId,
+      decision,
+      "lock-desk-approver-1",
+      "lock-desk-user-1",
+      expectedVersion,
+      investorConfirmationRequired,
+      true,
+      true,
+      true,
+      List.of("EXTENSION_POLICY_OK"),
+      "compliance-extension-evidence-v1",
+      idempotencyKey,
+      "corr-pii10-s06",
+      Instant.parse("2026-07-04T21:08:00Z")
+    );
+  }
+
+  private static LockModels.LockExtensionConfirmationCommand extensionConfirmationCommand(
+    String lockId,
+    String extensionId,
+    int expectedVersion,
+    String idempotencyKey,
+    UUID tenantId,
+    boolean investorResponseMatches
+  ) {
+    return new LockModels.LockExtensionConfirmationCommand(
+      tenantId,
+      lockId,
+      extensionId,
+      "investor-adapter-service",
+      expectedVersion,
+      true,
+      investorResponseMatches,
+      "INV-EXT-CONF-REF-001",
+      "compliance-extension-evidence-v1",
+      idempotencyKey,
+      "corr-pii10-s06",
+      Instant.parse("2026-07-04T21:09:00Z"),
+      Map.of("investorResponse", "investor-extension-confirmation-v1")
+    );
+  }
+
+  private static LockModels.LockExtensionCancelCommand extensionCancelCommand(
+    String lockId,
+    String extensionId,
+    int expectedVersion,
+    String idempotencyKey,
+    UUID tenantId
+  ) {
+    return new LockModels.LockExtensionCancelCommand(
+      tenantId,
+      lockId,
+      extensionId,
+      "lock-desk-user-1",
+      expectedVersion,
+      true,
+      List.of("BORROWER_WITHDREW_EXTENSION"),
+      "compliance-extension-evidence-v1",
+      idempotencyKey,
+      "corr-pii10-s06",
+      Instant.parse("2026-07-04T21:10:00Z")
+    );
+  }
+
+  private static LockExtensionApi.ExtensionPreviewRequest extensionPreviewApiRequest(int expectedVersion) {
+    return new LockExtensionApi.ExtensionPreviewRequest(
+      "lock-desk-user-1",
+      expectedVersion,
+      3,
+      Instant.parse("2026-07-07T21:06:00Z"),
+      "EXTENSION_REASON_CONFIGURED",
+      extensionCostSnapshot(),
+      true,
+      true,
+      true,
+      true,
+      Map.of("policyConfig", "extension-policy-v1", "costSnapshot", "extension-cost-snapshot-v1")
+    );
+  }
+
+  private static LockExtensionApi.ExtensionRequest extensionApiRequest(int expectedVersion) {
+    return new LockExtensionApi.ExtensionRequest(
+      "EXT-API-001",
+      "lock-desk-user-1",
+      expectedVersion,
+      3,
+      Instant.parse("2026-07-04T21:07:00Z"),
+      Instant.parse("2026-07-07T21:06:00Z"),
+      "EXTENSION_REASON_CONFIGURED",
+      extensionCostSnapshot(),
+      true,
+      true,
+      true,
+      true,
+      "compliance-extension-evidence-v1",
+      Map.of("policyConfig", "extension-policy-v1", "costSnapshot", "extension-cost-snapshot-v1")
+    );
+  }
+
+  private static LockExtensionApi.ExtensionDecisionRequest extensionDecisionApiRequest(int expectedVersion, boolean investorConfirmationRequired) {
+    return new LockExtensionApi.ExtensionDecisionRequest(
+      LockModels.LockExtensionDecisionType.APPROVE,
+      "lock-desk-approver-1",
+      "lock-desk-user-1",
+      expectedVersion,
+      investorConfirmationRequired,
+      true,
+      true,
+      true,
+      List.of("EXTENSION_POLICY_OK"),
+      "compliance-extension-evidence-v1",
+      Instant.parse("2026-07-04T21:08:00Z")
+    );
+  }
+
+  private static LockExtensionApi.ExtensionCancelRequest extensionCancelApiRequest(int expectedVersion) {
+    return new LockExtensionApi.ExtensionCancelRequest(
+      "lock-desk-user-1",
+      expectedVersion,
+      true,
+      List.of("BORROWER_WITHDREW_EXTENSION"),
+      "compliance-extension-evidence-v1",
+      Instant.parse("2026-07-04T21:10:00Z")
+    );
+  }
+
+  private LockModels.RelockPreviewCommand relockPreviewCommand(
+    String sourceLockId,
+    int expectedVersion,
+    String currentQuoteId,
+    UUID tenantId
+  ) {
+    return new LockModels.RelockPreviewCommand(
+      tenantId,
+      sourceLockId,
+      "lock-desk-user-1",
+      expectedVersion,
+      currentQuoteId,
+      originalTerms(sourceLockId, tenantId),
+      currentRelockTerms(),
+      originalTerms(sourceLockId, tenantId),
+      relockPolicy(true, true),
+      "RELOCK_REASON_CONFIGURED",
+      true,
+      "IDEMP-REL-PREVIEW-001",
+      "corr-pii10-s07",
+      Map.of("policyConfig", "relock-policy-v1", "comparisonSnapshot", "relock-comparison-v1")
+    );
+  }
+
+  private LockModels.RelockRequestCommand relockRequestCommand(
+    String sourceLockId,
+    int expectedVersion,
+    String requestId,
+    String idempotencyKey,
+    String currentQuoteId,
+    UUID tenantId
+  ) {
+    return new LockModels.RelockRequestCommand(
+      tenantId,
+      sourceLockId,
+      requestId,
+      "lock-desk-user-1",
+      expectedVersion,
+      currentQuoteId,
+      Instant.parse("2026-07-04T21:11:00Z"),
+      originalTerms(sourceLockId, tenantId),
+      currentRelockTerms(),
+      originalTerms(sourceLockId, tenantId),
+      relockPolicy(true, true),
+      "RELOCK_REASON_CONFIGURED",
+      "compliance-relock-evidence-v1",
+      true,
+      idempotencyKey,
+      "corr-pii10-s07",
+      Map.of("policyConfig", "relock-policy-v1", "comparisonSnapshot", "relock-comparison-v1")
+    );
+  }
+
+  private static LockModels.RelockRequestCommand withRelockPolicy(
+    LockModels.RelockRequestCommand command,
+    LockModels.RelockPolicySnapshot policySnapshot
+  ) {
+    return new LockModels.RelockRequestCommand(
+      command.tenantId(), command.sourceLockId(), command.requestId(), command.actorId(), command.expectedVersion(), command.currentQuoteId(),
+      command.requestedAt(), command.originalTerms(), command.currentTerms(), command.selectedTerms(), policySnapshot,
+      command.reasonCode(), command.complianceEvidenceRef(), command.permissionGranted(), command.idempotencyKey(), command.correlationId(),
+      command.sourceRefs()
+    );
+  }
+
+  private static LockModels.RelockPreviewCommand withSelectedTerms(
+    LockModels.RelockPreviewCommand command,
+    LockModels.RelockTermsSnapshot selectedTerms
+  ) {
+    return new LockModels.RelockPreviewCommand(
+      command.tenantId(), command.sourceLockId(), command.actorId(), command.expectedVersion(), command.currentQuoteId(),
+      command.originalTerms(), command.currentTerms(), selectedTerms, command.policySnapshot(), command.reasonCode(),
+      command.permissionGranted(), command.idempotencyKey(), command.correlationId(), command.sourceRefs()
+    );
+  }
+
+  private static LockModels.RelockDecisionCommand relockDecisionCommand(
+    String sourceLockId,
+    String relockId,
+    LockModels.RelockDecisionType decision,
+    int expectedVersion,
+    String idempotencyKey,
+    UUID tenantId
+  ) {
+    return new LockModels.RelockDecisionCommand(
+      tenantId,
+      sourceLockId,
+      relockId,
+      decision,
+      "lock-desk-approver-1",
+      "lock-desk-user-1",
+      expectedVersion,
+      true,
+      true,
+      true,
+      List.of("RELOCK_POLICY_OK"),
+      "compliance-relock-evidence-v1",
+      idempotencyKey,
+      "corr-pii10-s07",
+      Instant.parse("2026-07-04T21:12:00Z")
+    );
+  }
+
+  private static LockModels.RelockConfirmationCommand relockConfirmationCommand(
+    String sourceLockId,
+    String relockId,
+    int expectedVersion,
+    String idempotencyKey,
+    UUID tenantId,
+    boolean investorResponseMatches
+  ) {
+    return new LockModels.RelockConfirmationCommand(
+      tenantId,
+      sourceLockId,
+      relockId,
+      "investor-adapter-service",
+      expectedVersion,
+      true,
+      investorResponseMatches,
+      "INV-RELOCK-CONF-REF-001",
+      "compliance-relock-evidence-v1",
+      idempotencyKey,
+      "corr-pii10-s07",
+      Instant.parse("2026-07-04T21:13:00Z"),
+      Map.of("investorResponse", "investor-relock-confirmation-v1")
+    );
+  }
+
+  private LockRelockApi.RelockPreviewRequest relockPreviewApiRequest(String sourceLockId, int expectedVersion, String currentQuoteId) {
+    return new LockRelockApi.RelockPreviewRequest(
+      "lock-desk-user-1",
+      expectedVersion,
+      currentQuoteId,
+      originalTerms(sourceLockId, TENANT_A),
+      currentRelockTerms(),
+      originalTerms(sourceLockId, TENANT_A),
+      relockPolicy(true, true),
+      "RELOCK_REASON_CONFIGURED",
+      true,
+      Map.of("policyConfig", "relock-policy-v1", "comparisonSnapshot", "relock-comparison-v1")
+    );
+  }
+
+  private LockRenegotiationApi.RenegotiationPreviewRequest renegotiationPreviewApiRequest(String sourceLockId, int expectedVersion, String currentQuoteId) {
+    return new LockRenegotiationApi.RenegotiationPreviewRequest(
+      "lock-desk-user-1",
+      expectedVersion,
+      currentQuoteId,
+      originalTerms(sourceLockId, TENANT_A),
+      currentRelockTerms(),
+      originalTerms(sourceLockId, TENANT_A),
+      relockPolicy(true, true),
+      "FLOAT_DOWN_REASON_CONFIGURED",
+      true,
+      Map.of("policyConfig", "relock-policy-v1", "comparisonSnapshot", "relock-comparison-v1")
+    );
+  }
+
+  private LockRelockApi.RelockRequest relockApiRequest(String sourceLockId, int expectedVersion, String currentQuoteId) {
+    return new LockRelockApi.RelockRequest(
+      "REL-API-001",
+      "lock-desk-user-1",
+      expectedVersion,
+      currentQuoteId,
+      Instant.parse("2026-07-04T21:11:00Z"),
+      originalTerms(sourceLockId, TENANT_A),
+      currentRelockTerms(),
+      originalTerms(sourceLockId, TENANT_A),
+      relockPolicy(true, true),
+      "RELOCK_REASON_CONFIGURED",
+      "compliance-relock-evidence-v1",
+      true,
+      Map.of("policyConfig", "relock-policy-v1", "comparisonSnapshot", "relock-comparison-v1")
+    );
+  }
+
+  private LockRenegotiationApi.RenegotiationRequest renegotiationApiRequest(String sourceLockId, int expectedVersion, String currentQuoteId) {
+    return new LockRenegotiationApi.RenegotiationRequest(
+      "REN-API-001",
+      "lock-desk-user-1",
+      expectedVersion,
+      currentQuoteId,
+      Instant.parse("2026-07-04T21:11:00Z"),
+      originalTerms(sourceLockId, TENANT_A),
+      currentRelockTerms(),
+      originalTerms(sourceLockId, TENANT_A),
+      relockPolicy(true, true),
+      "FLOAT_DOWN_REASON_CONFIGURED",
+      "compliance-relock-evidence-v1",
+      true,
+      Map.of("policyConfig", "relock-policy-v1", "comparisonSnapshot", "relock-comparison-v1")
+    );
+  }
+
+  private static LockRelockApi.RelockDecisionRequest relockDecisionApiRequest(int expectedVersion) {
+    return new LockRelockApi.RelockDecisionRequest(
+      LockModels.RelockDecisionType.APPROVE,
+      "lock-desk-approver-1",
+      "lock-desk-user-1",
+      expectedVersion,
+      true,
+      true,
+      true,
+      List.of("RELOCK_POLICY_OK"),
+      "compliance-relock-evidence-v1",
+      Instant.parse("2026-07-04T21:12:00Z")
+    );
+  }
+
+  private static LockRenegotiationApi.RenegotiationDecisionRequest renegotiationDecisionApiRequest(int expectedVersion) {
+    return new LockRenegotiationApi.RenegotiationDecisionRequest(
+      LockModels.RelockDecisionType.APPROVE,
+      "lock-desk-approver-1",
+      "lock-desk-user-1",
+      expectedVersion,
+      true,
+      true,
+      true,
+      List.of("FLOAT_DOWN_POLICY_OK"),
+      "compliance-relock-evidence-v1",
+      Instant.parse("2026-07-04T21:12:00Z")
+    );
+  }
+
+  private static LockRelockApi.RelockConfirmationRequest relockConfirmationApiRequest(int expectedVersion) {
+    return new LockRelockApi.RelockConfirmationRequest(
+      "investor-adapter-service",
+      expectedVersion,
+      true,
+      true,
+      "INV-RELOCK-CONF-REF-001",
+      "compliance-relock-evidence-v1",
+      Instant.parse("2026-07-04T21:13:00Z"),
+      Map.of("investorResponse", "investor-relock-confirmation-v1")
+    );
+  }
+
+  private static LockRenegotiationApi.RenegotiationConfirmationRequest renegotiationConfirmationApiRequest(int expectedVersion) {
+    return new LockRenegotiationApi.RenegotiationConfirmationRequest(
+      "investor-adapter-service",
+      expectedVersion,
+      true,
+      true,
+      "INV-REN-CONF-REF-001",
+      "compliance-relock-evidence-v1",
+      Instant.parse("2026-07-04T21:13:00Z"),
+      Map.of("investorResponse", "investor-renegotiation-confirmation-v1")
+    );
+  }
+
+  private LockModels.RelockTermsSnapshot originalTerms(String sourceLockId, UUID tenantId) {
+    LockModels.RateLockRecord source = service.getLock(tenantId, sourceLockId);
+    return new LockModels.RelockTermsSnapshot(
+      "CONVENTIONAL-30Y",
+      "INVESTOR-A",
+      "rate-sheet-v1",
+      "original-price-ref",
+      "original-rate-ref",
+      "original-fee-ref",
+      "original-lock-period-ref",
+      source.requestHash()
+    );
+  }
+
+  private static LockModels.RelockTermsSnapshot currentRelockTerms() {
+    return new LockModels.RelockTermsSnapshot(
+      "CONVENTIONAL-30Y",
+      "INVESTOR-A",
+      "rate-sheet-v2",
+      "current-price-ref",
+      "current-rate-ref",
+      "current-fee-ref",
+      "current-lock-period-ref",
+      "current-terms-hash-v1"
+    );
+  }
+
+  private static LockModels.RelockPolicySnapshot relockPolicy(boolean currentQuoteFresh, boolean policyResolved) {
+    return relockPolicy(currentQuoteFresh, policyResolved, true, false);
+  }
+
+  private static LockModels.RelockPolicySnapshot relockPolicy(
+    boolean currentQuoteFresh,
+    boolean policyResolved,
+    boolean waitingPeriodSatisfied,
+    boolean investorConfirmationRequired
+  ) {
+    return new LockModels.RelockPolicySnapshot(
+      "relock-policy-v1",
+      "worse-case-selection-config-ref",
+      "waiting-period-config-ref",
+      "fee-treatment-config-ref",
+      "eligibility-threshold-config-ref",
+      "benefit-ledger-config-ref",
+      true,
+      currentQuoteFresh,
+      waitingPeriodSatisfied,
+      policyResolved,
+      true,
+      investorConfirmationRequired
     );
   }
 
@@ -759,5 +2100,12 @@ class LockServiceTest {
       command.complianceEvidenceRef(), command.idempotencyKey(), command.correlationId(), command.decidedAt(),
       command.permissionGranted(), command.separationOfDutiesConfigured(), decisionPolicyCurrent
     );
+  }
+
+  private void assertResourceContains(String resourcePath, String expectedText) throws IOException {
+    try (var stream = getClass().getClassLoader().getResourceAsStream(resourcePath)) {
+      assertNotNull(stream, "Missing test resource " + resourcePath);
+      assertTrue(new String(stream.readAllBytes(), StandardCharsets.UTF_8).contains(expectedText));
+    }
   }
 }

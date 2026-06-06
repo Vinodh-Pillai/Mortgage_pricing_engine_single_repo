@@ -1,0 +1,6 @@
+{
+  "scenario": "investor-float-down-confirmed",
+  "investorConfirmationRef": "INV-REN-CONF-REF-001",
+  "expectedEventType": "lock.terms_amended.v1",
+  "expectedStatus": "CONFIRMED"
+}

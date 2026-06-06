@@ -1,0 +1,15 @@
+{
+  "eventType": "lock.terms_amended.v1",
+  "eventVersion": "1",
+  "eventKey": "11111111-1111-1111-1111-111111111111:LOCK-PII10-S08:REN-PII10-S08",
+  "tenantId": "11111111-1111-1111-1111-111111111111",
+  "lockId": "LOCK-PII10-S08",
+  "correlationId": "corr-pii10-s08",
+  "payload": {
+    "renegotiationId": "REN-PII10-S08",
+    "replacementLockId": "RELOCK-PII10-S08",
+    "policyVersion": "relock-policy-v1",
+    "eligibilityThresholdRef": "eligibility-threshold-config-ref",
+    "benefitLedgerRef": "benefit-ledger-config-ref"
+  }
+}

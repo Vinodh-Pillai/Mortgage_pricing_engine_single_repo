@@ -1,0 +1,7 @@
+{
+  "storyId": "PII-08-S07",
+  "eventType": "quote_job.cancelled.v1",
+  "status": "CANCELLED",
+  "auditPreserved": true,
+  "deletesQuoteOrJob": false
+}

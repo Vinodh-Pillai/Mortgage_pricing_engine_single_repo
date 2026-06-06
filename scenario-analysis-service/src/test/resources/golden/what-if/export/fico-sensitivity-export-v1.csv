@@ -1,0 +1,3 @@
+export_id,source_type,source_id,row_id,format,recipient_type,include_ledger,include_ineligible,generated_at,disclaimer
+"<export-id>","selected-rows","analysis-123","row-001","CSV","internal",true,false,"2026-06-01T12:00:00Z","Non-binding what-if analysis for scenario comparison only; not a mortgage pricing commitment."
+"<export-id>","selected-rows","analysis-123","row-002","CSV","internal",true,false,"2026-06-01T12:00:00Z","Non-binding what-if analysis for scenario comparison only; not a mortgage pricing commitment."

@@ -1,0 +1,7 @@
+{
+  "lockStatus": "ACTIVE",
+  "targetId": "LOS-LOCK-STATUS",
+  "status": "SENT",
+  "payloadHash": "sha256-service-generated",
+  "policyVersion": "lock-sync-policy-v1"
+}

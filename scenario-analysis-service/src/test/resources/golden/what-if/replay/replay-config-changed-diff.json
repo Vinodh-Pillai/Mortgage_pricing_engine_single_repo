@@ -1,0 +1,5 @@
+{
+  "mismatchCategory": "CONFIG_CHANGED",
+  "eventTypes": ["whatif.replay.requested.v1", "whatif.replay.completed.v1", "whatif.replay.mismatch_detected.v1"],
+  "changedVersionType": "pricing"
+}

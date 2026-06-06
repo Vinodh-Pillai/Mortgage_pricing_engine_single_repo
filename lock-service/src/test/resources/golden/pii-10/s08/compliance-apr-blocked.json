@@ -1,0 +1,6 @@
+{
+  "scenario": "compliance-apr-blocked",
+  "expectedError": "POLICY_NOT_SATISFIED",
+  "complianceEvidenceRef": "compliance-relock-evidence-v1",
+  "reason": "compliance evidence does not permit selected relock terms"
+}

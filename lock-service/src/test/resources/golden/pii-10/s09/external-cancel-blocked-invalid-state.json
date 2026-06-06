@@ -1,0 +1,4 @@
+{
+  "code": "LOCK_STATE_CONFLICT",
+  "message": "External correction cannot bypass the RateLock state machine"
+}

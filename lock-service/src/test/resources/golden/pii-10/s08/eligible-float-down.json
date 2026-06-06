@@ -1,0 +1,7 @@
+{
+  "scenario": "eligible-float-down",
+  "policyVersionId": "relock-policy-v1",
+  "eligibilityThresholdRef": "eligibility-threshold-config-ref",
+  "benefitLedgerRef": "benefit-ledger-config-ref",
+  "expectedStatus": "REQUESTED"
+}

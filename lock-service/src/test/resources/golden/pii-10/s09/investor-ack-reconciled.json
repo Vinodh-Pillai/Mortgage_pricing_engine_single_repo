@@ -1,0 +1,6 @@
+{
+  "ackStatus": "RECONCILED",
+  "eventType": "lock.sync_reconciled.v1",
+  "resolution": "STATE_MACHINE_VALIDATED",
+  "policyVersion": "lock-sync-policy-v1"
+}

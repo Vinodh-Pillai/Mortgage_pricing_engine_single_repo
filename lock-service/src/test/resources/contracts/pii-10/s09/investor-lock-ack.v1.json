@@ -1,0 +1,7 @@
+{
+  "method": "POST",
+  "path": "/api/v1/tenants/{tenantId}/integrations/lock-status-acks",
+  "permission": "LOCK_SYNC_ACK_WRITE",
+  "requiredPayload": ["ackId", "lockId", "eventId", "targetId", "ackStatus", "ackRef", "policyVersion", "contractVersion"],
+  "failClosedInputs": ["sourceTrusted", "policyVersion"]
+}

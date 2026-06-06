@@ -1,0 +1,21 @@
+{
+  "tenantId": "tenant-001",
+  "version": 1,
+  "status": "PUBLISHED",
+  "uiMessages": [
+    {
+      "messageKey": "WHAT_IF_NON_BINDING",
+      "severity": "INFO",
+      "message": "What-if analysis is non-binding and must not be used as an approved quote."
+    }
+  ],
+  "rules": [
+    {
+      "ruleCode": "BLOCK_SOURCE_QUOTE_MUTATION",
+      "action": "CREATE_VARIANT",
+      "severity": "BLOCK",
+      "message": "What-if analysis cannot mutate the source quote."
+    }
+  ],
+  "cacheStatus": "DB_FALLBACK"
+}

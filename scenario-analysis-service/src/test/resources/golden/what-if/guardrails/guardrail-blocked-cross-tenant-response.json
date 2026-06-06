@@ -1,0 +1,21 @@
+{
+  "tenantId": "tenant-001",
+  "action": "CREATE_VARIANT",
+  "severity": "BLOCK",
+  "policyVersion": 0,
+  "decisions": [
+    {
+      "ruleCode": "CROSS_TENANT_REF",
+      "action": "CREATE_VARIANT",
+      "severity": "BLOCK",
+      "message": "What-if requests cannot reference another tenant's data."
+    },
+    {
+      "ruleCode": "NO_EFFECTIVE_POLICY",
+      "action": "CREATE_VARIANT",
+      "severity": "BLOCK",
+      "message": "No effective what-if guardrail policy is published for this tenant."
+    }
+  ],
+  "cacheStatus": "DB_FALLBACK"
+}

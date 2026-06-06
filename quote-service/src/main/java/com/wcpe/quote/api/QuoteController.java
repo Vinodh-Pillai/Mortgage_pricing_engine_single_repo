@@ -7,8 +7,14 @@ import com.wcpe.quote.QuoteComparisonExport;
 import com.wcpe.quote.QuoteComparisonResponse;
 import com.wcpe.quote.QuoteCreateRequest;
 import com.wcpe.quote.QuoteExplanationResponse;
+import com.wcpe.quote.QuoteJobResponse;
+import com.wcpe.quote.QuoteJobStartRequest;
+import com.wcpe.quote.QuoteSnapshot;
+import com.wcpe.quote.QuoteSnapshotExport;
 import com.wcpe.quote.RankingPreviewRequest;
 import com.wcpe.quote.RankingPreviewResponse;
+import com.wcpe.quote.QuoteSelectionResponse;
+import com.wcpe.quote.SelectQuoteOptionCommand;
 import java.util.Set;
 import java.util.UUID;
 
@@ -38,6 +44,32 @@ public class QuoteController {
 
     public QuoteCreateResponse getTenantQuote(UUID tenantId, UUID quoteId) {
         return QuoteCreateResponse.from(applicationService.getQuote(tenantId, quoteId));
+    }
+
+    public QuoteJobResponse postTenantQuoteJob(UUID tenantId, String idempotencyKey, String correlationId, boolean preferAsync, QuoteJobStartRequest body) {
+        QuoteJobStartRequest tenantScopedBody = new QuoteJobStartRequest(
+            tenantId,
+            body.scenarioId(),
+            body.scenarioVersion(),
+            body.requestedLockPeriods(),
+            body.filters(),
+            body.presentationCurrency(),
+            body.clientContext(),
+            body.actorId(),
+            idempotencyKey,
+            correlationId,
+            body.effectiveDate(),
+            preferAsync
+        );
+        return QuoteJobResponse.from(applicationService.startQuoteJob(tenantScopedBody));
+    }
+
+    public QuoteJobResponse getTenantQuoteJob(UUID tenantId, UUID jobId) {
+        return QuoteJobResponse.from(applicationService.getQuoteJob(tenantId, jobId));
+    }
+
+    public QuoteJobResponse postTenantQuoteJobCancel(UUID tenantId, UUID jobId, String actorId, String correlationId) {
+        return QuoteJobResponse.from(applicationService.cancelQuoteJob(tenantId, jobId, actorId, correlationId));
     }
 
     public RankingPreviewResponse postTenantRankingPreview(UUID tenantId, String correlationId, RankingPreviewRequest body) {
@@ -84,5 +116,37 @@ public class QuoteController {
         String correlationId
     ) {
         return applicationService.explainQuoteOption(tenantId, quoteId, optionId, allowedFields, actorId, correlationId);
+    }
+
+    public QuoteSnapshot getTenantQuoteSnapshot(UUID tenantId, UUID quoteId, String actorId, String correlationId) {
+        return applicationService.getQuoteSnapshot(tenantId, quoteId, actorId, correlationId);
+    }
+
+    public QuoteSnapshotExport postTenantQuoteSnapshotExport(
+        UUID tenantId,
+        UUID quoteId,
+        String redactionProfile,
+        boolean nonRedacted,
+        String actorId,
+        String correlationId
+    ) {
+        return applicationService.exportQuoteSnapshot(tenantId, quoteId, redactionProfile, nonRedacted, actorId, correlationId);
+    }
+
+    public QuoteSelectionResponse postTenantQuoteSelection(UUID tenantId, UUID quoteId, String idempotencyKey, String correlationId, SelectQuoteOptionCommand body) {
+        SelectQuoteOptionCommand tenantScopedBody = new SelectQuoteOptionCommand(
+            tenantId,
+            quoteId,
+            body.optionId(),
+            body.selectionIntent(),
+            body.acknowledgements(),
+            body.nonTopRankReason(),
+            body.policy(),
+            body.actorId(),
+            idempotencyKey,
+            correlationId,
+            body.clientContext()
+        );
+        return QuoteSelectionResponse.from(applicationService.selectQuoteOption(tenantScopedBody));
     }
 }

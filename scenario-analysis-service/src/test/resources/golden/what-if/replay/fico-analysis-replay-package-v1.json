@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "what-if-replay-package-v1",
+  "inputSnapshotHash": "sha256:input",
+  "changeSetHash": "sha256:changes",
+  "versionRefs": [
+    { "type": "pricing", "version": "pricing-v1" },
+    { "type": "eligibility", "version": "eligibility-v1" },
+    { "type": "product", "version": "product-v1" },
+    { "type": "mi", "version": "mi-v1" },
+    { "type": "lock", "version": "lock-v1" },
+    { "type": "engine", "version": "engine-v1" }
+  ],
+  "calculationLedgerHash": "sha256:ledger",
+  "eventIds": ["event-001", "event-002"],
+  "originalResultHash": "sha256:placeholder"
+}

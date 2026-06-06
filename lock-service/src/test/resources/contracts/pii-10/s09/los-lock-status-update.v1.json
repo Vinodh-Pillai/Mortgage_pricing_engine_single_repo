@@ -1,0 +1,7 @@
+{
+  "eventType": "lock.status_sync.sent.v1",
+  "eventVersion": "1",
+  "requiredHeaders": ["tenantId", "eventId", "eventType", "eventVersion", "sourceService", "actorId", "correlationId", "causationId", "idempotencyKey", "occurredAt"],
+  "requiredPayload": ["attemptId", "eventId", "targetId", "targetSystem", "lockStatus", "lockVersion", "payloadHash", "contractVersion", "policyVersion"],
+  "permissions": ["LOCK_SYNC_READ", "LOCK_SYNC_RETRY"]
+}

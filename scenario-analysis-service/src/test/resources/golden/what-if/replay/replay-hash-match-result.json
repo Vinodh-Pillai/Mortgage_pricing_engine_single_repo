@@ -1,0 +1,5 @@
+{
+  "mismatchCategory": "MATCH",
+  "eventTypes": ["whatif.replay.requested.v1", "whatif.replay.completed.v1"],
+  "evidenceSchemaVersion": "what-if-replay-evidence-v1"
+}

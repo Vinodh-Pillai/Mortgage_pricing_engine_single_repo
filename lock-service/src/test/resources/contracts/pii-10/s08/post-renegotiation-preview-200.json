@@ -1,0 +1,12 @@
+{
+  "renegotiationId": "RELOCK-PREVIEW-EXAMPLE",
+  "lockId": "LOCK-PII10-S08",
+  "sourceStatus": "ACTIVE",
+  "resultSummary": "Renegotiation preview calculated from tenant/investor policy snapshot",
+  "validationMessages": [
+    "Benefit ledger is represented by configured policy references"
+  ],
+  "replayRef": "REPLAY-LOCK-RELOCK-PREVIEW-example",
+  "correlationId": "corr-pii10-s08",
+  "benefitLedgerHash": "benefit-ledger-config-ref"
+}

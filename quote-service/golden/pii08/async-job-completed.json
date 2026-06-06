@@ -1,0 +1,15 @@
+{
+  "storyId": "PII-08-S07",
+  "eventType": "quote_job.completed.v1",
+  "status": "COMPLETED",
+  "requiredPayloadFields": [
+    "jobId",
+    "tenantId",
+    "status",
+    "version",
+    "summary",
+    "sourceRefs"
+  ],
+  "requiredAuditAction": "QUOTE_JOB_COMPLETED",
+  "replaySource": "completed quote snapshot"
+}

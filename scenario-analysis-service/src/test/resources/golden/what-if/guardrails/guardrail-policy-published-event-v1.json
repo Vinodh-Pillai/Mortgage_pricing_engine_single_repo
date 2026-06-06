@@ -1,0 +1,7 @@
+{
+  "eventType": "whatif.guardrail_policy.published.v1",
+  "tenantId": "tenant-001",
+  "actorId": "approver-001",
+  "policyVersion": 1,
+  "sourceService": "scenario-analysis-service"
+}
