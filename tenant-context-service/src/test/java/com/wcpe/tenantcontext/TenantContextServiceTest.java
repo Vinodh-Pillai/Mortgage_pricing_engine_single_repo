@@ -62,6 +62,19 @@ class TenantContextServiceTest {
     }
 
     @Test
+    void generatesCorrelationIdWhenInboundContextOmitsIt() {
+        TenantContextInput input = new TenantContextInput(
+            "tenant-alpha", "request-123", "trace:abc-123", "actor-123", "USER", List.of("pricing-analyst"),
+            List.of("tenant:context:read"), "retail", " ", "cause-123", "idem-123", "partner-api",
+            List.of("tenant-alpha"), "tenant-alpha", "ACTIVE");
+
+        TenantContext context = service.resolve("tenant-alpha", input);
+
+        assertThat(context.request().correlationId()).startsWith("corr-");
+        assertThat(context.request().correlationId()).hasSize(41);
+    }
+
+    @Test
     void doesNotInventDefaultTenantValues() {
         assertThatThrownBy(() -> service.normalize(new TenantContextInput(null, "request-1", "trace-1")))
             .isInstanceOf(TenantContextValidationException.class)

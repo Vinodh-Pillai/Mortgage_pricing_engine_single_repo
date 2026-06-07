@@ -1,0 +1,28 @@
+{
+  "ownerStory": "PII-17-S09",
+  "purpose": "Backpressure policy fixture for observability-service domain, response metadata, audit, and event assertions.",
+  "fixtureNote": "All thresholds are synthetic tenant-governed test fixture values; production values must come from tenant/effective-dated configuration.",
+  "tenantId": "aaaaaaaa-1717-0009-3333-bbbbbbbbbbbb",
+  "resource": "db_pool",
+  "triggerMetric": "db.pool.active",
+  "triggerValue": "86.0",
+  "state": "DEGRADED",
+  "priorityClass": "BATCH_REPLAY",
+  "responseMetadata": {
+    "status": 202,
+    "retryAfter": 30,
+    "backpressureState": "DEGRADED",
+    "correlationId": "corr-PII17S09"
+  },
+  "events": [
+    "BackpressureStateChanged.v1",
+    "BackpressureRequestRejected.v1",
+    "BackpressurePolicyPublished.v1"
+  ],
+  "metrics": [
+    "backpressure.state",
+    "backpressure.rejected.count",
+    "backpressure.queue.depth",
+    "backpressure.recovery.duration"
+  ]
+}

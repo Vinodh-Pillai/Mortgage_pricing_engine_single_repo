@@ -1,6 +1,7 @@
 package com.wcpe.tenantcontext.event;
 
 import com.wcpe.tenantcontext.TenantContext;
+import com.wcpe.tenantcontext.observability.EventTracePropagator;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -69,7 +70,7 @@ public class EventEnvelopeFactory {
             actorId = required(actorId, "actorId");
             actorType = required(actorType, "actorType");
             correlationId = required(correlationId, "correlationId");
-            causationId = required(causationId, "causationId");
+            causationId = EventTracePropagator.resolveCausationId(causationId, eventId.toString());
             idempotencyKey = required(idempotencyKey, "idempotencyKey");
             sourceService = required(sourceService, "sourceService");
             schemaRef = required(schemaRef, "schemaRef");

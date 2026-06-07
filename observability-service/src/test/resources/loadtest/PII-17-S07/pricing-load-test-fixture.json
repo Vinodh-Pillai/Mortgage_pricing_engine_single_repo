@@ -1,0 +1,28 @@
+{
+  "ownerStory": "PII-17-S07",
+  "fixtureKind": "synthetic-pricing-load-test",
+  "tenants": ["synthetic-tenant-alpha", "synthetic-tenant-beta"],
+  "scenarioMix": {
+    "warm-cache-repeat-quotes": 40,
+    "cold-cache-unique-quotes": 25,
+    "reference-data-version-changes": 10,
+    "intentional-invalid-requests": 10,
+    "multi-tenant-parallel": 10,
+    "redis-degraded-fallback": 5
+  },
+  "scenarioLabels": [
+    "conventional-purchase-boundary-set",
+    "conventional-refi-boundary-set",
+    "state-variation-set",
+    "channel-investor-product-combination-set"
+  ],
+  "sourceRefs": {
+    "pricingConfigRef": "tenant-config-ref-required",
+    "referenceDataVersionRef": "reference-data-version-ref-required",
+    "pricingEngineVersionRef": "pricing-engine-version-ref-required"
+  },
+  "privacy": {
+    "containsRealPii": false,
+    "notes": "Fixture stores scenario labels and immutable refs only; concrete mortgage pricing rules, borrower values, rates, and investor decisions must come from seeded tenant configuration."
+  }
+}

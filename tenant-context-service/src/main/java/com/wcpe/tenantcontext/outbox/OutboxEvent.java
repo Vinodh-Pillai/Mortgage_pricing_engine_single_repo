@@ -24,6 +24,7 @@ public record OutboxEvent(
     Instant publishedAt,
     String actorId,
     String correlationId,
+    String causationId,
     String idempotencyKey,
     List<PublishAttempt> attempts,
     String lastErrorCode,
@@ -50,6 +51,7 @@ public record OutboxEvent(
             throw new OutboxException("OUTBOX_VALIDATION_FAILED", "timestamps are required");
         }
         attempts = List.copyOf(attempts == null ? List.of() : attempts);
+        causationId = causationId == null ? "" : causationId.trim();
         lastErrorCode = lastErrorCode == null ? "" : lastErrorCode.trim();
         lastErrorMessage = lastErrorMessage == null ? "" : lastErrorMessage.trim();
         quarantineReason = quarantineReason == null ? "" : quarantineReason.trim();
@@ -128,7 +130,7 @@ public record OutboxEvent(
     ) {
         return new OutboxEvent(tenantId, eventId, aggregateType, aggregateId, topic, partitionKey, schemaRef,
             eventName, eventVersion, envelopeJson, payloadHash, nextStatus, nextAttemptCount, nextAttemptAt,
-            createdAt, nextUpdatedAt, nextPublishedAt, actorId, correlationId, idempotencyKey, nextAttempts,
+            createdAt, nextUpdatedAt, nextPublishedAt, actorId, correlationId, causationId, idempotencyKey, nextAttempts,
             nextLastErrorCode, nextLastErrorMessage, nextQuarantineReason);
     }
 

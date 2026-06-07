@@ -1,0 +1,25 @@
+{
+  "ownerStory": "PII-17-S08",
+  "tenantId": "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb",
+  "policyKey": "quote-read-policy",
+  "endpointGroup": "pricing-read",
+  "principalType": "API_CLIENT",
+  "principalHash": "sha256:0123456789abcdef0123456789abcdef",
+  "algorithm": "FIXED_WINDOW",
+  "limit": 2,
+  "burst": 1,
+  "headers": [
+    "X-RateLimit-Limit",
+    "X-RateLimit-Remaining",
+    "X-RateLimit-Reset",
+    "Retry-After"
+  ],
+  "events": [
+    "RateLimitDecisionRecorded.v1",
+    "RateLimitBreached.v1"
+  ],
+  "notes": [
+    "No raw identifiers, subject data, or pricing payloads are stored in the fixture.",
+    "All numeric limits are test fixture values, not tenant defaults."
+  ]
+}

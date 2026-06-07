@@ -58,7 +58,7 @@ public class OutboxWriter {
         OutboxEvent event = new OutboxEvent(command.tenantId(), command.eventId(), command.aggregateType(),
             command.aggregateId(), command.topic(), command.partitionKey(), command.schemaRef(), command.eventName(),
             command.eventVersion(), command.envelopeJson(), payloadHash, OutboxStatus.PENDING, 0, null, now, now,
-            null, command.actorId(), command.correlationId(), command.idempotencyKey(), List.of(), "", "", "");
+            null, command.actorId(), command.correlationId(), command.causationId(), command.idempotencyKey(), List.of(), "", "", "");
         return store.save(event);
     }
 

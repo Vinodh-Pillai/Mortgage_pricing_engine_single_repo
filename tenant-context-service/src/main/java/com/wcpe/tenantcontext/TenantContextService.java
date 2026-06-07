@@ -1,5 +1,7 @@
 package com.wcpe.tenantcontext;
 
+import com.wcpe.tenantcontext.observability.CorrelationIdGenerator;
+
 import java.util.regex.Pattern;
 
 public class TenantContextService {
@@ -36,7 +38,10 @@ public class TenantContextService {
 
         String requestId = normalizeRequiredString(input.requestId(), "requestId", TRACE_ID_PATTERN);
         String traceId = normalizeRequiredString(input.traceId(), "traceId", TRACE_ID_PATTERN);
-        String correlationId = normalizeRequiredString(input.correlationId(), "correlationId", TRACE_ID_PATTERN);
+        String correlationId = normalizeOptionalString(input.correlationId(), "correlationId", TRACE_ID_PATTERN);
+        if (correlationId.isBlank()) {
+            correlationId = CorrelationIdGenerator.generate();
+        }
         String actorId = normalizeRequiredString(input.actorId(), "actorId", TRACE_ID_PATTERN);
         String actorType = normalizeRequiredString(input.actorType(), "actorType", TRACE_ID_PATTERN);
         String channel = normalizeRequiredString(input.channel(), "channel", TRACE_ID_PATTERN);
@@ -65,6 +70,19 @@ public class TenantContextService {
             throw new TenantContextValidationException("TENANT_CONTEXT_MISSING", fieldName + " is required");
         }
 
+        if (!pattern.matcher(normalized).matches()) {
+            throw new TenantContextValidationException("TENANT_CONTEXT_MALFORMED", fieldName + " is malformed");
+        }
+
+        return normalized;
+    }
+
+    private String normalizeOptionalString(String value, String fieldName, Pattern pattern) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+
+        String normalized = value.trim();
         if (!pattern.matcher(normalized).matches()) {
             throw new TenantContextValidationException("TENANT_CONTEXT_MALFORMED", fieldName + " is malformed");
         }

@@ -26,6 +26,7 @@ class OutboxWriterTest {
         assertThat(event.createdAt()).isEqualTo(Instant.parse("2026-06-07T18:15:00Z"));
         assertThat(event.topic()).isEqualTo("tenant-context.outbox.v1");
         assertThat(event.eventName()).isEqualTo("tenant_context.outbox_recorded.v1");
+        assertThat(event.causationId()).isEqualTo("cause-1");
     }
 
     @Test
@@ -77,6 +78,6 @@ class OutboxWriterTest {
     static OutboxEventCommand command(String tenantId, UUID eventId, String idempotencyKey, String envelopeJson) {
         return new OutboxEventCommand(tenantId, eventId, "Scenario", "scenario-1", "tenant-context.outbox.v1",
             tenantId + ":" + eventId, "tenant-context.outbox.v1", "tenant_context.outbox_recorded.v1", 1,
-            envelopeJson, "actor-1", "correlation-1", idempotencyKey, Instant.parse("2026-06-07T18:15:00Z"));
+            envelopeJson, "actor-1", "correlation-1", "cause-1", idempotencyKey, Instant.parse("2026-06-07T18:15:00Z"));
     }
 }

@@ -16,6 +16,7 @@ public record OutboxEventCommand(
     String envelopeJson,
     String actorId,
     String correlationId,
+    String causationId,
     String idempotencyKey,
     Instant occurredAt
 ) {
@@ -36,6 +37,7 @@ public record OutboxEventCommand(
         envelopeJson = required(envelopeJson, "envelopeJson");
         actorId = required(actorId, "actorId");
         correlationId = required(correlationId, "correlationId");
+        causationId = optionalTrim(causationId);
         idempotencyKey = optionalTrim(idempotencyKey);
         if (occurredAt == null) {
             throw new OutboxException("OUTBOX_VALIDATION_FAILED", "occurredAt is required");
