@@ -1,0 +1,6 @@
+{
+  "story_id": "PII-15-S06",
+  "request_audience": "borrower_safe",
+  "expected_error": "BORROWER_TEXT_NOT_APPROVED",
+  "policy": "borrower-facing text must have legal approval evidence before resolution or publication"
+}

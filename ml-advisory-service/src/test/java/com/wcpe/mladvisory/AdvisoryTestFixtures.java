@@ -118,6 +118,53 @@ final class AdvisoryTestFixtures {
     return service;
   }
 
+  static MlAdvisoryControlService eligibilityRiskServiceWithSnapshot() {
+    MlAdvisoryControlService service = eligibilityRiskVisibleService();
+    MlAdvisoryResult<FeatureSnapshotResponse> snapshot = service.captureFeatureSnapshot(pricingSnapshotCommand("idem-snapshot-eligibility-risk", false));
+    if (!snapshot.valid()) {
+      throw new IllegalStateException(snapshot.errorCode().orElse("snapshot failed"));
+    }
+    return service;
+  }
+
+  static MlAdvisoryControlService eligibilityRiskServiceWithProhibitedProxySnapshot() {
+    MlAdvisoryControlService service = eligibilityRiskVisibleService();
+    MlAdvisoryResult<FeatureSnapshotResponse> snapshot = service.captureFeatureSnapshot(pricingSnapshotCommand("idem-snapshot-eligibility-risk-proxy", true));
+    if (!snapshot.valid()) {
+      throw new IllegalStateException(snapshot.errorCode().orElse("snapshot failed"));
+    }
+    return service;
+  }
+
+  static MlAdvisoryControlService eligibilityRiskVisibleService() {
+    MlAdvisoryControlService service = new MlAdvisoryControlService(Clock.fixed(NOW, ZoneOffset.UTC));
+    MlAdvisoryResult<MlAdvisoryControlResponse> result = service.createControl(eligibilityRiskVisibleControlCommand());
+    if (!result.valid()) {
+      throw new IllegalStateException(result.errorCode().orElse("control failed"));
+    }
+    return service;
+  }
+
+  static CreateControlCommand eligibilityRiskVisibleControlCommand() {
+    return new CreateControlCommand(
+        TENANT,
+        "idem-control-eligibility-risk-visible",
+        "ml-admin-1",
+        Set.of(MlAdvisoryControlService.ADMIN_ROLE),
+        "advisory-interface",
+        "eligibility-result",
+        AdvisoryType.ELIGIBILITY_RISK,
+        AdvisoryMode.ADVISORY_VISIBLE,
+        Instant.parse("2026-06-06T20:00:00Z"),
+        null,
+        "Enable eligibility review advisory interface display",
+        "MRM-2026-0006",
+        "APPROVED_FOR_ADVISORY",
+        "mrm-approver-1",
+        "APPROVAL-PII-14-S06",
+        "corr-control-PII-14-S06");
+  }
+
   static CaptureFeatureSnapshotCommand pricingSnapshotCommand(String idempotencyKey, boolean prohibitedProxy) {
     return new CaptureFeatureSnapshotCommand(
         TENANT,
@@ -175,6 +222,55 @@ final class AdvisoryTestFixtures {
         NOW,
         NOW.plusSeconds(3600),
         "corr-pricing-advisory-PII-14-S05",
+        250,
+        simulateTimeout,
+        simulateFailure,
+        simulateAuthoritativeOutput);
+  }
+
+  static EvaluateEligibilityRiskAdvisoryCommand eligibilityRiskCommand(String idempotencyKey, String snapshotId) {
+    return eligibilityRiskCommand(
+        idempotencyKey,
+        snapshotId,
+        List.of(
+            new AdvisoryReason(
+                "DOCUMENTATION_REVIEW_PROMPT",
+                1,
+                "Review configured documentation consistency before relying on final eligibility output",
+                "REVIEW_PROMPT",
+                "feature-hash:income-stability",
+                "NON_PUBLIC")),
+        false,
+        false,
+        false);
+  }
+
+  static EvaluateEligibilityRiskAdvisoryCommand eligibilityRiskCommand(
+      String idempotencyKey,
+      String snapshotId,
+      List<AdvisoryReason> reviewPrompts,
+      boolean simulateTimeout,
+      boolean simulateFailure,
+      boolean simulateAuthoritativeOutput) {
+    return new EvaluateEligibilityRiskAdvisoryCommand(
+        TENANT,
+        idempotencyKey,
+        "eligibility-analyst-1",
+        "scenario-123",
+        "eligibility-result-001",
+        "v1",
+        snapshotId,
+        approvedArtifact(),
+        "REVIEW",
+        0.76,
+        new AdvisoryDisplayPolicy(
+            0.50,
+            "Eligibility Review Advisory only; not adverse action and does not change eligibility.",
+            List.of(AllowedAction.VIEW, AllowedAction.DISMISS, AllowedAction.FEEDBACK)),
+        reviewPrompts,
+        NOW,
+        NOW.plusSeconds(3600),
+        "corr-eligibility-risk-PII-14-S06",
         250,
         simulateTimeout,
         simulateFailure,

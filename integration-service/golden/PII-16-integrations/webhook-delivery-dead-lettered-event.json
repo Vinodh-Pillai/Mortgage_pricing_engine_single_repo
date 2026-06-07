@@ -1,0 +1,19 @@
+{
+  "story_id": "PII-16-S04",
+  "fixture": "webhook-delivery-dead-lettered-event",
+  "eventType": "integration.webhook-delivery.dead-lettered.v1",
+  "schemaVersion": 1,
+  "payload": {
+    "tenantId": "11111111-1111-1111-1111-111111111111",
+    "deliveryId": "generated-deterministically-from-tenant-subscription-source-event",
+    "subscriptionId": "sub-los-main",
+    "sourceEventId": "source-event-2",
+    "eventType": "pricing.quote.completed.v1",
+    "status": "DEAD_LETTERED",
+    "attemptCount": "2",
+    "payloadHash": "sha-256-payload-hash-only",
+    "failureClass": "SERVER_ERROR",
+    "retryable": "true",
+    "replayEligibility": "true"
+  }
+}

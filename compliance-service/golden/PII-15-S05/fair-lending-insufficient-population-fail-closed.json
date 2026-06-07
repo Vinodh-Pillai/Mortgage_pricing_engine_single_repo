@@ -1,0 +1,7 @@
+{
+  "snapshotId": "snapshot-2026-05",
+  "tenantId": "tenant-a",
+  "status": "blocked_missing_config",
+  "reasonCodes": ["INSUFFICIENT_POPULATION:RATE_DISPARITY"],
+  "events": ["FairLendingSnapshotFailedClosed.v1"]
+}

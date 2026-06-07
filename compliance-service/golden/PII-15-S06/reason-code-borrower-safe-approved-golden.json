@@ -1,0 +1,9 @@
+{
+  "story_id": "PII-15-S06",
+  "status": "published",
+  "event_type": "ComplianceReasonCodePublished.v1",
+  "audit_action": "COMPLIANCE_REASON_CODE_PUBLISHED",
+  "borrower_safe_approved": true,
+  "approval_separation_of_duties": "author and legal approver are distinct",
+  "display_text_source": "locale_text configuration"
+}

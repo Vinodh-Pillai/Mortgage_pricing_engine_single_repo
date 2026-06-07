@@ -1,0 +1,17 @@
+{
+  "story_id": "PII-15-S06",
+  "tenant_id": "tenant-a",
+  "code": "RATE_DISPARITY_ALERT",
+  "category": "FAIR_LENDING",
+  "version": 1,
+  "status": "draft",
+  "severity": "HIGH",
+  "effective_from": "2026-01-01",
+  "internal_label": "Configured internal label",
+  "borrower_safe_label": true,
+  "borrower_safe_approved": false,
+  "citations": ["reg-citation-config-ref"],
+  "rule_mappings": ["rule:fair-lending-rate-disparity"],
+  "locale_text": ["en-US|borrower_safe|Configured borrower-safe label"],
+  "audit_note": "Reason-code wording and citations are tenant-governed configuration, not hard-coded legal policy."
+}

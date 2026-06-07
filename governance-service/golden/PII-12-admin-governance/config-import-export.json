@@ -1,0 +1,29 @@
+{
+  "story_id": "PII-12-S10",
+  "schema_version": 1,
+  "import_profile": {
+    "profile_id": "tenant-import-profile",
+    "profile_version": "profile-v1",
+    "allowed_artifact_types": ["pricing-rule-set", "margin-set"],
+    "supported_formats": ["json", "csv"],
+    "required_payload_fields": ["artifactName", "schemaVersion"],
+    "schema_refs": {
+      "pricing-rule-set": "schema://tenant/pricing-rule-set/2026.06"
+    }
+  },
+  "export_profile": {
+    "profile_id": "tenant-export-profile",
+    "profile_version": "profile-v1",
+    "allowed_artifact_types": ["pricing-rule-set", "margin-set"],
+    "redacted_fields": ["confidentialStrategy"],
+    "package_ttl_days": 30
+  },
+  "valid_bundle": {
+    "artifactName": "tenant-configured-rule-set",
+    "schemaVersion": "2026.06",
+    "sourceRef": "fixture-only"
+  },
+  "redacted_export_expected": {
+    "confidentialStrategy": "REDACTED_BY_EXPORT_PROFILE"
+  }
+}

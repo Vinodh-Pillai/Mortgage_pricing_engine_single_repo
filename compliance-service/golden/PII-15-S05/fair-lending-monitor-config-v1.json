@@ -1,0 +1,24 @@
+{
+  "tenantId": "tenant-a",
+  "configVersionId": "fair-lending-config-2026-05",
+  "version": 3,
+  "status": "APPROVED",
+  "effectiveFrom": "2026-01-01",
+  "effectiveTo": "2026-12-31",
+  "protectedClassPolicyRef": "protected-class-policy-approved-v1",
+  "metricDefinitions": [
+    {
+      "metricCode": "RATE_DISPARITY",
+      "formulaRef": "fair-lending-rate-disparity-formula-v1",
+      "thresholdRef": "rate-disparity-threshold-config-v1",
+      "comparisonOperator": ">=",
+      "thresholdValue": "0.03000",
+      "minimumPopulation": 100,
+      "scale": 8,
+      "roundingMode": "HALF_UP",
+      "alertSeverity": "HIGH",
+      "reasonCode": "RATE_DISPARITY_ALERT"
+    }
+  ],
+  "configHash": "config-hash-approved"
+}

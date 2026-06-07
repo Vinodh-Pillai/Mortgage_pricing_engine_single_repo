@@ -1,0 +1,17 @@
+{
+  "story_id": "PII-16-S04",
+  "fixture": "webhook-delivery-attempt-redacted",
+  "tenantId": "11111111-1111-1111-1111-111111111111",
+  "deliveryId": "generated-deterministically-from-tenant-subscription-source-event",
+  "subscriptionId": "sub-los-main",
+  "eventType": "pricing.quote.completed.v1",
+  "payloadHash": "sha-256-payload-hash-only",
+  "attempt": {
+    "httpStatus": 202,
+    "requestHeadersHash": "sha-256-headers-hash-only",
+    "responseBodyHash": "sha-256-capped-response-body-hash-only",
+    "failureClass": "NONE",
+    "retryable": false
+  },
+  "redaction": "request and response bodies are not exposed in search/detail responses or outbox payloads"
+}

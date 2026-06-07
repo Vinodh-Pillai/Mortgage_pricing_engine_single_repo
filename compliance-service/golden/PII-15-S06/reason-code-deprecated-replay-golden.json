@@ -1,0 +1,9 @@
+{
+  "story_id": "PII-15-S06",
+  "requested_code": "RATE_DISPARITY_ALERT",
+  "status": "deprecated",
+  "successor_code": "RATE_DISPARITY_SUCCESSOR",
+  "replay": true,
+  "event_type": "ComplianceReasonCodeDeprecated.v1",
+  "replay_behavior": "deprecated code remains resolvable for historical audit replay"
+}

@@ -1,0 +1,42 @@
+{
+  "story_id": "PII-12-S09",
+  "endpoints": {
+    "search": "/api/v1/tenants/{tenantId}/admin/config-history",
+    "detail": "/api/v1/tenants/{tenantId}/admin/config-history/{historyId}",
+    "diff": "/api/v1/tenants/{tenantId}/admin/config-history/diffs",
+    "evidence": "/api/v1/tenants/{tenantId}/admin/config-history/{historyId}/evidence"
+  },
+  "permissions": [
+    "admin.config.history.read",
+    "admin.config.history.diff",
+    "admin.config.history.evidence"
+  ],
+  "timeline_entry": {
+    "history_id": "history-published",
+    "artifact_id": "artifact-margin",
+    "artifact_type": "MARGIN_CONFIG",
+    "event_type": "PUBLISHED",
+    "actor_id": "pricing-admin-1",
+    "reason_code": "TENANT_MARGIN_CHANGE",
+    "summary": "Margin policy moved to PUBLISHED",
+    "redacted_diff": {
+      "marginFloor": "0.000",
+      "aprCap": "***REDACTED***#hash-prefix"
+    },
+    "replay_reference": {
+      "event_id": "event-history-published",
+      "replay_hash": "replay-hash-history-published",
+      "audit_record_id": "audit-history-published"
+    }
+  },
+  "evidence_links": [
+    "APPROVAL",
+    "VALIDATION",
+    "PUBLISH"
+  ],
+  "runbook_notes": [
+    "History read model is a governance-owned projection over audit, lifecycle, validation, approval, import/export, and outbox events.",
+    "Diff payload values are redacted by RedactionPolicyRef; keys and hashes remain visible for audit traceability.",
+    "Evidence exports require admin.config.history.evidence and create audit/outbox evidence."
+  ]
+}

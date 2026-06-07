@@ -1,0 +1,19 @@
+{
+  "snapshotId": "snapshot-2026-05",
+  "tenantId": "tenant-a",
+  "status": "completed_alert",
+  "configVersionId": "fair-lending-config-2026-05",
+  "metricResults": [
+    {
+      "metricCode": "RATE_DISPARITY",
+      "peerGroupKey": "peer-group-configured",
+      "comparisonGroupKey": "comparison-group-configured",
+      "value": "0.03149000",
+      "thresholdRef": "rate-disparity-threshold-config-v1",
+      "severity": "HIGH",
+      "reasonCode": "RATE_DISPARITY_ALERT",
+      "protectedClassRedacted": false
+    }
+  ],
+  "events": ["FairLendingSnapshotCompleted.v1", "FairLendingAlertRaised.v1"]
+}
