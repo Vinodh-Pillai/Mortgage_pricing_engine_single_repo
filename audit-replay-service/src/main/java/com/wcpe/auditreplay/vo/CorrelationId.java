@@ -12,7 +12,9 @@ public final class CorrelationId {
     }
 
     public static CorrelationId of(String id) {
-        Objects.requireNonNull(id, "correlationId must not be null");
+        if (id == null) {
+            throw new IllegalArgumentException("correlationId must not be null");
+        }
         if (id.isBlank()) {
             throw new IllegalArgumentException("correlationId must not be blank");
         }

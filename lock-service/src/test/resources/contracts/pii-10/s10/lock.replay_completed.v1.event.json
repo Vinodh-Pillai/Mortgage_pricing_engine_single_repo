@@ -1,0 +1,12 @@
+{
+  "eventType": "lock.replay_completed.v1",
+  "eventVersion": "1",
+  "payload": {
+    "replayId": "REPLAY-S10-001",
+    "inputHash": "captured-input-hash-v1",
+    "configGraphHash": "historical-config-graph-hash-v1",
+    "eventSequenceHash": "event-sequence-hash-v1",
+    "mismatchClass": "RESULT_MISMATCH",
+    "evidenceHash": "replay-evidence-hash"
+  }
+}

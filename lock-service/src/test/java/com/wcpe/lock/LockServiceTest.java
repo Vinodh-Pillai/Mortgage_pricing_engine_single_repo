@@ -1191,6 +1191,144 @@ class LockServiceTest {
     assertResourceContains("golden/pii-10/s08/investor-float-down-confirmed.json", "lock.terms_amended.v1");
   }
 
+  @Test
+  void LockAuditReportPersistsMetadataWithoutChangingHistoricalLockFacts() throws IOException {
+    LockModels.LockConfirmationResponse active = createActiveLock("AUDIT-REP-001", TENANT_A);
+    LockAuditReportApi api = new LockAuditReportApi(service);
+
+    LockAuditReportApi.AuditReportResponse response = api.postReport(
+      TENANT_A,
+      "IDEMP-AUDIT-REPORT-001",
+      "corr-pii10-s10",
+      auditReportRequest(active.lockId())
+    );
+
+    assertEquals("POST", LockAuditReportApi.POST_REPORT_METHOD);
+    assertEquals("/api/v1/tenants/{tenantId}/lock-audit-reports", LockAuditReportApi.POST_REPORT_PATH);
+    assertEquals("/api/v1/tenants/{tenantId}/lock-audit-reports/{reportId}", LockAuditReportApi.GET_REPORT_PATH);
+    assertEquals("READY", response.status());
+    assertEquals("lock.audit_report_ready.v1", response.eventType());
+    assertEquals(3, service.getLock(TENANT_A, active.lockId()).version());
+    assertEquals(LockModels.RateLockStatus.ACTIVE, service.getLock(TENANT_A, active.lockId()).status());
+    assertEquals(1, service.committedAuditReportCount());
+    assertEquals(1, service.metrics().lockAuditReportTotal());
+    assertThrows(LockServiceException.class, () -> api.getReport(TENANT_B, response.id(), true));
+    assertResourceContains("contracts/pii-10/s10/post-lock-audit-report-200.json", "lock.audit_report_ready.v1");
+  }
+
+  @Test
+  void ReplayUsesHistoricalPolicyRefsAndClassifiesMismatchDeterministically() throws IOException {
+    LockModels.LockConfirmationResponse active = createActiveLock("AUDIT-REPLAY-001", TENANT_A);
+    LockAuditReportApi api = new LockAuditReportApi(service);
+
+    LockAuditReportApi.ReplayResponse mismatch = api.postReplay(
+      TENANT_A,
+      active.lockId(),
+      "IDEMP-REPLAY-S10-001",
+      "corr-pii10-s10",
+      replayRequest("actual-result-hash-drift")
+    );
+    LockAuditReportApi.ReplayResponse replay = api.postReplay(
+      TENANT_A,
+      active.lockId(),
+      "IDEMP-REPLAY-S10-001",
+      "corr-pii10-s10",
+      replayRequest("actual-result-hash-drift")
+    );
+
+    assertEquals("POST", LockAuditReportApi.POST_REPLAY_METHOD);
+    assertEquals("/api/v1/tenants/{tenantId}/locks/{lockId}/replays", LockAuditReportApi.POST_REPLAY_PATH);
+    assertEquals(mismatch.id(), replay.id());
+    assertEquals("RESULT_MISMATCH", mismatch.mismatchClass());
+    assertEquals("lock.replay_completed.v1", mismatch.eventType());
+    assertEquals(1, service.committedReplayResultCount());
+    assertEquals(1, service.metrics().lockReplayMismatchTotal());
+    assertResourceContains("contracts/pii-10/s10/lock.replay_completed.v1.event.json", "mismatchClass");
+  }
+
+  @Test
+  void CancelActiveLockWritesAppendOnlyEvidenceOutboxAndIsTenantIdempotent() throws IOException {
+    LockModels.LockConfirmationResponse active = createActiveLock("AUDIT-CANCEL-001", TENANT_A);
+    LockAuditReportApi api = new LockAuditReportApi(service);
+
+    LockAuditReportApi.CancellationResponse first = api.postCancellation(
+      TENANT_A,
+      active.lockId(),
+      "IDEMP-CANCEL-S10-001",
+      "corr-pii10-s10",
+      cancellationRequest(active.version())
+    );
+    LockAuditReportApi.CancellationResponse replay = api.postCancellation(
+      TENANT_A,
+      active.lockId(),
+      "IDEMP-CANCEL-S10-001",
+      "corr-pii10-s10",
+      cancellationRequest(active.version())
+    );
+
+    assertEquals("POST", LockAuditReportApi.POST_CANCELLATION_METHOD);
+    assertEquals("/api/v1/tenants/{tenantId}/locks/{lockId}/cancellations", LockAuditReportApi.POST_CANCELLATION_PATH);
+    assertEquals(first.id(), replay.id());
+    assertEquals("ACTIVE", first.previousStatus());
+    assertEquals("CANCELLED", first.status());
+    assertEquals("lock.cancelled.v1", first.eventType());
+    assertEquals("LOCK_CANCELLED", service.auditSnapshots().get(service.auditSnapshots().size() - 1).action());
+    assertEquals(1, service.committedCancellationCount());
+    assertEquals(1, service.metrics().lockCancellationTotal());
+    LockModels.LockRequestResponse replacement = service.requestLock(validCommand("REQ-AUDIT-CANCEL-REPLACE", "IDEMP-AUDIT-CANCEL-REPLACE", TENANT_A));
+    assertEquals(LockModels.RateLockStatus.REQUESTED, replacement.status());
+    assertResourceContains("contracts/pii-10/s10/lock.cancelled.v1.event.json", "evidenceHash");
+  }
+
+  @Test
+  void EvidenceExportManifestRecordsHashesAndRedactsPiiByDefault() throws IOException {
+    LockModels.LockConfirmationResponse active = createActiveLock("AUDIT-EXPORT-001", TENANT_A);
+    LockAuditReportApi api = new LockAuditReportApi(service);
+    LockAuditReportApi.AuditReportResponse report = api.postReport(
+      TENANT_A,
+      "IDEMP-AUDIT-EXPORT-REPORT-001",
+      "corr-pii10-s10",
+      auditReportRequest(active.lockId())
+    );
+
+    LockAuditReportApi.EvidenceExportResponse export = api.postExport(
+      TENANT_A,
+      report.id(),
+      "IDEMP-AUDIT-EXPORT-001",
+      "corr-pii10-s10",
+      evidenceExportRequest(report.id())
+    );
+
+    assertEquals("POST", LockAuditReportApi.POST_EXPORT_METHOD);
+    assertEquals("/api/v1/tenants/{tenantId}/lock-audit-reports/{reportId}/exports", LockAuditReportApi.POST_EXPORT_PATH);
+    assertEquals("READY", export.status());
+    assertFalse(export.manifestHash().isBlank());
+    assertTrue(export.redactedByDefault());
+    assertEquals("lock-auditor-1", export.actorId());
+    assertEquals(Map.of("actorId", "lock-auditor-1"), export.actorRefs());
+    assertEquals(Map.of("lockEvent", "v1", "auditManifest", "v1"), export.schemaVersions());
+    assertEquals(Map.of("lockPolicy", "lock-policy-v1", "cancellationPolicy", "lock-cancellation-policy-v1"), export.configVersions());
+    assertEquals(Map.of("lockSnapshot", "lock-snapshot-hash-v1", "eventSequence", "event-sequence-hash-v1"), export.snapshotHashes());
+    assertEquals(Map.of("regulatorPacket", "generated-file-hash-v1"), export.generatedFileHashes());
+    assertEquals("lock.evidence_export_manifested.v1", export.eventType());
+    assertTrue(export.validationMessages().get(0).contains("Borrower PII minimized"));
+    assertEquals(1, service.committedEvidenceExportCount());
+    assertEquals(1, service.metrics().lockEvidenceExportTotal());
+    LockModels.LockEvidenceExportRecord record = service.getEvidenceExport(TENANT_A, export.id());
+    assertEquals(export.schemaVersions(), record.schemaVersions());
+    assertEquals(export.configVersions(), record.configVersions());
+    assertEquals(export.snapshotHashes(), record.snapshotHashes());
+    assertEquals(export.actorRefs(), record.actorRefs());
+    assertEquals(export.generatedFileHashes(), record.generatedFileHashes());
+    LockModels.LockEvent event = service.outboxEvents().get(service.outboxEvents().size() - 1);
+    assertEquals("auditManifest=v1;lockEvent=v1", event.payload().get("schemaVersions"));
+    assertEquals("cancellationPolicy=lock-cancellation-policy-v1;lockPolicy=lock-policy-v1", event.payload().get("configVersions"));
+    assertEquals("eventSequence=event-sequence-hash-v1;lockSnapshot=lock-snapshot-hash-v1", event.payload().get("snapshotHashes"));
+    assertEquals("actorId=lock-auditor-1", event.payload().get("actorRefs"));
+    assertEquals("regulatorPacket=generated-file-hash-v1", event.payload().get("generatedFileHashes"));
+    assertResourceContains("golden/pii-10/s10/regulator-evidence-export-manifest.json", "redactedByDefault");
+  }
+
   private static LockModels.LockRequestCommand validCommand(String requestId, String idempotencyKey, UUID tenantId) {
     return new LockModels.LockRequestCommand(
       tenantId,
@@ -1223,6 +1361,70 @@ class LockServiceTest {
       "lock-policy-v1",
       "compliance-evidence-v1",
       Map.of("quoteSnapshot", "quote-snapshot-v1", "pricingSnapshot", "pricing-snapshot-v1")
+    );
+  }
+
+  private static LockAuditReportApi.AuditReportRequest auditReportRequest(String lockId) {
+    return new LockAuditReportApi.AuditReportRequest(
+      "AUDIT-REPORT-S10-001",
+      "lock-auditor-1",
+      Map.of(
+        "lockId", lockId,
+        "loanId", "LOAN-PII10",
+        "status", "ACTIVE",
+        "eventType", "lock.confirmed.v1"
+      ),
+      Instant.parse("2026-07-04T22:10:00Z"),
+      true,
+      Map.of("lockSnapshot", "lock-snapshot-s10", "policyConfig", "lock-policy-v1")
+    );
+  }
+
+  private static LockAuditReportApi.ReplayRequest replayRequest(String actualResultHash) {
+    return new LockAuditReportApi.ReplayRequest(
+      "REPLAY-S10-001",
+      "lock-auditor-1",
+      "captured-input-hash-v1",
+      "historical-config-graph-hash-v1",
+      "event-sequence-hash-v1",
+      "expected-result-hash-v1",
+      actualResultHash,
+      true,
+      Instant.parse("2026-07-04T22:11:00Z"),
+      Map.of("lockPolicyVersion", "lock-policy-v1", "rateSheetVersion", "rate-sheet-v1")
+    );
+  }
+
+  private static LockAuditReportApi.CancellationRequest cancellationRequest(int expectedVersion) {
+    return new LockAuditReportApi.CancellationRequest(
+      "CANCEL-S10-001",
+      "BORROWER_WITHDREW_LOCK",
+      "Cancellation note is retained in service evidence only",
+      "lock-desk-user-1",
+      expectedVersion,
+      true,
+      true,
+      true,
+      "lock-cancellation-policy-v1",
+      "compliance-cancellation-evidence-v1",
+      Instant.parse("2026-07-04T22:12:00Z"),
+      Map.of("lockSnapshot", "lock-snapshot-s10", "policyConfig", "lock-cancellation-policy-v1")
+    );
+  }
+
+  private static LockAuditReportApi.EvidenceExportRequest evidenceExportRequest(String reportId) {
+    return new LockAuditReportApi.EvidenceExportRequest(
+      "EXPORT-S10-001",
+      "lock-auditor-1",
+      List.of("lock.audit_report_ready.v1:" + reportId, "lock.replay_completed.v1:REPLAY-S10-001"),
+      Map.of("lockEvent", "v1", "auditManifest", "v1"),
+      Map.of("lockPolicy", "lock-policy-v1", "cancellationPolicy", "lock-cancellation-policy-v1"),
+      Map.of("lockSnapshot", "lock-snapshot-hash-v1", "eventSequence", "event-sequence-hash-v1"),
+      Map.of("regulatorPacket", "generated-file-hash-v1"),
+      "REGULATOR_PACKET",
+      true,
+      true,
+      Instant.parse("2026-07-04T22:13:00Z")
     );
   }
 

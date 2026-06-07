@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+if ! command -v gradle >/dev/null 2>&1; then
+  echo "Gradle CLI is required because the exception-service local wrapper jar is not present." >&2
+  exit 1
+fi
+exec gradle "$@"

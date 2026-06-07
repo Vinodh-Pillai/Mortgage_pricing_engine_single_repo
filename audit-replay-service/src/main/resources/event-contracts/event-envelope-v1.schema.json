@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:wcpe:audit-replay:event-envelope-v1",
+  "title": "EventEnvelopeV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "eventId",
+    "tenantId",
+    "eventType",
+    "eventVersion",
+    "occurredAt",
+    "producer",
+    "aggregate",
+    "actor",
+    "correlationId",
+    "idempotencyKey",
+    "schemaRef",
+    "payload",
+    "payloadHash",
+    "integrityHash",
+    "legalHoldTags"
+  ],
+  "properties": {
+    "eventId": { "type": "string", "format": "uuid" },
+    "tenantId": { "type": "string", "format": "uuid" },
+    "eventType": { "type": "string", "minLength": 1 },
+    "eventVersion": { "type": "integer", "minimum": 1 },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "producer": {
+      "type": "object",
+      "required": ["service", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "service": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 }
+      }
+    },
+    "aggregate": {
+      "type": "object",
+      "required": ["type", "id"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "minLength": 1 },
+        "id": { "type": "string", "minLength": 1 },
+        "version": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+    "actor": {
+      "type": "object",
+      "required": ["type", "id"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "minLength": 1 },
+        "id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "correlationId": { "type": "string", "format": "uuid" },
+    "causationId": { "type": ["string", "null"], "format": "uuid" },
+    "idempotencyKey": { "type": "string", "minLength": 1 },
+    "schemaRef": { "type": "string", "minLength": 1 },
+    "payload": { "type": "object" },
+    "payloadHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "previousHash": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+    "integrityHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "legalHoldTags": { "type": "array", "items": { "type": "string" } }
+  }
+}

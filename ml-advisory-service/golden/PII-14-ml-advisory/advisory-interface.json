@@ -1,0 +1,9 @@
+{
+  "story_id": "PII-14-S03",
+  "endpoint": "GET /api/v1/tenants/{tenantId}/ml-advisory/advisories?scenarioId=&pricingResultId=",
+  "authoritative": false,
+  "disclaimer": "Advisory only — does not change final pricing or eligibility.",
+  "allowedActions": ["VIEW", "DISMISS", "FEEDBACK"],
+  "panelStates": ["READY_EXPANDED", "LOW_CONFIDENCE_COLLAPSED", "EXPIRED"],
+  "eventTypes": ["MlAdvisoryGenerated.v1", "MlAdvisoryViewed.v1"]
+}

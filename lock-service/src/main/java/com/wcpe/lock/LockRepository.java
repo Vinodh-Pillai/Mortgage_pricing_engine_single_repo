@@ -26,6 +26,14 @@ final class LockRepository {
   private final Map<String, String> syncAttemptByTenantEventTarget = new HashMap<>();
   private final Map<String, LockModels.LockSyncAcknowledgement> syncAcksByTenantAndId = new HashMap<>();
   private final Map<String, LockModels.LockReconciliationRecord> reconciliationByTenantAndId = new HashMap<>();
+  private final Map<String, LockModels.LockAuditReportRecord> auditReportsByTenantAndId = new HashMap<>();
+  private final Map<String, AuditReportIdempotencyRecord> auditReportIdempotency = new HashMap<>();
+  private final Map<String, LockModels.LockReplayResult> replayResultsByTenantAndId = new HashMap<>();
+  private final Map<String, ReplayIdempotencyRecord> replayIdempotency = new HashMap<>();
+  private final Map<String, LockModels.LockCancellationRecord> cancellationsByTenantAndId = new HashMap<>();
+  private final Map<String, CancellationIdempotencyRecord> cancellationIdempotency = new HashMap<>();
+  private final Map<String, LockModels.LockEvidenceExportRecord> evidenceExportsByTenantAndId = new HashMap<>();
+  private final Map<String, EvidenceExportIdempotencyRecord> evidenceExportIdempotency = new HashMap<>();
   private final Map<String, String> activeConfirmationByLock = new HashMap<>();
   private final Map<String, String> openExtensionByLock = new HashMap<>();
   private final Map<String, String> openRelockBySourceLock = new HashMap<>();
@@ -360,6 +368,120 @@ final class LockRepository {
     return attemptId == null ? Optional.empty() : findSyncAttempt(tenantId, attemptId);
   }
 
+  Optional<LockModels.LockAuditReportResponse> findAuditReportIdempotency(UUID tenantId, String idempotencyKey, String reportHash) {
+    AuditReportIdempotencyRecord record = auditReportIdempotency.get(tenantId + ":" + idempotencyKey);
+    if (record == null) {
+      return Optional.empty();
+    }
+    if (!record.reportHash.equals(reportHash)) {
+      throw new LockServiceException("IDEMPOTENCY_CONFLICT", "Audit report idempotency key was reused with a different payload");
+    }
+    return Optional.of(record.response);
+  }
+
+  void saveAuditReport(
+    LockModels.LockAuditReportRecord report,
+    LockModels.LockAuditReportResponse response,
+    String reportHash,
+    LockModels.LockEvent event,
+    LockModels.AuditSnapshot audit
+  ) {
+    auditReportsByTenantAndId.put(key(report.tenantId(), report.reportId()), report);
+    auditReportIdempotency.put(report.tenantId() + ":" + report.idempotencyKey(), new AuditReportIdempotencyRecord(reportHash, response));
+    outboxEvents.add(event);
+    auditSnapshots.add(audit);
+  }
+
+  Optional<LockModels.LockAuditReportRecord> findAuditReport(UUID tenantId, String reportId) {
+    return Optional.ofNullable(auditReportsByTenantAndId.get(key(tenantId, reportId)));
+  }
+
+  Optional<LockModels.LockReplayResponse> findReplayIdempotency(UUID tenantId, String idempotencyKey, String replayHash) {
+    ReplayIdempotencyRecord record = replayIdempotency.get(tenantId + ":" + idempotencyKey);
+    if (record == null) {
+      return Optional.empty();
+    }
+    if (!record.replayHash.equals(replayHash)) {
+      throw new LockServiceException("IDEMPOTENCY_CONFLICT", "Lock replay idempotency key was reused with a different payload");
+    }
+    return Optional.of(record.response);
+  }
+
+  void saveReplayResult(
+    LockModels.LockReplayResult result,
+    LockModels.LockReplayResponse response,
+    String replayHash,
+    LockModels.LockEvent event,
+    LockModels.AuditSnapshot audit
+  ) {
+    replayResultsByTenantAndId.put(key(result.tenantId(), result.replayId()), result);
+    replayIdempotency.put(result.tenantId() + ":" + result.idempotencyKey(), new ReplayIdempotencyRecord(replayHash, response));
+    outboxEvents.add(event);
+    auditSnapshots.add(audit);
+  }
+
+  Optional<LockModels.LockReplayResult> findReplayResult(UUID tenantId, String replayId) {
+    return Optional.ofNullable(replayResultsByTenantAndId.get(key(tenantId, replayId)));
+  }
+
+  Optional<LockModels.LockCancellationResponse> findCancellationIdempotency(UUID tenantId, String idempotencyKey, String cancellationHash) {
+    CancellationIdempotencyRecord record = cancellationIdempotency.get(tenantId + ":" + idempotencyKey);
+    if (record == null) {
+      return Optional.empty();
+    }
+    if (!record.cancellationHash.equals(cancellationHash)) {
+      throw new LockServiceException("IDEMPOTENCY_CONFLICT", "Lock cancellation idempotency key was reused with a different payload");
+    }
+    return Optional.of(record.response);
+  }
+
+  void saveCancellation(
+    LockModels.RateLockRecord lockRecord,
+    LockModels.LockCancellationRecord cancellation,
+    LockModels.LockCancellationResponse response,
+    String cancellationHash,
+    LockModels.LockEvent event,
+    LockModels.AuditSnapshot audit
+  ) {
+    replace(lockRecord);
+    cancellationsByTenantAndId.put(key(cancellation.tenantId(), cancellation.cancellationId()), cancellation);
+    cancellationIdempotency.put(cancellation.tenantId() + ":" + cancellation.idempotencyKey(), new CancellationIdempotencyRecord(cancellationHash, response));
+    outboxEvents.add(event);
+    auditSnapshots.add(audit);
+  }
+
+  Optional<LockModels.LockCancellationRecord> findCancellation(UUID tenantId, String cancellationId) {
+    return Optional.ofNullable(cancellationsByTenantAndId.get(key(tenantId, cancellationId)));
+  }
+
+  Optional<LockModels.LockEvidenceExportResponse> findEvidenceExportIdempotency(UUID tenantId, String idempotencyKey, String manifestHash) {
+    EvidenceExportIdempotencyRecord record = evidenceExportIdempotency.get(tenantId + ":" + idempotencyKey);
+    if (record == null) {
+      return Optional.empty();
+    }
+    if (!record.manifestHash.equals(manifestHash)) {
+      throw new LockServiceException("IDEMPOTENCY_CONFLICT", "Evidence export idempotency key was reused with a different payload");
+    }
+    return Optional.of(record.response);
+  }
+
+  void saveEvidenceExport(
+    LockModels.LockEvidenceExportRecord export,
+    LockModels.LockEvidenceExportResponse response,
+    String manifestHash,
+    LockModels.LockEvent event,
+    LockModels.AuditSnapshot audit
+  ) {
+    evidenceExportsByTenantAndId.put(key(export.tenantId(), export.exportId()), export);
+    evidenceExportIdempotency.put(export.tenantId() + ":" + export.idempotencyKey(), new EvidenceExportIdempotencyRecord(manifestHash, response));
+    outboxEvents.add(event);
+    auditSnapshots.add(audit);
+  }
+
+  Optional<LockModels.LockEvidenceExportRecord> findEvidenceExport(UUID tenantId, String exportId) {
+    return Optional.ofNullable(evidenceExportsByTenantAndId.get(key(tenantId, exportId)));
+  }
+
   List<LockModels.LockSyncAttempt> syncAttemptsForLock(UUID tenantId, String lockId) {
     return syncAttemptsByTenantAndId.values().stream()
       .filter(attempt -> attempt.tenantId().equals(tenantId) && attempt.lockId().equals(lockId))
@@ -439,6 +561,22 @@ final class LockRepository {
     return reconciliationByTenantAndId.size();
   }
 
+  int auditReportCount() {
+    return auditReportsByTenantAndId.size();
+  }
+
+  int replayResultCount() {
+    return replayResultsByTenantAndId.size();
+  }
+
+  int cancellationCount() {
+    return cancellationsByTenantAndId.size();
+  }
+
+  int evidenceExportCount() {
+    return evidenceExportsByTenantAndId.size();
+  }
+
   List<LockModels.LockEvent> outboxEvents() {
     return List.copyOf(outboxEvents);
   }
@@ -462,4 +600,12 @@ final class LockRepository {
   private record ExtensionIdempotencyRecord(String resultHash, LockModels.LockExtensionResponse response) {}
 
   private record RelockIdempotencyRecord(String resultHash, LockModels.RelockResponse response) {}
+
+  private record AuditReportIdempotencyRecord(String reportHash, LockModels.LockAuditReportResponse response) {}
+
+  private record ReplayIdempotencyRecord(String replayHash, LockModels.LockReplayResponse response) {}
+
+  private record CancellationIdempotencyRecord(String cancellationHash, LockModels.LockCancellationResponse response) {}
+
+  private record EvidenceExportIdempotencyRecord(String manifestHash, LockModels.LockEvidenceExportResponse response) {}
 }

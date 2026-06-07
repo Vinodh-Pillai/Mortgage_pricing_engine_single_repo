@@ -1,0 +1,10 @@
+{
+  "id": "REPORT-S10-001",
+  "status": "READY",
+  "version": 1,
+  "eventType": "lock.audit_report_ready.v1",
+  "auditRef": "AUDIT-LOCK-REPORT-REPORT-S10-001",
+  "replayRef": "REPLAY-LOCK-REPORT-hash",
+  "manifestHash": "manifest-hash",
+  "correlationId": "corr-pii10-s10"
+}

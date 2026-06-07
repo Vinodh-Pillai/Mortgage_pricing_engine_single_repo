@@ -1,0 +1,12 @@
+{
+  "storyId": "PII-11-S09",
+  "fixture": "full-exception-history-approved-applied-v1",
+  "subjectType": "CONCESSION_REQUEST",
+  "expectedActions": ["REQUESTED", "APPROVED", "APPLIED"],
+  "requiredConfigVersions": ["MATRIX-V1", "POLICY-V1", "PRICING-RULE-V1", "PRECEDENCE-V1"],
+  "expectedReplayStatus": "MATCH",
+  "redaction": {
+    "rawEventJsonRequiresPermission": "exception_history.raw_json",
+    "evidenceRefsRequirePermission": "exception_history.evidence"
+  }
+}

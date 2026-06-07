@@ -51,6 +51,6 @@ class QuoteExpirationRequestTimeGuardTest {
 
         assertThat(current.status()).isEqualTo(QuoteStatus.READY);
         assertThat(service.outboxEvents()).extracting(OutboxEvent::eventType)
-            .containsExactly("quote.created.v1", "quote.ready.v1", "best_execution.ranked.v1");
+            .containsExactly("quote.created.v1", "quote.ready.v1", "best_execution.ranked.v1", "quote.snapshot_created.v1");
     }
 }

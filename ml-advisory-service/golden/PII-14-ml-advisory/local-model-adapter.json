@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "story_id": "PII-14-S04",
+  "adapter": "FakeLocalModelAdapter",
+  "modelVersionId": "model-version-approved-1",
+  "artifactChecksum": "sha256:local-approved-model",
+  "approvedStatus": "APPROVED_FOR_ADVISORY",
+  "featureSchemaVersion": "ml-advisory-feature-schema-v1",
+  "successStatus": "SUCCESS",
+  "degradedResponse": "NO_ADVISORY",
+  "events": [
+    "MlModelInferenceCompleted.v1",
+    "MlModelRuntimeHealthChanged.v1"
+  ],
+  "sensitiveDataPolicy": "Events, audit records, invocations, and health responses carry snapshot IDs and metadata only; raw borrower feature values are excluded."
+}

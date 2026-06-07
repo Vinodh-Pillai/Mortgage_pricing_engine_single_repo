@@ -1,0 +1,6 @@
+{
+  "eventVersion": "1",
+  "replayHeaders": ["replay", "originalEventId", "deliveryId", "reasonForAccess", "correlationId", "actorId"],
+  "auditAction": "QUOTE_EVENT_REPLAY_REQUESTED",
+  "payloadRule": "Replay preserves the original event payload and adds replay headers instead of creating a new business payload."
+}

@@ -1,0 +1,24 @@
+{
+  "storyId": "PII-11-S08",
+  "fixture": "prevent-manual-price-edit-v1",
+  "tenantId": "11111111-1111-1111-1111-111111111111",
+  "sourceSurface": "manual-price-edit-api",
+  "targetType": "PARTNER_API",
+  "quoteId": "QUOTE-PII11",
+  "attemptedFields": ["finalPrice", "margin"],
+  "decision": "BLOCKED",
+  "denialReason": "MANUAL_PRICE_EDIT_FORBIDDEN",
+  "outboxEventType": "ManualPriceEditBlocked.v1",
+  "auditEvidence": {
+    "payloadStorage": "hash-only",
+    "payloadHashRequired": true,
+    "actorRequired": true,
+    "policyVersionRequired": true,
+    "correlationIdRequired": true
+  },
+  "quotePriceState": {
+    "beforeQuoteHash": "quote-hash-before-v1",
+    "afterQuoteHash": "quote-hash-before-v1",
+    "unchanged": true
+  }
+}

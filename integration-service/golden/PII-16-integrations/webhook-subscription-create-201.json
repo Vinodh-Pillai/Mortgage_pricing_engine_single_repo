@@ -1,0 +1,12 @@
+{
+  "id": "tenant-channel-generated-subscription-id",
+  "status": "ACTIVE",
+  "version": 1,
+  "resultSummary": "created",
+  "validationMessages": [],
+  "auditRef": "audit:{tenantId}:{subscriptionId}:1",
+  "replayRef": "event:{tenantId}:{subscriptionId}:1",
+  "secretVersion": "provider-managed-version",
+  "lastValidatedAt": "2026-06-04T03:00:00Z",
+  "correlationId": "corr-PII-16-S03"
+}

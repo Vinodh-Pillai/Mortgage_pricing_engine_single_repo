@@ -1,0 +1,29 @@
+{
+  "exportId": "EXPORT-S10-001",
+  "reportId": "REPORT-S10-001",
+  "redactedByDefault": true,
+  "eventIds": [
+    "lock.audit_report_ready.v1:REPORT-S10-001",
+    "lock.replay_completed.v1:REPLAY-S10-001",
+    "lock.cancelled.v1:CANCEL-S10-001"
+  ],
+  "schemaVersions": {
+    "lockEvent": "v1",
+    "auditManifest": "v1"
+  },
+  "configVersions": {
+    "lockPolicy": "lock-policy-v1",
+    "cancellationPolicy": "lock-cancellation-policy-v1"
+  },
+  "snapshotHashes": {
+    "lockSnapshot": "lock-snapshot-hash-v1",
+    "eventSequence": "event-sequence-hash-v1"
+  },
+  "actorRefs": {
+    "actorId": "lock-auditor-1"
+  },
+  "generatedFileHashes": {
+    "regulatorPacket": "generated-file-hash-v1"
+  },
+  "borrowerPii": "minimized"
+}

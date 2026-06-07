@@ -1,0 +1,6 @@
+{
+  "redactionProfile": "mortgage-pricing-default-v1",
+  "before": { "status": "DRAFT", "borrower": "REDACTED", "price": "REDACTED" },
+  "after": { "status": "SUBMITTED", "borrower": "REDACTED", "price": "REDACTED" },
+  "classification": "redacted-summary-only"
+}

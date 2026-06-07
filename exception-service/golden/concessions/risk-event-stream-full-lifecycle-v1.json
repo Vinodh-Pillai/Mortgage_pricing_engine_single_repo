@@ -1,0 +1,23 @@
+{
+  "storyId": "PII-11-S10",
+  "topic": "pricing.risk-monitoring.events",
+  "mappingVersionId": "RISK-MAPPING-V1",
+  "expectedEventTypes": [
+    "risk_monitoring_events.completed.v1"
+  ],
+  "expectedHeaders": [
+    "tenantId",
+    "eventId",
+    "eventType",
+    "eventVersion",
+    "sourceEventId",
+    "schemaVersion",
+    "mappingVersionId",
+    "correlationId",
+    "causationId",
+    "traceId",
+    "replayFlag"
+  ],
+  "redactionMode": "NON_PII_REFS_ONLY",
+  "notes": "Golden fixture for the service-local risk monitoring event walking skeleton. Payload values are non-PII refs or configured buckets only."
+}

@@ -9,12 +9,15 @@ import com.wcpe.quote.QuoteCreateRequest;
 import com.wcpe.quote.QuoteExplanationResponse;
 import com.wcpe.quote.QuoteJobResponse;
 import com.wcpe.quote.QuoteJobStartRequest;
+import com.wcpe.quote.OutboxEvent;
 import com.wcpe.quote.QuoteSnapshot;
 import com.wcpe.quote.QuoteSnapshotExport;
+import com.wcpe.quote.QuoteEventReplayResult;
 import com.wcpe.quote.RankingPreviewRequest;
 import com.wcpe.quote.RankingPreviewResponse;
 import com.wcpe.quote.QuoteSelectionResponse;
 import com.wcpe.quote.SelectQuoteOptionCommand;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -148,5 +151,13 @@ public class QuoteController {
             body.clientContext()
         );
         return QuoteSelectionResponse.from(applicationService.selectQuoteOption(tenantScopedBody));
+    }
+
+    public List<OutboxEvent> getTenantQuoteEvents(UUID tenantId, UUID quoteId) {
+        return applicationService.quoteEvents(tenantId, quoteId);
+    }
+
+    public QuoteEventReplayResult postTenantQuoteEventReplay(UUID tenantId, String eventId, String actorId, String correlationId, String reasonForAccess) {
+        return applicationService.replayQuoteEvent(tenantId, eventId, actorId, correlationId, reasonForAccess);
     }
 }

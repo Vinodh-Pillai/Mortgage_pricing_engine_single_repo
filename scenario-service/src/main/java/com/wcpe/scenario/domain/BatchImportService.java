@@ -6,6 +6,7 @@ import java.time.*;
 import java.util.*;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 @Service
@@ -31,7 +32,8 @@ class BatchImportService {
     this.scenarioService = scenarioService;
   }
 
-  ImportJobResponse upload(MultipartFile file, String templateVersion, String channel, String quoteIntent,
+  @Transactional
+  public ImportJobResponse upload(MultipartFile file, String templateVersion, String channel, String quoteIntent,
       PartialSuccessPolicy policy, UUID tenantId, String idempotencyKey, String correlationId, String submittedBy) {
     requireRole("SCENARIO_WRITER", WRITER_ROLES);
     requireIdempotencyKey(idempotencyKey);
@@ -146,6 +148,12 @@ class BatchImportService {
         emitImportCompleted(tenantId, jobId, ImportJobStatus.FAILED, 0, prevalidationFailures, correlationId, fileHash, templateVersion);
         return;
       }
+      int draftValidationFailures = recordRejectAllDraftValidationFailures(tenantId, jobId, headers, rows, channel, quoteIntent);
+      if (draftValidationFailures > 0) {
+        importRepository.markJobComplete(tenantId, jobId, ImportJobStatus.FAILED, Instant.now(), 0, draftValidationFailures);
+        emitImportCompleted(tenantId, jobId, ImportJobStatus.FAILED, 0, draftValidationFailures, correlationId, fileHash, templateVersion);
+        return;
+      }
     }
 
     for (int i = 0; i < rows.size(); i++) {
@@ -180,6 +188,7 @@ class BatchImportService {
           importRepository.addRow(tenantId, jobId, rowNum, rowHash, ImportRowStatus.CREATED, result.scenarioId(), rowIdempotencyKey);
           created++;
         } catch (ScenarioException ex) {
+          if (policy == PartialSuccessPolicy.REJECT_ALL_ON_ANY_ERROR) throw ex;
           ImportRowStatus status = ex.fieldErrors().isEmpty() ? ImportRowStatus.SYSTEM_FAILED : ImportRowStatus.FAILED_VALIDATION;
           UUID rowId = importRepository.addRow(tenantId, jobId, rowNum, rowHash, status, null, rowIdempotencyKey);
           for (ValidationIssue issue : ex.fieldErrors()) {
@@ -188,6 +197,10 @@ class BatchImportService {
           failed++;
         }
       } catch (Exception ex) {
+        if (policy == PartialSuccessPolicy.REJECT_ALL_ON_ANY_ERROR) {
+          if (ex instanceof RuntimeException runtime) throw runtime;
+          throw new IllegalStateException("Reject-all scenario import failed after draft prevalidation.", ex);
+        }
         importRepository.addRow(tenantId, jobId, rowNum, rowHash, ImportRowStatus.SYSTEM_FAILED, null, rowIdempotencyKey);
         failed++;
       }
@@ -300,6 +313,43 @@ class BatchImportService {
         importRepository.addError(tenantId, rowId, issue.fieldPath(), issue.code(), issue.message(), "");
       }
       failed++;
+    }
+    return failed;
+  }
+
+  private int recordRejectAllDraftValidationFailures(UUID tenantId, UUID jobId, String[] headers, List<String[]> rows, String channel, String quoteIntent) {
+    int failed = 0;
+    for (int i = 0; i < rows.size(); i++) {
+      int rowNum = i + 2;
+      String[] cols = rows.get(i);
+      String rowHash = Hashing.sha256(rowNum + ":" + String.join("|", cols));
+      String rowIdempotencyKey = jobId + ":row:" + rowNum;
+      try {
+        CreateScenarioRequest request = mapRowToRequest(headers, cols, channel, quoteIntent);
+        if (request == null) throw new ScenarioException(HttpStatus.BAD_REQUEST, "INVALID_ROW", "Row " + rowNum + " could not be mapped.", List.of());
+        List<ValidationIssue> issues = scenarioService.validateCreateDraft(tenantId, rowIdempotencyKey, request);
+        List<ValidationIssue> blocking = Optional.ofNullable(issues).orElse(List.of()).stream()
+            .filter(issue -> issue.severity() == Severity.BLOCKING)
+            .toList();
+        if (!blocking.isEmpty()) {
+          UUID rowId = importRepository.addRow(tenantId, jobId, rowNum, rowHash, ImportRowStatus.FAILED_VALIDATION, null, rowIdempotencyKey);
+          for (ValidationIssue issue : blocking) importRepository.addError(tenantId, rowId, issue.fieldPath(), issue.code(), issue.message(), "");
+          failed++;
+        }
+      } catch (ScenarioException ex) {
+        ImportRowStatus status = ex.fieldErrors().isEmpty() ? ImportRowStatus.SYSTEM_FAILED : ImportRowStatus.FAILED_VALIDATION;
+        UUID rowId = importRepository.addRow(tenantId, jobId, rowNum, rowHash, status, null, rowIdempotencyKey);
+        if (ex.fieldErrors().isEmpty()) {
+          importRepository.addError(tenantId, rowId, "_row", ex.code(), ex.getMessage(), "");
+        } else {
+          for (ValidationIssue issue : ex.fieldErrors()) importRepository.addError(tenantId, rowId, issue.fieldPath(), issue.code(), issue.message(), "");
+        }
+        failed++;
+      } catch (RuntimeException ex) {
+        UUID rowId = importRepository.addRow(tenantId, jobId, rowNum, rowHash, ImportRowStatus.SYSTEM_FAILED, null, rowIdempotencyKey);
+        importRepository.addError(tenantId, rowId, "_row", "CREATE_DRAFT_VALIDATION_FAILED", "Draft scenario validation failed before reject-all creation.", "");
+        failed++;
+      }
     }
     return failed;
   }

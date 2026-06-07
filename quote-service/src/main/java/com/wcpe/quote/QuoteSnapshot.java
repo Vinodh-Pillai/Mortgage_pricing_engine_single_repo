@@ -1,5 +1,7 @@
 package com.wcpe.quote;
 
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
@@ -18,13 +20,18 @@ public record QuoteSnapshot(
     Map<String, String> evidenceRefs,
     String redactionProfile,
     Instant createdAt,
+    Instant retentionUntil,
     String auditRef,
     String correlationId
 ) {
     public QuoteSnapshot {
-        canonicalRequest = Map.copyOf(canonicalRequest == null ? Map.of() : canonicalRequest);
-        canonicalResponse = Map.copyOf(canonicalResponse == null ? Map.of() : canonicalResponse);
-        inputVersionSet = Map.copyOf(inputVersionSet == null ? Map.of() : inputVersionSet);
-        evidenceRefs = Map.copyOf(evidenceRefs == null ? Map.of() : evidenceRefs);
+        canonicalRequest = stableMap(canonicalRequest);
+        canonicalResponse = stableMap(canonicalResponse);
+        inputVersionSet = stableMap(inputVersionSet);
+        evidenceRefs = stableMap(evidenceRefs);
+    }
+
+    private static Map<String, String> stableMap(Map<String, String> values) {
+        return Collections.unmodifiableMap(new LinkedHashMap<>(values == null ? Map.of() : values));
     }
 }

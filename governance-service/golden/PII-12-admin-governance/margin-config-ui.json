@@ -1,0 +1,35 @@
+{
+  "story_id": "PII-12-S07",
+  "artifact_type": "MARGIN_CONFIG",
+  "fixture_id": "impact-fixture-channel-overlay-1",
+  "metadata_ref": "tenant-owned margin-schema-tenant-2026-06",
+  "dimensions_source": "tenant metadata payload",
+  "reason_code_source": "tenant reason-code catalog",
+  "policy_source": "tenant margin value policy",
+  "rows": [
+    {
+      "row_id": "row-channel-overlay-1",
+      "context_refs": {
+        "product": "tenant-product-ref",
+        "channel": "tenant-channel-ref"
+      },
+      "reason_code": "TENANT_MARGIN_CHANGE",
+      "value_ref": "fixture-margin-value-ref",
+      "cap_ref": "fixture-cap-ref",
+      "floor_ref": "fixture-floor-ref"
+    }
+  ],
+  "impact_result": {
+    "simulation_id": "impact-fixture-channel-overlay-1",
+    "scenario_fixture_id": "tenant-margin-channel-overlay-scenario",
+    "result_hash": "tenant-supplied-impact-result-hash",
+    "ledger_requirements": [
+      "record margin version id",
+      "record margin row hash",
+      "record reason code",
+      "record rounding operation reference"
+    ]
+  },
+  "separation_of_duties": "requester cannot approve their own margin config",
+  "audit_replay": "audit snapshot stores hash references, not raw confidential margin strategy"
+}

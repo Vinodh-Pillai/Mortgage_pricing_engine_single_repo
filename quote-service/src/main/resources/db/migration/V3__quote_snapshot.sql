@@ -12,6 +12,7 @@ create table quote_snapshot (
     evidence_refs jsonb not null,
     redaction_profile varchar(128) not null,
     created_at timestamptz not null,
+    retention_until timestamptz not null,
     audit_ref varchar(160) not null,
     correlation_id varchar(128) not null,
     constraint uq_quote_snapshot_tenant_quote unique (tenant_id, quote_id)

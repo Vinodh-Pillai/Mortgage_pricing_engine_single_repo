@@ -1,0 +1,11 @@
+{
+  "story_id": "PII-12-S04",
+  "metadata_endpoint": "/api/v1/tenants/{tenantId}/admin/config-ui/metadata",
+  "inventory_endpoint": "/api/v1/tenants/{tenantId}/admin/config-artifacts",
+  "approval_queue_endpoint": "/api/v1/tenants/{tenantId}/admin/config-approval-queue",
+  "required_permission": "governance:config-ui-shell:read",
+  "cache_key_inputs": ["tenantId", "permissionsHash", "metadataVersion", "filters"],
+  "event_type": "config_ui_shell.completed.v1",
+  "audit_action": "CONFIG_UI_SHELL_COMPLETED",
+  "blocked_frontend_gap": "No frontend UI root is present in acquired locks; backend metadata/read-model API slice records the contract for a future UI lane."
+}

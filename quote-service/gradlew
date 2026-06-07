@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+if command -v gradle >/dev/null 2>&1; then
+  exec gradle "$@"
+fi
+echo "Gradle executable not found. Install Gradle or replace this service-local wrapper with a full Gradle wrapper distribution." >&2
+exit 1

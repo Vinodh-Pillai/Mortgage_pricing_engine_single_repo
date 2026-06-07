@@ -35,6 +35,17 @@ public class ScenarioService {
     return response;
   }
 
+  synchronized List<ValidationIssue> validateCreateDraft(UUID tenantId, String idempotencyKey, CreateScenarioRequest request) {
+    requireIdempotencyKey(idempotencyKey);
+    requireRole("SCENARIO_WRITER", WRITER_ROLES);
+    Optional<Object> replay = repository.idempotent(tenantId.toString(), idempotencyKey, request);
+    if (replay.isPresent()) return ((ScenarioResponse) replay.get()).validationIssues();
+    requireActiveProfile(tenantId, request.channel(), request.quoteIntent());
+    Scenario scenario = new Scenario(tenantId, request.quoteIntent(), request.channel(), request.scenarioName(), request.externalLoanId(), request.sourceSystem(), request.initialFacts());
+    applyProfileValidation(scenario);
+    return scenario.validationIssues();
+  }
+
   public ScenarioResponse get(UUID tenantId, UUID scenarioId) { return response(repository.get(tenantId, scenarioId)); }
   public synchronized BorrowerCreditResponse updateBorrowers(UUID tenantId, UUID scenarioId, String key, String correlationId, BorrowerCreditRequest request) {
     requireIdempotencyKey(key);

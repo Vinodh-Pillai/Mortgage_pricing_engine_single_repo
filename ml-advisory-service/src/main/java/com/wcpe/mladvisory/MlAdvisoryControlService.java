@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 public final class MlAdvisoryControlService {
   public static final String GET_CONTROLS_ENDPOINT =
@@ -29,12 +30,29 @@ public final class MlAdvisoryControlService {
       "GET /api/v1/tenants/{tenantId}/ml-advisory/feature-snapshots/{snapshotId}";
   public static final String SEARCH_FEATURE_SNAPSHOTS_ENDPOINT =
       "GET /api/v1/tenants/{tenantId}/ml-advisory/feature-snapshots?scenarioId=&from=&to=";
+  public static final String LIST_ADVISORIES_ENDPOINT =
+      "GET /api/v1/tenants/{tenantId}/ml-advisory/advisories?scenarioId=&pricingResultId=";
+  public static final String GET_ADVISORY_ENDPOINT =
+      "GET /api/v1/tenants/{tenantId}/ml-advisory/advisories/{advisoryId}";
+  public static final String EVALUATE_PRICING_ADVISORY_ENDPOINT =
+      "POST /api/v1/tenants/{tenantId}/ml-advisory/pricing-advisories:evaluate";
+  public static final String GET_MODEL_RUNTIME_HEALTH_ENDPOINT =
+      "GET /api/v1/tenants/{tenantId}/ml-advisory/model-runtime/health";
+  public static final String NON_AUTHORITATIVE_DISCLAIMER =
+      "Advisory only — does not change final pricing or eligibility.";
   public static final String ADMIN_ROLE = "ML_ADVISORY_ADMIN";
   public static final String CAPTURE_ROLE = "ML_ADVISORY_CAPTURE";
   public static final String SNAPSHOT_READ_ROLE = "ML_ADVISORY_SNAPSHOT_READ";
+  public static final String ADVISORY_READ_ROLE = "ML_ADVISORY_READ";
   public static final String CONTROL_CHANGED_EVENT = "MlAdvisoryControlChanged.v1";
   public static final String KILL_SWITCH_CHANGED_EVENT = "MlAdvisoryKillSwitchChanged.v1";
   public static final String FEATURE_SNAPSHOT_CAPTURED_EVENT = "MlFeatureSnapshotCaptured.v1";
+  public static final String ML_ADVISORY_GENERATED_EVENT = "MlAdvisoryGenerated.v1";
+  public static final String ML_PRICING_ADVISORY_GENERATED_EVENT = "MlPricingAdvisoryGenerated.v1";
+  public static final String ML_PRICING_ADVISORY_SUPPRESSED_EVENT = "MlPricingAdvisorySuppressed.v1";
+  public static final String ML_ADVISORY_VIEWED_EVENT = "MlAdvisoryViewed.v1";
+  public static final String ML_MODEL_INFERENCE_COMPLETED_EVENT = "MlModelInferenceCompleted.v1";
+  public static final String ML_MODEL_RUNTIME_HEALTH_CHANGED_EVENT = "MlModelRuntimeHealthChanged.v1";
   public static final String CACHE_KEY_PATTERN = "tenant:%s:ml-advisory:control:%s:v%d";
   public static final String GLOBAL_KILL_SWITCH_TENANT_ID = "GLOBAL";
 
@@ -45,6 +63,11 @@ public final class MlAdvisoryControlService {
   private final Map<String, KillSwitchState> killSwitches = new HashMap<>();
   private final Map<String, FeatureSnapshot> featureSnapshots = new HashMap<>();
   private final Map<String, FeatureSnapshotResponse> snapshotIdempotencyResponses = new HashMap<>();
+  private final Map<String, AdvisoryCard> advisoryCards = new HashMap<>();
+  private final Map<String, AdvisoryCard> advisoryIdempotencyResponses = new HashMap<>();
+  private final Map<String, PricingAdvisoryEvaluation> pricingAdvisoryIdempotencyResponses = new HashMap<>();
+  private final List<ModelInferenceResult> modelInvocations = new ArrayList<>();
+  private final Map<String, RuntimeHealth> runtimeHealth = new HashMap<>();
   private final List<MlAdvisoryOutboxEvent> outboxEvents = new ArrayList<>();
   private final List<MlAdvisoryAuditRecord> auditRecords = new ArrayList<>();
 
@@ -317,6 +340,400 @@ public final class MlAdvisoryControlService {
         .toList();
   }
 
+  public MlAdvisoryResult<AdvisoryCard> generateAdvisory(GenerateAdvisoryCommand command) {
+    MlAdvisoryResult<GenerateAdvisoryCommand> validation = validateGenerateAdvisory(command);
+    if (!validation.valid()) {
+      return MlAdvisoryResult.failure(validation.errorCode().orElseThrow());
+    }
+    MlAdvisoryResult<MlAdvisoryControlResponse> mode =
+        resolveEffectiveMode(
+            new ResolveControlQuery(
+                command.tenantId(),
+                "advisory-interface",
+                "pricing-result",
+                command.advisoryType(),
+                command.correlationId()));
+    if (mode.valid() && mode.value().orElseThrow().effectiveMode() != AdvisoryMode.ADVISORY_VISIBLE) {
+      return MlAdvisoryResult.failure("ML_ADVISORY_DISABLED");
+    }
+
+    String idempotencyKey = command.tenantId() + ":advisory:" + command.idempotencyKey();
+    String requestHash = hash(canonicalAdvisory(command));
+    String existingHash = idempotencyHashes.get(idempotencyKey);
+    if (existingHash != null) {
+      if (!existingHash.equals(requestHash)) {
+        return MlAdvisoryResult.failure("IDEMPOTENCY_CONFLICT");
+      }
+      return MlAdvisoryResult.success(advisoryIdempotencyResponses.get(idempotencyKey));
+    }
+
+    Instant now = clock.instant();
+    String advisoryId =
+        deterministicId(command.tenantId(), command.scenarioId(), command.pricingResultId(), command.snapshotId(), command.modelVersionId());
+    String eventId = deterministicId(advisoryId, command.correlationId(), ML_ADVISORY_GENERATED_EVENT);
+    String auditId = deterministicId(advisoryId, command.actorId(), "advisory-audit");
+    List<AllowedAction> allowedActions = AdvisoryBoundaryEnforcer.allowedDisplayActions(command.displayPolicy());
+    boolean collapsed = command.displayPolicy().collapsedByDefault(command.confidence());
+    AdvisoryCard card =
+        new AdvisoryCard(
+            advisoryId,
+            command.tenantId(),
+            command.scenarioId(),
+            command.pricingResultId(),
+            command.snapshotId(),
+            command.modelVersionId(),
+            command.advisoryType(),
+            command.recommendation(),
+            command.confidence(),
+            command.confidenceBand(),
+            AdvisoryBoundaryEnforcer.authoritative(),
+            expired(command.expiresAt(), now) ? "EXPIRED" : "READY",
+            command.generatedAt(),
+            command.expiresAt(),
+            command.displayPolicy().disclaimer(),
+            allowedActions,
+            command.reasons().stream().sorted(Comparator.comparingInt(AdvisoryReason::rank)).toList(),
+            collapsed,
+            collapsed ? "LOW_CONFIDENCE_COLLAPSED" : "READY_EXPANDED",
+            "ML Advisory, " + command.confidenceBand() + " confidence, advisory only",
+            eventId,
+            auditId,
+            command.correlationId());
+    advisoryCards.put(advisoryKey(command.tenantId(), advisoryId), card);
+    outboxEvents.add(
+        new MlAdvisoryOutboxEvent(
+            eventId,
+            ML_ADVISORY_GENERATED_EVENT,
+            command.tenantId(),
+            advisoryId,
+            command.actorId(),
+            command.correlationId(),
+            command.idempotencyKey(),
+            now,
+            Map.of(
+                "advisoryId", advisoryId,
+                "scenarioId", command.scenarioId(),
+                "type", command.advisoryType().name(),
+                "confidenceBand", command.confidenceBand(),
+                "modelVersionId", command.modelVersionId(),
+                "snapshotId", command.snapshotId(),
+                "authoritative", "false",
+                "sourceRefs", String.join(",", command.sourceRefs().keySet().stream().sorted().toList()))));
+    auditRecords.add(
+        new MlAdvisoryAuditRecord(
+            auditId,
+            command.tenantId(),
+            command.actorId(),
+            "ML_ADVISORY_GENERATED",
+            "none",
+            "advisory=" + advisoryId + ";authoritative=false;actions=" + allowedActions,
+            command.correlationId(),
+            now));
+    idempotencyHashes.put(idempotencyKey, requestHash);
+    advisoryIdempotencyResponses.put(idempotencyKey, card);
+    return MlAdvisoryResult.success(card);
+  }
+
+  public List<AdvisoryCard> listAdvisoryCards(AdvisorySummaryQuery query) {
+    if (query == null || !isUuid(query.tenantId()) || isBlank(query.scenarioId()) || isBlank(query.pricingResultId())) {
+      return List.of();
+    }
+    return advisoryCards.values().stream()
+        .filter(card -> card.tenantId().equals(query.tenantId()))
+        .filter(card -> card.scenarioId().equals(query.scenarioId()))
+        .filter(card -> card.pricingResultId().equals(query.pricingResultId()))
+        .sorted(Comparator.comparing(AdvisoryCard::generatedAt).reversed())
+        .toList();
+  }
+
+  public MlAdvisoryResult<PricingAdvisoryEvaluation> evaluatePricingAdvisory(
+      EvaluatePricingAdvisoryCommand command, LocalModelAdapter adapter) {
+    MlAdvisoryResult<EvaluatePricingAdvisoryCommand> validation = validatePricingAdvisory(command, adapter);
+    if (!validation.valid()) {
+      return MlAdvisoryResult.failure(validation.errorCode().orElseThrow());
+    }
+
+    String idempotencyKey = command.tenantId() + ":pricing-advisory:" + command.idempotencyKey();
+    String requestHash = hash(canonicalPricingAdvisory(command));
+    String existingHash = idempotencyHashes.get(idempotencyKey);
+    if (existingHash != null) {
+      if (!existingHash.equals(requestHash)) {
+        return MlAdvisoryResult.failure("IDEMPOTENCY_CONFLICT");
+      }
+      return MlAdvisoryResult.success(pricingAdvisoryIdempotencyResponses.get(idempotencyKey));
+    }
+
+    FeatureSnapshot snapshot = featureSnapshots.get(snapshotKey(command.tenantId(), command.snapshotId()));
+    if (snapshot == null || !snapshot.pricingResultId().equals(command.pricingResultId())) {
+      return MlAdvisoryResult.failure("ML_PRICING_REFERENCE_STALE");
+    }
+
+    MlAdvisoryResult<MlAdvisoryControlResponse> mode =
+        resolveEffectiveMode(
+            new ResolveControlQuery(
+                command.tenantId(),
+                "advisory-interface",
+                "pricing-result",
+                AdvisoryType.PRICING,
+                command.correlationId()));
+    if (mode.valid() && mode.value().orElseThrow().effectiveMode() != AdvisoryMode.ADVISORY_VISIBLE) {
+      PricingAdvisoryEvaluation suppressed = suppressPricingAdvisory(command, "ML_PRICING_ADVISORY_DISABLED");
+      rememberPricingAdvisory(idempotencyKey, requestHash, suppressed);
+      return MlAdvisoryResult.success(suppressed);
+    }
+    if (command.displayPolicy().collapsedByDefault(command.confidence())) {
+      PricingAdvisoryEvaluation suppressed = suppressPricingAdvisory(command, "ML_PRICING_ADVISORY_SUPPRESSED");
+      rememberPricingAdvisory(idempotencyKey, requestHash, suppressed);
+      return MlAdvisoryResult.success(suppressed);
+    }
+    if (snapshot.features().stream().anyMatch(value -> !value.included() && "PROHIBITED_PROXY".equals(value.sensitivityClass()))) {
+      PricingAdvisoryEvaluation suppressed = suppressPricingAdvisory(command, "FAIR_LENDING_GUARD_SUPPRESSED");
+      rememberPricingAdvisory(idempotencyKey, requestHash, suppressed);
+      return MlAdvisoryResult.success(suppressed);
+    }
+
+    Map<String, String> modelFeatures =
+        snapshot.features().stream()
+            .filter(FeatureSnapshotValue::included)
+            .collect(Collectors.toMap(FeatureSnapshotValue::featureName, FeatureSnapshotValue::valueHash, (left, right) -> left));
+    ModelInferenceResult inference =
+        invokeLocalModel(
+                adapter,
+                new ModelInvocationRequest(
+                    command.modelArtifactRef(),
+                    new InferenceRequest(
+                        command.tenantId(),
+                        snapshot.snapshotId(),
+                        AdvisoryType.PRICING,
+                        snapshot.featureSchemaVersion(),
+                        modelFeatures,
+                        command.actorId(),
+                        command.correlationId(),
+                        command.timeoutMillis(),
+                        command.simulateModelTimeout(),
+                        command.simulateModelFailure(),
+                        command.simulateAuthoritativeOutput())))
+            .value()
+            .orElseThrow();
+    if (!"SUCCESS".equals(inference.status()) || inference.authoritative()) {
+      PricingAdvisoryEvaluation suppressed =
+          suppressPricingAdvisory(command, inference.reasonCode().isBlank() ? "ML_MODEL_UNAVAILABLE" : inference.reasonCode());
+      rememberPricingAdvisory(idempotencyKey, requestHash, suppressed);
+      return MlAdvisoryResult.success(suppressed);
+    }
+
+    Map<String, String> sourceRefs = new HashMap<>(snapshot.sourceRefs());
+    sourceRefs.put("snapshot", snapshot.snapshotId());
+    sourceRefs.put("pricingResult", snapshot.pricingResultId());
+    sourceRefs.put("modelVersion", command.modelArtifactRef().modelVersionId());
+    String recommendation =
+        inference.output().getOrDefault("recommendation", "Review pricing advisory evidence before final pricing decision");
+    String confidenceBand =
+        inference.confidenceBand().isBlank() ? commandConfidenceBand(command.displayPolicy(), command.confidence()) : inference.confidenceBand();
+    AdvisoryCard card =
+        generateAdvisory(
+                new GenerateAdvisoryCommand(
+                    command.tenantId(),
+                    command.idempotencyKey() + "-card",
+                    command.actorId(),
+                    command.scenarioId(),
+                    command.pricingResultId(),
+                    snapshot.snapshotId(),
+                    command.modelArtifactRef().modelVersionId(),
+                    AdvisoryType.PRICING,
+                    recommendation,
+                    command.confidence(),
+                    confidenceBand,
+                    command.generatedAt(),
+                    command.expiresAt(),
+                    command.reasons(),
+                    sourceRefs,
+                    command.displayPolicy(),
+                    command.correlationId()))
+            .value()
+            .orElseThrow();
+    String eventId = deterministicId(card.advisoryId(), command.correlationId(), ML_PRICING_ADVISORY_GENERATED_EVENT);
+    outboxEvents.add(
+        new MlAdvisoryOutboxEvent(
+            eventId,
+            ML_PRICING_ADVISORY_GENERATED_EVENT,
+            command.tenantId(),
+            card.advisoryId(),
+            command.actorId(),
+            command.correlationId(),
+            command.idempotencyKey(),
+            clock.instant(),
+            Map.of(
+                "advisoryId", card.advisoryId(),
+                "scenarioId", command.scenarioId(),
+                "pricingResultId", command.pricingResultId(),
+                "subtype", "PRICING",
+                "confidenceBand", confidenceBand,
+                "severity", command.reasons().get(0).direction(),
+                "modelVersionId", command.modelArtifactRef().modelVersionId(),
+                "snapshotId", snapshot.snapshotId(),
+                "authoritative", "false",
+                "deterministicPricingUnchanged", "true")));
+    PricingAdvisoryEvaluation evaluation =
+        new PricingAdvisoryEvaluation(
+            deterministicId(card.advisoryId(), command.correlationId(), "evaluation"),
+            command.tenantId(),
+            command.scenarioId(),
+            command.pricingResultId(),
+            snapshot.snapshotId(),
+            command.modelArtifactRef().modelVersionId(),
+            "READY",
+            false,
+            true,
+            command.confidence(),
+            confidenceBand,
+            "",
+            card.disclaimer(),
+            card.advisoryId(),
+            pricingAdvisoryLink(command.tenantId(), card.advisoryId(), "explanation"),
+            pricingAdvisoryLink(command.tenantId(), card.advisoryId(), "feedback"),
+            eventId,
+            card.auditRef(),
+            command.correlationId(),
+            card.topReasons());
+    rememberPricingAdvisory(idempotencyKey, requestHash, evaluation);
+    return MlAdvisoryResult.success(evaluation);
+  }
+
+  public MlAdvisoryResult<AdvisoryCard> getAdvisoryDetails(
+      String tenantId, String advisoryId, String actorId, String viewSurface, String correlationId) {
+    if (!isUuid(tenantId) || isBlank(advisoryId) || isBlank(actorId) || isBlank(viewSurface) || isBlank(correlationId)) {
+      return MlAdvisoryResult.failure("VALIDATION_FAILED");
+    }
+    AdvisoryCard card = advisoryCards.get(advisoryKey(tenantId, advisoryId));
+    if (card == null) {
+      return MlAdvisoryResult.failure("ML_ADVISORY_NOT_FOUND");
+    }
+    if (expired(card.expiresAt(), clock.instant())) {
+      return MlAdvisoryResult.failure("ML_ADVISORY_EXPIRED");
+    }
+    String eventId = deterministicId(advisoryId, actorId, correlationId, ML_ADVISORY_VIEWED_EVENT);
+    outboxEvents.add(
+        new MlAdvisoryOutboxEvent(
+            eventId,
+            ML_ADVISORY_VIEWED_EVENT,
+            tenantId,
+            advisoryId,
+            actorId,
+            correlationId,
+            "",
+            clock.instant(),
+            Map.of("advisoryId", advisoryId, "viewSurface", viewSurface, "authoritative", "false")));
+    auditRecords.add(
+        new MlAdvisoryAuditRecord(
+            deterministicId(advisoryId, actorId, "view-audit"),
+            tenantId,
+            actorId,
+            "ML_ADVISORY_VIEWED",
+            "hidden",
+            "viewSurface=" + viewSurface,
+            correlationId,
+            clock.instant()));
+    return MlAdvisoryResult.success(card);
+  }
+
+  public MlAdvisoryResult<ModelInferenceResult> invokeLocalModel(LocalModelAdapter adapter, ModelInvocationRequest request) {
+    if (adapter == null || request == null || request.inferenceRequest() == null || request.artifactRef() == null) {
+      return MlAdvisoryResult.failure("VALIDATION_FAILED");
+    }
+    InferenceRequest inference = request.inferenceRequest();
+    ModelArtifactRef artifact = request.artifactRef();
+    if (!isUuid(inference.tenantId())
+        || isBlank(inference.snapshotId())
+        || inference.advisoryType() == null
+        || isBlank(inference.actorId())
+        || isBlank(inference.correlationId())) {
+      return MlAdvisoryResult.failure("VALIDATION_FAILED");
+    }
+
+    ModelInferenceResult result = adapter.invoke(request);
+    Instant now = clock.instant();
+    modelInvocations.add(result);
+    String runtimeId = deterministicId(inference.tenantId(), artifact.modelVersionId(), "runtime");
+    String healthStatus = result.status().equals("SUCCESS") ? "READY" : "DEGRADED";
+    RuntimeHealth previousHealth = runtimeHealth.get(runtimeId);
+    RuntimeHealth health =
+        new RuntimeHealth(
+            runtimeId,
+            artifact.modelVersionId(),
+            artifact.actualChecksum(),
+            now,
+            healthStatus,
+            result.status().equals("SUCCESS") ? "" : result.reasonCode(),
+            now,
+            killSwitchFor(inference.tenantId()).filter(KillSwitchState::enabled).isPresent());
+    runtimeHealth.put(runtimeId, health);
+
+    outboxEvents.add(
+        new MlAdvisoryOutboxEvent(
+            result.eventRef(),
+            ML_MODEL_INFERENCE_COMPLETED_EVENT,
+            result.tenantId(),
+            result.invocationId(),
+            inference.actorId(),
+            result.correlationId(),
+            "",
+            now,
+            Map.of(
+                "invocationId", result.invocationId(),
+                "modelVersionId", result.modelVersionId(),
+                "snapshotId", result.snapshotId(),
+                "status", result.status(),
+                "advisoryResponse", result.advisoryResponse(),
+                "latencyMs", String.valueOf(result.latencyMs()),
+                "confidenceBand", result.confidenceBand())));
+    auditRecords.add(
+        new MlAdvisoryAuditRecord(
+            result.auditRef(),
+            result.tenantId(),
+            inference.actorId(),
+            "ML_MODEL_RUNTIME_INVOCATION_COMPLETED",
+            "snapshot=" + result.snapshotId(),
+            "status=" + result.status() + ";response=" + result.advisoryResponse() + ";reason=" + result.reasonCode(),
+            result.correlationId(),
+            now));
+    if (previousHealth == null || !previousHealth.status().equals(health.status())) {
+      outboxEvents.add(
+          new MlAdvisoryOutboxEvent(
+              deterministicId(runtimeId, health.status(), ML_MODEL_RUNTIME_HEALTH_CHANGED_EVENT),
+              ML_MODEL_RUNTIME_HEALTH_CHANGED_EVENT,
+              inference.tenantId(),
+              runtimeId,
+              inference.actorId(),
+              result.correlationId(),
+              "",
+              now,
+              Map.of(
+                  "runtimeId", runtimeId,
+                  "modelVersionId", artifact.modelVersionId(),
+                  "oldStatus", previousHealth == null ? "UNKNOWN" : previousHealth.status(),
+                  "newStatus", health.status(),
+                  "reason", health.lastError())));
+    }
+    return MlAdvisoryResult.success(result);
+  }
+
+  public List<ModelInferenceResult> modelInvocationsForTenant(String tenantId) {
+    return modelInvocations.stream()
+        .filter(invocation -> invocation.tenantId().equals(tenantId))
+        .sorted(Comparator.comparing(ModelInferenceResult::invocationId))
+        .toList();
+  }
+
+  public List<RuntimeHealth> runtimeHealthForTenant(String tenantId) {
+    if (!isUuid(tenantId)) {
+      return List.of();
+    }
+    return runtimeHealth.values().stream()
+        .sorted(Comparator.comparing(RuntimeHealth::runtimeId))
+        .toList();
+  }
+
   public List<MlAdvisoryOutboxEvent> outboxEvents() {
     return List.copyOf(outboxEvents);
   }
@@ -336,6 +753,13 @@ public final class MlAdvisoryControlService {
     return featureSnapshots.values().stream()
         .filter(snapshot -> snapshot.tenantId().equals(tenantId))
         .sorted(Comparator.comparing(FeatureSnapshot::snapshotId))
+        .toList();
+  }
+
+  public List<AdvisoryCard> advisoryCardsForTenant(String tenantId) {
+    return advisoryCards.values().stream()
+        .filter(card -> card.tenantId().equals(tenantId))
+        .sorted(Comparator.comparing(AdvisoryCard::advisoryId))
         .toList();
   }
 
@@ -405,6 +829,146 @@ public final class MlAdvisoryControlService {
       return MlAdvisoryResult.failure("ML_FEATURE_SCHEMA_UNSUPPORTED");
     }
     return MlAdvisoryResult.success(command);
+  }
+
+  private MlAdvisoryResult<GenerateAdvisoryCommand> validateGenerateAdvisory(GenerateAdvisoryCommand command) {
+    if (command == null
+        || !isUuid(command.tenantId())
+        || isBlank(command.idempotencyKey())
+        || isBlank(command.actorId())
+        || isBlank(command.scenarioId())
+        || isBlank(command.pricingResultId())
+        || isBlank(command.snapshotId())
+        || isBlank(command.modelVersionId())
+        || command.advisoryType() == null
+        || isBlank(command.recommendation())
+        || isBlank(command.confidenceBand())
+        || command.generatedAt() == null
+        || command.expiresAt() == null
+        || isBlank(command.correlationId())) {
+      return MlAdvisoryResult.failure("VALIDATION_FAILED");
+    }
+    if (command.confidence() < 0.0 || command.confidence() > 1.0) {
+      return MlAdvisoryResult.failure("ML_ADVISORY_CONFIDENCE_INVALID");
+    }
+    if (!command.expiresAt().isAfter(command.generatedAt())) {
+      return MlAdvisoryResult.failure("ML_ADVISORY_EXPIRED");
+    }
+    if (command.displayPolicy() == null || !command.displayPolicy().valid()) {
+      return MlAdvisoryResult.failure("POLICY_NOT_SATISFIED");
+    }
+    if (command.reasons().isEmpty()
+        || command.sourceRefs().isEmpty()
+        || command.reasons().stream().anyMatch(this::invalidReason)) {
+      return MlAdvisoryResult.failure("VALIDATION_FAILED");
+    }
+    return MlAdvisoryResult.success(command);
+  }
+
+  private MlAdvisoryResult<EvaluatePricingAdvisoryCommand> validatePricingAdvisory(
+      EvaluatePricingAdvisoryCommand command, LocalModelAdapter adapter) {
+    if (command == null
+        || adapter == null
+        || !isUuid(command.tenantId())
+        || isBlank(command.idempotencyKey())
+        || isBlank(command.actorId())
+        || isBlank(command.scenarioId())
+        || isBlank(command.pricingResultId())
+        || isBlank(command.snapshotId())
+        || command.modelArtifactRef() == null
+        || isBlank(command.correlationId())
+        || command.generatedAt() == null
+        || command.expiresAt() == null) {
+      return MlAdvisoryResult.failure("VALIDATION_FAILED");
+    }
+    if (command.confidence() < 0.0 || command.confidence() > 1.0 || command.timeoutMillis() <= 0) {
+      return MlAdvisoryResult.failure("VALIDATION_FAILED");
+    }
+    if (command.displayPolicy() == null || !command.displayPolicy().valid() || command.reasons().isEmpty()) {
+      return MlAdvisoryResult.failure("POLICY_NOT_SATISFIED");
+    }
+    if (!command.expiresAt().isAfter(command.generatedAt()) || command.reasons().stream().anyMatch(this::invalidReason)) {
+      return MlAdvisoryResult.failure("VALIDATION_FAILED");
+    }
+    return MlAdvisoryResult.success(command);
+  }
+
+  private PricingAdvisoryEvaluation suppressPricingAdvisory(EvaluatePricingAdvisoryCommand command, String reason) {
+    String evaluationId = deterministicId(command.tenantId(), command.pricingResultId(), command.snapshotId(), reason);
+    String eventId = deterministicId(evaluationId, command.correlationId(), ML_PRICING_ADVISORY_SUPPRESSED_EVENT);
+    String auditId = deterministicId(evaluationId, command.actorId(), "pricing-advisory-suppressed-audit");
+    outboxEvents.add(
+        new MlAdvisoryOutboxEvent(
+            eventId,
+            ML_PRICING_ADVISORY_SUPPRESSED_EVENT,
+            command.tenantId(),
+            evaluationId,
+            command.actorId(),
+            command.correlationId(),
+            command.idempotencyKey(),
+            clock.instant(),
+            Map.of(
+                "scenarioId", command.scenarioId(),
+                "pricingResultId", command.pricingResultId(),
+                "reason", reason,
+                "policyVersion", command.displayPolicy().disclaimer(),
+                "modelVersionId", command.modelArtifactRef() == null ? "" : command.modelArtifactRef().modelVersionId(),
+                "authoritative", "false",
+                "deterministicPricingUnchanged", "true")));
+    auditRecords.add(
+        new MlAdvisoryAuditRecord(
+            auditId,
+            command.tenantId(),
+            command.actorId(),
+            "ML_PRICING_ADVISORY_SUPPRESSED",
+            "none",
+            "reason=" + reason + ";pricingResult=" + command.pricingResultId(),
+            command.correlationId(),
+            clock.instant()));
+    return new PricingAdvisoryEvaluation(
+        evaluationId,
+        command.tenantId(),
+        command.scenarioId(),
+        command.pricingResultId(),
+        command.snapshotId(),
+        command.modelArtifactRef() == null ? "" : command.modelArtifactRef().modelVersionId(),
+        "SUPPRESSED",
+        false,
+        true,
+        command.confidence(),
+        commandConfidenceBand(command.displayPolicy(), command.confidence()),
+        reason,
+        command.displayPolicy() == null ? NON_AUTHORITATIVE_DISCLAIMER : command.displayPolicy().disclaimer(),
+        "",
+        "",
+        "",
+        eventId,
+        auditId,
+        command.correlationId(),
+        command.reasons());
+  }
+
+  private void rememberPricingAdvisory(String idempotencyKey, String requestHash, PricingAdvisoryEvaluation evaluation) {
+    idempotencyHashes.put(idempotencyKey, requestHash);
+    pricingAdvisoryIdempotencyResponses.put(idempotencyKey, evaluation);
+  }
+
+  private String commandConfidenceBand(AdvisoryDisplayPolicy policy, double confidence) {
+    return policy != null && policy.collapsedByDefault(confidence) ? "LOW" : "VISIBLE";
+  }
+
+  private String pricingAdvisoryLink(String tenantId, String advisoryId, String relation) {
+    return "/api/v1/tenants/" + tenantId + "/ml-advisory/pricing-advisories/" + advisoryId + ":" + relation;
+  }
+
+  private boolean invalidReason(AdvisoryReason reason) {
+    return reason == null
+        || isBlank(reason.reasonCode())
+        || reason.rank() <= 0
+        || isBlank(reason.description())
+        || isBlank(reason.direction())
+        || isBlank(reason.featureRef())
+        || isBlank(reason.sensitivityClass());
   }
 
   private boolean invalidFeature(FeatureInput feature) {
@@ -535,6 +1099,14 @@ public final class MlAdvisoryControlService {
     return tenantId + ":" + snapshotId;
   }
 
+  private String advisoryKey(String tenantId, String advisoryId) {
+    return tenantId + ":" + advisoryId;
+  }
+
+  private boolean expired(Instant expiresAt, Instant now) {
+    return expiresAt != null && !expiresAt.isAfter(now);
+  }
+
   private String cacheKey(String tenantId, String channel, String productFamily, AdvisoryType advisoryType, int version) {
     return CACHE_KEY_PATTERN.formatted(tenantId, hash(channel + ":" + productFamily + ":" + advisoryType).substring(0, 16), version);
   }
@@ -606,6 +1178,59 @@ public final class MlAdvisoryControlService {
         command.retentionClass(),
         command.correlationId(),
         canonicalFeatures);
+  }
+
+  private String canonicalAdvisory(GenerateAdvisoryCommand command) {
+    String canonicalReasons =
+        command.reasons().stream()
+            .sorted(Comparator.comparingInt(AdvisoryReason::rank))
+            .map(reason -> reason.reasonCode() + ":" + reason.featureRef() + ":" + reason.direction())
+            .reduce("", (left, right) -> left + "|" + right);
+    return String.join(
+        "|",
+        command.tenantId(),
+        command.idempotencyKey(),
+        command.actorId(),
+        command.scenarioId(),
+        command.pricingResultId(),
+        command.snapshotId(),
+        command.modelVersionId(),
+        command.advisoryType().name(),
+        command.recommendation(),
+        String.valueOf(command.confidence()),
+        command.confidenceBand(),
+        command.generatedAt().toString(),
+        command.expiresAt().toString(),
+        command.displayPolicy().disclaimer(),
+        canonicalReasons,
+        command.correlationId());
+  }
+
+  private String canonicalPricingAdvisory(EvaluatePricingAdvisoryCommand command) {
+    String canonicalReasons =
+        command.reasons().stream()
+            .sorted(Comparator.comparingInt(AdvisoryReason::rank))
+            .map(reason -> reason.reasonCode() + ":" + reason.featureRef() + ":" + reason.direction())
+            .reduce("", (left, right) -> left + "|" + right);
+    return String.join(
+        "|",
+        command.tenantId(),
+        command.idempotencyKey(),
+        command.actorId(),
+        command.scenarioId(),
+        command.pricingResultId(),
+        command.snapshotId(),
+        command.modelArtifactRef().modelVersionId(),
+        String.valueOf(command.confidence()),
+        command.generatedAt().toString(),
+        command.expiresAt().toString(),
+        command.displayPolicy().disclaimer(),
+        String.valueOf(command.timeoutMillis()),
+        String.valueOf(command.simulateModelTimeout()),
+        String.valueOf(command.simulateModelFailure()),
+        String.valueOf(command.simulateAuthoritativeOutput()),
+        canonicalReasons,
+        command.correlationId());
   }
 
   private String nullToEmpty(String value) {

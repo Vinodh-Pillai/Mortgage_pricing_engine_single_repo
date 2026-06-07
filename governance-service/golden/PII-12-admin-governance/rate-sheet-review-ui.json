@@ -1,0 +1,26 @@
+{
+  "story_id": "PII-12-S06",
+  "artifact_type": "RateSheetConfig",
+  "api": {
+    "queue": "/api/v1/tenants/{tenantId}/admin/rate-sheets",
+    "review": "/api/v1/tenants/{tenantId}/admin/rate-sheets/{versionId}/review",
+    "review_notes": "/api/v1/tenants/{tenantId}/admin/rate-sheets/{versionId}/review-notes",
+    "compare": "/api/v1/tenants/{tenantId}/admin/rate-sheets/{versionId}/compare"
+  },
+  "permissions": [
+    "admin.config.read",
+    "admin.config.write",
+    "admin.config.submit",
+    "admin.config.approve",
+    "admin.config.publish"
+  ],
+  "events": [
+    "RateSheetReviewStarted.v1",
+    "RateSheetVarianceAnnotated.v1"
+  ],
+  "audit_action": "RATE_SHEET_REVIEW_UI_COMPLETED",
+  "confidentiality": "Outbox and audit payloads carry row hashes, counts, version refs, policy refs, and comment hashes rather than raw rate sheet row values.",
+  "blocked_gaps": [
+    "No pricing-workbench UI project is present inside the acquired governance-service lock; frontend components, accessibility screenshots, and browser E2E remain blocked for a UI-scoped lane."
+  ]
+}

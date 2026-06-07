@@ -3,6 +3,7 @@ package com.wcpe.quote;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -75,6 +76,63 @@ public class QuoteApplicationService {
             .orElseThrow(() -> new QuoteCreateException("NOT_FOUND", "Quote not found"));
         Quote current = cache.get(tenantId, quoteId, stored.version()).orElse(stored);
         return expireIfNeeded(current);
+    }
+
+    public List<OutboxEvent> quoteEvents(UUID tenantId, UUID quoteId) {
+        if (tenantId == null || quoteId == null) {
+            throw new QuoteCreateException("QUOTE_VALIDATION_FAILED", "tenantId and quoteId are required");
+        }
+        repository.findById(tenantId, quoteId)
+            .orElseThrow(() -> new QuoteCreateException("NOT_FOUND", "Quote not found"));
+        return outboxEvents.stream()
+            .filter(event -> tenantId.toString().equals(event.tenantId()))
+            .filter(event -> quoteId.toString().equals(event.aggregateId()))
+            .sorted(Comparator.comparing(OutboxEvent::occurredAt).thenComparing(OutboxEvent::eventType))
+            .toList();
+    }
+
+    public QuoteEventReplayResult replayQuoteEvent(UUID tenantId, String eventId, String actorId, String correlationId, String reasonForAccess) {
+        validateReplayRequest(tenantId, eventId, actorId, correlationId, reasonForAccess);
+        OutboxEvent original = outboxEvents.stream()
+            .filter(event -> tenantId.toString().equals(event.tenantId()))
+            .filter(event -> eventId.equals(event.eventId()))
+            .findFirst()
+            .orElseThrow(() -> new QuoteCreateException("NOT_FOUND", "Quote event not found"));
+        String deliveryId = UUID.nameUUIDFromBytes((tenantId + ":" + eventId + ":" + correlationId + ":replay").getBytes()).toString();
+        Map<String, String> replayHeaders = new LinkedHashMap<>(original.envelopeHeaders());
+        replayHeaders.put("eventId", UUID.nameUUIDFromBytes((deliveryId + ":" + original.eventType()).getBytes()).toString());
+        replayHeaders.put("causationId", original.eventId());
+        replayHeaders.put("correlationId", correlationId);
+        replayHeaders.put("actorId", actorId);
+        replayHeaders.put("replay", "true");
+        replayHeaders.put("originalEventId", original.eventId());
+        replayHeaders.put("deliveryId", deliveryId);
+        replayHeaders.put("reasonForAccess", reasonForAccess);
+        OutboxEvent replayed = new OutboxEvent(
+            original.eventType(),
+            original.eventVersion(),
+            original.key(),
+            clock.instant(),
+            replayHeaders,
+            original.payload()
+        );
+        outboxEvents.add(replayed);
+        AuditEntry auditEntry = new AuditEntry(
+            "QUOTE_EVENT_REPLAY_REQUESTED",
+            actorId,
+            tenantId.toString(),
+            correlationId,
+            ReplayHash.sha256(original.payload().toString()),
+            clock.instant(),
+            Map.of(
+                "originalEventId", original.eventId(),
+                "deliveryId", deliveryId,
+                "eventType", original.eventType(),
+                "reasonForAccess", reasonForAccess
+            )
+        );
+        auditEntries.add(auditEntry);
+        return new QuoteEventReplayResult(original.eventId(), deliveryId, replayed, auditEntry);
     }
 
     public QuoteJob startQuoteJob(QuoteJobStartRequest request) {
@@ -154,6 +212,9 @@ public class QuoteApplicationService {
         }
         QuoteSnapshot snapshot = snapshotRepository.findByQuoteId(tenantId, quoteId)
             .orElseThrow(() -> new QuoteCreateException("NOT_FOUND", "Quote snapshot not found"));
+        if (!clock.instant().isBefore(snapshot.retentionUntil())) {
+            throw new QuoteCreateException("POLICY_NOT_SATISFIED", "Snapshot export is outside the configured retention window");
+        }
         QuoteSnapshotExport export = new QuoteSnapshotExport(
             tenantId,
             quoteId,
@@ -843,6 +904,16 @@ public class QuoteApplicationService {
         }
     }
 
+    private static void validateReplayRequest(UUID tenantId, String eventId, String actorId, String correlationId, String reasonForAccess) {
+        if (tenantId == null || eventId == null || eventId.isBlank()) {
+            throw new QuoteCreateException("QUOTE_VALIDATION_FAILED", "tenantId and eventId are required");
+        }
+        validateSnapshotAccess(actorId, correlationId);
+        if (reasonForAccess == null || reasonForAccess.isBlank()) {
+            throw new QuoteCreateException("POLICY_NOT_SATISFIED", "Quote event replay requires reason-for-access");
+        }
+    }
+
     private static List<PriceWaterfall.WaterfallSection> maskedSections(PriceWaterfall waterfall, Set<String> allowedFields) {
         return waterfall.sections().stream()
             .map(section -> new PriceWaterfall.WaterfallSection(
@@ -905,6 +976,7 @@ public class QuoteApplicationService {
             evidenceRefs,
             "",
             quote.createdAt(),
+            quote.createdAt().plus(java.time.Duration.ofDays(365L * 7L)),
             quote.auditRef(),
             quote.correlationId()
         );
@@ -957,7 +1029,8 @@ public class QuoteApplicationService {
             Map.of(
                 "quoteId", quote.quoteId().toString(),
                 "snapshotId", snapshot.snapshotId().toString(),
-                "outputDigest", snapshot.outputDigest()
+                "outputDigest", snapshot.outputDigest(),
+                "retentionUntil", snapshot.retentionUntil().toString()
             )
         ));
         if (quote.options().stream().anyMatch(option -> option.tieBreakerTrace() != null && !option.tieBreakerTrace().isBlank())) {
@@ -997,7 +1070,8 @@ public class QuoteApplicationService {
                 "tenantId", quote.tenantId().toString(),
                 "snapshotId", snapshot.snapshotId().toString(),
                 "replayHash", snapshot.replayHash(),
-                "outputDigest", snapshot.outputDigest()
+                "outputDigest", snapshot.outputDigest(),
+                "retentionUntil", snapshot.retentionUntil().toString()
             )
         );
     }

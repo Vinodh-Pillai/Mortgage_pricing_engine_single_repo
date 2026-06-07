@@ -1,0 +1,13 @@
+{
+  "eventType": "lock.cancelled.v1",
+  "eventVersion": "1",
+  "payload": {
+    "cancellationId": "CANCEL-S10-001",
+    "previousStatus": "ACTIVE",
+    "status": "CANCELLED",
+    "reasonCode": "BORROWER_WITHDREW_LOCK",
+    "policyVersion": "lock-cancellation-policy-v1",
+    "externalNotifyRequired": "true",
+    "evidenceHash": "cancellation-evidence-hash"
+  }
+}

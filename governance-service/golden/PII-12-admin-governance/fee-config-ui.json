@@ -1,0 +1,27 @@
+{
+  "story_id": "PII-12-S08",
+  "artifact_type": "FEE_CONFIG",
+  "schema_version": "fee-schema-tenant-2026-06",
+  "impact_simulation_id": "impact-fixture-conventional-fees-1",
+  "fixture_scope": "tenant-supplied fee impact replay evidence",
+  "fee_rows": [
+    {
+      "fee_code": "ORIGINATION_FEE",
+      "category": "LENDER",
+      "display_label": "Origination Fee",
+      "calculation_method": "FIXED_AMOUNT",
+      "amount_type": "USD",
+      "context": {
+        "product": "tenant-product-ref",
+        "channel": "tenant-channel-ref",
+        "jurisdiction": "TX"
+      },
+      "disclosure_ref": "DISCLOSURE-REF-APR-2026",
+      "tolerance_ref": "TOLERANCE-REF-APR-2026",
+      "reason_code": "TENANT_FEE_CHANGE"
+    }
+  ],
+  "notes": [
+    "Fixture intentionally uses tenant/reference identifiers only; no hard-coded mortgage pricing policy or borrower PII."
+  ]
+}

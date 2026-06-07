@@ -1,0 +1,7 @@
+{
+  "eventType": "quote.ready.v1",
+  "eventVersion": "1",
+  "aggregateType": "Quote",
+  "piiClassification": "NO_BORROWER_PII",
+  "payloadFields": ["quoteId", "tenantId", "status", "version", "replayHash"]
+}

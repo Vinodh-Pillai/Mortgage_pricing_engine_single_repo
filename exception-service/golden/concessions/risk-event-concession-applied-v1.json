@@ -1,0 +1,22 @@
+{
+  "topic": "pricing.risk-monitoring.events",
+  "eventType": "risk_monitoring_events.completed.v1",
+  "eventVersion": "1",
+  "schemaVersion": "schema://risk-events/concession-applied/v1",
+  "mappingVersionId": "RISK-MAPPING-V1",
+  "sourceEventType": "CONCESSION_APPLIED",
+  "signalType": "OVERRIDE_USAGE",
+  "severity": "HIGH",
+  "payloadShape": {
+    "id": "string",
+    "tenantId": "uuid",
+    "status": "READY|SUPPRESSED",
+    "version": "integer-string",
+    "summary": "string",
+    "sourceRefs": "non-pii map string",
+    "category": "configured category",
+    "routingHint": "configured route",
+    "payloadHash": "sha256"
+  },
+  "redactionMode": "NON_PII_REFS_ONLY"
+}

@@ -17,6 +17,8 @@ public interface OutboxEventRepository extends JpaRepository<OutboxEvent, UUID>,
 
     Optional<OutboxEvent> findByTenantIdAndId(UUID tenantId, UUID id);
 
+    Optional<OutboxEvent> findByTenantIdAndEventKeyAndEventVersion(UUID tenantId, String eventKey, Integer eventVersion);
+
     List<OutboxEvent> findByTenantIdAndStatusOrderByNextAttemptAtAsc(
             UUID tenantId, OutboxEventStatus status, Pageable pageable);
 

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:wcpe:audit-replay:audit-record-created-v1",
+  "title": "AuditRecordCreatedV1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "id",
+    "tenantId",
+    "status",
+    "version",
+    "summary",
+    "sourceRefs",
+    "auditRecordId",
+    "subject",
+    "action",
+    "actor",
+    "result",
+    "occurredAt",
+    "integrityHash",
+    "retentionUntil",
+    "legalHold"
+  ],
+  "properties": {
+    "id": { "type": "string" },
+    "tenantId": { "type": "string", "format": "uuid" },
+    "status": { "type": "string" },
+    "version": { "type": "integer", "minimum": 1 },
+    "summary": { "type": "string" },
+    "sourceRefs": { "type": "array", "items": { "type": "string" } },
+    "auditRecordId": { "type": "string", "format": "uuid" },
+    "subject": {
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "type": "string" },
+        "id": { "type": "string" }
+      }
+    },
+    "action": { "type": "string" },
+    "actor": {
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "type": "string" },
+        "id": { "type": "string" }
+      }
+    },
+    "result": { "type": "string" },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "integrityHash": { "type": "string" },
+    "retentionUntil": { "type": "string", "format": "date" },
+    "legalHold": { "type": "boolean" }
+  },
+  "x-wcpe-sensitivity": {
+    "headers": "no raw PII",
+    "payload": "schema owners must classify and redact fields before replay export"
+  }
+}

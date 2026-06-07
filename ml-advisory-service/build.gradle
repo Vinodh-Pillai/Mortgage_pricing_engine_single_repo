@@ -16,6 +16,7 @@ tasks.withType(JavaCompile).configureEach {
 }
 
 dependencies {
+  implementation 'org.springframework:spring-web:6.1.14'
   testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
 }
 

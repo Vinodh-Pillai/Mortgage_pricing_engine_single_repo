@@ -1,0 +1,8 @@
+{
+  "code": "422",
+  "reason": "POLICY_NOT_SATISFIED",
+  "message": "Webhook endpoint must use HTTPS except explicit local dev endpoints",
+  "fieldErrors": [],
+  "correlationId": "corr-PII-16-S03",
+  "retryable": false
+}

@@ -15,7 +15,7 @@ class QuoteCreateIdempotencyTest {
 
         assertThat(replay.quoteId()).isEqualTo(first.quoteId());
         assertThat(service.outboxEvents()).extracting(OutboxEvent::eventType)
-            .containsExactly("quote.created.v1", "quote.ready.v1", "best_execution.ranked.v1");
+            .containsExactly("quote.created.v1", "quote.ready.v1", "best_execution.ranked.v1", "quote.snapshot_created.v1");
         QuoteCreateRequest differentScenarioVersion = new QuoteCreateRequest(
             QuoteTestSupport.TENANT,
             QuoteTestSupport.SCENARIO,

@@ -14,6 +14,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.Objects;
 import java.util.UUID;
 
 @Entity
@@ -80,6 +81,9 @@ public class OutboxEvent {
     @Column(name = "actor_id", length = 120)
     private String actorId;
 
+    @Column(name = "idempotency_key", length = 160)
+    private String idempotencyKey;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -111,6 +115,78 @@ public class OutboxEvent {
             UUID correlationId,
             UUID causationId,
             String actorId) {
+        return createPending(
+                tenantId,
+                aggregateType,
+                aggregateId,
+                aggregateVersion,
+                eventType,
+                eventVersion,
+                eventKey,
+                partitionKey,
+                payloadJson,
+                headersJson,
+                correlationId,
+                causationId,
+                actorId,
+                null);
+    }
+
+    public static OutboxEvent createPending(
+            UUID tenantId,
+            String aggregateType,
+            String aggregateId,
+            Long aggregateVersion,
+            String eventType,
+            Integer eventVersion,
+            String eventKey,
+            String partitionKey,
+            byte[] payloadJson,
+            byte[] headersJson,
+            UUID correlationId,
+            UUID causationId,
+            String actorId,
+            String idempotencyKey) {
+        return createPending(
+                tenantId,
+                aggregateType,
+                aggregateId,
+                aggregateVersion,
+                eventType,
+                eventVersion,
+                eventKey,
+                partitionKey,
+                payloadJson,
+                headersJson,
+                correlationId,
+                causationId,
+                actorId,
+                idempotencyKey,
+                null);
+    }
+
+    public static OutboxEvent createPending(
+            UUID tenantId,
+            String aggregateType,
+            String aggregateId,
+            Long aggregateVersion,
+            String eventType,
+            Integer eventVersion,
+            String eventKey,
+            String partitionKey,
+            byte[] payloadJson,
+            byte[] headersJson,
+            UUID correlationId,
+            UUID causationId,
+            String actorId,
+            String idempotencyKey,
+            String integrityHash) {
+        Objects.requireNonNull(tenantId, "tenantId is required");
+        requireText(eventType, "eventType is required");
+        Objects.requireNonNull(eventVersion, "eventVersion is required");
+        requireText(eventKey, "eventKey is required");
+        Objects.requireNonNull(payloadJson, "payloadJson is required");
+        Objects.requireNonNull(headersJson, "headersJson is required");
         OutboxEvent event = new OutboxEvent();
         event.id = UUID.randomUUID();
         event.tenantId = tenantId;
@@ -129,8 +205,48 @@ public class OutboxEvent {
         event.correlationId = correlationId;
         event.causationId = causationId;
         event.actorId = actorId;
-        event.integrityHash = sha256Hex(event.payloadJson);
+        event.idempotencyKey = idempotencyKey;
+        event.integrityHash = integrityHash == null ? sha256Hex(event.payloadJson) : integrityHash;
         return event;
+    }
+
+    public void markInFlight() {
+        if (status != OutboxEventStatus.PENDING && status != OutboxEventStatus.FAILED) {
+            throw new IllegalStateException("Only pending or failed outbox events can be claimed for publish");
+        }
+        status = OutboxEventStatus.IN_FLIGHT;
+        nextAttemptAt = null;
+    }
+
+    public void markPublished(Instant publishedAt) {
+        this.status = OutboxEventStatus.PUBLISHED;
+        this.publishedAt = Objects.requireNonNull(publishedAt, "publishedAt is required");
+        this.nextAttemptAt = null;
+        this.lastErrorCode = null;
+        this.lastErrorMessage = null;
+    }
+
+    public void markFailed(String errorCode, String errorMessage, Instant nextAttemptAt, int maxAttempts) {
+        this.attemptCount++;
+        this.lastErrorCode = truncate(errorCode, 80);
+        this.lastErrorMessage = errorMessage;
+        if (this.attemptCount >= maxAttempts) {
+            this.status = OutboxEventStatus.POISON;
+            this.nextAttemptAt = null;
+        } else {
+            this.status = OutboxEventStatus.FAILED;
+            this.nextAttemptAt = Objects.requireNonNull(nextAttemptAt, "nextAttemptAt is required before max attempts");
+        }
+    }
+
+    public void queueRetry(Instant nextAttemptAt) {
+        if (status != OutboxEventStatus.FAILED) {
+            throw new IllegalStateException("Only failed outbox events can be queued for retry");
+        }
+        this.status = OutboxEventStatus.PENDING;
+        this.nextAttemptAt = Objects.requireNonNull(nextAttemptAt, "nextAttemptAt is required");
+        this.lastErrorCode = null;
+        this.lastErrorMessage = null;
     }
 
     @PrePersist
@@ -298,6 +414,14 @@ public class OutboxEvent {
         this.actorId = actorId;
     }
 
+    public String getIdempotencyKey() {
+        return idempotencyKey;
+    }
+
+    public void setIdempotencyKey(String idempotencyKey) {
+        this.idempotencyKey = idempotencyKey;
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
     }
@@ -328,5 +452,18 @@ public class OutboxEvent {
         } catch (NoSuchAlgorithmException ex) {
             throw new IllegalStateException("SHA-256 digest is unavailable", ex);
         }
+    }
+
+    private static void requireText(String value, String message) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(message);
+        }
+    }
+
+    private static String truncate(String value, int maxLength) {
+        if (value == null || value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, maxLength);
     }
 }

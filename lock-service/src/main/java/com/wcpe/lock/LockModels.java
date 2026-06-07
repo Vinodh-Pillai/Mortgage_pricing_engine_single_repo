@@ -78,6 +78,206 @@ public final class LockModels {
     PENDING, SENT, ACKED, FAILED, DLQ, RECONCILED
   }
 
+  public enum LockAuditReportStatus {
+    REQUESTED, READY, FAILED
+  }
+
+  public enum LockReplayMismatchClass {
+    MATCH, RESULT_MISMATCH, CONFIG_REF_MISSING
+  }
+
+  public record LockAuditReportCommand(
+    UUID tenantId,
+    String requestId,
+    String actorId,
+    Map<String, String> criteria,
+    Instant requestedAt,
+    boolean permissionGranted,
+    String idempotencyKey,
+    String correlationId,
+    Map<String, String> sourceRefs
+  ) {}
+
+  public record LockAuditReportRecord(
+    UUID tenantId,
+    String reportId,
+    LockAuditReportStatus status,
+    String requestedBy,
+    Instant generatedAt,
+    String criteriaHash,
+    String manifestHash,
+    String idempotencyKey,
+    String correlationId
+  ) {}
+
+  public record LockAuditReportResponse(
+    UUID tenantId,
+    String reportId,
+    LockAuditReportStatus status,
+    int version,
+    String resultSummary,
+    List<String> validationMessages,
+    String auditRef,
+    String replayRef,
+    String correlationId,
+    String outboxEventType,
+    String manifestHash
+  ) {}
+
+  public record LockReplayCommand(
+    UUID tenantId,
+    String lockId,
+    String replayId,
+    String actorId,
+    String capturedInputHash,
+    String configGraphHash,
+    String eventSequenceHash,
+    String expectedResultHash,
+    String actualResultHash,
+    boolean permissionGranted,
+    String idempotencyKey,
+    String correlationId,
+    Instant replayedAt,
+    Map<String, String> historicalRefs
+  ) {}
+
+  public record LockReplayResult(
+    UUID tenantId,
+    String replayId,
+    String lockId,
+    String inputHash,
+    String configGraphHash,
+    String eventSequenceHash,
+    String expectedResultHash,
+    String actualResultHash,
+    LockReplayMismatchClass mismatchClass,
+    String evidenceHash,
+    String idempotencyKey,
+    String correlationId,
+    Instant replayedAt
+  ) {}
+
+  public record LockReplayResponse(
+    UUID tenantId,
+    String replayId,
+    String lockId,
+    LockReplayMismatchClass mismatchClass,
+    String evidenceHash,
+    String resultSummary,
+    List<String> validationMessages,
+    String auditRef,
+    String replayRef,
+    String correlationId,
+    String outboxEventType
+  ) {}
+
+  public record LockCancellationCommand(
+    UUID tenantId,
+    String lockId,
+    String cancellationId,
+    String reasonCode,
+    String note,
+    String actorId,
+    int expectedVersion,
+    boolean permissionGranted,
+    boolean cancellationPolicyResolved,
+    boolean externalNotifyRequired,
+    String policyVersionId,
+    String complianceEvidenceRef,
+    String idempotencyKey,
+    String correlationId,
+    Instant cancelledAt,
+    Map<String, String> sourceRefs
+  ) {}
+
+  public record LockCancellationRecord(
+    UUID tenantId,
+    String cancellationId,
+    String lockId,
+    String reasonCode,
+    String cancelledBy,
+    Instant cancelledAt,
+    String policyVersionId,
+    boolean externalNotifyRequired,
+    String evidenceHash,
+    String idempotencyKey,
+    String correlationId
+  ) {}
+
+  public record LockCancellationResponse(
+    UUID tenantId,
+    String cancellationId,
+    String lockId,
+    RateLockStatus previousStatus,
+    RateLockStatus status,
+    int version,
+    String resultSummary,
+    List<String> validationMessages,
+    String auditRef,
+    String replayRef,
+    String correlationId,
+    String outboxEventType,
+    String evidenceHash
+  ) {}
+
+  public record LockEvidenceExportCommand(
+    UUID tenantId,
+    String reportId,
+    String exportId,
+    String actorId,
+    List<String> eventIds,
+    Map<String, String> schemaVersions,
+    Map<String, String> configVersions,
+    Map<String, String> snapshotHashes,
+    Map<String, String> generatedFileHashes,
+    String purposeCode,
+    boolean permissionGranted,
+    boolean redactedByDefault,
+    String idempotencyKey,
+    String correlationId,
+    Instant generatedAt
+  ) {}
+
+  public record LockEvidenceExportRecord(
+    UUID tenantId,
+    String exportId,
+    String reportId,
+    String actorId,
+    Map<String, String> actorRefs,
+    String purposeCode,
+    boolean redactedByDefault,
+    String manifestHash,
+    List<String> eventIds,
+    Map<String, String> schemaVersions,
+    Map<String, String> configVersions,
+    Map<String, String> snapshotHashes,
+    Map<String, String> generatedFileHashes,
+    String idempotencyKey,
+    String correlationId,
+    Instant generatedAt
+  ) {}
+
+  public record LockEvidenceExportResponse(
+    UUID tenantId,
+    String exportId,
+    String reportId,
+    String status,
+    String manifestHash,
+    List<String> eventIds,
+    Map<String, String> schemaVersions,
+    Map<String, String> configVersions,
+    Map<String, String> snapshotHashes,
+    Map<String, String> actorRefs,
+    Map<String, String> generatedFileHashes,
+    boolean redactedByDefault,
+    String actorId,
+    List<String> validationMessages,
+    String auditRef,
+    String replayRef,
+    String correlationId,
+    String outboxEventType
+  ) {}
+
   public record LockRequestCommand(
     UUID tenantId,
     String requestId,
@@ -826,7 +1026,12 @@ public final class LockModels {
     long lockSyncAckedTotal,
     long lockSyncFailedTotal,
     long lockSyncDlqTotal,
-    long lockSyncReconciledTotal
+    long lockSyncReconciledTotal,
+    long lockAuditReportTotal,
+    long lockReplayTotal,
+    long lockReplayMismatchTotal,
+    long lockCancellationTotal,
+    long lockEvidenceExportTotal
   ) {}
 
   static String normalized(String value) {

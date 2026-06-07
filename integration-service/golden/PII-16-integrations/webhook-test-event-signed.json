@@ -1,0 +1,14 @@
+{
+  "deliveryHeaders": [
+    "X-Integration-Event-Id",
+    "X-Integration-Event-Type",
+    "X-Integration-Schema-Version",
+    "X-Integration-Tenant-Id",
+    "X-Integration-Correlation-Id",
+    "X-Integration-Signature",
+    "X-Integration-Timestamp"
+  ],
+  "eventType": "integration.webhook-subscription.tested.v1",
+  "signatureAlgorithm": "HMAC-SHA256 provider-owned signer",
+  "secretValueReturned": false
+}

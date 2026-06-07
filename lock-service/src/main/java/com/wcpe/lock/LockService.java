@@ -40,6 +40,11 @@ public final class LockService {
   private long lockSyncFailedTotal;
   private long lockSyncDlqTotal;
   private long lockSyncReconciledTotal;
+  private long lockAuditReportTotal;
+  private long lockReplayTotal;
+  private long lockReplayMismatchTotal;
+  private long lockCancellationTotal;
+  private long lockEvidenceExportTotal;
   private final Map<String, String> extensionFeeConfigRefsByReason = new LinkedHashMap<>();
 
   public LockService() {
@@ -878,6 +883,255 @@ public final class LockService {
       .orElseThrow(() -> new LockServiceException("NOT_FOUND", "Lock expiration schedule was not found for tenant"));
   }
 
+  public LockModels.LockAuditReportResponse createAuditReportReplayAware(LockModels.LockAuditReportCommand command) {
+    validateAuditReportRequired(command);
+    String reportHash = hash(command);
+    repository.findAuditReportIdempotency(command.tenantId(), command.idempotencyKey(), reportHash)
+      .ifPresent(response -> { throw new AuditReportIdempotencyReplay(response); });
+
+    String reportId = "REPORT-" + hash(command.tenantId() + "|" + command.requestId() + "|" + command.idempotencyKey()).substring(0, 16).toUpperCase();
+    String manifestHash = hash(command.tenantId() + "|" + reportId + "|" + reportHash + "|" + Objects.hashCode(command.criteria()));
+    String auditRef = "AUDIT-LOCK-REPORT-" + reportId;
+    String replayRef = "REPLAY-LOCK-REPORT-" + reportHash.substring(0, 16);
+    LockModels.LockAuditReportRecord report = new LockModels.LockAuditReportRecord(
+      command.tenantId(), reportId, LockModels.LockAuditReportStatus.READY, command.actorId(), command.requestedAt(),
+      reportHash, manifestHash, command.idempotencyKey(), command.correlationId()
+    );
+    LockModels.LockAuditReportResponse response = new LockModels.LockAuditReportResponse(
+      command.tenantId(), reportId, LockModels.LockAuditReportStatus.READY, 1,
+      "Lock audit report metadata persisted without changing historical lock facts", List.of(), auditRef, replayRef,
+      command.correlationId(), "lock.audit_report_ready.v1", manifestHash
+    );
+    LockModels.LockEvent event = new LockModels.LockEvent(
+      "lock.audit_report_ready.v1", "1", command.tenantId() + ":" + reportId, command.tenantId(), reportId,
+      command.actorId(), command.correlationId(), command.requestId(), command.idempotencyKey(), command.requestedAt(), Map.of(
+        "reportId", reportId,
+        "status", LockModels.LockAuditReportStatus.READY.name(),
+        "criteriaHash", reportHash,
+        "manifestHash", manifestHash,
+        "sourceRefs", String.valueOf(Objects.hashCode(command.sourceRefs()))
+      )
+    );
+    LockModels.AuditSnapshot audit = new LockModels.AuditSnapshot(
+      auditRef, command.tenantId(), reportId, "LOCK_AUDIT_REPORT_READY", command.actorId(), null,
+      LockModels.LockAuditReportStatus.READY.name(), null, null, command.correlationId(), manifestHash
+    );
+    repository.saveAuditReport(report, response, reportHash, event, audit);
+    lockAuditReportTotal++;
+    return response;
+  }
+
+  public LockModels.LockAuditReportResponse createAuditReport(LockModels.LockAuditReportCommand command) {
+    try {
+      return createAuditReportReplayAware(command);
+    } catch (AuditReportIdempotencyReplay replay) {
+      return replay.response;
+    }
+  }
+
+  public LockModels.LockAuditReportRecord getAuditReport(UUID tenantId, String reportId) {
+    return repository.findAuditReport(tenantId, reportId)
+      .orElseThrow(() -> new LockServiceException("NOT_FOUND", "Lock audit report was not found for tenant"));
+  }
+
+  public LockModels.LockReplayResponse replayLock(LockModels.LockReplayCommand command) {
+    validateReplayRequired(command);
+    String replayHash = hash(command);
+    repository.findReplayIdempotency(command.tenantId(), command.idempotencyKey(), replayHash)
+      .ifPresent(response -> { throw new ReplayIdempotencyReplay(response); });
+    getLock(command.tenantId(), command.lockId());
+    LockModels.LockReplayMismatchClass mismatchClass = replayMismatchClass(command);
+    String replayId = LockModels.normalized(command.replayId()).isEmpty()
+      ? "REPLAY-" + hash(command.tenantId() + "|" + command.lockId() + "|" + command.idempotencyKey()).substring(0, 16).toUpperCase()
+      : command.replayId();
+    String auditRef = "AUDIT-LOCK-REPLAY-" + replayId;
+    String replayRef = "REPLAY-LOCK-" + replayHash.substring(0, 16);
+    LockModels.LockReplayResult result = new LockModels.LockReplayResult(
+      command.tenantId(), replayId, command.lockId(), command.capturedInputHash(), command.configGraphHash(),
+      command.eventSequenceHash(), command.expectedResultHash(), command.actualResultHash(), mismatchClass, replayHash,
+      command.idempotencyKey(), command.correlationId(), command.replayedAt()
+    );
+    LockModels.LockReplayResponse response = new LockModels.LockReplayResponse(
+      command.tenantId(), replayId, command.lockId(), mismatchClass, replayHash,
+      "Lock replay evidence recorded using historical captured policy and config references", List.of(), auditRef, replayRef,
+      command.correlationId(), "lock.replay_completed.v1"
+    );
+    LockModels.LockEvent event = new LockModels.LockEvent(
+      "lock.replay_completed.v1", "1", command.tenantId() + ":" + command.lockId() + ":" + replayId,
+      command.tenantId(), command.lockId(), command.actorId(), command.correlationId(), replayId, command.idempotencyKey(),
+      command.replayedAt(), Map.of(
+        "replayId", replayId,
+        "inputHash", command.capturedInputHash(),
+        "configGraphHash", command.configGraphHash(),
+        "eventSequenceHash", command.eventSequenceHash(),
+        "mismatchClass", mismatchClass.name(),
+        "evidenceHash", replayHash
+      )
+    );
+    LockModels.AuditSnapshot audit = new LockModels.AuditSnapshot(
+      auditRef, command.tenantId(), command.lockId(), "LOCK_REPLAY_COMPLETED", command.actorId(), null,
+      mismatchClass.name(), null, null, command.correlationId(), replayHash
+    );
+    repository.saveReplayResult(result, response, replayHash, event, audit);
+    lockReplayTotal++;
+    if (mismatchClass != LockModels.LockReplayMismatchClass.MATCH) {
+      lockReplayMismatchTotal++;
+    }
+    return response;
+  }
+
+  public LockModels.LockReplayResponse replayLockReplayAware(LockModels.LockReplayCommand command) {
+    try {
+      return replayLock(command);
+    } catch (ReplayIdempotencyReplay replay) {
+      return replay.response;
+    }
+  }
+
+  public LockModels.LockReplayResult getReplayResult(UUID tenantId, String replayId) {
+    return repository.findReplayResult(tenantId, replayId)
+      .orElseThrow(() -> new LockServiceException("NOT_FOUND", "Lock replay result was not found for tenant"));
+  }
+
+  public LockModels.LockCancellationResponse cancelLock(LockModels.LockCancellationCommand command) {
+    validateCancellationRequired(command);
+    String cancellationHash = hash(command);
+    repository.findCancellationIdempotency(command.tenantId(), command.idempotencyKey(), cancellationHash)
+      .ifPresent(response -> { throw new CancellationIdempotencyReplay(response); });
+    LockModels.RateLockRecord current = getLock(command.tenantId(), command.lockId());
+    if (current.version() != command.expectedVersion()) {
+      throw new LockServiceException("VERSION_CONFLICT", "Cancellation expected aggregate version " + command.expectedVersion() + " but current version is " + current.version());
+    }
+    if (!cancellationEligible(current.status())) {
+      throw new LockServiceException("LOCK_STATE_CONFLICT", "Lock cancellation is not allowed from " + current.status());
+    }
+    if (!command.permissionGranted()) {
+      throw new LockServiceException("TENANT_ACCESS_DENIED", "LOCK_CANCEL permission is required");
+    }
+    if (!command.cancellationPolicyResolved()) {
+      throw new LockServiceException("POLICY_NOT_SATISFIED", "Tenant cancellation policy configuration is missing or ambiguous");
+    }
+    String cancellationId = LockModels.normalized(command.cancellationId()).isEmpty()
+      ? "CANCEL-" + hash(command.tenantId() + "|" + command.lockId() + "|" + command.idempotencyKey()).substring(0, 16).toUpperCase()
+      : command.cancellationId();
+    String auditRef = "AUDIT-LOCK-CANCEL-" + cancellationId;
+    String replayRef = "REPLAY-LOCK-CANCEL-" + cancellationHash.substring(0, 16);
+    LockModels.RateLockRecord updated = new LockModels.RateLockRecord(
+      current.tenantId(), current.lockId(), current.requestId(), current.quoteId(), current.loanId(), current.scenarioHash(),
+      LockModels.RateLockStatus.CANCELLED, current.version() + 1, current.createdAt(), command.cancelledAt(), current.expiresAt(),
+      current.idempotencyKey(), command.correlationId(), command.policyVersionId(), cancellationHash, auditRef, replayRef,
+      "lock.cancelled.v1"
+    );
+    LockModels.LockCancellationRecord cancellation = new LockModels.LockCancellationRecord(
+      command.tenantId(), cancellationId, command.lockId(), LockModels.upper(command.reasonCode()), command.actorId(),
+      command.cancelledAt(), command.policyVersionId(), command.externalNotifyRequired(), cancellationHash, command.idempotencyKey(),
+      command.correlationId()
+    );
+    LockModels.LockCancellationResponse response = new LockModels.LockCancellationResponse(
+      command.tenantId(), cancellationId, command.lockId(), current.status(), updated.status(), updated.version(),
+      "Lock cancelled with append-only cancellation evidence", List.of(), auditRef, replayRef, command.correlationId(),
+      "lock.cancelled.v1", cancellationHash
+    );
+    LockModels.LockEvent event = new LockModels.LockEvent(
+      "lock.cancelled.v1", "1", command.tenantId() + ":" + command.lockId(), command.tenantId(), command.lockId(),
+      command.actorId(), command.correlationId(), cancellationId, command.idempotencyKey(), command.cancelledAt(), Map.of(
+        "cancellationId", cancellationId,
+        "previousStatus", current.status().name(),
+        "status", LockModels.RateLockStatus.CANCELLED.name(),
+        "version", String.valueOf(updated.version()),
+        "reasonCode", LockModels.upper(command.reasonCode()),
+        "policyVersion", command.policyVersionId(),
+        "externalNotifyRequired", String.valueOf(command.externalNotifyRequired()),
+        "evidenceHash", cancellationHash
+      )
+    );
+    LockModels.AuditSnapshot audit = new LockModels.AuditSnapshot(
+      auditRef, command.tenantId(), command.lockId(), "LOCK_CANCELLED", command.actorId(), current.status().name(),
+      LockModels.RateLockStatus.CANCELLED.name(), command.policyVersionId(), command.complianceEvidenceRef(), command.correlationId(),
+      cancellationHash
+    );
+    repository.saveCancellation(updated, cancellation, response, cancellationHash, event, audit);
+    lockCancellationTotal++;
+    return response;
+  }
+
+  public LockModels.LockCancellationResponse cancelLockReplayAware(LockModels.LockCancellationCommand command) {
+    try {
+      return cancelLock(command);
+    } catch (CancellationIdempotencyReplay replay) {
+      return replay.response;
+    }
+  }
+
+  public LockModels.LockCancellationRecord getCancellation(UUID tenantId, String cancellationId) {
+    return repository.findCancellation(tenantId, cancellationId)
+      .orElseThrow(() -> new LockServiceException("NOT_FOUND", "Lock cancellation was not found for tenant"));
+  }
+
+  public LockModels.LockEvidenceExportResponse createEvidenceExport(LockModels.LockEvidenceExportCommand command) {
+    validateEvidenceExportRequired(command);
+    if (!command.redactedByDefault()) {
+      throw new LockServiceException("POLICY_NOT_SATISFIED", "Evidence export manifest must redact and minimize borrower PII by default");
+    }
+    getAuditReport(command.tenantId(), command.reportId());
+    String manifestHash = hash(command);
+    repository.findEvidenceExportIdempotency(command.tenantId(), command.idempotencyKey(), manifestHash)
+      .ifPresent(response -> { throw new EvidenceExportIdempotencyReplay(response); });
+    String exportId = LockModels.normalized(command.exportId()).isEmpty()
+      ? "EXPORT-" + hash(command.tenantId() + "|" + command.reportId() + "|" + command.idempotencyKey()).substring(0, 16).toUpperCase()
+      : command.exportId();
+    String auditRef = "AUDIT-LOCK-EVIDENCE-EXPORT-" + exportId;
+    String replayRef = "REPLAY-LOCK-EVIDENCE-EXPORT-" + manifestHash.substring(0, 16);
+    Map<String, String> actorRefs = Map.of("actorId", command.actorId());
+    LockModels.LockEvidenceExportRecord export = new LockModels.LockEvidenceExportRecord(
+      command.tenantId(), exportId, command.reportId(), command.actorId(), actorRefs, LockModels.upper(command.purposeCode()),
+      true, manifestHash, command.eventIds(), command.schemaVersions(), command.configVersions(), command.snapshotHashes(),
+      command.generatedFileHashes(), command.idempotencyKey(), command.correlationId(), command.generatedAt()
+    );
+    LockModels.LockEvidenceExportResponse response = new LockModels.LockEvidenceExportResponse(
+      command.tenantId(), exportId, command.reportId(), "READY", manifestHash, command.eventIds(),
+      command.schemaVersions(), command.configVersions(), command.snapshotHashes(), actorRefs, command.generatedFileHashes(), true,
+      command.actorId(),
+      List.of("Borrower PII minimized by default; full evidence requires external secure object storage scope"), auditRef, replayRef,
+      command.correlationId(), "lock.evidence_export_manifested.v1"
+    );
+    LockModels.LockEvent event = new LockModels.LockEvent(
+      "lock.evidence_export_manifested.v1", "1", command.tenantId() + ":" + exportId, command.tenantId(), command.reportId(),
+      command.actorId(), command.correlationId(), exportId, command.idempotencyKey(), command.generatedAt(), Map.of(
+        "exportId", exportId,
+        "reportId", command.reportId(),
+        "eventIds", String.join(",", command.eventIds()),
+        "schemaVersions", manifestRefs(command.schemaVersions()),
+        "configVersions", manifestRefs(command.configVersions()),
+        "snapshotHashes", manifestRefs(command.snapshotHashes()),
+        "actorRefs", manifestRefs(actorRefs),
+        "generatedFileHashes", manifestRefs(command.generatedFileHashes()),
+        "manifestHash", manifestHash,
+        "redactedByDefault", "true"
+      )
+    );
+    LockModels.AuditSnapshot audit = new LockModels.AuditSnapshot(
+      auditRef, command.tenantId(), command.reportId(), "LOCK_EVIDENCE_EXPORT_MANIFESTED", command.actorId(), null,
+      "READY", null, null, command.correlationId(), manifestHash
+    );
+    repository.saveEvidenceExport(export, response, manifestHash, event, audit);
+    lockEvidenceExportTotal++;
+    return response;
+  }
+
+  public LockModels.LockEvidenceExportResponse createEvidenceExportReplayAware(LockModels.LockEvidenceExportCommand command) {
+    try {
+      return createEvidenceExport(command);
+    } catch (EvidenceExportIdempotencyReplay replay) {
+      return replay.response;
+    }
+  }
+
+  public LockModels.LockEvidenceExportRecord getEvidenceExport(UUID tenantId, String exportId) {
+    return repository.findEvidenceExport(tenantId, exportId)
+      .orElseThrow(() -> new LockServiceException("NOT_FOUND", "Lock evidence export was not found for tenant"));
+  }
+
   public LockModels.LockSyncAttemptResponse syncLockStatusReplayAware(LockModels.LockStatusSyncCommand command) {
     validateStatusSyncRequired(command);
     String payloadHash = hash(command);
@@ -1035,6 +1289,22 @@ public final class LockService {
     return repository.reconciliationCount();
   }
 
+  public int committedAuditReportCount() {
+    return repository.auditReportCount();
+  }
+
+  public int committedReplayResultCount() {
+    return repository.replayResultCount();
+  }
+
+  public int committedCancellationCount() {
+    return repository.cancellationCount();
+  }
+
+  public int committedEvidenceExportCount() {
+    return repository.evidenceExportCount();
+  }
+
   public List<LockModels.LockEvent> outboxEvents() {
     return repository.outboxEvents();
   }
@@ -1076,7 +1346,8 @@ public final class LockService {
       extensionRequestTotal, extensionApprovalTotal, extensionRejectionTotal, extensionCancellationTotal,
       extensionConfirmationFailureTotal, extensionRequestTotal == 0 ? 0.0 : (double) extensionRequestedDaysTotal / extensionRequestTotal,
       Map.copyOf(extensionFeeConfigRefsByReason), lockSyncSentTotal, lockSyncAckedTotal, lockSyncFailedTotal,
-      lockSyncDlqTotal, lockSyncReconciledTotal
+      lockSyncDlqTotal, lockSyncReconciledTotal, lockAuditReportTotal, lockReplayTotal, lockReplayMismatchTotal,
+      lockCancellationTotal, lockEvidenceExportTotal
     );
   }
 
@@ -1164,6 +1435,118 @@ public final class LockService {
     if (LockModels.normalized(policyVersion).isEmpty()) {
       throw new LockServiceException("POLICY_NOT_SATISFIED", "Tenant-scoped lock sync policy version is required");
     }
+  }
+
+  private static void validateAuditReportRequired(LockModels.LockAuditReportCommand command) {
+    if (command == null) {
+      throw new LockServiceException("VALIDATION_FAILED", "lock audit report command is required");
+    }
+    List<String> missing = new ArrayList<>();
+    require(command.tenantId(), "tenantId", missing);
+    require(command.requestId(), "requestId", missing);
+    require(command.actorId(), "actorId", missing);
+    require(command.requestedAt(), "requestedAt", missing);
+    require(command.idempotencyKey(), "idempotencyKey", missing);
+    require(command.correlationId(), "correlationId", missing);
+    if (!missing.isEmpty()) {
+      throw new LockServiceException("VALIDATION_FAILED", "Missing or invalid fields: " + String.join(", ", missing));
+    }
+    if (!command.permissionGranted()) {
+      throw new LockServiceException("TENANT_ACCESS_DENIED", "LOCK_AUDIT_READ permission is required");
+    }
+  }
+
+  private static void validateReplayRequired(LockModels.LockReplayCommand command) {
+    if (command == null) {
+      throw new LockServiceException("VALIDATION_FAILED", "lock replay command is required");
+    }
+    List<String> missing = new ArrayList<>();
+    require(command.tenantId(), "tenantId", missing);
+    require(command.lockId(), "lockId", missing);
+    require(command.actorId(), "actorId", missing);
+    require(command.capturedInputHash(), "capturedInputHash", missing);
+    require(command.configGraphHash(), "configGraphHash", missing);
+    require(command.eventSequenceHash(), "eventSequenceHash", missing);
+    require(command.expectedResultHash(), "expectedResultHash", missing);
+    require(command.actualResultHash(), "actualResultHash", missing);
+    require(command.idempotencyKey(), "idempotencyKey", missing);
+    require(command.correlationId(), "correlationId", missing);
+    require(command.replayedAt(), "replayedAt", missing);
+    if (!missing.isEmpty()) {
+      throw new LockServiceException("VALIDATION_FAILED", "Missing or invalid fields: " + String.join(", ", missing));
+    }
+    if (!command.permissionGranted()) {
+      throw new LockServiceException("TENANT_ACCESS_DENIED", "LOCK_REPLAY_RUN permission is required");
+    }
+  }
+
+  private static void validateCancellationRequired(LockModels.LockCancellationCommand command) {
+    if (command == null) {
+      throw new LockServiceException("VALIDATION_FAILED", "lock cancellation command is required");
+    }
+    List<String> missing = new ArrayList<>();
+    require(command.tenantId(), "tenantId", missing);
+    require(command.lockId(), "lockId", missing);
+    require(command.reasonCode(), "reasonCode", missing);
+    require(command.actorId(), "actorId", missing);
+    require(command.policyVersionId(), "policyVersionId", missing);
+    require(command.complianceEvidenceRef(), "complianceEvidenceRef", missing);
+    require(command.idempotencyKey(), "idempotencyKey", missing);
+    require(command.correlationId(), "correlationId", missing);
+    require(command.cancelledAt(), "cancelledAt", missing);
+    if (command.expectedVersion() <= 0) missing.add("expectedVersion");
+    if (!missing.isEmpty()) {
+      throw new LockServiceException("VALIDATION_FAILED", "Missing or invalid fields: " + String.join(", ", missing));
+    }
+  }
+
+  private static void validateEvidenceExportRequired(LockModels.LockEvidenceExportCommand command) {
+    if (command == null) {
+      throw new LockServiceException("VALIDATION_FAILED", "lock evidence export command is required");
+    }
+    List<String> missing = new ArrayList<>();
+    require(command.tenantId(), "tenantId", missing);
+    require(command.reportId(), "reportId", missing);
+    require(command.actorId(), "actorId", missing);
+    require(command.purposeCode(), "purposeCode", missing);
+    require(command.idempotencyKey(), "idempotencyKey", missing);
+    require(command.correlationId(), "correlationId", missing);
+    require(command.generatedAt(), "generatedAt", missing);
+    if (command.eventIds() == null || command.eventIds().isEmpty()) missing.add("eventIds");
+    if (command.schemaVersions() == null || command.schemaVersions().isEmpty()) missing.add("schemaVersions");
+    if (command.configVersions() == null || command.configVersions().isEmpty()) missing.add("configVersions");
+    if (command.snapshotHashes() == null || command.snapshotHashes().isEmpty()) missing.add("snapshotHashes");
+    if (command.generatedFileHashes() == null || command.generatedFileHashes().isEmpty()) missing.add("generatedFileHashes");
+    if (!missing.isEmpty()) {
+      throw new LockServiceException("VALIDATION_FAILED", "Missing or invalid fields: " + String.join(", ", missing));
+    }
+    if (!command.permissionGranted()) {
+      throw new LockServiceException("TENANT_ACCESS_DENIED", "LOCK_AUDIT_EXPORT permission is required");
+    }
+  }
+
+  private static LockModels.LockReplayMismatchClass replayMismatchClass(LockModels.LockReplayCommand command) {
+    if (command.historicalRefs() == null || command.historicalRefs().isEmpty()) {
+      return LockModels.LockReplayMismatchClass.CONFIG_REF_MISSING;
+    }
+    return LockModels.normalized(command.expectedResultHash()).equals(LockModels.normalized(command.actualResultHash()))
+      ? LockModels.LockReplayMismatchClass.MATCH
+      : LockModels.LockReplayMismatchClass.RESULT_MISMATCH;
+  }
+
+  private static boolean cancellationEligible(LockModels.RateLockStatus status) {
+    return status == LockModels.RateLockStatus.REQUESTED
+      || status == LockModels.RateLockStatus.PENDING_APPROVAL
+      || status == LockModels.RateLockStatus.APPROVED
+      || status == LockModels.RateLockStatus.PENDING_INVESTOR_CONFIRMATION
+      || status == LockModels.RateLockStatus.ACTIVE
+      || status == LockModels.RateLockStatus.EXPIRING_SOON
+      || status == LockModels.RateLockStatus.EXTENSION_REQUESTED
+      || status == LockModels.RateLockStatus.EXTENSION_APPROVED
+      || status == LockModels.RateLockStatus.PENDING_INVESTOR_EXTENSION_CONFIRMATION
+      || status == LockModels.RateLockStatus.RELOCK_REQUESTED
+      || status == LockModels.RateLockStatus.RELOCK_APPROVED
+      || status == LockModels.RateLockStatus.PENDING_INVESTOR_RELOCK_CONFIRMATION;
   }
 
   private static LockModels.LockSyncAttemptResponse responseFor(
@@ -2254,6 +2637,48 @@ public final class LockService {
     ));
   }
 
+  private static String hash(LockModels.LockAuditReportCommand command) {
+    return hash(String.join("|",
+      command.tenantId().toString(), command.requestId(), command.actorId(), command.requestedAt().toString(),
+      String.valueOf(Objects.hashCode(command.criteria())), String.valueOf(Objects.hashCode(command.sourceRefs()))
+    ));
+  }
+
+  private static String hash(LockModels.LockReplayCommand command) {
+    return hash(String.join("|",
+      command.tenantId().toString(), command.lockId(), LockModels.normalized(command.replayId()), command.actorId(),
+      command.capturedInputHash(), command.configGraphHash(), command.eventSequenceHash(), command.expectedResultHash(),
+      command.actualResultHash(), command.replayedAt().toString(), String.valueOf(Objects.hashCode(command.historicalRefs()))
+    ));
+  }
+
+  private static String hash(LockModels.LockCancellationCommand command) {
+    return hash(String.join("|",
+      command.tenantId().toString(), command.lockId(), LockModels.normalized(command.cancellationId()), LockModels.upper(command.reasonCode()),
+      String.valueOf(Objects.hashCode(LockModels.normalized(command.note()))), command.actorId(), String.valueOf(command.expectedVersion()),
+      String.valueOf(command.externalNotifyRequired()), command.policyVersionId(), command.complianceEvidenceRef(),
+      command.cancelledAt().toString(), String.valueOf(Objects.hashCode(command.sourceRefs()))
+    ));
+  }
+
+  private static String hash(LockModels.LockEvidenceExportCommand command) {
+    return hash(String.join("|",
+      command.tenantId().toString(), command.reportId(), LockModels.normalized(command.exportId()), command.actorId(),
+      String.join(",", command.eventIds()), String.valueOf(Objects.hashCode(command.schemaVersions())),
+      String.valueOf(Objects.hashCode(command.configVersions())), String.valueOf(Objects.hashCode(command.snapshotHashes())),
+      String.valueOf(Objects.hashCode(command.generatedFileHashes())), LockModels.upper(command.purposeCode()),
+      String.valueOf(command.redactedByDefault()), command.generatedAt().toString()
+    ));
+  }
+
+  private static String manifestRefs(Map<String, String> refs) {
+    List<String> entries = new ArrayList<>();
+    refs.entrySet().stream()
+      .sorted(Map.Entry.comparingByKey())
+      .forEach(entry -> entries.add(entry.getKey() + "=" + entry.getValue()));
+    return String.join(";", entries);
+  }
+
   private static String relockTermsHash(LockModels.RelockTermsSnapshot terms) {
     return hash(String.join("|",
       LockModels.normalized(terms.productId()), LockModels.normalized(terms.investorId()),
@@ -2354,6 +2779,38 @@ public final class LockService {
     private final LockModels.RelockResponse response;
 
     private RelockIdempotencyReplay(LockModels.RelockResponse response) {
+      this.response = response;
+    }
+  }
+
+  private static final class AuditReportIdempotencyReplay extends RuntimeException {
+    private final LockModels.LockAuditReportResponse response;
+
+    private AuditReportIdempotencyReplay(LockModels.LockAuditReportResponse response) {
+      this.response = response;
+    }
+  }
+
+  private static final class ReplayIdempotencyReplay extends RuntimeException {
+    private final LockModels.LockReplayResponse response;
+
+    private ReplayIdempotencyReplay(LockModels.LockReplayResponse response) {
+      this.response = response;
+    }
+  }
+
+  private static final class CancellationIdempotencyReplay extends RuntimeException {
+    private final LockModels.LockCancellationResponse response;
+
+    private CancellationIdempotencyReplay(LockModels.LockCancellationResponse response) {
+      this.response = response;
+    }
+  }
+
+  private static final class EvidenceExportIdempotencyReplay extends RuntimeException {
+    private final LockModels.LockEvidenceExportResponse response;
+
+    private EvidenceExportIdempotencyReplay(LockModels.LockEvidenceExportResponse response) {
       this.response = response;
     }
   }

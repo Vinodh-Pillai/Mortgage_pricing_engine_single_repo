@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "story_id": "PII-14-S05",
+  "endpoint": "POST /api/v1/tenants/{tenantId}/ml-advisory/pricing-advisories:evaluate",
+  "response_contract": {
+    "authoritative": false,
+    "deterministicPricingUnchanged": true,
+    "status_values": ["READY", "SUPPRESSED"],
+    "required_links": ["explanationUrl", "feedbackUrl"],
+    "disclaimer": "Advisory only — does not change final pricing or eligibility."
+  },
+  "events": [
+    "MlPricingAdvisoryGenerated.v1",
+    "MlPricingAdvisorySuppressed.v1"
+  ],
+  "suppression_reasons": [
+    "ML_PRICING_ADVISORY_DISABLED",
+    "ML_PRICING_ADVISORY_SUPPRESSED",
+    "FAIR_LENDING_GUARD_SUPPRESSED",
+    "ML_MODEL_UNAVAILABLE",
+    "TIMEOUT",
+    "OUTPUT_REJECTED"
+  ],
+  "safety": {
+    "raw_borrower_feature_values_in_events": false,
+    "automatic_price_mutation": false,
+    "advisory_ids_include_model_version": true
+  }
+}

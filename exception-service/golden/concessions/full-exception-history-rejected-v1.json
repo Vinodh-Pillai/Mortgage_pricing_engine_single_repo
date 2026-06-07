@@ -1,0 +1,11 @@
+{
+  "storyId": "PII-11-S09",
+  "fixture": "full-exception-history-rejected-v1",
+  "subjectType": "QUOTE",
+  "expectedActions": ["REJECTED"],
+  "expectedReplayStatus": "MATCH",
+  "redaction": {
+    "rawEventJsonRequiresPermission": "exception_history.raw_json",
+    "evidenceRefsRequirePermission": "exception_history.evidence"
+  }
+}
