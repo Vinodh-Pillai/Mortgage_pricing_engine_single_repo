@@ -1,0 +1,31 @@
+{
+  "story_id": "PII-15-S09",
+  "tenant_id": "tenant-a",
+  "export_id": "export-001",
+  "status": "completed",
+  "template_version_ref": "fair-lending-audit-package:v1",
+  "redaction_profile_ref": "borrower-pii-redaction:v1",
+  "delivery_policy_ref": "local-reference-only:v1",
+  "artifacts": [
+    {
+      "sequence": 1,
+      "artifact_type": "audit_snapshot",
+      "source_ref": "audit-snapshot:snapshot-001",
+      "file_ref": "object://local/export-001/artifact-1.json",
+      "content_type": "application/json",
+      "redaction_applied": true
+    },
+    {
+      "sequence": 2,
+      "artifact_type": "fair_lending_snapshot",
+      "source_ref": "fair-lending:snapshot-2026-05",
+      "file_ref": "object://local/export-001/artifact-2.json",
+      "content_type": "application/json",
+      "redaction_applied": true
+    }
+  ],
+  "external_delivery": "blocked_not_integrated",
+  "notes": [
+    "Fixture records local manifest contract only; no regulator-specific layout or legal text is encoded."
+  ]
+}

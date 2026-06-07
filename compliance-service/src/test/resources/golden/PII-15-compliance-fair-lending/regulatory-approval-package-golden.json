@@ -1,0 +1,24 @@
+{
+  "storyId": "PII-15-S08",
+  "tenantId": "tenant-a",
+  "approvalId": "approval-001",
+  "artifactRef": {
+    "artifactType": "state-high-cost-rule-pack",
+    "artifactId": "state-high-cost",
+    "artifactVersion": "v3",
+    "effectiveFrom": "2026-07-01"
+  },
+  "sourceRefs": ["source-doc:state-high-cost-2026"],
+  "citations": ["citation:state-code-2026-15"],
+  "schemaRefs": ["schema:regulatory-rule-pack:v1"],
+  "simulationFixtureRefs": ["fixture:state-high-cost-golden:v3"],
+  "expectedWorkflow": ["draft", "ready_for_review", "submitted", "approved", "published"],
+  "invariants": [
+    "author cannot approve own package",
+    "approval requires validation evidence",
+    "approval requires simulation evidence",
+    "publish requires approved artifact hash",
+    "rollback requires prior approved target"
+  ],
+  "domainConstants": "No regulatory thresholds, tolerances, legal values, or pricing values are encoded in this fixture."
+}

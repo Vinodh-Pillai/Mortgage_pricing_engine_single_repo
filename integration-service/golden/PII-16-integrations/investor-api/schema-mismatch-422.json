@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "UNKNOWN",
+  "feedType": "PRICE_SHEET",
+  "error": {
+    "code": "422",
+    "reason": "SCHEMA_VERSION_MISMATCH"
+  }
+}

@@ -1,0 +1,12 @@
+package com.wcpe.mladvisory;
+
+public enum ModelStatus {
+  DRAFT,
+  IN_REVIEW,
+  APPROVED_SHADOW,
+  APPROVED_ADVISORY_VISIBLE,
+  REJECTED,
+  SUSPENDED,
+  RETIRED,
+  REMEDIATION_REQUIRED
+}

@@ -45,6 +45,16 @@ public final class MlAdvisoryControlService {
       "POST /api/v1/tenants/{tenantId}/ml-advisory/advisories/{advisoryId}/feedback";
   public static final String GET_ADVISORY_FEEDBACK_AGGREGATES_ENDPOINT =
       "GET /api/v1/tenants/{tenantId}/ml-advisory/feedback/aggregates?modelVersionId=&advisoryType=&from=&to=";
+  public static final String START_MONITORING_RUN_ENDPOINT =
+      "POST /api/v1/tenants/{tenantId}/ml-advisory/monitoring-runs";
+  public static final String LIST_MONITORING_RUNS_ENDPOINT =
+      "GET /api/v1/tenants/{tenantId}/ml-advisory/monitoring-runs?modelVersionId=&from=&to=";
+  public static final String LIST_MONITORING_ALERTS_ENDPOINT =
+      "GET /api/v1/tenants/{tenantId}/ml-advisory/monitoring-alerts?status=&severity=";
+  public static final String ACKNOWLEDGE_MONITORING_ALERT_ENDPOINT =
+      "POST /api/v1/tenants/{tenantId}/ml-advisory/monitoring-alerts/{alertId}:acknowledge";
+  public static final String REQUEST_MONITORING_SUSPENSION_ENDPOINT =
+      "POST /api/v1/tenants/{tenantId}/ml-advisory/monitoring-alerts/{alertId}:request-suspension";
   public static final String GET_MODEL_RUNTIME_HEALTH_ENDPOINT =
       "GET /api/v1/tenants/{tenantId}/ml-advisory/model-runtime/health";
   public static final String GET_ADVISORY_EXPLANATION_ENDPOINT =
@@ -59,6 +69,8 @@ public final class MlAdvisoryControlService {
   public static final String ADVISORY_READ_ROLE = "ML_ADVISORY_READ";
   public static final String FEEDBACK_WRITE_ROLE = "ML_ADVISORY_FEEDBACK_WRITE";
   public static final String FEEDBACK_AGGREGATE_READ_ROLE = "ML_ADVISORY_FEEDBACK_AGGREGATE_READ";
+  public static final String MONITORING_RUN_ROLE = "ML_ADVISORY_MONITORING_RUN";
+  public static final String MONITORING_REVIEWER_ROLE = "ML_ADVISORY_MONITORING_REVIEWER";
   public static final String EXPLANATION_READ_ROLE = "ML_ADVISORY_EXPLANATION_READ";
   public static final String EXPLANATION_EXPORT_ROLE = "ML_ADVISORY_EXPLANATION_EXPORT";
   public static final String CONTROL_CHANGED_EVENT = "MlAdvisoryControlChanged.v1";
@@ -71,6 +83,10 @@ public final class MlAdvisoryControlService {
   public static final String ML_ELIGIBILITY_RISK_ADVISORY_SUPPRESSED_EVENT = "MlEligibilityRiskAdvisorySuppressed.v1";
   public static final String ML_ADVISORY_FEEDBACK_CAPTURED_EVENT = "MlAdvisoryFeedbackCaptured.v1";
   public static final String ML_ADVISORY_CONCERN_REPORTED_EVENT = "MlAdvisoryConcernReported.v1";
+  public static final String ML_MODEL_MONITORING_RUN_COMPLETED_EVENT = "MlModelMonitoringRunCompleted.v1";
+  public static final String ML_MODEL_DRIFT_ALERT_RAISED_EVENT = "MlModelDriftAlertRaised.v1";
+  public static final String ML_MODEL_BIAS_ALERT_RAISED_EVENT = "MlModelBiasAlertRaised.v1";
+  public static final String ML_MODEL_MONITORING_ALERT_DISPOSED_EVENT = "MlModelMonitoringAlertDisposed.v1";
   public static final String ML_ADVISORY_VIEWED_EVENT = "MlAdvisoryViewed.v1";
   public static final String ML_ADVISORY_EXPLANATION_VIEWED_EVENT = "MlAdvisoryExplanationViewed.v1";
   public static final String ML_ADVISORY_EXPLANATION_SUPPRESSED_EVENT = "MlAdvisoryExplanationSuppressed.v1";
@@ -100,6 +116,9 @@ public final class MlAdvisoryControlService {
   private final Map<String, AdvisoryFeedback> feedbackIdempotencyResponses = new HashMap<>();
   private final Map<String, String> activeFeedbackKeys = new HashMap<>();
   private final Map<String, FeedbackAggregate> feedbackAggregates = new HashMap<>();
+  private final Map<String, ModelMonitoringRun> monitoringRuns = new HashMap<>();
+  private final Map<String, ModelMonitoringRun> monitoringRunIdempotencyResponses = new HashMap<>();
+  private final Map<String, MonitoringAlert> monitoringAlerts = new HashMap<>();
   private final Map<String, AdvisoryExplanation> advisoryExplanations = new HashMap<>();
   private final Map<String, AdvisoryExplanation> explanationsByAdvisory = new HashMap<>();
   private final List<ModelInferenceResult> modelInvocations = new ArrayList<>();
@@ -1317,6 +1336,123 @@ public final class MlAdvisoryControlService {
         .toList();
   }
 
+  public MlAdvisoryResult<ModelMonitoringRun> startMonitoringRun(StartMonitoringRunCommand command) {
+    MlAdvisoryResult<StartMonitoringRunCommand> validation = validateMonitoringRun(command);
+    if (!validation.valid()) {
+      return MlAdvisoryResult.failure(validation.errorCode().orElseThrow());
+    }
+
+    String idempotencyKey = command.tenantId() + ":monitoring-run:" + command.idempotencyKey();
+    String requestHash = hash(canonicalMonitoringRun(command));
+    String existingHash = idempotencyHashes.get(idempotencyKey);
+    if (existingHash != null) {
+      if (!existingHash.equals(requestHash)) {
+        return MlAdvisoryResult.failure("IDEMPOTENCY_CONFLICT");
+      }
+      return MlAdvisoryResult.success(monitoringRunIdempotencyResponses.get(idempotencyKey));
+    }
+
+    Instant now = clock.instant();
+    String runId = deterministicId(command.tenantId(), command.modelVersionId(), command.windowStart().toString(), command.policyVersion());
+    List<MonitoringMetric> metrics = command.metrics().stream().map(input -> toMonitoringMetric(runId, input)).toList();
+    List<MonitoringAlert> alerts =
+        command.metrics().stream()
+            .filter(input -> input.valueNumeric() > input.thresholdNumeric())
+            .map(input -> toMonitoringAlert(command, runId, input, now))
+            .toList();
+    String highestSeverity = alerts.stream().map(MonitoringAlert::severity).reduce("NONE", this::moreSevere);
+    String eventId = deterministicId(runId, command.correlationId(), ML_MODEL_MONITORING_RUN_COMPLETED_EVENT);
+    String auditId = deterministicId(runId, command.actorId(), "monitoring-run-audit");
+    ModelMonitoringRun run =
+        new ModelMonitoringRun(
+            runId,
+            command.tenantId(),
+            command.modelVersionId(),
+            command.advisoryType(),
+            command.windowStart(),
+            command.windowEnd(),
+            command.policyVersion(),
+            command.featureSchemaVersion(),
+            command.dataLineageRef(),
+            alerts.isEmpty() ? "COMPLETED" : "COMPLETED_WITH_ALERTS",
+            highestSeverity,
+            command.aggregateCohortCount(),
+            command.minimumCohortSize(),
+            now,
+            now,
+            eventId,
+            auditId,
+            command.correlationId(),
+            metrics,
+            alerts);
+    monitoringRuns.put(monitoringRunKey(command.tenantId(), runId), run);
+    alerts.forEach(alert -> monitoringAlerts.put(monitoringAlertKey(alert.tenantId(), alert.alertId()), alert));
+    outboxEvents.add(
+        new MlAdvisoryOutboxEvent(
+            eventId,
+            ML_MODEL_MONITORING_RUN_COMPLETED_EVENT,
+            command.tenantId(),
+            runId,
+            command.actorId(),
+            command.correlationId(),
+            command.idempotencyKey(),
+            now,
+            Map.of(
+                "runId", runId,
+                "modelVersionId", command.modelVersionId(),
+                "status", run.status(),
+                "highestSeverity", highestSeverity,
+                "policyVersion", command.policyVersion(),
+                "dataLineageRef", command.dataLineageRef())));
+    alerts.forEach(alert -> outboxEvents.add(alertRaisedEvent(command, alert, now)));
+    auditRecords.add(
+        new MlAdvisoryAuditRecord(
+            auditId,
+            command.tenantId(),
+            command.actorId(),
+            "ML_MODEL_MONITORING_RUN_COMPLETED",
+            "none",
+            "run=" + runId + ";status=" + run.status() + ";policyVersion=" + command.policyVersion(),
+            command.correlationId(),
+            now));
+    idempotencyHashes.put(idempotencyKey, requestHash);
+    monitoringRunIdempotencyResponses.put(idempotencyKey, run);
+    return MlAdvisoryResult.success(run);
+  }
+
+  public List<ModelMonitoringRun> monitoringRuns(MonitoringRunQuery query) {
+    if (query == null || !isUuid(query.tenantId())) {
+      return List.of();
+    }
+    return monitoringRuns.values().stream()
+        .filter(run -> run.tenantId().equals(query.tenantId()))
+        .filter(run -> isBlank(query.modelVersionId()) || run.modelVersionId().equals(query.modelVersionId()))
+        .filter(run -> query.from() == null || !run.windowEnd().isBefore(query.from()))
+        .filter(run -> query.to() == null || !run.windowStart().isAfter(query.to()))
+        .sorted(Comparator.comparing(ModelMonitoringRun::windowStart).thenComparing(ModelMonitoringRun::runId))
+        .toList();
+  }
+
+  public List<MonitoringAlert> monitoringAlerts(MonitoringAlertQuery query) {
+    if (query == null || !isUuid(query.tenantId())) {
+      return List.of();
+    }
+    return monitoringAlerts.values().stream()
+        .filter(alert -> alert.tenantId().equals(query.tenantId()))
+        .filter(alert -> isBlank(query.status()) || alert.status().equals(query.status()))
+        .filter(alert -> isBlank(query.severity()) || alert.severity().equals(query.severity()))
+        .sorted(Comparator.comparing(MonitoringAlert::createdAt).thenComparing(MonitoringAlert::alertId))
+        .toList();
+  }
+
+  public MlAdvisoryResult<MonitoringAlert> acknowledgeMonitoringAlert(MonitoringDispositionCommand command) {
+    return disposeMonitoringAlert(command, "ACKNOWLEDGED");
+  }
+
+  public MlAdvisoryResult<MonitoringAlert> requestAdvisorySuspensionReview(MonitoringDispositionCommand command) {
+    return disposeMonitoringAlert(command, "SUSPENSION_REVIEW_REQUESTED");
+  }
+
   private MlAdvisoryResult<CaptureAdvisoryFeedbackCommand> validateAdvisoryFeedback(CaptureAdvisoryFeedbackCommand command) {
     if (command == null
         || !isUuid(command.tenantId())
@@ -1338,6 +1474,118 @@ public final class MlAdvisoryControlService {
     return MlAdvisoryResult.success(command);
   }
 
+  private MlAdvisoryResult<StartMonitoringRunCommand> validateMonitoringRun(StartMonitoringRunCommand command) {
+    if (command == null
+        || !isUuid(command.tenantId())
+        || isBlank(command.idempotencyKey())
+        || isBlank(command.actorId())
+        || isBlank(command.modelVersionId())
+        || command.advisoryType() == null
+        || command.windowStart() == null
+        || command.windowEnd() == null
+        || isBlank(command.correlationId())) {
+      return MlAdvisoryResult.failure("VALIDATION_FAILED");
+    }
+    if (!command.windowEnd().isAfter(command.windowStart())) {
+      return MlAdvisoryResult.failure("VALIDATION_FAILED");
+    }
+    if (isBlank(command.policyVersion()) || isBlank(command.featureSchemaVersion()) || isBlank(command.dataLineageRef())) {
+      return MlAdvisoryResult.failure("ML_MONITORING_POLICY_MISSING");
+    }
+    if (command.minimumCohortSize() <= 0 || command.aggregateCohortCount() < command.minimumCohortSize()) {
+      return MlAdvisoryResult.failure("ML_MONITORING_INSUFFICIENT_DATA");
+    }
+    if (command.metrics().isEmpty()) {
+      return MlAdvisoryResult.failure("ML_MONITORING_INSUFFICIENT_DATA");
+    }
+    if (command.metrics().stream().anyMatch(this::invalidMonitoringMetric)) {
+      return MlAdvisoryResult.failure("ML_MONITORING_POLICY_MISSING");
+    }
+    if (command.metrics().stream().anyMatch(metric -> !metric.approvedAggregateCohort() || metric.containsRawSensitiveData())) {
+      return MlAdvisoryResult.failure("ML_MONITORING_ACTION_UNAUTHORIZED");
+    }
+    return MlAdvisoryResult.success(command);
+  }
+
+  private boolean invalidMonitoringMetric(MonitoringMetricInput metric) {
+    return metric == null
+        || isBlank(metric.metricType())
+        || isBlank(metric.metricName())
+        || isBlank(metric.band())
+        || isBlank(metric.severity())
+        || isBlank(metric.recommendedAction())
+        || isBlank(metric.sourceRef())
+        || !Double.isFinite(metric.valueNumeric())
+        || !Double.isFinite(metric.thresholdNumeric())
+        || metric.thresholdNumeric() < 0.0;
+  }
+
+  private MlAdvisoryResult<MonitoringDispositionCommand> validateMonitoringDisposition(MonitoringDispositionCommand command) {
+    if (command == null
+        || !isUuid(command.tenantId())
+        || isBlank(command.alertId())
+        || isBlank(command.actorId())
+        || isBlank(command.dispositionReason())
+        || isBlank(command.governanceTicket())
+        || isBlank(command.correlationId())) {
+      return MlAdvisoryResult.failure("VALIDATION_FAILED");
+    }
+    if (!command.actorRoles().contains(MONITORING_REVIEWER_ROLE)) {
+      return MlAdvisoryResult.failure("ML_MONITORING_ACTION_UNAUTHORIZED");
+    }
+    return MlAdvisoryResult.success(command);
+  }
+
+  private MlAdvisoryResult<MonitoringAlert> disposeMonitoringAlert(MonitoringDispositionCommand command, String nextStatus) {
+    MlAdvisoryResult<MonitoringDispositionCommand> validation = validateMonitoringDisposition(command);
+    if (!validation.valid()) {
+      return MlAdvisoryResult.failure(validation.errorCode().orElseThrow());
+    }
+    MonitoringAlert current = monitoringAlerts.get(monitoringAlertKey(command.tenantId(), command.alertId()));
+    if (current == null) {
+      return MlAdvisoryResult.failure("NOT_FOUND");
+    }
+    Instant now = clock.instant();
+    String eventId = deterministicId(command.alertId(), command.correlationId(), ML_MODEL_MONITORING_ALERT_DISPOSED_EVENT, nextStatus);
+    String auditId = deterministicId(command.alertId(), command.actorId(), nextStatus, "audit");
+    MonitoringAlert updated =
+        current.withDisposition(
+            nextStatus,
+            command.actorId(),
+            command.dispositionReason(),
+            command.governanceTicket(),
+            eventId,
+            auditId,
+            command.correlationId());
+    monitoringAlerts.put(monitoringAlertKey(updated.tenantId(), updated.alertId()), updated);
+    outboxEvents.add(
+        new MlAdvisoryOutboxEvent(
+            eventId,
+            ML_MODEL_MONITORING_ALERT_DISPOSED_EVENT,
+            command.tenantId(),
+            command.alertId(),
+            command.actorId(),
+            command.correlationId(),
+            "",
+            now,
+            Map.of(
+                "alertId", command.alertId(),
+                "status", nextStatus,
+                "governanceTicket", command.governanceTicket(),
+                "advisoryOnly", String.valueOf(updated.advisoryOnly()))));
+    auditRecords.add(
+        new MlAdvisoryAuditRecord(
+            auditId,
+            command.tenantId(),
+            command.actorId(),
+            "ML_MODEL_MONITORING_ALERT_DISPOSED",
+            current.status(),
+            nextStatus + ";alert=" + command.alertId() + ";ticket=" + command.governanceTicket(),
+            command.correlationId(),
+            now));
+    return MlAdvisoryResult.success(updated);
+  }
+
   private void incrementFeedbackAggregate(AdvisoryCard card, FeedbackOutcome outcome, Instant now) {
     Instant periodStart = periodStart(now);
     Instant periodEnd = periodStart.plusSeconds(86400);
@@ -1350,6 +1598,85 @@ public final class MlAdvisoryControlService {
     feedbackAggregates.put(key, current.increment(outcome));
   }
 
+  private MonitoringMetric toMonitoringMetric(String runId, MonitoringMetricInput input) {
+    return new MonitoringMetric(
+        deterministicId(runId, input.metricType(), input.metricName(), input.sourceRef()),
+        runId,
+        input.metricType(),
+        input.metricName(),
+        input.valueNumeric(),
+        input.thresholdNumeric(),
+        input.band(),
+        input.severity(),
+        input.sourceRef(),
+        input.metadata());
+  }
+
+  private MonitoringAlert toMonitoringAlert(
+      StartMonitoringRunCommand command, String runId, MonitoringMetricInput input, Instant now) {
+    String alertId = deterministicId(runId, input.metricType(), input.metricName(), input.severity(), "alert");
+    String eventType = monitoringAlertEventType(input.metricType());
+    String eventId = deterministicId(alertId, command.correlationId(), eventType);
+    String auditId = deterministicId(alertId, command.actorId(), "monitoring-alert-audit");
+    return new MonitoringAlert(
+        alertId,
+        command.tenantId(),
+        command.modelVersionId(),
+        runId,
+        input.metricType(),
+        input.metricName(),
+        input.severity(),
+        "OPEN",
+        input.recommendedAction(),
+        now,
+        "",
+        "",
+        "",
+        true,
+        eventId,
+        auditId,
+        command.correlationId());
+  }
+
+  private MlAdvisoryOutboxEvent alertRaisedEvent(StartMonitoringRunCommand command, MonitoringAlert alert, Instant now) {
+    return new MlAdvisoryOutboxEvent(
+        alert.eventRef(),
+        monitoringAlertEventType(alert.metricType()),
+        command.tenantId(),
+        alert.alertId(),
+        command.actorId(),
+        command.correlationId(),
+        command.idempotencyKey(),
+        now,
+        Map.of(
+            "alertId", alert.alertId(),
+            "runId", alert.runId(),
+            "modelVersionId", command.modelVersionId(),
+            "metric", alert.metricName(),
+            "severity", alert.severity(),
+            "recommendedAction", alert.recommendedAction(),
+            "rawSensitiveDataExposed", "false",
+            "advisoryOnly", String.valueOf(alert.advisoryOnly())));
+  }
+
+  private String monitoringAlertEventType(String metricType) {
+    return "BIAS".equalsIgnoreCase(metricType) ? ML_MODEL_BIAS_ALERT_RAISED_EVENT : ML_MODEL_DRIFT_ALERT_RAISED_EVENT;
+  }
+
+  private String moreSevere(String left, String right) {
+    return severityRank(right) > severityRank(left) ? right : left;
+  }
+
+  private int severityRank(String severity) {
+    return switch (nullToEmpty(severity).toUpperCase()) {
+      case "CRITICAL" -> 4;
+      case "HIGH" -> 3;
+      case "MEDIUM" -> 2;
+      case "LOW" -> 1;
+      default -> 0;
+    };
+  }
+
   private Instant periodStart(Instant instant) {
     return Instant.ofEpochSecond(Math.floorDiv(instant.getEpochSecond(), 86400) * 86400);
   }
@@ -1357,6 +1684,14 @@ public final class MlAdvisoryControlService {
   private String feedbackAggregateKey(
       String tenantId, String modelVersionId, AdvisoryType advisoryType, String confidenceBand, Instant periodStart) {
     return tenantId + ":" + modelVersionId + ":" + advisoryType + ":" + confidenceBand + ":" + periodStart;
+  }
+
+  private String monitoringRunKey(String tenantId, String runId) {
+    return tenantId + ":" + runId;
+  }
+
+  private String monitoringAlertKey(String tenantId, String alertId) {
+    return tenantId + ":" + alertId;
   }
 
   private String feedbackActiveKey(String tenantId, String advisoryId, String actorId, String sourceSurface) {
@@ -1383,6 +1718,43 @@ public final class MlAdvisoryControlService {
         nullToEmpty(command.comment()),
         command.sourceSurface(),
         nullToEmpty(command.supersedesFeedbackId()),
+        command.correlationId());
+  }
+
+  private String canonicalMonitoringRun(StartMonitoringRunCommand command) {
+    String canonicalMetrics =
+        command.metrics().stream()
+            .sorted(Comparator.comparing(MonitoringMetricInput::metricType).thenComparing(MonitoringMetricInput::metricName))
+            .map(
+                metric ->
+                    String.join(
+                        ":",
+                        metric.metricType(),
+                        metric.metricName(),
+                        String.valueOf(metric.valueNumeric()),
+                        String.valueOf(metric.thresholdNumeric()),
+                        metric.band(),
+                        metric.severity(),
+                        metric.recommendedAction(),
+                        String.valueOf(metric.approvedAggregateCohort()),
+                        String.valueOf(metric.containsRawSensitiveData()),
+                        metric.sourceRef()))
+            .reduce("", (left, right) -> left + "|" + right);
+    return String.join(
+        "|",
+        command.tenantId(),
+        command.idempotencyKey(),
+        command.actorId(),
+        command.modelVersionId(),
+        command.advisoryType().name(),
+        command.windowStart().toString(),
+        command.windowEnd().toString(),
+        command.policyVersion(),
+        command.featureSchemaVersion(),
+        command.dataLineageRef(),
+        String.valueOf(command.aggregateCohortCount()),
+        String.valueOf(command.minimumCohortSize()),
+        canonicalMetrics,
         command.correlationId());
   }
 

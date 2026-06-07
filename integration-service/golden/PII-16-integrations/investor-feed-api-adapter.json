@@ -1,0 +1,15 @@
+{
+  "storyId": "PII-16-S05",
+  "basePath": "/api/v1/tenants/{tenantId}/investor-api-adapters",
+  "events": [
+    "integration.investor-feed-run.started.v1",
+    "integration.investor-feed-run.normalized.v1",
+    "integration.investor-feed-run.failed.v1",
+    "integration.investor-feed-record.normalized.v1"
+  ],
+  "security": {
+    "credentialStorage": "credential_ref_only",
+    "egress": "https_allowlist_required",
+    "rawInvestorPayloadLogging": false
+  }
+}

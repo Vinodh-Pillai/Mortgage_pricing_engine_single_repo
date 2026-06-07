@@ -50,3 +50,11 @@ This service owns tenant-scoped ML advisory control behavior. The first vertical
 - `MlPricingAdvisoryGenerated.v1` and `MlPricingAdvisorySuppressed.v1` include advisory, pricing-result, model-version, snapshot, confidence/status, and reason metadata only. Raw borrower feature values are never emitted.
 - Advisory IDs include tenant, scenario, pricing result, snapshot, and model version so cache/read-model callers can invalidate when the pricing result, model version, or snapshot changes.
 - Live Redis caching, cross-service pricing-result reads, feedback submission, explainability content, and pricing-workbench UI cards remain integration points; this service-local slice provides stable links, events, and audit evidence without mutating deterministic pricing.
+
+## PII-14-S10 Drift Monitoring Shell
+
+- Monitoring runs are exposed as `POST /api/v1/tenants/{tenantId}/ml-advisory/monitoring-runs` and read back through `GET /api/v1/tenants/{tenantId}/ml-advisory/monitoring-runs?modelVersionId=&from=&to=`.
+- Alert review is exposed through `GET /api/v1/tenants/{tenantId}/ml-advisory/monitoring-alerts?status=&severity=`, `:acknowledge`, and `:request-suspension` actions.
+- Drift, bias, data quality, confidence, and feedback disagreement metrics must arrive as approved aggregate-cohort metrics with policy version, feature schema version, data lineage reference, and configured thresholds supplied by the caller or governance configuration. Missing policy/configuration fails closed.
+- The shell never emits raw protected attributes, borrower-level feature values, or deterministic pricing changes. Alert actions are advisory-only and record governance ticket/audit evidence for downstream model-risk review.
+- Live scheduled aggregation, model registry mutation, kill-switch activation, pricing-workbench UI, Kafka delivery, and PostgreSQL repository wiring remain external integrations; this slice provides API/domain/schema/event/audit shells and service-local tests.

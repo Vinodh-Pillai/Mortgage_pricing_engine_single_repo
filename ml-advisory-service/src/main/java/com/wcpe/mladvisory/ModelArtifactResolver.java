@@ -11,7 +11,7 @@ final class ModelArtifactResolver {
         || isBlank(artifactRef.schemaVersion())) {
       return MlAdvisoryResult.failure("VALIDATION_FAILED");
     }
-    if (!"APPROVED_FOR_ADVISORY".equals(artifactRef.approvalStatus())) {
+    if (!approvedForAdvisoryUse(artifactRef.approvalStatus())) {
       return MlAdvisoryResult.failure("MODEL_DISABLED");
     }
     if (!artifactRef.registryChecksum().equals(artifactRef.actualChecksum())) {
@@ -22,5 +22,11 @@ final class ModelArtifactResolver {
 
   private boolean isBlank(String value) {
     return value == null || value.isBlank();
+  }
+
+  private boolean approvedForAdvisoryUse(String status) {
+    return "APPROVED_FOR_ADVISORY".equals(status)
+        || "APPROVED_SHADOW".equals(status)
+        || "APPROVED_ADVISORY_VISIBLE".equals(status);
   }
 }

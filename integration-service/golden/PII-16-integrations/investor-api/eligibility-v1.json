@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "INVESTOR-FEED-V1",
+  "feedType": "ELIGIBILITY",
+  "nextCursor": "cursor-c",
+  "records": [
+    {
+      "externalRecordId": "elig-1",
+      "recordType": "ELIGIBILITY",
+      "productRef": "product-a",
+      "effectiveDate": "2026-06-07"
+    }
+  ]
+}

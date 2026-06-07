@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "INVESTOR-FEED-V1",
+  "feedType": "PRICE_SHEET",
+  "nextCursor": "cursor-b",
+  "records": [
+    {
+      "externalRecordId": "price-1",
+      "recordType": "PRICE_SHEET",
+      "productRef": "product-a",
+      "effectiveDate": "2026-06-07"
+    },
+    {
+      "externalRecordId": "price-2",
+      "recordType": "PRICE_SHEET",
+      "productRef": "product-b",
+      "effectiveDate": "2026-06-07"
+    }
+  ]
+}
