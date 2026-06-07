@@ -92,13 +92,13 @@ public class CriterionEvaluator {
         }
     }
 
-    // Private normalization helpers - no domain rules, just math
+    // Private scoring helpers - no domain rules, just the configured primitive direction.
     private BigDecimal normalizeMinScore(BigDecimal value, String configJson) {
-        return BigDecimal.ONE;
+        return value.negate();
     }
 
     private BigDecimal normalizeMaxScore(BigDecimal value, String configJson) {
-        return BigDecimal.ONE;
+        return value;
     }
 
     private BigDecimal checkThreshold(BigDecimal value, String configJson) {

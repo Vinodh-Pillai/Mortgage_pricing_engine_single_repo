@@ -1,6 +1,7 @@
 package com.wcpe.mladvisory;
 
 import java.util.Comparator;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -8,6 +9,10 @@ import java.util.Optional;
 
 final class InMemoryModelVersionRepository implements ModelVersionRepository {
   private final Map<String, ModelVersion> versions = new HashMap<>();
+  private final Map<String, ModelVersionIdempotencyRecord> idempotencyRecords = new HashMap<>();
+  private final List<ModelVersionStatusHistory> statusHistory = new ArrayList<>();
+  private final List<MlAdvisoryOutboxEvent> outboxEvents = new ArrayList<>();
+  private final List<MlAdvisoryAuditRecord> auditRecords = new ArrayList<>();
 
   @Override
   public void save(ModelVersion version) {
@@ -33,6 +38,45 @@ final class InMemoryModelVersionRepository implements ModelVersionRepository {
         .filter(version -> advisoryType == null || version.advisoryTypes().contains(advisoryType))
         .sorted(Comparator.comparing(ModelVersion::createdAt).reversed())
         .toList();
+  }
+
+  @Override
+  public Optional<ModelVersionIdempotencyRecord> findIdempotency(String idempotencyKey) {
+    return Optional.ofNullable(idempotencyRecords.get(idempotencyKey));
+  }
+
+  @Override
+  public void saveIdempotency(ModelVersionIdempotencyRecord record) {
+    idempotencyRecords.put(record.idempotencyKey(), record);
+  }
+
+  @Override
+  public void saveStatusHistory(ModelVersionStatusHistory history) {
+    statusHistory.add(history);
+  }
+
+  @Override
+  public void saveOutboxEvent(MlAdvisoryOutboxEvent event) {
+    outboxEvents.add(event);
+  }
+
+  @Override
+  public void saveAuditRecord(MlAdvisoryAuditRecord record) {
+    auditRecords.add(record);
+  }
+
+  @Override
+  public List<MlAdvisoryOutboxEvent> outboxEvents() {
+    return List.copyOf(outboxEvents);
+  }
+
+  @Override
+  public List<MlAdvisoryAuditRecord> auditRecords() {
+    return List.copyOf(auditRecords);
+  }
+
+  List<ModelVersionStatusHistory> statusHistory() {
+    return List.copyOf(statusHistory);
   }
 
   private String versionKey(String tenantId, String modelVersionId) {

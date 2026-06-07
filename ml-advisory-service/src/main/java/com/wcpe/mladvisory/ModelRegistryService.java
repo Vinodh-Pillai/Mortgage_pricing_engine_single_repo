@@ -5,8 +5,6 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -31,10 +29,6 @@ public final class ModelRegistryService {
   private final ModelVersionRepository repository;
   private final ModelLifecyclePolicy lifecyclePolicy = new ModelLifecyclePolicy();
   private final ModelApprovalPolicy approvalPolicy = new ModelApprovalPolicy();
-  private final Map<String, ModelVersionResponse> idempotencyResponses = new HashMap<>();
-  private final Map<String, String> idempotencyHashes = new HashMap<>();
-  private final List<MlAdvisoryOutboxEvent> outboxEvents = new ArrayList<>();
-  private final List<MlAdvisoryAuditRecord> auditRecords = new ArrayList<>();
 
   public ModelRegistryService() {
     this(Clock.systemUTC(), new InMemoryModelVersionRepository());
@@ -56,12 +50,13 @@ public final class ModelRegistryService {
     }
     String idempotencyKey = command.tenantId() + ":model-version:" + command.idempotencyKey();
     String requestHash = hash(canonicalRegister(command));
-    String existingHash = idempotencyHashes.get(idempotencyKey);
-    if (existingHash != null) {
-      if (!existingHash.equals(requestHash)) {
+    Optional<ModelVersionIdempotencyRecord> existingIdempotency = repository.findIdempotency(idempotencyKey);
+    if (existingIdempotency.isPresent()) {
+      ModelVersionIdempotencyRecord record = existingIdempotency.orElseThrow();
+      if (!record.requestHash().equals(requestHash)) {
         return MlAdvisoryResult.failure("IDEMPOTENCY_CONFLICT");
       }
-      return MlAdvisoryResult.success(idempotencyResponses.get(idempotencyKey));
+      return MlAdvisoryResult.success(record.response());
     }
     if (repository.existsByTenantModelAndSemanticVersion(command.tenantId(), command.modelName(), command.semanticVersion())) {
       return MlAdvisoryResult.failure("VERSION_CONFLICT");
@@ -90,8 +85,7 @@ public final class ModelRegistryService {
             1);
     repository.save(version);
     ModelVersionResponse response = recordTransition(version, "none", ModelStatus.DRAFT, command.actorId(), REGISTERED_EVENT, command.idempotencyKey(), "registered", command.correlationId());
-    idempotencyHashes.put(idempotencyKey, requestHash);
-    idempotencyResponses.put(idempotencyKey, response);
+    repository.saveIdempotency(new ModelVersionIdempotencyRecord(idempotencyKey, requestHash, response));
     return MlAdvisoryResult.success(response);
   }
 
@@ -156,11 +150,11 @@ public final class ModelRegistryService {
   }
 
   public List<MlAdvisoryOutboxEvent> outboxEvents() {
-    return List.copyOf(outboxEvents);
+    return repository.outboxEvents();
   }
 
   public List<MlAdvisoryAuditRecord> auditRecords() {
-    return List.copyOf(auditRecords);
+    return repository.auditRecords();
   }
 
   private MlAdvisoryResult<RegisterModelVersionCommand> validateRegister(RegisterModelVersionCommand command) {
@@ -195,8 +189,9 @@ public final class ModelRegistryService {
     Instant now = clock.instant();
     String eventId = deterministicId(version.modelVersionId(), correlationId, eventType, afterStatus.name());
     String auditId = deterministicId(version.modelVersionId(), actorId, afterStatus.name(), "audit");
+    String historyId = deterministicId(version.modelVersionId(), beforeStatus, afterStatus.name(), correlationId, "history");
     String cacheInvalidationRef = afterStatus == ModelStatus.SUSPENDED || afterStatus == ModelStatus.RETIRED ? deterministicId(version.modelVersionId(), "cache-invalidation", correlationId) : "";
-    outboxEvents.add(
+    MlAdvisoryOutboxEvent event =
         new MlAdvisoryOutboxEvent(
             eventId,
             eventType,
@@ -212,8 +207,8 @@ public final class ModelRegistryService {
                 "allowedUse", version.allowedUse().name(),
                 "actor", actorId,
                 "reason", reason == null ? "" : reason,
-                "governanceTicket", reason == null ? "" : reason)));
-    auditRecords.add(
+                "governanceTicket", reason == null ? "" : reason));
+    MlAdvisoryAuditRecord audit =
         new MlAdvisoryAuditRecord(
             auditId,
             version.tenantId(),
@@ -222,7 +217,21 @@ public final class ModelRegistryService {
             beforeStatus,
             afterStatus.name() + ";modelVersion=" + version.modelVersionId(),
             correlationId,
+            now);
+    repository.saveStatusHistory(
+        new ModelVersionStatusHistory(
+            historyId,
+            version.modelVersionId(),
+            version.tenantId(),
+            beforeStatus,
+            afterStatus.name(),
+            actorId,
+            reason == null ? "" : reason,
+            reason == null ? "" : reason,
+            correlationId,
             now));
+    repository.saveOutboxEvent(event);
+    repository.saveAuditRecord(audit);
     return new ModelVersionResponse(
         version.modelVersionId(),
         version.tenantId(),

@@ -55,6 +55,7 @@ public class BestExecutionRanker {
     private ScoredCandidate score(QuoteCandidate candidate, RankingPolicyRef policyRef) {
         List<BigDecimal> criterionScores = new java.util.ArrayList<>();
         List<String> reasons = new java.util.ArrayList<>();
+        reasons.add("policy:" + policyRef.policyId() + ":" + policyRef.policyVersion());
         BigDecimal totalScore = BigDecimal.ZERO;
 
         for (RankingCriterion criterion : policyRef.criteria()) {
@@ -62,7 +63,7 @@ public class BestExecutionRanker {
                 CriterionEvaluator.EvaluationResult result = criterionEvaluator.evaluate(criterion, candidate);
                 BigDecimal weighted = result.normalizedScore().multiply(criterion.weight()).setScale(8, RoundingMode.HALF_UP);
                 criterionScores.add(weighted);
-                reasons.add(result.reason().description());
+                reasons.add(formatReason(result.reason()));
                 totalScore = totalScore.add(weighted);
             } catch (QuoteCreateException ex) {
                 if (criterion.required()) {
@@ -93,6 +94,13 @@ public class BestExecutionRanker {
             groups.computeIfAbsent(groupKey, k -> new java.util.ArrayList<>()).add(sc);
         }
         return groups;
+    }
+
+    private String formatReason(RankReason reason) {
+        return reason.criterionId()
+            + ":" + reason.reasonType()
+            + ":" + reason.description()
+            + ":" + reason.evidence();
     }
 
     private QuoteOption toOption(ScoredCandidate sc, int rank, RankingPolicy policy, Instant expiresAt) {

@@ -47,8 +47,54 @@ create table if not exists ml_model_status_history (
   changed_at timestamptz not null
 );
 
+create table if not exists ml_model_idempotency (
+  idempotency_key varchar(240) primary key,
+  request_hash varchar(80) not null,
+  model_version_id varchar(80) not null,
+  tenant_id uuid not null,
+  model_name varchar(160) not null,
+  semantic_version varchar(80) not null,
+  status varchar(40) not null,
+  allowed_use varchar(40) not null,
+  version int not null,
+  event_ref varchar(80) not null,
+  audit_ref varchar(80) not null,
+  cache_invalidation_ref varchar(80) not null,
+  correlation_id varchar(128) not null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists ml_model_outbox_events (
+  event_id varchar(80) primary key,
+  event_type varchar(120) not null,
+  tenant_id uuid not null,
+  aggregate_id varchar(80) not null,
+  actor_id varchar(128) not null,
+  correlation_id varchar(128) not null,
+  idempotency_key varchar(160) not null,
+  occurred_at timestamptz not null,
+  payload_json text not null
+);
+
+create table if not exists ml_model_audit_records (
+  audit_id varchar(80) primary key,
+  tenant_id uuid not null,
+  actor_id varchar(128) not null,
+  action varchar(120) not null,
+  before_summary text not null,
+  after_summary text not null,
+  correlation_id varchar(128) not null,
+  recorded_at timestamptz not null
+);
+
 create index if not exists idx_ml_model_versions_tenant_status_updated
   on ml_model_versions (tenant_id, status, created_at desc);
 
 create index if not exists idx_ml_model_status_history_model
   on ml_model_status_history (tenant_id, model_version_id, changed_at desc);
+
+create index if not exists idx_ml_model_outbox_tenant_occurred
+  on ml_model_outbox_events (tenant_id, occurred_at desc);
+
+create index if not exists idx_ml_model_audit_tenant_recorded
+  on ml_model_audit_records (tenant_id, recorded_at desc);
