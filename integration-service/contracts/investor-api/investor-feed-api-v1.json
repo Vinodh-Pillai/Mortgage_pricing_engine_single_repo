@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "integration.investorApi.v1",
+  "tenantId": "11111111-1111-1111-1111-111111111111",
+  "investorId": "investor-ref-001",
+  "adapterId": "investor-api-main",
+  "credentialRef": "credential-ref-001",
+  "normalizedRecordCount": 2,
+  "expectedErrors": ["DEPENDENCY_UNAVAILABLE", "POLICY_NOT_SATISFIED"],
+  "redactionPolicyRef": "integration-redaction-v1"
+}

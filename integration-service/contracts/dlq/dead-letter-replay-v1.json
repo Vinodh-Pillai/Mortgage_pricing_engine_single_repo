@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "integration.dlq.v1",
+  "tenantId": "11111111-1111-1111-1111-111111111111",
+  "deadLetterId": "dlq-001",
+  "replayMode": "DRY_RUN",
+  "reasonRef": "schema-version-blocked",
+  "auditedReasonRequired": true,
+  "redactionPolicyRef": "integration-redaction-v1"
+}

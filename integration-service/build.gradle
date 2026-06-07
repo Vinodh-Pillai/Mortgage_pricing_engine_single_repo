@@ -18,3 +18,17 @@ dependencies {
 tasks.named('test') {
   useJUnitPlatform()
 }
+
+tasks.register('contractTest', Test) {
+  description = 'Runs integration contract tests for API, event, fixture, redaction, and tenant isolation contracts.'
+  group = 'verification'
+  testClassesDirs = sourceSets.test.output.classesDirs
+  classpath = sourceSets.test.runtimeClasspath
+  useJUnitPlatform()
+  include '**/*ContractTest.class'
+  shouldRunAfter tasks.named('test')
+}
+
+tasks.named('check') {
+  dependsOn tasks.named('contractTest')
+}

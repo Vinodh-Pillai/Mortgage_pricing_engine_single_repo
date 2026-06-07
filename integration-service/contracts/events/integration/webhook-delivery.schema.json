@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "integration.webhookDelivery.v1",
+  "eventTypes": ["integration.webhook-delivery.delivered.v1", "integration.webhook-delivery.failed.v1", "integration.webhook-delivery.dead-lettered.v1"],
+  "requiredEnvelope": ["tenantId", "eventId", "eventType", "eventVersion", "sourceService", "actorId", "correlationId", "causationId", "idempotencyKey", "occurredAt", "payloadHash"],
+  "requiredPayload": ["deliveryId", "subscriptionId", "status", "attempt", "redactionPolicyRef", "sourceRefs"]
+}

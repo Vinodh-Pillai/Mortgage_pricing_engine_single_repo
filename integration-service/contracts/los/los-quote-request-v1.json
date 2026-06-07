@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "LOS-QUOTE-V1",
+  "tenantId": "11111111-1111-1111-1111-111111111111",
+  "channelId": "channel-main",
+  "losLoanId": "loan-ref-001",
+  "productPreference": "product-ref-conventional",
+  "pricingConfigVersion": "tenant-config-2026-06",
+  "expectedErrors": ["VALIDATION_FAILED", "UNSUPPORTED_SCHEMA_VERSION", "POLICY_NOT_SATISFIED"],
+  "redactionPolicyRef": "integration-redaction-v1"
+}

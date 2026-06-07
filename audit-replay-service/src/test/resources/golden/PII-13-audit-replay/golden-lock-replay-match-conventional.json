@@ -1,0 +1,11 @@
+{
+  "storyId": "PII-13-S07",
+  "scenario": "golden-lock-replay-match-conventional",
+  "sourceLockId": "lock-123",
+  "decisionType": "ELIGIBILITY",
+  "marketSnapshotRef": "market-snapshot-2026-06-07",
+  "lockPolicyVersionRefs": ["lock-policy-v1"],
+  "expectedClassification": "MATCH",
+  "lockStateMutated": false,
+  "currentMarketDataUsed": false
+}

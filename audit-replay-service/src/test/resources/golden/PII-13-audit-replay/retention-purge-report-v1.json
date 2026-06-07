@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "retention-purge-report-v1",
+  "tenantId": "11111111-1111-1111-1111-111111111111",
+  "cutoff": "2026-01-01",
+  "dryRun": false,
+  "candidateAuditRecordIds": ["44444444-4444-4444-4444-444444444444"],
+  "skippedHeldAuditRecordIds": [],
+  "purgeMode": "TOMBSTONE_ONLY_NO_PHYSICAL_DELETE"
+}

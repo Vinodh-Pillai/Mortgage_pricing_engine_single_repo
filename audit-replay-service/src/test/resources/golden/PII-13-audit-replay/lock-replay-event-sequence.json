@@ -1,0 +1,9 @@
+{
+  "storyId": "PII-13-S07",
+  "events": [
+    "LockReplayRequested.v1",
+    "LockReplayCompleted.v1"
+  ],
+  "sourceRefs": ["audit-record:{sourceAuditRecordId}"],
+  "schemaRef": "lock-replay-v1"
+}

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "integration.sftp.v1",
+  "tenantId": "11111111-1111-1111-1111-111111111111",
+  "adapterId": "sftp-adapter-main",
+  "fileId": "file-001",
+  "checksum": "sha256:fixture-hash-001",
+  "archiveRef": "tenant-archive-ref-001",
+  "pathTraversalRejected": true,
+  "redactionPolicyRef": "integration-redaction-v1"
+}

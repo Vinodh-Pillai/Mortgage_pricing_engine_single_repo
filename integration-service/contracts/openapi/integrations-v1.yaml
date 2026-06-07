@@ -1,0 +1,98 @@
+openapi: 3.0.3
+info:
+  title: WCPE Integration API
+  version: v1
+servers:
+  - url: /api/v1
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required: [code, reason, message, correlationId]
+      properties:
+        code: { type: string }
+        reason:
+          type: string
+          enum: [VALIDATION_FAILED, UNAUTHENTICATED, TENANT_ACCESS_DENIED, NOT_FOUND, VERSION_CONFLICT, IDEMPOTENCY_CONFLICT, POLICY_NOT_SATISFIED, DEPENDENCY_UNAVAILABLE, UNSUPPORTED_SCHEMA_VERSION]
+        message: { type: string }
+        correlationId: { type: string }
+    IntegrationEnvelope:
+      type: object
+      required: [tenantId, id, status, version, correlationId]
+      properties:
+        tenantId: { type: string, format: uuid }
+        id: { type: string }
+        status: { type: string }
+        version: { type: integer, minimum: 1 }
+        correlationId: { type: string }
+security:
+  - bearerAuth: []
+paths:
+  /tenants/{tenantId}/channels:
+    post:
+      operationId: createChannel
+      responses:
+        '200': { description: channel registered }
+        '400': { description: validation failed }
+        '409': { description: duplicate or idempotency conflict }
+        '422': { description: policy not satisfied }
+  /tenants/{tenantId}/channels/{channelId}:
+    get:
+      operationId: readChannel
+      responses:
+        '200': { description: channel read }
+        '404': { description: not found }
+  /tenants/{tenantId}/channels/{channelId}/quotes:
+    post:
+      operationId: submitLosQuote
+      responses:
+        '200': { description: quote request accepted or priced }
+        '400': { description: validation failed }
+        '422': { description: policy not satisfied }
+  /tenants/{tenantId}/channels/{channelId}/webhook-subscriptions:
+    post:
+      operationId: createWebhookSubscription
+      responses:
+        '200': { description: subscription created }
+        '400': { description: validation failed }
+        '422': { description: policy not satisfied }
+  /tenants/{tenantId}/webhook-deliveries:
+    post:
+      operationId: recordWebhookDelivery
+      responses:
+        '200': { description: delivery outcome recorded }
+        '503': { description: dependency unavailable }
+  /tenants/{tenantId}/investor-api-adapters:
+    post:
+      operationId: runInvestorFeedAdapter
+      responses:
+        '200': { description: investor feed normalized }
+        '503': { description: dependency unavailable }
+  /tenants/{tenantId}/sftp-feed-adapters:
+    post:
+      operationId: pollSftpFeedAdapter
+      responses:
+        '200': { description: sftp feed normalized }
+        '422': { description: policy not satisfied }
+  /tenants/{tenantId}/service-credentials:
+    post:
+      operationId: createServiceCredential
+      responses:
+        '200': { description: credential created with one time disclosure token }
+        '403': { description: tenant access denied }
+  /tenants/{tenantId}/integration-health:
+    get:
+      operationId: readIntegrationHealth
+      responses:
+        '200': { description: component health summary }
+  /tenants/{tenantId}/dead-letters:
+    post:
+      operationId: replayDeadLetter
+      responses:
+        '200': { description: replay, dry run, discard, or blocked outcome }
+        '422': { description: policy not satisfied }

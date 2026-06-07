@@ -3,8 +3,11 @@ package com.wcpe.auditreplay.api;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.wcpe.auditreplay.CorrelationContext;
+import com.wcpe.auditreplay.application.AuditIntegrityHashService;
 import com.wcpe.auditreplay.application.AuditRecordCommand;
 import com.wcpe.auditreplay.application.AuditRecorder;
+import com.wcpe.auditreplay.application.AuditSearchService;
 import com.wcpe.auditreplay.domain.AuditRecord;
 import com.wcpe.auditreplay.repository.AuditRecordRepository;
 import java.io.IOException;
@@ -18,24 +21,60 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
-import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.util.MultiValueMap;
 
 @RestController
 public class AuditRecordController {
 
     private final AuditRecorder auditRecorder;
     private final AuditRecordRepository auditRecordRepository;
+    private final AuditSearchService auditSearchService;
+    private final AuditIntegrityHashService auditIntegrityHashService;
     private final ObjectMapper objectMapper;
 
     public AuditRecordController(
             AuditRecorder auditRecorder,
             AuditRecordRepository auditRecordRepository,
+            AuditSearchService auditSearchService,
+            AuditIntegrityHashService auditIntegrityHashService,
             ObjectMapper objectMapper) {
         this.auditRecorder = auditRecorder;
         this.auditRecordRepository = auditRecordRepository;
+        this.auditSearchService = auditSearchService;
+        this.auditIntegrityHashService = auditIntegrityHashService;
         this.objectMapper = objectMapper;
+    }
+
+    @GetMapping("/api/v1/tenants/{tenantId}/audit-records")
+    @Transactional(readOnly = true)
+    public AuditSearchService.AuditSearchPage search(
+            @PathVariable UUID tenantId,
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam MultiValueMap<String, String> filters) {
+        requireAuthorization(authorization);
+        try {
+            return auditSearchService.search(tenantId, filters);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
+    }
+
+    @PostMapping("/api/v1/tenants/{tenantId}/audit-integrity/verifications")
+    @Transactional(readOnly = true)
+    public AuditIntegrityHashService.AuditIntegrityVerification verifyIntegrity(
+            @PathVariable UUID tenantId,
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody AuditIntegrityVerificationRequest request) {
+        requireAuthorization(authorization);
+        try {
+            request.validate();
+            return auditIntegrityHashService.verifyTenantChain(tenantId, request.from(), request.to());
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
     }
 
     @PostMapping("/internal/v1/tenants/{tenantId}/audit-records")
@@ -95,6 +134,7 @@ public class AuditRecordController {
             boolean legalHold) {
 
         AuditRecordCommand toCommand(UUID tenantId, String idempotencyKey, ObjectMapper objectMapper) {
+            CorrelationContext.Data correlationContext = CorrelationContext.get();
             return new AuditRecordCommand(
                     tenantId,
                     action,
@@ -104,8 +144,8 @@ public class AuditRecordController {
                     actorType,
                     actorId,
                     actorDisplay,
-                    correlationId,
-                    causationId,
+                    resolveCorrelationId(correlationContext),
+                    resolveCausationId(correlationContext),
                     requestId,
                     sourceIpHash,
                     userAgentHash,
@@ -121,6 +161,40 @@ public class AuditRecordController {
                     retentionUntil,
                     legalHold,
                     idempotencyKey);
+        }
+
+        private UUID resolveCorrelationId(CorrelationContext.Data correlationContext) {
+            if (correlationContext == null || correlationContext.correlationId() == null) {
+                return correlationId;
+            }
+            UUID headerCorrelationId = correlationContext.correlationId().getValue();
+            if (correlationId != null && !correlationId.equals(headerCorrelationId)) {
+                throw new IllegalArgumentException("correlationId must match X-Correlation-Id");
+            }
+            return headerCorrelationId;
+        }
+
+        private UUID resolveCausationId(CorrelationContext.Data correlationContext) {
+            if (causationId != null) {
+                return causationId;
+            }
+            if (correlationContext == null
+                    || correlationContext.causationId() == null
+                    || !correlationContext.causationId().isPresent()) {
+                return null;
+            }
+            return correlationContext.causationId().get();
+        }
+    }
+
+    public record AuditIntegrityVerificationRequest(Instant from, Instant to) {
+        void validate() {
+            if (from == null) {
+                throw new IllegalArgumentException("from is required");
+            }
+            if (to == null) {
+                throw new IllegalArgumentException("to is required");
+            }
         }
     }
 

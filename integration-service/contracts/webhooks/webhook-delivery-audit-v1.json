@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "integration.webhookDelivery.v1",
+  "tenantId": "11111111-1111-1111-1111-111111111111",
+  "deliveryId": "delivery-001",
+  "status": "DEAD_LETTERED",
+  "attempt": 3,
+  "endpointHostHash": "host-hash-001",
+  "redactionPolicyRef": "integration-redaction-v1"
+}

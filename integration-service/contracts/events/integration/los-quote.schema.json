@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "integration.losQuote.v1",
+  "eventTypes": ["integration.los-quote-request.accepted.v1", "integration.los-quote-request.priced.v1", "integration.los-quote-request.rejected.v1"],
+  "requiredEnvelope": ["tenantId", "eventId", "eventType", "eventVersion", "sourceService", "actorId", "correlationId", "causationId", "idempotencyKey", "occurredAt", "payloadHash"],
+  "requiredPayload": ["requestId", "channelId", "status", "pricingConfigVersion", "sourceRefs"]
+}

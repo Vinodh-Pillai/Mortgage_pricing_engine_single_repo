@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "integration.sftpFile.v1",
+  "eventTypes": ["integration.sftp-file.discovered.v1", "integration.sftp-file.normalized.v1", "integration.sftp-file.failed.v1", "integration.sftp-file.archived.v1", "integration.investor-feed-record.normalized.v1"],
+  "requiredEnvelope": ["tenantId", "eventId", "eventType", "eventVersion", "sourceService", "actorId", "correlationId", "causationId", "idempotencyKey", "occurredAt", "payloadHash"],
+  "requiredPayload": ["fileId", "adapterId", "status", "checksum", "archiveRef", "sourceRefs"]
+}

@@ -1,7 +1,7 @@
 package com.wcpe.auditreplay.application;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.wcpe.auditreplay.CorrelationContext;
 import com.wcpe.auditreplay.domain.AuditRecord;
 import com.wcpe.auditreplay.domain.AuditSnapshot;
 import com.wcpe.auditreplay.repository.AuditRecordRepository;
@@ -67,7 +67,9 @@ public class AuditRecorder {
     @Transactional
     public AuditRecord record(AuditRecordCommand command) {
         long started = System.nanoTime();
+        CorrelationContext.checkPersistenceBoundary();
         validate(command);
+        requireCorrelationContextMatchesCommand(command);
         Optional<AuditRecord> existing = auditRecordRepository.findByTenantIdAndRequestId(command.tenantId(), command.requestId());
         if (existing.isPresent()) {
             return existing.get();
@@ -81,7 +83,7 @@ public class AuditRecorder {
             metrics.recordHashChainBreak();
             throw new IllegalStateException("Audit hash chain previous record is missing integrityHash");
         }
-        String integrityHash = integrityHash(redactedCommand, previousHash, beforeRef, afterRef);
+        String integrityHash = AuditIntegrityHashService.hash(redactedCommand, previousHash, beforeRef, afterRef, objectMapper);
         AuditRecord record = AuditRecord.create(
                 redactedCommand.tenantId(),
                 UUID.nameUUIDFromBytes((redactedCommand.tenantId() + ":" + redactedCommand.requestId()).getBytes(StandardCharsets.UTF_8)),
@@ -113,6 +115,13 @@ public class AuditRecorder {
         outboxRecorder.record(toOutboxCommand(saved, redactedCommand.idempotencyKey()));
         metrics.recordWrite(Duration.ofNanos(System.nanoTime() - started));
         return saved;
+    }
+
+    private void requireCorrelationContextMatchesCommand(AuditRecordCommand command) {
+        CorrelationContext.Data context = CorrelationContext.get();
+        if (!context.correlationId().getValue().equals(command.correlationId())) {
+            throw new IllegalArgumentException("correlationId must match current CorrelationContext");
+        }
     }
 
     private AuditRecordCommand withRedactedSnapshot(AuditRecordCommand command) {
@@ -191,34 +200,6 @@ public class AuditRecorder {
                 record.getActorId(),
                 idempotencyKey,
                 AUDIT_RECORD_SCHEMA_REF);
-    }
-
-    private String integrityHash(AuditRecordCommand command, String previousHash, UUID beforeRef, UUID afterRef) {
-        Map<String, Object> canonical = new LinkedHashMap<>();
-        canonical.put("tenantId", command.tenantId().toString());
-        canonical.put("requestId", command.requestId().toString());
-        canonical.put("action", command.action());
-        canonical.put("subjectType", command.subjectType());
-        canonical.put("subjectId", command.subjectId());
-        canonical.put("subjectVersion", command.subjectVersion());
-        canonical.put("actorType", command.actorType());
-        canonical.put("actorId", command.actorId());
-        canonical.put("correlationId", command.correlationId().toString());
-        canonical.put("beforeRef", beforeRef == null ? null : beforeRef.toString());
-        canonical.put("afterRef", afterRef == null ? null : afterRef.toString());
-        canonical.put("snapshotHash", sha256Hex(command.snapshotJson()));
-        canonical.put("configVersionRefsHash", sha256Hex(command.configVersionRefsJson()));
-        canonical.put("result", command.result());
-        canonical.put("reasonCode", command.reasonCode());
-        canonical.put("occurredAt", command.occurredAt().toString());
-        canonical.put("retentionUntil", command.retentionUntil().toString());
-        canonical.put("legalHold", command.legalHold());
-        canonical.put("previousHash", previousHash);
-        try {
-            return sha256Hex(objectMapper.writeValueAsBytes(canonical));
-        } catch (JsonProcessingException ex) {
-            throw new IllegalArgumentException("Audit record canonical hash payload is not JSON serializable", ex);
-        }
     }
 
     private void validate(AuditRecordCommand command) {

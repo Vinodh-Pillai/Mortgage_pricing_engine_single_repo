@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "integration.healthStatus.v1",
+  "eventTypes": ["integration.health-status.changed.v1"],
+  "requiredEnvelope": ["tenantId", "eventId", "eventType", "eventVersion", "sourceService", "actorId", "correlationId", "causationId", "idempotencyKey", "occurredAt", "payloadHash"],
+  "requiredPayload": ["componentId", "status", "tenantHash", "sourceRefs"]
+}

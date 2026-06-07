@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "integration.webhookSubscription.v1",
+  "eventTypes": ["integration.webhook-subscription.created.v1", "integration.webhook-subscription.updated.v1", "integration.webhook-subscription.paused.v1", "integration.webhook-subscription.secret-rotated.v1", "integration.webhook-subscription.tested.v1"],
+  "requiredEnvelope": ["tenantId", "eventId", "eventType", "eventVersion", "sourceService", "actorId", "correlationId", "causationId", "idempotencyKey", "occurredAt", "payloadHash"],
+  "requiredPayload": ["subscriptionId", "channelId", "status", "endpointHostHash", "deliveryIntegrityHeader", "sourceRefs"]
+}

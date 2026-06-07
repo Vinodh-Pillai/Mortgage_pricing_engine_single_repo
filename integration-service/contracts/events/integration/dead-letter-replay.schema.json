@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "integration.deadLetterReplay.v1",
+  "eventTypes": ["integration.dead-letter.opened.v1", "integration.dead-letter.replay-requested.v1", "integration.dead-letter.replayed.v1", "integration.dead-letter.discarded.v1", "integration.dead-letter.blocked.v1"],
+  "requiredEnvelope": ["tenantId", "eventId", "eventType", "eventVersion", "sourceService", "actorId", "correlationId", "causationId", "idempotencyKey", "occurredAt", "payloadHash"],
+  "requiredPayload": ["deadLetterId", "status", "reasonRef", "replayMode", "sourceRefs"]
+}

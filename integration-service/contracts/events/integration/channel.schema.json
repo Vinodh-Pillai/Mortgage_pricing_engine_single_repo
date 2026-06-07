@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "integration.channel.v1",
+  "eventTypes": ["integration.channel-client.registered.v1", "integration.channel-client.updated.v1"],
+  "requiredEnvelope": ["tenantId", "eventId", "eventType", "eventVersion", "sourceService", "actorId", "correlationId", "causationId", "idempotencyKey", "occurredAt", "payloadHash"],
+  "requiredPayload": ["channelId", "status", "version", "sourceRefs"]
+}

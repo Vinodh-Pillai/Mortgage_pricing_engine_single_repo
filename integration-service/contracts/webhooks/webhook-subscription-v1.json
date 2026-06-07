@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "integration.webhook.v1",
+  "tenantId": "11111111-1111-1111-1111-111111111111",
+  "channelId": "channel-main",
+  "endpointHostHash": "host-hash-001",
+  "deliveryIntegrityHeader": "WCPE-HMAC-v1",
+  "allowedEvents": ["integration.los-quote-request.priced.v1", "integration.webhook-delivery.failed.v1"],
+  "redactionPolicyRef": "integration-redaction-v1"
+}

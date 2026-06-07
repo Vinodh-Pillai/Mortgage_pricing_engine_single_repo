@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "integration.health.v1",
+  "tenantHash": "tenant-hash-001",
+  "componentStatus": [
+    { "componentId": "channel-api", "status": "HEALTHY" },
+    { "componentId": "investor-api", "status": "DEGRADED" },
+    { "componentId": "sftp", "status": "DOWN" }
+  ],
+  "payloadFieldsAllowed": false,
+  "redactionPolicyRef": "integration-redaction-v1"
+}

@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "integration.channel.v1",
+  "tenantId": "11111111-1111-1111-1111-111111111111",
+  "externalRef": "los-main",
+  "allowedProducts": ["product-ref-conventional"],
+  "rateLimitPolicyRef": "tenant-rate-limit-policy",
+  "expectedErrors": ["VALIDATION_FAILED", "IDEMPOTENCY_CONFLICT", "POLICY_NOT_SATISFIED"],
+  "redactionPolicyRef": "integration-redaction-v1"
+}

@@ -26,7 +26,17 @@ public class EventContractRegistryService implements EventContractRegistry {
         return Integer.valueOf(1).equals(eventVersion)
                 && ("AuditRecordCreated.v1".equals(eventType)
                 || "audit_record.created".equals(eventType)
-                || "outbox_pattern.completed.v1".equals(eventType));
+                || "outbox_pattern.completed.v1".equals(eventType)
+                || "QuoteReplayRequested.v1".equals(eventType)
+                || "QuoteReplayCompleted.v1".equals(eventType)
+                 || "EvidenceExportRequested.v1".equals(eventType)
+                 || "EvidenceExportReady.v1".equals(eventType)
+                 || "EvidenceExportDownloaded.v1".equals(eventType)
+                 || "EvidenceExportFailed.v1".equals(eventType)
+                 || "RetentionPolicyPublished.v1".equals(eventType)
+                 || "LegalHoldApplied.v1".equals(eventType)
+                 || "LegalHoldReleased.v1".equals(eventType)
+                 || "RetentionPurgeCompleted.v1".equals(eventType));
     }
 
     public ContractMetadata envelopeV1() {

@@ -1,0 +1,13 @@
+{
+  "storyId": "PII-13-S07",
+  "scenario": "golden-lock-replay-mismatch-extension-fee",
+  "sourceLockId": "lock-123",
+  "decisionType": "EXTENSION",
+  "marketSnapshotRef": "market-snapshot-2026-06-07",
+  "extensionPolicyRef": "extension-policy-v1",
+  "lockPolicyVersionRefs": ["lock-policy-v1"],
+  "expectedClassification": "MISMATCH",
+  "expectedMismatchCode": "EXTENSION_FEE_MISMATCH",
+  "lockStateMutated": false,
+  "currentMarketDataUsed": false
+}

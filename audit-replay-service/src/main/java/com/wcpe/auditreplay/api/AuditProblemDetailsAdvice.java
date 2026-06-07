@@ -1,5 +1,6 @@
 package com.wcpe.auditreplay.api;
 
+import com.wcpe.auditreplay.CorrelationContext;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -23,12 +24,32 @@ public class AuditProblemDetailsAdvice {
     }
 
     private ResponseEntity<AuditProblemDetail> problem(HttpStatusCode status, String detail, HttpServletRequest request) {
+        CorrelationContext.Data correlationContext = CorrelationContext.get();
         AuditProblemDetail problem = new AuditProblemDetail(
-                "about:blank", title(status), status.value(), detail, code(status), request.getRequestURI());
+                "about:blank",
+                title(status),
+                status.value(),
+                detail,
+                code(status),
+                request.getRequestURI(),
+                correlationContext == null || correlationContext.correlationId() == null
+                        ? null
+                        : correlationContext.correlationId().toString(),
+                correlationContext == null || correlationContext.requestId() == null
+                        ? null
+                        : correlationContext.requestId().toString());
         return ResponseEntity.status(status).body(problem);
     }
 
-    public record AuditProblemDetail(String type, String title, int status, String detail, String code, String path) {
+    public record AuditProblemDetail(
+            String type,
+            String title,
+            int status,
+            String detail,
+            String code,
+            String path,
+            String correlationId,
+            String requestId) {
     }
 
     private static String title(HttpStatusCode status) {
@@ -50,6 +71,9 @@ public class AuditProblemDetailsAdvice {
         }
         if (status.value() == HttpStatus.CONFLICT.value()) {
             return "IDEMPOTENCY_CONFLICT";
+        }
+        if (status.value() == HttpStatus.UNPROCESSABLE_ENTITY.value()) {
+            return "POLICY_NOT_SATISFIED";
         }
         return "VALIDATION_FAILED";
     }

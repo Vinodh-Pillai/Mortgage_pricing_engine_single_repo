@@ -38,3 +38,15 @@ This module is a contract-first foundation for future audit and replay tooling. 
 - Old pending rows: inspect `audit_outbox_events` by `(tenant_id,status,next_attempt_at)` and compare against `audit_outbox_pending_count`/publish latency metrics when the metrics backend is wired.
 - Broker outage: rows move from `IN_FLIGHT` to `FAILED` with `last_error_code`, then to `POISON` after configured max attempts. Retry only `FAILED` rows through the tenant-scoped retry endpoint with an `Idempotency-Key`.
 - Cross-tenant lookup: use the tenant-scoped API and repository methods only; missing rows return `404` instead of revealing another tenant's event.
+
+## PII-13-S07 Lock Replay Engine Slice
+
+- REST endpoints under `/api/v1/tenants/{tenantId}/lock-replays` create/read immutable lock replay runs and `/api/v1/tenants/{tenantId}/lock-replays/{runId}/diff` exposes the persisted diff artifact.
+- `LockReplayService` assembles replay input only from service-owned audit evidence, requires a source `marketSnapshotRef` plus lock policy version refs, and records `lockStateMutated=false`/`currentMarketDataUsed=false` in replay ledger and diff artifacts.
+- Tables `lock_replay_runs` and `lock_replay_artifacts` persist tenant-scoped run metadata, idempotency hash, source refs, policy refs, market snapshot ref, deterministic classification, and evidence export refs.
+- The local MVP classifies immutable replay-hash mismatches without calling protected lock/pricing engines. UI entry points and real read-only lock/pricing replay adapters require additional story locks.
+
+### Runbook Notes
+
+- Missing snapshot evidence: rejected requests return `VALIDATION_FAILED` with `marketSnapshotRef is required for lock replay`; investigate the source audit record and snapshot/config reference producer before retrying.
+- Determinism drift: inspect the diff artifact's `mismatchCode`, `marketSnapshotRef`, `lockPolicyVersionRefsHash`, and `ledgerDiff`, then compare against the exported audit evidence referenced by `evidenceExportRef`.
