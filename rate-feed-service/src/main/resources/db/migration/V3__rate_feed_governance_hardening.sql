@@ -191,7 +191,7 @@ alter table rate_feed.rate_feed_batch
   );
 
 -- Create index for governance tracking
-create index if not exists outbox_investor_channel_idx on rate_feed.outbox_event (tenant_id, headers_json ->> 'investorId', headers_json ->> 'channelId');
+create index if not exists outbox_investor_channel_idx on rate_feed.outbox_event (tenant_id, (headers_json ->> 'investorId'), (headers_json ->> 'channelId'));
 create index if not exists batch_governance_lookup_idx on rate_feed.rate_feed_batch (tenant_id, investor_id, channel_id, feed_format_id);
 
 -- Create governance view for downstream consumers

@@ -19,11 +19,11 @@ import org.springframework.web.bind.annotation.RestController;
 public final class ModelVersionGovernanceController {
   private final ModelRegistryService registryService;
 
-  ModelVersionGovernanceController() {
+  public ModelVersionGovernanceController() {
     this(new ModelRegistryService());
   }
 
-  @Autowired
+  @Autowired(required = false)
   public ModelVersionGovernanceController(DataSource dataSource) {
     this(new ModelRegistryService(Clock.systemUTC(), new JdbcModelVersionRepository(dataSource)));
   }

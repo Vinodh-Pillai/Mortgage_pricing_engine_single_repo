@@ -106,8 +106,8 @@ create table rate_feed.outbox_event (
 
 create index outbox_pending_idx on rate_feed.outbox_event (tenant_id, created_at) where published_at is null;
 create index outbox_aggregate_idx on rate_feed.outbox_event (tenant_id, aggregate_id, event_type);
-create index outbox_investor_idx on rate_feed.outbox_event (tenant_id, headers_json ->> 'investorId', event_type);
-create index outbox_channel_idx on rate_feed.outbox_event (tenant_id, headers_json ->> 'channelId', event_type);
+create index outbox_investor_idx on rate_feed.outbox_event (tenant_id, (headers_json ->> 'investorId'), event_type);
+create index outbox_channel_idx on rate_feed.outbox_event (tenant_id, (headers_json ->> 'channelId'), event_type);
 
 create table rate_feed.audit_event (
   tenant_id uuid not null,

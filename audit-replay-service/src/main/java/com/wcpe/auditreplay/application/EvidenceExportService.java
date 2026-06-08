@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,6 +34,7 @@ public class EvidenceExportService {
     private final ObjectMapper objectMapper;
     private final EvidenceExportMetrics metrics;
 
+    @Autowired
     public EvidenceExportService(
             AuditRecordRepository auditRecordRepository,
             EvidenceExportJobRepository jobRepository,

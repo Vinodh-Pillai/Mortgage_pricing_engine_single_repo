@@ -1,0 +1,92 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: wcpe-dev
+  labels:
+    app.kubernetes.io/part-of: world-class-pricing-engine
+    environment: dev
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: adjustment-service-config
+  namespace: wcpe-dev
+data:
+  SPRING_PROFILES_ACTIVE: dev
+  SERVER_PORT: "8080"
+  MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info,prometheus
+  WCPE_SYNTHETIC_ONLY: "true"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: adjustment-service
+  namespace: wcpe-dev
+  labels:
+    app: adjustment-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: adjustment-service
+  template:
+    metadata:
+      labels:
+        app: adjustment-service
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: adjustment-service
+          image: adjustment-service:0.1.0-local
+          imagePullPolicy: Never
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: adjustment-service-config
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 40
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: 750m
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: adjustment-service
+  namespace: wcpe-dev
+spec:
+  type: ClusterIP
+  selector:
+    app: adjustment-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

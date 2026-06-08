@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,6 +37,7 @@ public class LockReplayService {
     private final ObjectMapper objectMapper;
     private final LockReplayMetrics metrics;
 
+    @Autowired
     public LockReplayService(
             AuditRecordRepository auditRecordRepository,
             LockReplayRunRepository runRepository,

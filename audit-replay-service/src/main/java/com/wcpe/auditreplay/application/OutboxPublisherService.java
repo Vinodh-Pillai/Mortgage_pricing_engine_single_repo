@@ -5,6 +5,7 @@ import com.wcpe.auditreplay.domain.OutboxEvent;
 import com.wcpe.auditreplay.repository.OutboxEventRepository;
 import java.time.Clock;
 import java.time.Instant;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,6 +17,7 @@ public class OutboxPublisherService {
     private final OutboxRetryPolicy retryPolicy;
     private final Clock clock;
 
+    @Autowired
     public OutboxPublisherService(
             OutboxEventRepository repository,
             OutboxBrokerClient brokerClient,
