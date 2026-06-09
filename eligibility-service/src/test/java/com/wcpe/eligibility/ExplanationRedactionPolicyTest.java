@@ -31,7 +31,7 @@ class ExplanationRedactionPolicyTest {
                 "FNMA",
                 "ELIGIBLE",
                 new EligibilityExplanationResponse.Summary(1, 0, 0, 0),
-                List.of(new EligibilityExplanationResponse.Rule("FICO_LTV", "FICO/LTV", "ELIGIBLE", "INFO", "OK", "message", "715", "minimum configured", "rv1", "ev1", null)),
+                List.of(new EligibilityExplanationResponse.Rule("FICO_LTV", "FICO/LTV", "ELIGIBLE", "INFO", "OK", "message", "715", "minimum configured", List.of("fact:representativeFico"), List.of(), "FRESH", "cache:eligibility:fico-ltv", "rv1", "ev1", null)),
                 new EligibilityExplanationResponse.Audit(UUID.fromString("55555555-5555-5555-5555-555555555555"), "sha256:result", "sha256:graph")
             )));
 

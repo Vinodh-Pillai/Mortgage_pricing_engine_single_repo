@@ -39,6 +39,9 @@ class EligibilityExplanationApiContractTest {
             .andExpect(jsonPath("$.quoteId").value("22222222-2222-2222-2222-222222222222"))
             .andExpect(jsonPath("$.summary.passed").value(1))
             .andExpect(jsonPath("$.rules[0].ruleCode").value("CONF_LOAN_LIMIT"))
+            .andExpect(jsonPath("$.rules[0].inputFactRefs[0]").value("fact:loanAmount"))
+            .andExpect(jsonPath("$.rules[0].overlayRefs[0]").value("overlay:loan-limit"))
+            .andExpect(jsonPath("$.rules[0].cacheFreshnessStatus").value("FRESH"))
             .andExpect(jsonPath("$.audit.resultHash").value("sha256:result"));
     }
 
@@ -78,7 +81,7 @@ class EligibilityExplanationApiContractTest {
             "FNMA",
             "ELIGIBLE",
             new EligibilityExplanationResponse.Summary(1, 0, 0, 0),
-            List.of(new EligibilityExplanationResponse.Rule("CONF_LOAN_LIMIT", "Loan limit", "ELIGIBLE", "INFO", "OK", "message", "$100,000.00", "$806,500.00", "rv1", "ev1", null)),
+            List.of(new EligibilityExplanationResponse.Rule("CONF_LOAN_LIMIT", "Loan limit", "ELIGIBLE", "INFO", "OK", "message", "$100,000.00", "$806,500.00", List.of("fact:loanAmount"), List.of("overlay:loan-limit"), "FRESH", "cache:eligibility:loan-limit", "rv1", "ev1", null)),
             new EligibilityExplanationResponse.Audit(UUID.fromString("55555555-5555-5555-5555-555555555555"), "sha256:result", "sha256:graph")
         );
     }

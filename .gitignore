@@ -3,7 +3,7 @@
 **/.gradle/
 build/
 **/build/
-
+**/node_modules/
 # Local agent/runtime artifacts
 .agent-runtime/
 **/.agent-runtime/

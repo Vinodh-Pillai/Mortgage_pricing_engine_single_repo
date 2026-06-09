@@ -5,10 +5,17 @@ export type OfferSummary = {
   payment?: string | number | null;
   apr?: string | number | null;
   confidence?: string | number | null;
+  rankScore?: string | number | null;
   rationaleChips: string[];
   scenarioFlags: string[];
   explanationStatus: 'AVAILABLE' | 'MISSING' | 'BLOCKED' | string;
   sourceScenarioId?: string | null;
+  scenarioVersion?: number | null;
+  upstreamRefs?: string[];
+  lockEligibilityRefs?: string[];
+  snapshotRefs?: string[];
+  auditIds?: string[];
+  explanationSections?: string[];
 };
 
 export type OfferComparisonView = {
@@ -19,6 +26,8 @@ export type OfferComparisonView = {
   selectedOfferId: string | null;
   commitBlocked: boolean;
   fallbackReason?: string | null;
+  requiredFacts?: string[];
+  backendRefs?: string[];
   uiTraceId: string;
   events: string[];
 };
@@ -29,6 +38,10 @@ export type OfferExplanationView = {
   status: 'AVAILABLE' | 'MISSING' | 'BLOCKED' | string;
   rationaleLines: string[];
   scenarioFlags: string[];
+  upstreamRefs?: string[];
+  snapshotRefs?: string[];
+  auditIds?: string[];
+  explanationSections?: string[];
   commitBlocked: boolean;
   message: string;
   uiTraceId: string;
@@ -40,6 +53,10 @@ export type OfferSelectionResult = {
   status: 'SELECTED' | 'BLOCKED' | string;
   nextRoute: string | null;
   sourceScenarioId: string | null;
+  scenarioVersion?: number | null;
+  lockEligibilityRef?: string | null;
+  snapshotRef?: string | null;
+  auditIds?: string[];
   auditRef: string | null;
   message: string;
   uiTraceId: string;
@@ -82,6 +99,10 @@ export async function selectOffer(
   runId: string,
   offerId: string,
   sourceScenarioId: string | null | undefined,
+  scenarioVersion: number | null | undefined,
+  lockEligibilityRefs: string[] | undefined,
+  snapshotRefs: string[] | undefined,
+  auditIds: string[] | undefined,
   fetchImpl: typeof fetch = fetch,
 ): Promise<OfferSelectionResult> {
   const response = await fetchImpl(
@@ -92,7 +113,7 @@ export async function selectOffer(
         ...traceHeaders,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ sourceScenarioId }),
+      body: JSON.stringify({ sourceScenarioId, scenarioVersion, lockEligibilityRefs, snapshotRefs, auditIds }),
     },
   );
   return (await response.json()) as OfferSelectionResult;

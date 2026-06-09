@@ -115,6 +115,72 @@ class RuleBuilderServiceTest {
     assertEquals(1, service.outboxEvents().size());
   }
 
+  @Test
+  void describesCustomFieldsWithTypedOperatorsAndDecisionQualityRequirement() {
+    GovernanceValidationResult<List<RuleBuilderCustomFieldDescriptor>> result = service.describeCustomFields(metadata());
+
+    assertTrue(result.valid());
+    RuleBuilderCustomFieldDescriptor descriptor = result.value().orElseThrow().get(0);
+    assertEquals("dimension-configured", descriptor.stableId());
+    assertEquals("catalog-ref", descriptor.dataType());
+    assertEquals(List.of("metadata-equals"), descriptor.allowedOperators());
+    assertEquals(List.of("value-source-catalog"), descriptor.valueSources());
+    assertEquals("CONFIRMED_OR_ESTIMATED", descriptor.decisionQualityRequirement());
+    assertEquals("metadata-rule-builder-2026-06", descriptor.versionRef());
+    assertTrue(descriptor.validationMessages().isEmpty());
+  }
+
+  @Test
+  void dynamicRuleEvaluationFailsClosedForUnknownOrConflictingRequiredFacts() {
+    GovernanceValidationResult<RuleBuilderDynamicEvaluationResult> unknownResult =
+        service.evaluateDynamicRules(
+            dynamicCommand(
+                Map.of(
+                    "dimension-configured",
+                    new RuleBuilderTypedFact("CONFIGURED_VALUE", "fact-1", RuleBuilderFactQuality.UNKNOWN, "scenario", "precision-configured"))));
+
+    assertTrue(unknownResult.valid());
+    RuleBuilderDynamicEvaluationResult unknown = unknownResult.value().orElseThrow();
+    assertEquals("BLOCKED", unknown.status());
+    assertEquals("UNKNOWN_FACT_FAIL_CLOSED", unknown.validationMessages().get(0).code());
+    assertEquals(List.of("rule-1"), unknown.skippedRuleIds());
+    assertTrue(unknown.actionOutputs().isEmpty());
+
+    GovernanceValidationResult<RuleBuilderDynamicEvaluationResult> conflictingResult =
+        service.evaluateDynamicRules(
+            dynamicCommand(
+                Map.of(
+                    "dimension-configured",
+                    new RuleBuilderTypedFact("CONFIGURED_VALUE", "fact-1", RuleBuilderFactQuality.CONFLICTING, "scenario", "precision-configured"))));
+
+    assertEquals("CONFLICTING_FACT_FAIL_CLOSED", conflictingResult.value().orElseThrow().validationMessages().get(0).code());
+  }
+
+  @Test
+  void dynamicRuleEvaluationRecordsMatchedRulesActionOutputsFactRefsAndEvidenceHash() {
+    GovernanceValidationResult<RuleBuilderDynamicEvaluationResult> result =
+        service.evaluateDynamicRules(
+            dynamicCommand(
+                Map.of(
+                    "dimension-configured",
+                    new RuleBuilderTypedFact("CONFIGURED_VALUE", "fact-tenant-1", RuleBuilderFactQuality.CONFIRMED, "scenario", "precision-configured"))));
+
+    assertTrue(result.valid());
+    RuleBuilderDynamicEvaluationResult evaluation = result.value().orElseThrow();
+    assertEquals("PASSED", evaluation.status());
+    assertEquals(64, evaluation.resultHash().length());
+    assertEquals(evaluation.resultHash(), evaluation.evidenceHash());
+    assertEquals(List.of("rule-1"), evaluation.matchedRuleIds());
+    assertTrue(evaluation.skippedRuleIds().isEmpty());
+    RuleBuilderDynamicActionOutput output = evaluation.actionOutputs().get(0);
+    assertEquals("metadata-adjustment", output.actionOutputRef());
+    assertEquals("draft-version-1", output.ruleVersionRef());
+    assertEquals(List.of("fact-tenant-1"), output.factRefs());
+    assertEquals("precision-configured", output.precisionRef());
+    assertEquals("rounding-configured", output.roundingRef());
+    assertEquals("reason-configured", output.reasonCodeRef());
+  }
+
   private RuleBuilderDraftCommand draftCommand(String idempotencyKey, RuleBuilderRuleSet ruleSet) {
     return new RuleBuilderDraftCommand(
         TENANT_ONE,
@@ -124,6 +190,18 @@ class RuleBuilderServiceTest {
         metadata(),
         ruleSet,
         "corr-PII-12-S05");
+  }
+
+  private RuleBuilderDynamicEvaluationCommand dynamicCommand(Map<String, RuleBuilderTypedFact> facts) {
+    return new RuleBuilderDynamicEvaluationCommand(
+        TENANT_ONE,
+        "admin-editor-1",
+        List.of(RuleBuilderService.SIMULATE_PERMISSION),
+        metadata(),
+        dynamicRuleSet(),
+        facts,
+        "draft-version-1",
+        "corr-PII-20-S01");
   }
 
   private RuleBuilderMetadata metadata() {
@@ -157,6 +235,27 @@ class RuleBuilderServiceTest {
                 10,
                 List.of("group-1"),
                 List.of(new RuleBuilderCondition("condition-1", "dimension-configured", "metadata-equals", "value-source-catalog")),
+                List.of(new RuleBuilderAction("action-1", "metadata-adjustment", "reason-configured", "precision-configured", "rounding-configured")),
+                false)),
+        List.of("metadata-rule-builder-2026-06"),
+        List.of("reason-configured"));
+  }
+
+  private RuleBuilderRuleSet dynamicRuleSet() {
+    return new RuleBuilderRuleSet(
+        "rule-set-tenant-configured",
+        "2026.06",
+        "Tenant configured rules",
+        "pricing-admin",
+        "PRIORITY_ORDER",
+        List.of(
+            new RuleBuilderRule(
+                "rule-1",
+                "Metadata driven rule",
+                true,
+                10,
+                List.of("group-1"),
+                List.of(new RuleBuilderCondition("condition-1", "dimension-configured", "metadata-equals", "value-source-catalog", "CONFIGURED_VALUE")),
                 List.of(new RuleBuilderAction("action-1", "metadata-adjustment", "reason-configured", "precision-configured", "rounding-configured")),
                 false)),
         List.of("metadata-rule-builder-2026-06"),

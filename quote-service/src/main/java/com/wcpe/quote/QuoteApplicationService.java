@@ -518,11 +518,15 @@ public class QuoteApplicationService {
         Map<String, String> lineageRefs = new LinkedHashMap<>();
         lineageRefs.put("quoteId", quote.quoteId().toString());
         lineageRefs.put("quoteVersion", Integer.toString(quote.version()));
+        lineageRefs.put("scenarioVersion", Integer.toString(quote.scenarioVersion()));
         lineageRefs.put("quoteReplayHash", quote.replayHash());
         lineageRefs.put("rankingPolicyRef", quote.rankingPolicyId() + ":" + quote.rankingPolicyVersion());
         lineageRefs.put("selectionPolicyRef", command.policy().policyId() + ":" + command.policy().policyVersion());
         lineageRefs.put("optionRank", Integer.toString(option.rank()));
         lineageRefs.put("optionRefs", option.upstreamRefs().toString());
+        lineageRefs.put("auditRef", quote.auditRef());
+        snapshotRepository.findByQuoteId(quote.tenantId(), quote.quoteId())
+            .ifPresent(snapshot -> lineageRefs.put("snapshotRef", "snapshot:" + snapshot.snapshotId()));
         return new QuoteSelection(
             command.tenantId(),
             selectionId,

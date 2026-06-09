@@ -6,6 +6,17 @@ export type AdminTraceMetadata = {
   signerMetadata: string;
 };
 
+export type GovernanceDescriptor = {
+  stableId: string;
+  label: string;
+  type: string;
+  allowedOperators: string[];
+  valueSources: string[];
+  decisionQualityRequirement: string;
+  validationMessages: string[];
+  versionRef: string;
+};
+
 export type PolicyVersionSummary = {
   versionId: string;
   owner: string;
@@ -105,12 +116,34 @@ export type OverrideLedgerEntry = {
   auditRef: string;
 };
 
+export type PendingConfigReview = {
+  reviewId: string;
+  state: string;
+  simulationVisible: boolean;
+  approvalVisible: boolean;
+  publishVisible: boolean;
+  rollbackVisible: boolean;
+  auditRef: string;
+  downstreamConsumers: string[];
+  blockers: string[];
+};
+
+export type DynamicRuleEvidenceSnapshot = {
+  matchedRules: { ruleRef: string; versionRef: string; outcome: string; reasonCode: string; factRefs: string[] }[];
+  skippedRules: { ruleRef: string; versionRef: string; outcome: string; reasonCode: string; factRefs: string[] }[];
+  actionOutputs: string[];
+  factRefs: string[];
+  precisionMetadataRef: string;
+  replayHashRef: string;
+};
+
 export type AdminGovernanceView = {
   tenantContext: string;
   adminRole: string;
   dependencyStatus: string;
   uiTraceId: string;
   traceMetadata: AdminTraceMetadata;
+  descriptors: GovernanceDescriptor[];
   policies: PolicyVersionSummary[];
   featureFlags: FeatureFlagSummary[];
   marketRules: MarketRuleSummary[];
@@ -120,6 +153,8 @@ export type AdminGovernanceView = {
   driftAlerts: DriftAlertSummary[];
   incidents: IncidentReviewSummary[];
   overrideLedger: OverrideLedgerEntry[];
+  pendingReview: PendingConfigReview;
+  dynamicRuleEvidence: DynamicRuleEvidenceSnapshot;
   events: string[];
   fallbackReason: string;
 };

@@ -26,6 +26,10 @@ public record EligibilityExplanationResponse(
         String message,
         String actualDisplay,
         String thresholdDisplay,
+        List<String> inputFactRefs,
+        List<String> overlayRefs,
+        String cacheFreshnessStatus,
+        String cacheRef,
         String ruleVersionId,
         String evidenceId,
         String remediationHint

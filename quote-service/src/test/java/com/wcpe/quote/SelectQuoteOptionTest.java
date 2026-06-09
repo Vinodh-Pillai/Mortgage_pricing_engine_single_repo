@@ -16,8 +16,15 @@ class SelectQuoteOptionTest {
         QuoteSelection selection = service.selectQuoteOption(command(quote, quote.options().get(0), policy(true, false), "select-1", ""));
 
         assertThat(selection.status()).isEqualTo(QuoteSelectionStatus.SELECTED);
+        assertThat(selection.lineageRefs()).containsEntry("scenarioVersion", Integer.toString(quote.scenarioVersion()));
+        assertThat(selection.lineageRefs()).containsKey("snapshotRef");
         assertThat(selection.lineageRefs()).containsEntry("quoteReplayHash", quote.replayHash());
         assertThat(selection.lockEligibilityRef()).startsWith("lock-eligibility:pending:");
+        QuoteSelectionResponse response = QuoteSelectionResponse.from(selection);
+        assertThat(response.optionId()).isEqualTo(quote.options().get(0).optionId());
+        assertThat(response.scenarioVersion()).isEqualTo(quote.scenarioVersion());
+        assertThat(response.snapshotRef()).startsWith("snapshot:");
+        assertThat(response.auditIds()).contains(response.auditRef(), quote.auditRef(), quote.replayHash());
         assertThat(service.outboxEvents()).extracting(OutboxEvent::eventType).contains("quote_option.selected.v1");
         OutboxEvent selectedEvent = service.outboxEvents().stream()
             .filter(event -> event.eventType().equals("quote_option.selected.v1"))

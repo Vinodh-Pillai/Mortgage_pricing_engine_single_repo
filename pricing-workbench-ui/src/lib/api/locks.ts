@@ -4,11 +4,45 @@ export type LockWorkflowView = {
   status: 'READY' | 'BLOCKED' | string;
   lockDisabled: boolean;
   blockers: string[];
+  blockerDetails?: LockBlockerView[];
   disclosureText: string;
   nextAction: string;
   uiTraceId: string;
   events: string[];
   dependencyStatus: string;
+  selectedQuoteRefs?: string[];
+  freshnessChecks?: LockLifecycleCheck[];
+  requiredEvidence?: string[];
+  stateTransitions?: LockStateTransition[];
+  auditGroups?: LockAuditGroup[];
+};
+
+export type LockLifecycleCheck = {
+  label: string;
+  status: string;
+  sourceRef: string;
+  remediation: string;
+};
+
+export type LockBlockerView = {
+  code: string;
+  message: string;
+  remediation: string;
+};
+
+export type LockStateTransition = {
+  fromState: string;
+  toState: string;
+  eventId: string;
+  status: string;
+};
+
+export type LockAuditGroup = {
+  eventId: string;
+  label: string;
+  evidenceRefs: string[];
+  replayHash: string;
+  exportRef: string;
 };
 
 export type LockConfirmationResult = {
@@ -23,6 +57,7 @@ export type LockConfirmationResult = {
   uiTraceId: string;
   events: string[];
   blockers: string[];
+  auditGroups?: LockAuditGroup[];
 };
 
 const traceHeaders = {

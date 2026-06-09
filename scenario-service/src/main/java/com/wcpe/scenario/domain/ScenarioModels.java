@@ -55,6 +55,66 @@ record EventRecord(UUID eventId, UUID tenantId, UUID scenarioId, String eventTyp
 
 record AuditRecord(UUID auditPackageId, UUID tenantId, UUID scenarioId, String action, String correlationId, Instant occurredAt, String replayHash) {}
 
+record ScenarioIntakeMetadata(UUID tenantId, String dependencyStatus, List<ScenarioIntakeFieldGroup> fieldGroups,
+    List<String> decisionControls, List<ValidationIssue> validationIssues, String auditPackageId, String replayHashRef,
+    String correlationId) {}
+
+record ScenarioIntakeFieldGroup(String groupId, String label, String helpText, List<ScenarioIntakeField> fields) {}
+
+record ScenarioIntakeField(String fieldId, String label, String groupId, String dataType, boolean required,
+    String helpText, String sourceRef, String decisionQuality, List<String> validationMessages) {}
+
+final class ScenarioIntakeMetadataCatalog {
+  private ScenarioIntakeMetadataCatalog() {}
+
+  static ScenarioIntakeMetadata metadata(UUID tenantId, String correlationId) {
+    return new ScenarioIntakeMetadata(tenantId, "METADATA_AVAILABLE", List.of(
+        new ScenarioIntakeFieldGroup("scenario-identity", "Scenario identity",
+            "Capture identifiers and channel context before quote decisions.",
+            List.of(field("scenarioName", "Scenario name", "scenario-identity", "text", false,
+                    "Optional label for support and audit review.", "scenario-service", "VERIFIED", List.of()),
+                field("channel", "Channel", "scenario-identity", "text", false,
+                    "Originating channel captured as a scenario fact.", "submission-profile", "UNKNOWN",
+                    List.of("Submission profile configuration decides whether this field is required.")),
+                field("externalLoanId", "External loan id", "scenario-identity", "text", false,
+                    "Caller-provided loan reference for replay correlation.", "scenario-service", "VERIFIED", List.of()),
+                field("sourceSystem", "Source system", "scenario-identity", "text", false,
+                    "Optional upstream source reference for audit correlation.", "scenario-service", "VERIFIED", List.of()))),
+        new ScenarioIntakeFieldGroup("borrower-loan-property", "Borrower, loan, and property facts",
+            "Capture borrower, loan, and property facts without calculating eligibility, rates, fees, or pricing.",
+            List.of(field("borrowerCreditStatus", "Borrower credit status", "borrower-loan-property", "text", false,
+                    "Credit status fact supplied by borrower intake or a configured source.", "borrower-credit", "UNKNOWN", List.of()),
+                field("creditScore", "Credit score", "borrower-loan-property", "number", false,
+                    "Optional score fact; representative score policy runs downstream.", "borrower-credit", "UNKNOWN", List.of()),
+                field("loanPurpose", "Loan purpose", "borrower-loan-property", "text", false,
+                    "Loan purpose fact for downstream validation.", "loan-structure", "UNKNOWN", List.of()),
+                field("loanAmount", "Loan amount", "borrower-loan-property", "number", false,
+                    "Requested amount captured as a fact; ratios are not calculated here.", "loan-structure", "UNKNOWN", List.of()),
+                field("propertyState", "Property state", "borrower-loan-property", "text", false,
+                    "State fact for downstream configured validation.", "property", "UNKNOWN", List.of()),
+                field("occupancyType", "Occupancy type", "borrower-loan-property", "text", false,
+                    "Occupancy fact for downstream configured validation.", "property", "UNKNOWN", List.of()))),
+        new ScenarioIntakeFieldGroup("income-assets", "Income and assets",
+            "Capture optional income and asset facts without deriving capacity or pricing.",
+            List.of(field("monthlyIncome", "Monthly income", "income-assets", "number", false,
+                    "Optional income fact for downstream validation.", "income-assets", "UNKNOWN", List.of()),
+                field("liquidAssets", "Liquid assets", "income-assets", "number", false,
+                    "Optional asset fact for downstream validation.", "income-assets", "UNKNOWN", List.of())))),
+        List.of("Block submit when scenario validation issues are blocking.",
+            "Carry audit package and replay hash references with intake state.",
+            "Do not calculate pricing or eligibility in intake metadata."),
+        List.of(new ValidationIssue("SCENARIO_METADATA_REVIEW_REQUIRED", "scenarioFacts", Severity.WARNING,
+            "Review backend-owned scenario facts before submitting downstream quote decisions.")),
+        "created-after-draft-scenario", "computed-after-draft-scenario", correlationId);
+  }
+
+  private static ScenarioIntakeField field(String fieldId, String label, String groupId, String dataType, boolean required,
+      String helpText, String sourceRef, String decisionQuality, List<String> validationMessages) {
+    return new ScenarioIntakeField(fieldId, label, groupId, dataType, required, helpText, sourceRef, decisionQuality,
+        validationMessages);
+  }
+}
+
 record BorrowerCreditResponse(UUID scenarioId, int scenarioVersion, String creditReadinessStatus, Integer representativeCreditScore,
     String representativeCreditScoreRule, int borrowerCount, int blockingIssueCount, int warningIssueCount,
     List<String> updatedSections, UUID auditPackageId) {}

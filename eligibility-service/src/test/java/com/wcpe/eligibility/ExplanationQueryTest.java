@@ -65,7 +65,7 @@ class ExplanationQueryTest {
             "FNMA",
             "ELIGIBLE",
             new EligibilityExplanationResponse.Summary(1, 0, 0, 0),
-            List.of(new EligibilityExplanationResponse.Rule("CONF_LOAN_LIMIT", "Loan limit", "ELIGIBLE", "INFO", "OK", "message", "$100,000.00", "$806,500.00", "rv1", "ev1", null)),
+            List.of(new EligibilityExplanationResponse.Rule("CONF_LOAN_LIMIT", "Loan limit", "ELIGIBLE", "INFO", "OK", "message", "$100,000.00", "$806,500.00", List.of("fact:loanAmount"), List.of("overlay:loan-limit"), "FRESH", "cache:eligibility:loan-limit", "rv1", "ev1", null)),
             new EligibilityExplanationResponse.Audit(UUID.fromString("55555555-5555-5555-5555-555555555555"), "sha256:result", "sha256:graph")
         );
     }

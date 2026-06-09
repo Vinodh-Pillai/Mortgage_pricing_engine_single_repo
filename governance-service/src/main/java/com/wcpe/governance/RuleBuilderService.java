@@ -183,6 +183,89 @@ public final class RuleBuilderService {
     return List.copyOf(auditRecords);
   }
 
+  public GovernanceValidationResult<List<RuleBuilderCustomFieldDescriptor>> describeCustomFields(RuleBuilderMetadata metadata) {
+    if (metadata == null || metadata.dimensions() == null || metadata.operators() == null) {
+      return GovernanceValidationResult.failure("POLICY_NOT_SATISFIED: rule metadata is required");
+    }
+
+    List<RuleBuilderCustomFieldDescriptor> descriptors =
+        metadata.dimensions().values().stream()
+            .sorted(Comparator.comparing(RuleBuilderDimensionMetadata::dimensionRef))
+            .map(dimension -> toDescriptor(metadata, dimension))
+            .toList();
+    return GovernanceValidationResult.success(descriptors);
+  }
+
+  public GovernanceValidationResult<RuleBuilderDynamicEvaluationResult> evaluateDynamicRules(RuleBuilderDynamicEvaluationCommand command) {
+    GovernanceValidationResult<RuleBuilderDynamicEvaluationCommand> validation = validateDynamicEvaluationCommand(command);
+    if (!validation.valid()) {
+      return GovernanceValidationResult.failure(validation.error().orElseThrow());
+    }
+
+    List<RuleBuilderValidationMessage> messages = new ArrayList<>(validateRuleSet(command.ruleSet(), command.metadata()));
+    List<RuleBuilderDynamicActionOutput> actionOutputs = new ArrayList<>();
+    List<String> matchedRuleIds = new ArrayList<>();
+    List<String> skippedRuleIds = new ArrayList<>();
+
+    for (RuleBuilderRule rule : orderedEnabledRules(command.ruleSet())) {
+      List<RuleBuilderValidationMessage> ruleBlockers = requiredFactBlockers(command, rule);
+      messages.addAll(ruleBlockers);
+      if (!ruleBlockers.isEmpty()) {
+        skippedRuleIds.add(rule.ruleId());
+        continue;
+      }
+      RuleMatchResult match = matchesRule(command.metadata().dimensions(), command.factsByDimension(), rule);
+      messages.addAll(match.messages());
+      if (match.blocked() || !match.matched()) {
+        skippedRuleIds.add(rule.ruleId());
+        continue;
+      }
+      matchedRuleIds.add(rule.ruleId());
+      List<String> factRefs = factRefs(command.factsByDimension(), rule.conditions());
+      for (RuleBuilderAction action : rule.actions()) {
+        actionOutputs.add(
+            new RuleBuilderDynamicActionOutput(
+                rule.ruleId(),
+                action.actionId(),
+                action.actionTypeRef(),
+                command.versionRef(),
+                factRefs,
+                action.precisionRef(),
+                action.roundingRef(),
+                action.reasonCodeRef()));
+      }
+      if (rule.stopProcessing()) {
+        break;
+      }
+    }
+
+    boolean blocked = messages.stream().anyMatch(RuleBuilderValidationMessage::blocking);
+    Instant now = clock.instant();
+    String evidenceMaterial =
+        canonicalRuleSet(command.ruleSet())
+            + "|"
+            + canonicalTypedFacts(command.factsByDimension())
+            + "|"
+            + canonicalDynamicOutputs(actionOutputs)
+            + "|"
+            + canonicalMessages(messages)
+            + "|"
+            + command.versionRef();
+    String evidenceHash = hash(evidenceMaterial);
+    return GovernanceValidationResult.success(
+        new RuleBuilderDynamicEvaluationResult(
+            command.ruleSet().ruleSetId(),
+            blocked ? "BLOCKED" : "PASSED",
+            evidenceHash,
+            evidenceHash,
+            List.copyOf(messages),
+            List.copyOf(actionOutputs),
+            List.copyOf(matchedRuleIds),
+            List.copyOf(skippedRuleIds),
+            command.correlationId(),
+            now));
+  }
+
   private GovernanceValidationResult<RuleBuilderDraftCommand> validateCommand(RuleBuilderDraftCommand command) {
     if (command == null) {
       return GovernanceValidationResult.failure("VALIDATION_FAILED: command is required");
@@ -217,6 +300,25 @@ public final class RuleBuilderService {
     }
     if (command.metadata() == null || command.ruleSet() == null || command.factsByDimension() == null) {
       return GovernanceValidationResult.failure("POLICY_NOT_SATISFIED: metadata, rule set, and facts are required");
+    }
+    return GovernanceValidationResult.success(command);
+  }
+
+  private GovernanceValidationResult<RuleBuilderDynamicEvaluationCommand> validateDynamicEvaluationCommand(RuleBuilderDynamicEvaluationCommand command) {
+    if (command == null) {
+      return GovernanceValidationResult.failure("VALIDATION_FAILED: command is required");
+    }
+    if (!isUuid(command.tenantId())) {
+      return GovernanceValidationResult.failure("VALIDATION_FAILED: tenantId must be a UUID");
+    }
+    if (isBlank(command.actorId()) || isBlank(command.correlationId()) || isBlank(command.versionRef())) {
+      return GovernanceValidationResult.failure("VALIDATION_FAILED: actorId, versionRef, and correlationId are required");
+    }
+    if (command.permissions() == null || !command.permissions().contains(SIMULATE_PERMISSION)) {
+      return GovernanceValidationResult.failure("TENANT_ACCESS_DENIED");
+    }
+    if (command.metadata() == null || command.ruleSet() == null || command.factsByDimension() == null) {
+      return GovernanceValidationResult.failure("POLICY_NOT_SATISFIED: metadata, rule set, and typed facts are required");
     }
     return GovernanceValidationResult.success(command);
   }
@@ -269,6 +371,90 @@ public final class RuleBuilderService {
     if (!dimension.valueSourceRefs().contains(condition.valueSourceRef())) {
       messages.add(new RuleBuilderValidationMessage("VALUE_SOURCE_METADATA_MISSING", "$.rules." + rule.ruleId() + ".conditions." + condition.valueSourceRef(), "rule-builder.value-source.missing", true));
     }
+  }
+
+  private RuleBuilderCustomFieldDescriptor toDescriptor(RuleBuilderMetadata metadata, RuleBuilderDimensionMetadata dimension) {
+    List<String> validationMessages = new ArrayList<>();
+    List<String> allowedOperators = dimension.operatorRefs().stream().sorted().toList();
+    for (String operatorRef : allowedOperators) {
+      if (!metadata.operators().containsKey(operatorRef)) {
+        validationMessages.add("operator metadata missing: " + operatorRef);
+      }
+    }
+    String dataType =
+        allowedOperators.stream()
+            .map(metadata.operators()::get)
+            .filter(operator -> operator != null && !isBlank(operator.valueType()))
+            .map(RuleBuilderOperatorMetadata::valueType)
+            .sorted()
+            .findFirst()
+            .orElse("metadata-ref");
+    return new RuleBuilderCustomFieldDescriptor(
+        dimension.dimensionRef(),
+        dimension.label(),
+        dataType,
+        allowedOperators,
+        dimension.valueSourceRefs().stream().sorted().toList(),
+        "CONFIRMED_OR_ESTIMATED",
+        metadata.metadataVersionRef(),
+        List.copyOf(validationMessages));
+  }
+
+  private List<RuleBuilderValidationMessage> requiredFactBlockers(RuleBuilderDynamicEvaluationCommand command, RuleBuilderRule rule) {
+    List<RuleBuilderValidationMessage> blockers = new ArrayList<>();
+    for (RuleBuilderCondition condition : rule.conditions()) {
+      RuleBuilderTypedFact fact = command.factsByDimension().get(condition.dimensionRef());
+      String path = "$.rules." + rule.ruleId() + ".conditions." + condition.dimensionRef();
+      if (fact == null) {
+        blockers.add(new RuleBuilderValidationMessage("UNKNOWN_FACT_FAIL_CLOSED", path, "rule-builder.fact.missing", true));
+      } else if (fact.quality() == RuleBuilderFactQuality.UNKNOWN || fact.quality() == RuleBuilderFactQuality.CONFLICTING) {
+        blockers.add(new RuleBuilderValidationMessage(fact.quality().name() + "_FACT_FAIL_CLOSED", path, "rule-builder.fact.quality-blocked", true));
+      }
+    }
+    return blockers;
+  }
+
+  private RuleMatchResult matchesRule(Map<String, RuleBuilderDimensionMetadata> dimensions, Map<String, RuleBuilderTypedFact> facts, RuleBuilderRule rule) {
+    List<RuleBuilderValidationMessage> messages = new ArrayList<>();
+    for (RuleBuilderCondition condition : rule.conditions()) {
+      RuleBuilderDimensionMetadata dimension = dimensions.get(condition.dimensionRef());
+      RuleBuilderTypedFact fact = facts.get(condition.dimensionRef());
+      if (dimension == null || fact == null) {
+        continue;
+      }
+      String expectedValueRef = condition.expectedValueRef();
+      if (isBlank(expectedValueRef)) {
+        continue;
+      }
+      String actual = String.valueOf(fact.value());
+      boolean matched;
+      switch (condition.operatorRef()) {
+        case "metadata-equals", "equals", "eq" -> matched = expectedValueRef.equals(actual);
+        case "metadata-in", "in" -> matched = List.of(expectedValueRef.split(",")).stream().map(String::trim).anyMatch(actual::equals);
+        default -> {
+          messages.add(
+              new RuleBuilderValidationMessage(
+                  "OPERATOR_EVALUATION_UNSUPPORTED",
+                  "$.rules." + rule.ruleId() + ".conditions." + condition.operatorRef(),
+                  "rule-builder.operator.evaluation-unsupported",
+                  true));
+          return new RuleMatchResult(false, true, messages);
+        }
+      }
+      if (!matched) {
+        return new RuleMatchResult(false, false, messages);
+      }
+    }
+    return new RuleMatchResult(true, false, messages);
+  }
+
+  private List<String> factRefs(Map<String, RuleBuilderTypedFact> facts, List<RuleBuilderCondition> conditions) {
+    return conditions.stream()
+        .map(condition -> facts.get(condition.dimensionRef()))
+        .filter(fact -> fact != null && !isBlank(fact.factRef()))
+        .map(RuleBuilderTypedFact::factRef)
+        .sorted()
+        .toList();
   }
 
   private void validateAction(
@@ -360,7 +546,7 @@ public final class RuleBuilderService {
   }
 
   private String canonicalCondition(RuleBuilderCondition condition) {
-    return condition.conditionId() + ":" + condition.dimensionRef() + ":" + condition.operatorRef() + ":" + condition.valueSourceRef();
+    return condition.conditionId() + ":" + condition.dimensionRef() + ":" + condition.operatorRef() + ":" + condition.valueSourceRef() + ":" + condition.expectedValueRef();
   }
 
   private String canonicalAction(RuleBuilderAction action) {
@@ -377,6 +563,22 @@ public final class RuleBuilderService {
 
   private String canonicalMap(Map<String, String> values) {
     return values.entrySet().stream().sorted(Map.Entry.comparingByKey()).map(entry -> entry.getKey() + "=" + entry.getValue()).reduce((left, right) -> left + ";" + right).orElse("");
+  }
+
+  private String canonicalTypedFacts(Map<String, RuleBuilderTypedFact> values) {
+    return values.entrySet().stream()
+        .sorted(Map.Entry.comparingByKey())
+        .map(entry -> entry.getKey() + "=" + entry.getValue().factRef() + ":" + entry.getValue().quality() + ":" + String.valueOf(entry.getValue().value()))
+        .reduce((left, right) -> left + ";" + right)
+        .orElse("");
+  }
+
+  private String canonicalDynamicOutputs(List<RuleBuilderDynamicActionOutput> outputs) {
+    return outputs.stream()
+        .sorted(Comparator.comparing(RuleBuilderDynamicActionOutput::ruleId).thenComparing(RuleBuilderDynamicActionOutput::actionId))
+        .map(output -> output.ruleId() + ":" + output.actionId() + ":" + output.actionOutputRef() + ":" + canonicalList(output.factRefs()))
+        .reduce((left, right) -> left + ";" + right)
+        .orElse("");
   }
 
   private String hash(String value) {
@@ -409,6 +611,31 @@ record RuleBuilderSimulationCommand(
     Map<String, String> factsByDimension,
     String versionRef,
     String correlationId) {}
+
+record RuleBuilderDynamicEvaluationCommand(
+    String tenantId,
+    String actorId,
+    List<String> permissions,
+    RuleBuilderMetadata metadata,
+    RuleBuilderRuleSet ruleSet,
+    Map<String, RuleBuilderTypedFact> factsByDimension,
+    String versionRef,
+    String correlationId) {}
+
+enum RuleBuilderFactQuality {
+  CONFIRMED,
+  ESTIMATED,
+  UNKNOWN,
+  CONFLICTING
+}
+
+record RuleBuilderTypedFact(Object value, String factRef, RuleBuilderFactQuality quality, String sourceRef, String precisionRef) {
+  public RuleBuilderTypedFact {
+    if (quality == null) {
+      quality = RuleBuilderFactQuality.UNKNOWN;
+    }
+  }
+}
 
 record RuleBuilderMetadata(
     String metadataVersion,
@@ -447,7 +674,11 @@ record RuleBuilderRule(
     List<RuleBuilderAction> actions,
     boolean stopProcessing) {}
 
-record RuleBuilderCondition(String conditionId, String dimensionRef, String operatorRef, String valueSourceRef) {}
+record RuleBuilderCondition(String conditionId, String dimensionRef, String operatorRef, String valueSourceRef, String expectedValueRef) {
+  RuleBuilderCondition(String conditionId, String dimensionRef, String operatorRef, String valueSourceRef) {
+    this(conditionId, dimensionRef, operatorRef, valueSourceRef, "");
+  }
+}
 
 record RuleBuilderAction(String actionId, String actionTypeRef, String reasonCodeRef, String precisionRef, String roundingRef) {}
 
@@ -471,6 +702,40 @@ record RuleBuilderSimulationResult(
     List<RuleBuilderLedgerEntry> ledger,
     String correlationId,
     Instant completedAt) {}
+
+record RuleBuilderDynamicEvaluationResult(
+    String ruleSetId,
+    String status,
+    String resultHash,
+    String evidenceHash,
+    List<RuleBuilderValidationMessage> validationMessages,
+    List<RuleBuilderDynamicActionOutput> actionOutputs,
+    List<String> matchedRuleIds,
+    List<String> skippedRuleIds,
+    String correlationId,
+    Instant completedAt) {}
+
+record RuleBuilderCustomFieldDescriptor(
+    String stableId,
+    String label,
+    String dataType,
+    List<String> allowedOperators,
+    List<String> valueSources,
+    String decisionQualityRequirement,
+    String versionRef,
+    List<String> validationMessages) {}
+
+record RuleBuilderDynamicActionOutput(
+    String ruleId,
+    String actionId,
+    String actionOutputRef,
+    String ruleVersionRef,
+    List<String> factRefs,
+    String precisionRef,
+    String roundingRef,
+    String reasonCodeRef) {}
+
+record RuleMatchResult(boolean matched, boolean blocked, List<RuleBuilderValidationMessage> messages) {}
 
 record RuleBuilderValidationMessage(String code, String jsonPath, String messageKey, boolean blocking) {}
 

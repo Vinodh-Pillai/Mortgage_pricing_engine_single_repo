@@ -83,6 +83,10 @@ public class EligibilityExplanationService {
             rule.message(),
             actualDisplay,
             rule.thresholdDisplay(),
+            rule.inputFactRefs(),
+            rule.overlayRefs(),
+            rule.cacheFreshnessStatus(),
+            rule.cacheRef(),
             rule.ruleVersionId(),
             rule.evidenceId(),
             rule.remediationHint()

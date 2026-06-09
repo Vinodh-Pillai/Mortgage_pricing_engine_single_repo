@@ -52,6 +52,6 @@ class EligibilityExplanationAssemblerTest {
     }
 
     private EligibilityExplanationResponse.Rule rule(String ruleCode, String status) {
-        return new EligibilityExplanationResponse.Rule(ruleCode, ruleCode, status, "INFO", "RC", "message", "710", null, "rv1", "ev1", null);
+        return new EligibilityExplanationResponse.Rule(ruleCode, ruleCode, status, "INFO", "RC", "message", "710", null, List.of("fact:representativeFico"), List.of(), "FRESH", "cache:eligibility:test", "rv1", "ev1", null);
     }
 }

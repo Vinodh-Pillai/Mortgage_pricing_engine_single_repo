@@ -22,6 +22,12 @@ class ScenarioController {
     return profileService.getActiveChannelProfile(tenantId, channel, quoteIntent);
   }
 
+  @GetMapping("/intake-metadata")
+  ScenarioIntakeMetadata intakeMetadata(@PathVariable UUID tenantId,
+      @RequestHeader(value = "X-Correlation-Id", required = false) String correlationId) {
+    return ScenarioIntakeMetadataCatalog.metadata(tenantId, correlationId);
+  }
+
   @PostMapping
   ResponseEntity<ScenarioResponse> create(@PathVariable UUID tenantId, @RequestHeader("Idempotency-Key") String key,
       @RequestHeader(value = "X-Correlation-Id", required = false) String correlationId, @RequestHeader(value = "X-Roles", required = false) String roles,
