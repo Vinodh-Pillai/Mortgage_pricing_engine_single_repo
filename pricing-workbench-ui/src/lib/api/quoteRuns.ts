@@ -1,18 +1,15 @@
 export type BorrowerIntake = {
+  quoteIntent: string;
+  channel: string;
+  scenarioName: string;
+  externalLoanId: string;
+  sourceSystem: string;
   borrowerName: string;
   borrowerRole: string;
   coBorrowerName: string;
   coBorrowerRole: string;
   contactEmail: string;
-  quoteGoal: string;
-  scenarioName: string;
-  scenarioIntent: string;
-  channel: string;
-  externalLoanId: string;
-  sourceSystem: string;
-  scenarioId: string;
-  scenarioVersion: string;
-  borrowerCreditStatus: string;
+  creditStatus: string;
   creditScore: string;
   creditScoreSource: string;
   creditReportDate: string;
@@ -21,21 +18,36 @@ export type BorrowerIntake = {
   loanAmount: string;
   purchasePriceOrValue: string;
   downPaymentOrEquity: string;
+  subordinateFinancingAmount: string;
+  helocDrawnAmount: string;
+  helocLimitAmount: string;
+  lienPosition: string;
+  termMonths: string;
+  amortizationType: string;
+  requestedLockPeriodDays: string;
   propertyState: string;
   propertyCounty: string;
   propertyZip: string;
   propertyType: string;
   occupancyType: string;
   unitCount: string;
+  purchasePrice: string;
+  appraisedValue: string;
+  condoProjectType: string;
+  manufacturedHomeFlag: string;
   monthlyIncome: string;
   incomeType: string;
+  employmentType: string;
   monthlyDebt: string;
+  suppliedDti: string;
+  reserveMonths: string;
+  incomeVerificationStatus: string;
+  assetVerificationStatus: string;
   liquidAssets: string;
   reserves: string;
-  productPreference: string;
   productFamily: string;
+  productPreference: string;
   quoteFilters: string;
-  requestedLockPeriods: string;
   effectiveDate: string;
   actorId: string;
   clientContext: string;
@@ -112,6 +124,18 @@ export type QuoteRunLaunch = {
   missingContractBlockers?: string[];
   quickQuoteState?: ProgressiveQuickQuoteState | null;
 };
+
+export type LaunchState =
+  | { kind: 'idle' }
+  | { kind: 'submitting' }
+  | { kind: 'blocked'; validation: IntakeValidation }
+  | { kind: 'created'; launch: QuoteRunLaunch }
+  | { kind: 'outage'; message: string };
+
+export type MetadataState =
+  | { kind: 'loading' }
+  | { kind: 'loaded'; metadata: ScenarioIntakeMetadata }
+  | { kind: 'unreachable'; message: string };
 
 export type RedactedWaterfallValue = {
   value: string | null;

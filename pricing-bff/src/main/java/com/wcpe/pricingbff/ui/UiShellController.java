@@ -178,14 +178,14 @@ class PricingBffUiFallbackAdapter {
         new ScenarioIntakeFieldGroup("borrower-credit", "Borrower and credit",
             "Capture borrower and credit fact refs for downstream validation. The BFF does not calculate eligibility, rates, fees, or pricing.",
             List.of(
-                metadataField("borrowerRole", "Borrower role", "borrower-credit", "text", false,
-                    "Identify the primary borrower role for the scenario.", "borrower profile", "UNKNOWN", List.of()),
-                metadataField("coBorrowerName", "Co-borrower name", "borrower-credit", "text", false,
-                    "Optional co-borrower name for multi-borrower review.", "borrower profile", "UNKNOWN", List.of()),
-                metadataField("coBorrowerRole", "Co-borrower role", "borrower-credit", "text", false,
-                    "Optional co-borrower role for multi-borrower credit comparison.", "borrower profile", "UNKNOWN", List.of()),
                 metadataField("borrowerCreditStatus", "Borrower credit status", "borrower-credit", "text", false,
                     "Status label supplied by borrower intake or a configured credit source.", "borrower-credit profile", "UNKNOWN", List.of()),
+                metadataField("borrowerRole", "Borrower role", "borrower-credit", "text", false,
+                    "Identify the primary borrower role for the scenario.", "borrower profile", "UNKNOWN", List.of()),
+                metadataField("coBorrowerRole", "Co-borrower role", "borrower-credit", "text", false,
+                    "Optional co-borrower role for multi-borrower credit comparison.", "borrower profile", "UNKNOWN", List.of()),
+                metadataField("coBorrowerName", "Co-borrower name", "borrower-credit", "text", false,
+                    "Optional co-borrower name for multi-borrower review.", "borrower profile", "UNKNOWN", List.of()),
                 metadataField("creditScore", "Credit score", "borrower-loan-property", "number", false,
                     "Optional borrower-provided score value; pricing decisions remain connected-service owned.", "borrower-credit profile", "UNKNOWN", List.of()),
                 metadataField("creditScoreSource", "Credit score source", "borrower-credit", "text", false,
@@ -263,9 +263,9 @@ class PricingBffUiFallbackAdapter {
             "Surface review references before connected quote decisions.",
             "Keep pricing calculations outside the workbench intake surface.",
             "Keep the first step minimal and reveal backend-mapped sections progressively."),
-        List.of(new ScenarioIntakeValidationIssue("SCENARIO_SERVICE_SETUP_REQUIRED", "scenarioService", "BLOCKING",
+        List.of(new ScenarioIntakeValidationIssue("SCENARIO_SERVICE_CONTRACT_REQUIRED", "scenarioService", "BLOCKING",
             "Scenario setup, validation guidance, review package, and review reference must be configured before connected quote decisions can change."),
-            new ScenarioIntakeValidationIssue("QUOTE_SERVICE_SETUP_REQUIRED", "quoteService", "BLOCKING",
+            new ScenarioIntakeValidationIssue("QUOTE_SERVICE_CONTRACT_REQUIRED", "quoteService", "BLOCKING",
                 "Quote setup needs scenario id/version, filters, requested lock periods, effective date, actor id, and client context before live quote creation.")),
         "review-package-required-after-scenario-create", "review-reference-required-after-scenario-create",
         "Scenario, quote, and catalog setup details are unavailable; this local response carries non-secret progressive sections and attention items only.", traceId,
@@ -957,7 +957,7 @@ class PricingBffUiFallbackAdapter {
   QualityEvidenceExport qualityEvidenceExport() {
     return new QualityEvidenceExport("quality-evidence-package-required", "INCOMPLETE", true,
         List.of("validation summary", "review trail", "module review index", "attention item register"),
-        List.of("Export is redacted and incomplete until configured quality review storage is available."));
+        List.of("Export is redacted and incomplete until configured quality evidence storage is available."));
   }
 
   @GetMapping("/api/v1/custom-rules/evidence")
