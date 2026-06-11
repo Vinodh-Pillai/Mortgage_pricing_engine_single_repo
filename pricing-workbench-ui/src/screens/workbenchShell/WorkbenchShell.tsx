@@ -144,7 +144,7 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     screenPackage: 'screens/adjustmentEvidence',
     dataBoundary: 'lib/api/adjustments',
     stateCoverage: ['load-state', 'blocked', 'ids', 'fact-refs', 'conflicts', 'compensation-hooks', 'summaries'],
-    evidenceTarget: '.local-harness/evidence/PII-22-S17/adjustment-evidence.json',
+    evidenceTarget: '.local-harness/evidence/PII-24-S15/adjustment-evidence.json',
     match: (pathname) => pathname.startsWith('/pricing/adjustments'),
   },
   {
@@ -155,7 +155,7 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     screenPackage: 'screens/marginProfitability',
     dataBoundary: 'lib/api/marginProfitability',
     stateCoverage: ['load-state', 'blocked', 'redacted', 'floor-evidence', 'approval', 'replay-evidence'],
-    evidenceTarget: '.local-harness/evidence/PII-22-S16/margin-profitability.json',
+    evidenceTarget: '.local-harness/evidence/PII-24-S16/margin-profitability.json',
     match: (pathname) => pathname.startsWith('/pricing/margins'),
   },
   {

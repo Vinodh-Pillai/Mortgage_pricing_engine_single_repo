@@ -1,0 +1,23 @@
+{
+  "breadcrumb": "Breadcrumb",
+  "primaryNavigationDrawer": "Primary navigation drawer",
+  "mainNavigation": "Main navigation",
+  "navigateWorkbench": "Navigate workbench",
+  "workspace": "Workspace",
+  "expand": "Expand",
+  "collapse": "Collapse",
+  "noAccessibleModules": "No accessible modules",
+  "attentionItem": "{{count}} attention item",
+  "connectionStatus": "Connection status",
+  "notices": "Notices",
+  "quote": "Quote",
+  "pricing": "Pricing",
+  "operations": "Operations",
+  "governance": "Governance",
+  "partner": "Partner",
+  "admin": "Admin",
+  "personas.loanOfficer": "Loan officer",
+  "personas.pricingAnalyst": "Pricing analyst",
+  "personas.operationsLead": "Operations lead",
+  "personas.governanceReviewer": "Governance reviewer"
+}

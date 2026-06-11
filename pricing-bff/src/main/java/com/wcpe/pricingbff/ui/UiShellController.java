@@ -153,75 +153,58 @@ class PricingBffUiFallbackAdapter {
   ScenarioIntakeMetadata scenarioIntakeMetadata(@PathVariable String tenantId,
       @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
     String traceId = normalizeTrace(uiTraceId);
-    return new ScenarioIntakeMetadata(tenantId, "Scenario, quote, and catalog setup needs attention", List.of(
+    List<ScenarioIntakeFieldGroup> fieldGroups = List.of(
         new ScenarioIntakeFieldGroup("scenario-identity", "Scenario identity",
-            "Capture identifiers and channel context. The first step stays minimal; these refs expand when quote-service needs them.",
+            "Step 1: capture the minimum scenario and channel facts needed before progressive intake expands.",
             List.of(
-                metadataField("scenarioId", "Scenario id", "scenario-identity", "text", false,
-                    "Use a configured scenario-service id when one already exists; otherwise the fallback records that creation is blocked pending contract wiring.", "scenario-service scenario id", "UNKNOWN",
-                    List.of("Required by quote-service before live quote creation can mutate.")),
-                metadataField("scenarioVersion", "Scenario version", "scenario-identity", "text", false,
-                    "Version reference supplied by scenario-service. The UI does not create or increment versions locally.", "scenario-service version ref", "UNKNOWN",
-                    List.of("Required by quote-service when ranking offers for a persisted scenario.")),
+                metadataField("quoteIntent", "Quote intent", "scenario-identity", "select", true,
+                    "Select the backend-owned quote intent before the UI reveals downstream sections.", "scenario-service:quote-intent-catalog", "UNKNOWN",
+                    List.of("Scenario-service quote intent catalog is required before this can be marked verified.")),
+                metadataField("channel", "Channel", "scenario-identity", "select", true,
+                    "Select the originating channel supplied by the configured scenario submission profile.", "catalog-service:channel-catalog", "UNKNOWN",
+                    List.of("Catalog-service channel catalog is required before this can be marked verified.")),
                 metadataField("scenarioName", "Scenario name", "scenario-identity", "text", false,
-                    "Optional local label for support and review.", "scenario setup", "UNKNOWN",
+                    "Optional local label for support, audit, and replay correlation.", "scenario-service:scenario-draft", "UNKNOWN",
                     List.of("Configured scenario-service metadata is required before this field can be marked verified.")),
-                metadataField("scenarioIntent", "Scenario or business intent", "scenario-identity", "textarea", false,
-                    "Capture purchase, refinance, comparison, or no-eligible-product review intent without pricing assumptions.", "scenario setup", "UNKNOWN", List.of()),
-                metadataField("channel", "Channel", "scenario-identity", "text", false,
-                    "Record the originating channel supplied by the backend-owned scenario profile.", "submission-profile contract", "UNKNOWN",
-                    List.of("Channel remains optional until a configured submission profile marks it required.")),
                 metadataField("externalLoanId", "External loan id", "scenario-identity", "text", false,
-                    "Store a caller-provided loan reference when available; do not infer one in the UI.", "scenario-service create request", "UNKNOWN", List.of()),
-                metadataField("sourceSystem", "Source system", "scenario-identity", "text", false,
-                    "Optional upstream system reference for replay and audit correlation.", "scenario-service create request", "UNKNOWN", List.of()))),
+                    "Store a caller-provided loan reference when available; do not infer one in the UI.", "scenario-service:create-request", "UNKNOWN", List.of()))),
         new ScenarioIntakeFieldGroup("borrower-credit", "Borrower and credit",
-            "Capture borrower and credit fact refs for downstream validation. The BFF does not calculate eligibility, rates, fees, or pricing.",
+            "Step 2: capture borrower and credit fact refs for downstream validation without local pricing decisions.",
             List.of(
-                metadataField("borrowerCreditStatus", "Borrower credit status", "borrower-credit", "text", false,
-                    "Status label supplied by borrower intake or a configured credit source.", "borrower-credit profile", "UNKNOWN", List.of()),
-                metadataField("borrowerRole", "Borrower role", "borrower-credit", "text", false,
-                    "Identify the primary borrower role for the scenario.", "borrower profile", "UNKNOWN", List.of()),
-                metadataField("coBorrowerRole", "Co-borrower role", "borrower-credit", "text", false,
-                    "Optional co-borrower role for multi-borrower credit comparison.", "borrower profile", "UNKNOWN", List.of()),
-                metadataField("coBorrowerName", "Co-borrower name", "borrower-credit", "text", false,
-                    "Optional co-borrower name for multi-borrower review.", "borrower profile", "UNKNOWN", List.of()),
-                metadataField("creditScore", "Credit score", "borrower-loan-property", "number", false,
-                    "Optional borrower-provided score value; pricing decisions remain connected-service owned.", "borrower-credit profile", "UNKNOWN", List.of()),
+                metadataField("borrowerRole", "Borrower role", "borrower-credit", "select", false,
+                    "Identify the primary borrower role for scenario review.", "scenario-service:borrower-role-metadata", "UNKNOWN", List.of()),
+                metadataField("borrowerCount", "Borrower count", "borrower-credit", "number", false,
+                    "Capture borrower count as supplied; the BFF does not infer household composition.", "scenario-service:borrower-profile", "UNKNOWN", List.of()),
+                metadataField("creditScore", "Credit score", "borrower-credit", "number", false,
+                    "Optional borrower-provided score value; verified credit remains backend-owned.", "credit-service:credit-score", "UNKNOWN", List.of()),
                 metadataField("creditScoreSource", "Credit score source", "borrower-credit", "text", false,
-                    "Capture the score source label without verifying credit in the UI.", "borrower-credit profile", "UNKNOWN", List.of()),
-                metadataField("creditReportDate", "Credit report date", "borrower-credit", "text", false,
-                    "Capture the report date when supplied; do not default one.", "borrower-credit profile", "UNKNOWN", List.of()),
-                metadataField("creditReadiness", "Credit readiness", "borrower-credit", "text", false,
-                    "Plain-language readiness notes for credit comparison.", "borrower-credit profile", "UNKNOWN", List.of()))),
+                    "Capture source labels without verifying credit in the UI.", "credit-service:source-ref", "UNKNOWN", List.of()))),
         new ScenarioIntakeFieldGroup("loan-structure", "Loan structure",
-            "Capture requested loan structure facts as pass-through facts only.",
+            "Step 3: capture loan facts that quote-service needs for launch.",
             List.of(
-                metadataField("loanPurpose", "Loan purpose", "borrower-loan-property", "text", false,
-                    "Plain-language purpose captured for scenario completeness only.", "loan-structure metadata", "UNKNOWN", List.of()),
-                metadataField("loanAmount", "Loan amount", "borrower-loan-property", "number", false,
-                    "Optional requested amount captured as a fact; the UI does not calculate ratios.", "loan-structure metadata", "UNKNOWN", List.of()),
-                metadataField("purchasePriceOrValue", "Purchase price or estimated value", "borrower-loan-property", "number", false,
+                metadataField("loanPurpose", "Loan purpose", "loan-structure", "select", false,
+                    "Purpose fact captured for scenario completeness and quote launch.", "catalog-service:loan-purpose-catalog", "UNKNOWN", List.of()),
+                metadataField("loanAmount", "Loan amount", "loan-structure", "number", false,
+                    "Requested amount captured as a fact; the UI does not calculate ratios.", "scenario-service:loan-structure", "UNKNOWN", List.of()),
+                metadataField("purchasePriceOrValue", "Purchase price or estimated value", "loan-structure", "number", false,
                     "Capture the purchase price or current estimated value without calculating ratios.", "loan-structure metadata", "UNKNOWN", List.of()),
-                metadataField("downPaymentOrEquity", "Down payment or equity", "borrower-loan-property", "number", false,
+                metadataField("downPaymentOrEquity", "Down payment or equity", "loan-structure", "number", false,
                     "Capture down payment or equity as supplied by the user; no ratio is inferred.", "loan-structure metadata", "UNKNOWN", List.of()))),
         new ScenarioIntakeFieldGroup("property", "Property",
-            "Capture property fact refs for configured downstream validation only.",
+            "Step 4: capture property refs for configured downstream validation only.",
             List.of(
-                metadataField("propertyState", "Property state", "borrower-loan-property", "text", false,
-                    "State reference captured for configured downstream validation.", "property metadata", "UNKNOWN", List.of()),
-                metadataField("propertyCounty", "Property county", "borrower-loan-property", "text", false,
-                    "County reference captured for configured validation.", "property metadata", "UNKNOWN", List.of()),
-                metadataField("propertyZip", "Property ZIP", "borrower-loan-property", "text", false,
-                    "ZIP code captured as a scenario fact only.", "property metadata", "UNKNOWN", List.of()),
-                metadataField("propertyType", "Property type", "borrower-loan-property", "text", false,
-                    "Property type captured for downstream scenario validation only.", "property metadata", "UNKNOWN", List.of()),
-                metadataField("occupancyType", "Occupancy type", "borrower-loan-property", "text", false,
-                    "Occupancy fact captured for downstream scenario validation only.", "property metadata", "UNKNOWN", List.of()),
-                metadataField("unitCount", "Unit count", "borrower-loan-property", "number", false,
+                metadataField("propertyState", "Property state", "property", "select", false,
+                    "State reference captured for configured downstream validation.", "catalog-service:market-catalog", "UNKNOWN", List.of()),
+                metadataField("propertyCounty", "Property county", "property", "text", false,
+                    "County reference captured for configured validation.", "catalog-service:market-catalog", "UNKNOWN", List.of()),
+                metadataField("propertyType", "Property type", "property", "select", false,
+                    "Property type captured for downstream scenario validation only.", "catalog-service:property-type-catalog", "UNKNOWN", List.of()),
+                metadataField("occupancyType", "Occupancy type", "property", "select", false,
+                    "Occupancy fact captured for downstream scenario validation only.", "catalog-service:occupancy-catalog", "UNKNOWN", List.of()),
+                metadataField("unitCount", "Unit count", "property", "number", false,
                     "Unit count captured when supplied; no property eligibility is inferred.", "property metadata", "UNKNOWN", List.of()))),
         new ScenarioIntakeFieldGroup("income-assets", "Income and assets",
-            "Capture optional borrower-provided income and asset facts without deriving capacity or pricing.",
+            "Step 5: capture optional income and asset facts without deriving capacity or pricing.",
             List.of(
                 metadataField("monthlyIncome", "Monthly income", "income-assets", "number", false,
                     "Optional income fact for downstream scenario-service validation.", "income-asset metadata", "UNKNOWN", List.of()),
@@ -233,32 +216,24 @@ class PricingBffUiFallbackAdapter {
                     "Optional asset fact for downstream scenario-service validation.", "income-asset metadata", "UNKNOWN", List.of()),
                 metadataField("reserves", "Reserves", "income-assets", "text", false,
                     "Reserve information captured as supplied; no reserve requirement is inferred.", "income-asset metadata", "UNKNOWN", List.of()))),
-        new ScenarioIntakeFieldGroup("product-preferences", "Product preferences",
-            "Capture catalog preference refs without inferring product eligibility or investor behavior.",
+        new ScenarioIntakeFieldGroup("preferences", "Preferences",
+            "Step 6: capture product, filter, effective-date, and lock-period preferences as backend-owned refs.",
             List.of(
-                metadataField("productPreference", "Product preference", "product-preferences", "text", false,
+                metadataField("productPreference", "Product preference", "preferences", "select", false,
                     "Preference label or configured product ref supplied by catalog-service when available.", "catalog-service product preference", "UNKNOWN", List.of("Catalog-service product preference setup is unavailable in local preview mode.")),
-                metadataField("productFamily", "Product family preference", "product-preferences", "text", false,
-                    "Capture preferred product family labels without inferring eligibility or investor behavior.", "catalog-service product preference", "UNKNOWN", List.of()))),
-        new ScenarioIntakeFieldGroup("quote-filters", "Filters and effective date",
-            "Capture quote-service filters explicitly so they are not dropped at launch.",
-            List.of(
-                metadataField("quoteFilters", "Quote filters", "quote-filters", "textarea", false,
+                metadataField("productFamily", "Product family preference", "preferences", "select", false,
+                    "Capture preferred product family labels without inferring eligibility or investor behavior.", "catalog-service product preference", "UNKNOWN", List.of()),
+                metadataField("quoteFilters", "Quote filters", "preferences", "textarea", false,
                     "Filter refs or plain labels to pass to quote-service; the UI does not evaluate them.", "quote-service creation filters", "UNKNOWN", List.of("Configured filter schema is required before validation can be verified.")),
-                metadataField("effectiveDate", "Effective date", "quote-filters", "text", false,
-                    "Effective date supplied by the actor or configured client context; no default market date is inferred.", "quote-service effective date", "UNKNOWN", List.of("Quote-service requires an explicit effective date before live creation.")))),
-        new ScenarioIntakeFieldGroup("lock-periods", "Lock periods",
-            "Capture requested lock-period refs without defaulting lock policy.",
-            List.of(
-                metadataField("requestedLockPeriods", "Requested lock periods", "lock-periods", "text", false,
-                    "Requested lock-period refs passed through for quote-service and lock-service; no durations are invented.", "quote-service requested lock periods", "UNKNOWN", List.of("Configured lock-period catalog is required before options can be verified.")))),
-        new ScenarioIntakeFieldGroup("decision-quality", "Decision-quality state",
-            "Capture actor/client context and show blocker refs before downstream quote decisions mutate.",
-            List.of(
-                metadataField("actorId", "Actor id", "decision-quality", "text", false,
-                    "Actor id supplied by identity or calling context. The fallback asks for an explicit value instead of deriving credentials.", "tenant-context actor id", "UNKNOWN", List.of("Actor context is required before configured quote-service mutation.")),
-                metadataField("clientContext", "Client context", "decision-quality", "textarea", false,
-                    "Client context supplied by the caller or tenant platform as non-secret refs.", "tenant-context client context", "UNKNOWN", List.of("Client context contract is unavailable in local fallback mode."))))),
+                metadataField("effectiveDate", "Effective date", "preferences", "text", false,
+                    "Effective date supplied by the actor or configured client context; no default market date is inferred.", "quote-service effective date", "UNKNOWN", List.of("Quote-service requires an explicit effective date before live creation.")),
+                metadataField("requestedLockPeriods", "Requested lock periods", "preferences", "text", false,
+                    "Requested lock-period refs passed through for quote-service and lock-service; no durations are invented.", "lock-service:lock-period-catalog", "UNKNOWN", List.of("Configured lock-period catalog is required before options can be verified.")))));
+    List<String> minimalFirstStepFields = fieldGroups.get(0).fields().stream()
+        .filter(ScenarioIntakeField::required)
+        .map(ScenarioIntakeField::fieldId)
+        .toList();
+    return new ScenarioIntakeMetadata(tenantId, "PARTIAL", fieldGroups,
         List.of("Disable quote progression when required backend facts are missing.",
             "Surface review references before connected quote decisions.",
             "Keep pricing calculations outside the workbench intake surface.",
@@ -268,14 +243,14 @@ class PricingBffUiFallbackAdapter {
             new ScenarioIntakeValidationIssue("QUOTE_SERVICE_CONTRACT_REQUIRED", "quoteService", "BLOCKING",
                 "Quote setup needs scenario id/version, filters, requested lock periods, effective date, actor id, and client context before live quote creation.")),
         "review-package-required-after-scenario-create", "review-reference-required-after-scenario-create",
-        "Scenario, quote, and catalog setup details are unavailable; this local response carries non-secret progressive sections and attention items only.", traceId,
+        "Connected scenario, catalog, eligibility, pricing, and lock contracts are not fully configured; this local response carries non-secret progressive sections and actionable setup blockers only.", traceId,
         new ProgressiveQuickQuoteState(
-            List.of("borrowerName", "borrowerRole", "coBorrowerName", "contactEmail", "quoteGoal", "scenarioIntent"),
-            List.of("scenario-identity", "borrower-credit", "loan-structure", "property", "income-assets", "product-preferences", "quote-filters", "lock-periods", "decision-quality"),
-            List.of("scenarioId", "scenarioVersion", "quoteFilters", "requestedLockPeriods", "effectiveDate", "actorId", "clientContext"),
-            List.of("scenario setup", "quote setup", "catalog product preference", "tenant actor/client context"),
-            List.of("Scenario setup required", "Quote setup required", "Catalog setup required", "Tenant context setup required"),
-            "Quick quote intake collects borrower, credit, loan, property, income, product, lock, and intent facts without local pricing rules."));
+            minimalFirstStepFields,
+            fieldGroups.stream().skip(1).map(ScenarioIntakeFieldGroup::groupId).toList(),
+            List.of("scenarioId", "scenarioVersion", "quoteIntent", "channel", "loanPurpose", "loanAmount"),
+            List.of("creditScore", "propertyValidation", "incomeVerification"),
+            List.of("investor-pricing-config", "margin-config", "scenario-service-contract", "catalog-service-contract", "lock-period-catalog"),
+            "Investor pricing, margin, scenario, catalog, and lock-period configuration are required for full quote launch."));
   }
 
   @PostMapping("/api/v1/tenants/{tenantId}/quote-runs/{runId}/intake/validate")
@@ -1500,14 +1475,11 @@ class PricingBffUiFallbackAdapter {
 
   private IntakeValidation validateBorrowerIntake(Map<String, Object> intake) {
     Map<String, String> blockers = new LinkedHashMap<>();
-    if (isBlankText(intake, "borrowerName")) {
-      blockers.put("borrowerName", "Borrower name is required before a quote run can start.");
+    if (isBlankText(intake, "quoteIntent")) {
+      blockers.put("quoteIntent", "Quote intent is required before a quote run can start.");
     }
-    if (isBlankText(intake, "contactEmail")) {
-      blockers.put("contactEmail", "Contact email is required before a quote run can start.");
-    }
-    if (isBlankText(intake, "quoteGoal")) {
-      blockers.put("quoteGoal", "Quote goal is required before a quote run can start.");
+    if (isBlankText(intake, "channel")) {
+      blockers.put("channel", "Channel is required before a quote run can start.");
     }
 
     if (!blockers.isEmpty()) {
@@ -1519,9 +1491,9 @@ class PricingBffUiFallbackAdapter {
 
   private List<String> backendFactRefs(Map<String, Object> intake) {
     List<String> refs = new java.util.ArrayList<>();
-    List.of("scenarioId", "scenarioVersion", "quoteFilters", "requestedLockPeriods", "effectiveDate", "actorId",
-        "clientContext", "productPreference", "loanPurpose", "propertyState", "occupancyType", "monthlyIncome",
-        "liquidAssets").forEach(field -> {
+    List.of("scenarioId", "scenarioVersion", "quoteIntent", "channel", "loanPurpose", "loanAmount", "propertyState",
+        "occupancyType", "monthlyIncome", "liquidAssets", "productPreference", "quoteFilters", "effectiveDate",
+        "requestedLockPeriods", "actorId", "clientContext").forEach(field -> {
           if (!isBlankText(intake, field)) {
             refs.add("fact:" + field);
           }
@@ -1534,11 +1506,10 @@ class PricingBffUiFallbackAdapter {
     Map<String, String> required = new LinkedHashMap<>();
     required.put("scenarioId", "Quote-service scenario id is missing; select or create a scenario through configured scenario-service.");
     required.put("scenarioVersion", "Quote-service scenario version is missing; scenario-service version evidence is required.");
-    required.put("quoteFilters", "Quote-service creation filters are missing or unverified; configured filter schema is required.");
-    required.put("requestedLockPeriods", "Requested lock periods are missing or unverified; configured lock-period catalog is required.");
-    required.put("effectiveDate", "Effective date is missing; no market date is inferred by the BFF.");
-    required.put("actorId", "Actor id is missing; configured identity or tenant-context evidence is required.");
-    required.put("clientContext", "Client context is missing; configured tenant/client context is required.");
+    required.put("quoteIntent", "Quote intent is missing; scenario-service intent metadata is required before launch.");
+    required.put("channel", "Channel is missing; catalog or scenario submission profile evidence is required.");
+    required.put("loanPurpose", "Loan purpose is missing; quote-service launch requires an explicit purpose fact.");
+    required.put("loanAmount", "Loan amount is missing; quote-service launch requires an explicit amount fact.");
     required.forEach((field, message) -> {
       if (isBlankText(intake, field)) {
         missing.add(message);
@@ -1559,8 +1530,8 @@ class PricingBffUiFallbackAdapter {
   }
 
   private String deterministicRunId(String tenantId, Map<String, Object> intake) {
-    String seed = normalized(tenantId) + "|" + normalized(intake.get("borrowerName")) + "|"
-        + normalized(intake.get("contactEmail")) + "|" + normalized(intake.get("quoteGoal"));
+    String seed = normalized(tenantId) + "|" + normalized(intake.get("quoteIntent")) + "|"
+        + normalized(intake.get("channel")) + "|" + normalized(intake.get("scenarioName"));
     return "run-" + Integer.toUnsignedString(seed.hashCode(), 36);
   }
 

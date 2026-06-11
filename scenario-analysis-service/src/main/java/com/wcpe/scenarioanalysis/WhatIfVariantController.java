@@ -38,6 +38,7 @@ public class WhatIfVariantController {
   private final WhatIfExportService whatIfExportService;
   private final WhatIfReplayService whatIfReplayService;
   private final WhatIfGuardrailService whatIfGuardrailService;
+  private final ScenarioAnalysisApiService scenarioAnalysisApiService;
 
   public WhatIfVariantController(
       WhatIfVariantService service,
@@ -49,7 +50,8 @@ public class WhatIfVariantController {
       SavedWhatIfAnalysisService savedWhatIfAnalysisService,
       WhatIfExportService whatIfExportService,
       WhatIfReplayService whatIfReplayService,
-      WhatIfGuardrailService whatIfGuardrailService) {
+      WhatIfGuardrailService whatIfGuardrailService,
+      ScenarioAnalysisApiService scenarioAnalysisApiService) {
     this.service = service;
     this.ficoSensitivityService = ficoSensitivityService;
     this.ltvSensitivityService = ltvSensitivityService;
@@ -60,6 +62,56 @@ public class WhatIfVariantController {
     this.whatIfExportService = whatIfExportService;
     this.whatIfReplayService = whatIfReplayService;
     this.whatIfGuardrailService = whatIfGuardrailService;
+    this.scenarioAnalysisApiService = scenarioAnalysisApiService;
+  }
+
+  @GetMapping("/api/v1/tenants/{tenantId}/quote-runs/{runId}/what-if/workspace")
+  public ScenarioAnalysisApiService.ScenarioAnalysisResponse getScenarioAnalysisWorkspace(
+      @PathVariable String tenantId,
+      @PathVariable String runId,
+      @RequestHeader(value = "X-UI-Trace-Id", required = false) String uiTraceId) {
+    return scenarioAnalysisApiService.workspace(tenantId, runId, uiTraceId);
+  }
+
+  @PostMapping("/api/v1/tenants/{tenantId}/quote-runs/{runId}/what-if/recalculate")
+  public ResponseEntity<ScenarioAnalysisApiService.ScenarioAnalysisResponse> recalculateScenarioAnalysis(
+      @PathVariable String tenantId,
+      @PathVariable String runId,
+      @RequestHeader(value = "X-UI-Trace-Id", required = false) String uiTraceId,
+      @RequestBody ScenarioAnalysisApiService.RecalculationRequest request) {
+    return ResponseEntity.accepted().body(scenarioAnalysisApiService.recalculate(tenantId, runId, request, uiTraceId));
+  }
+
+  @GetMapping("/api/v1/tenants/{tenantId}/quote-runs/{runId}/what-if/fico-sensitivity")
+  public ScenarioAnalysisApiService.ScenarioAnalysisResponse getFicoScenarioAnalysis(
+      @PathVariable String tenantId,
+      @PathVariable String runId,
+      @RequestHeader(value = "X-UI-Trace-Id", required = false) String uiTraceId) {
+    return scenarioAnalysisApiService.ficoSensitivity(tenantId, runId, uiTraceId);
+  }
+
+  @GetMapping("/api/v1/tenants/{tenantId}/quote-runs/{runId}/what-if/ltv-sensitivity")
+  public ScenarioAnalysisApiService.ScenarioAnalysisResponse getLtvScenarioAnalysis(
+      @PathVariable String tenantId,
+      @PathVariable String runId,
+      @RequestHeader(value = "X-UI-Trace-Id", required = false) String uiTraceId) {
+    return scenarioAnalysisApiService.ltvSensitivity(tenantId, runId, uiTraceId);
+  }
+
+  @GetMapping("/api/v1/tenants/{tenantId}/quote-runs/{runId}/what-if/product-comparison")
+  public ScenarioAnalysisApiService.ScenarioAnalysisResponse getProductScenarioAnalysis(
+      @PathVariable String tenantId,
+      @PathVariable String runId,
+      @RequestHeader(value = "X-UI-Trace-Id", required = false) String uiTraceId) {
+    return scenarioAnalysisApiService.productComparison(tenantId, runId, uiTraceId);
+  }
+
+  @GetMapping("/api/v1/tenants/{tenantId}/quote-runs/{runId}/what-if/lock-period-comparison")
+  public ScenarioAnalysisApiService.ScenarioAnalysisResponse getLockPeriodScenarioAnalysis(
+      @PathVariable String tenantId,
+      @PathVariable String runId,
+      @RequestHeader(value = "X-UI-Trace-Id", required = false) String uiTraceId) {
+    return scenarioAnalysisApiService.lockPeriodComparison(tenantId, runId, uiTraceId);
   }
 
   @PostMapping("/api/v1/tenants/{tenantId}/what-if/scenarios/{sourceQuoteId}/variants")
@@ -817,6 +869,11 @@ public class WhatIfVariantController {
   @ExceptionHandler(WhatIfGuardrailService.NotFoundException.class)
   ResponseEntity<Map<String, String>> whatIfGuardrailNotFound(WhatIfGuardrailService.NotFoundException ex) {
     return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("code", "NOT_FOUND", "message", ex.getMessage()));
+  }
+
+  @ExceptionHandler(ScenarioAnalysisApiService.ValidationException.class)
+  ResponseEntity<Map<String, String>> scenarioAnalysisValidationFailure(ScenarioAnalysisApiService.ValidationException ex) {
+    return ResponseEntity.badRequest().body(Map.of("code", "VALIDATION_FAILED", "message", ex.getMessage()));
   }
 
   public record CreateVariantRequest(

@@ -1,0 +1,9 @@
+{
+  "rateFeed": "Rate feed",
+  "pipeline": "Pipeline",
+  "case": "Case",
+  "sla": "SLA",
+  "priority": "Priority",
+  "escalation": "Escalation",
+  "queue": "Queue"
+}

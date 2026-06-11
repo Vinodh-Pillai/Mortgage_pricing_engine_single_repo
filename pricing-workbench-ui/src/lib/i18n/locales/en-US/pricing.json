@@ -1,0 +1,15 @@
+{
+  "rate": "Rate",
+  "price": "Price",
+  "margin": "Margin",
+  "adjustment": "Adjustment",
+  "llpa": "LLPA",
+  "waterfall": "Waterfall",
+  "eligibility": "Eligibility",
+  "lock": "Lock",
+  "offer": "Offer",
+  "quote": "Quote",
+  "scenario": "Scenario",
+  "itemsCount": "{count, plural, =0 {No items} one {1 item} other {# items}}",
+  "priceChange": "{direction, select, up {+{{amount}}} down {-{{amount}}} other {±{{amount}}}}"
+}

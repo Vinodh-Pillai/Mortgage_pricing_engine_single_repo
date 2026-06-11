@@ -1,0 +1,11 @@
+{
+  "generic": "Something went wrong.",
+  "validation": "Check the highlighted fields and try again.",
+  "network": "Network request failed.",
+  "unauthorized": "You are not authorized to perform this action.",
+  "notFound": "The requested item was not found.",
+  "required": "This field is required.",
+  "invalidDate": "Enter a valid date.",
+  "invalidNumber": "Enter a valid number.",
+  "missingTranslation": "Missing translation for {{key}}"
+}

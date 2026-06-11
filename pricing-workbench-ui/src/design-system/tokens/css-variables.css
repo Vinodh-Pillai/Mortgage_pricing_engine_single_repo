@@ -1,0 +1,111 @@
+:root {
+  color-scheme: dark;
+  --ds-color-background: #07111f;
+  --ds-color-background-raised: #0b172a;
+  --ds-color-surface: #101f38;
+  --ds-color-surface-raised: #172a46;
+  --ds-color-border: #365178;
+  --ds-color-border-strong: #74b9ff;
+  --ds-color-text: #e7f0ff;
+  --ds-color-text-muted: #aab8d4;
+  --ds-color-primary: #2dd4bf;
+  --ds-color-primary-strong: #14b8a6;
+  --ds-color-secondary: #60a5fa;
+  --ds-color-success: #34d399;
+  --ds-color-warning: #fbbf24;
+  --ds-color-error: #f87171;
+  --ds-color-info: #38bdf8;
+  --ds-space-0: 0;
+  --ds-space-1: 0.25rem;
+  --ds-space-2: 0.5rem;
+  --ds-space-3: 0.75rem;
+  --ds-space-4: 1rem;
+  --ds-space-5: 1.25rem;
+  --ds-space-6: 1.5rem;
+  --ds-space-8: 2rem;
+  --ds-space-10: 2.5rem;
+  --ds-space-12: 3rem;
+  --ds-font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --ds-font-mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  --ds-font-size-sm: 0.875rem;
+  --ds-font-size-md: 1rem;
+  --ds-font-size-lg: 1.125rem;
+  --ds-line-height-normal: 1.5;
+  --ds-radius-sm: 0.35rem;
+  --ds-radius-md: 0.5rem;
+  --ds-radius-lg: 0.75rem;
+  --ds-radius-xl: 1rem;
+  --ds-radius-full: 999px;
+  --ds-shadow-1: 0 1px 2px rgb(0 0 0 / 18%);
+  --ds-shadow-2: 0 8px 24px rgb(0 0 0 / 18%);
+  --ds-shadow-3: 0 16px 44px rgb(0 0 0 / 22%);
+  --ds-z-base: 0;
+  --ds-z-dropdown: 100;
+  --ds-z-modal: 300;
+  --ds-z-toast: 400;
+  --ds-z-tooltip: 500;
+  --ds-motion-instant: 0ms;
+  --ds-motion-fast: 120ms;
+  --ds-motion-normal: 220ms;
+  --ds-motion-slow: 360ms;
+  --ds-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]):not([data-theme="light"]) {
+    color-scheme: light;
+    --ds-color-background: #f6f9ff;
+    --ds-color-background-raised: #ffffff;
+    --ds-color-surface: #ffffff;
+    --ds-color-surface-raised: #eef5ff;
+    --ds-color-border: #c7d6ee;
+    --ds-color-border-strong: #2563eb;
+    --ds-color-text: #102036;
+    --ds-color-text-muted: #53657f;
+    --ds-color-primary: #0f766e;
+    --ds-color-primary-strong: #0d9488;
+    --ds-color-secondary: #2563eb;
+    --ds-color-success: #047857;
+    --ds-color-warning: #b45309;
+    --ds-color-error: #b91c1c;
+    --ds-color-info: #0369a1;
+  }
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --ds-color-background: #f6f9ff;
+  --ds-color-background-raised: #ffffff;
+  --ds-color-surface: #ffffff;
+  --ds-color-surface-raised: #eef5ff;
+  --ds-color-border: #c7d6ee;
+  --ds-color-border-strong: #2563eb;
+  --ds-color-text: #102036;
+  --ds-color-text-muted: #53657f;
+  --ds-color-primary: #0f766e;
+  --ds-color-primary-strong: #0d9488;
+  --ds-color-secondary: #2563eb;
+  --ds-color-success: #047857;
+  --ds-color-warning: #b45309;
+  --ds-color-error: #b91c1c;
+  --ds-color-info: #0369a1;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ds-motion-fast: 0ms;
+    --ds-motion-normal: 0ms;
+    --ds-motion-slow: 0ms;
+  }
+
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -110,19 +110,8 @@ import {
   type RuleCalculationEvidenceView,
   type RuleEvidenceRow,
 } from './lib/api/customRules';
-import {
-  fetchAdjustmentEvidence,
-  type AdjustmentBlockedState,
-  type AdjustmentConflictView,
-  type AdjustmentEvidenceRow,
-  type AdjustmentEvidenceView,
-  type AdjustmentSummaryCard,
-} from './lib/api/adjustments';
-import {
-  fetchMarginProfitability,
-  type MarginEvidenceSection,
-  type MarginProfitabilityView,
-} from './lib/api/marginProfitability';
+import AdjustmentEvidenceScreen from './screens/adjustmentEvidence/AdjustmentEvidenceScreen';
+import { MarginProfitabilityScreen } from './screens/marginProfitability';
 import {
   fetchAuditReplayWorkbench,
   type AuditReplayRecordSummary,
@@ -159,10 +148,12 @@ import {
   type ProductSetupRequest,
   type ProductSetupResult,
 } from './lib/api/products';
-import { resolveWorkbenchModule, WorkbenchModuleRail, workbenchModules } from './screens/workbenchShell/WorkbenchShell';
+import { resolveWorkbenchModule, WorkbenchModuleRail } from './screens/workbenchShell/WorkbenchShell';
 import { DiagnosticsDetails } from './components/DiagnosticsDetails';
 import { WorkflowField } from './components/WorkflowField';
 import { WorkflowResultBanner } from './components/WorkflowResultBanner';
+import { ThemeProvider } from './design-system';
+import { Shell } from './layout';
 
 const QuickQuoteIntake = lazy(() => import('./screens/quickQuote/QuickQuoteIntake'));
 
@@ -277,6 +268,7 @@ export function App() {
   const [scenarioAnalysisActive] = useState(() => scenarioAnalysisPathActive(window.location.pathname));
   const activeModule = resolveWorkbenchModule(window.location.pathname);
   const featureRegistryActive = activeModule.id === 'service-modules' && window.location.pathname.startsWith('/service-modules');
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
 
   useEffect(() => {
     let active = true;
@@ -430,41 +422,16 @@ export function App() {
   }
 
   return (
-    <div className="app-shell">
-      <a className="skip-link" href="#main-content">
-        Skip to main content
-      </a>
-      <header className="shell-header" role="banner">
-        <div>
-          <p className="eyebrow">World Class Pricing Engine</p>
-          <h1>Pricing Workbench</h1>
-        </div>
-        <form className="shell-search" role="search" aria-label="Workbench search">
-          <label htmlFor="global-search">Search</label>
-          <input id="global-search" name="search" type="search" placeholder="Search workbench" />
-        </form>
-      </header>
-
-      <div className="shell-grid">
-        <nav className="side-nav" aria-label="Main navigation">
-          <h2>Workspace</h2>
-          {workbenchModules.map((screen) => (
-            <a key={screen.id} href={screen.routePattern.replace(':runId', activeRunId ?? 'run-test')} aria-current={screen.id === activeModule.id ? 'page' : undefined}>
-              {screen.routePattern.startsWith('/audit/replay') ? 'Review record workbench' : businessFacingText(screen.label)}
-            </a>
-          ))}
-          <a href="#status-panel">Connection status</a>
-          <a href="#notice-panel">Notices</a>
-          <a href="#help-panel">Help</a>
-        </nav>
-
-        <main id="main-content" tabIndex={-1}>
-          <nav aria-label="Breadcrumb" className="breadcrumbs">
-            <ol>
-              <li>Home</li>
-              <li aria-current="page">{activeRunId ? screenLabel(activeScreen) : activeModule.breadcrumb}</li>
-            </ol>
-          </nav>
+    <ThemeProvider>
+    <Shell
+      activeModuleId={activeModule.id}
+      activeRunId={activeRunId}
+      breadcrumb={activeRunId ? screenLabel(activeScreen) : activeModule.breadcrumb}
+      notifications={healthState.kind === 'unreachable' ? [{ id: 'health', label: healthState.message, attentionRequired: true }] : []}
+      onThemeToggle={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
+      theme={theme}
+      user={{ name: 'Workbench user', role: 'Pricing analyst' }}
+    >
 
           {!activeRunId && featureRegistryActive ? <WorkbenchModuleRail activeModuleId={activeModule.id} /> : null}
 
@@ -479,9 +446,9 @@ export function App() {
           ) : customRulesActive ? (
             <CustomRuleEvidenceSection />
           ) : adjustmentEvidenceActive ? (
-            <AdjustmentEvidenceSection />
+            <AdjustmentEvidenceScreen tenantContext={tenantBoundaryPlaceholder} />
           ) : marginProfitabilityActive ? (
-            <MarginProfitabilitySection />
+            <MarginProfitabilityScreen tenantContext={tenantBoundaryPlaceholder} />
           ) : performanceActive ? (
             <PerformanceDashboardSection />
           ) : rateFeedOpsActive ? (
@@ -602,9 +569,8 @@ export function App() {
               Return focus to status
             </button>
           </section>
-        </main>
-      </div>
-    </div>
+    </Shell>
+    </ThemeProvider>
   );
 }
 
@@ -3509,264 +3475,6 @@ type QuoteJourneyMapState =
   | { kind: 'loading' }
   | { kind: 'loaded'; view: QuoteJourneyMapView }
   | { kind: 'unreachable'; message: string };
-
-type MarginProfitabilityState =
-  | { kind: 'loading' }
-  | { kind: 'loaded'; view: MarginProfitabilityView }
-  | { kind: 'unreachable'; message: string };
-
-type AdjustmentEvidenceState =
-  | { kind: 'loading' }
-  | { kind: 'loaded'; view: AdjustmentEvidenceView }
-  | { kind: 'unreachable'; message: string };
-
-function AdjustmentEvidenceSection() {
-  const [adjustmentState, setAdjustmentState] = useState<AdjustmentEvidenceState>({ kind: 'loading' });
-
-  useEffect(() => {
-    let active = true;
-    fetchAdjustmentEvidence(tenantBoundaryPlaceholder)
-      .then((view) => {
-        if (active) setAdjustmentState({ kind: 'loaded', view });
-      })
-      .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'Adjustment evidence is unavailable.';
-        if (active) setAdjustmentState({ kind: 'unreachable', message });
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  if (adjustmentState.kind === 'loading') {
-    return <section className="panel" aria-labelledby="adjustment-heading"><h2 id="adjustment-heading">Adjustment evidence</h2><p role="status">Loading adjustment evidence...</p></section>;
-  }
-
-  if (adjustmentState.kind === 'unreachable') {
-    return (
-      <section className="panel" aria-labelledby="adjustment-heading">
-        <h2 id="adjustment-heading">Adjustment evidence</h2>
-        <div className="banner banner--blocked" role="alert">{adjustmentState.message}</div>
-      </section>
-    );
-  }
-
-  const view = adjustmentState.view;
-  return (
-    <>
-      <section className="hero hero--admin" aria-labelledby="adjustment-title">
-        <p className="eyebrow">Adjustment service Â· PII-22-S17</p>
-        <h2 id="adjustment-title">Adjustment evidence cockpit</h2>
-        <p>
-          Inspect connected adjustment records, fact references, sources, conflict reasons, compensation hook refs, summaries,
-          review references and processing references without calculating LLPA, fee, or compensation values in the UI.
-        </p>
-      </section>
-
-      <section className="panel" aria-labelledby="adjustment-heading">
-        <div className="panel-heading-row">
-          <div>
-            <p className="eyebrow">Connected adjustment references</p>
-            <h2 id="adjustment-heading">Adjustment ids, facts, sources, and summaries</h2>
-          </div>
-           <DiagnosticsDetails items={[`Support reference: ${view.uiTraceId}`, `Processing record: ${view.replayHash}`]} />
-        </div>
-        <div className="banner banner--blocked" role="alert">
-          <strong>{businessFacingText(view.status)}</strong>
-          <span>{businessFacingText(view.dependencyStatus)}</span>
-          <span>{businessFacingText(view.fallbackReason)}</span>
-        </div>
-        <div className="offer-list" role="list" aria-label="Adjustment evidence rows">
-          {view.adjustments.map((adjustment) => <AdjustmentEvidenceCard key={adjustment.adjustmentId} adjustment={adjustment} />)}
-        </div>
-      </section>
-
-      <section className="panel" aria-labelledby="adjustment-conflicts-heading">
-        <h2 id="adjustment-conflicts-heading">Conflict reasons and resolution ownership</h2>
-        <div className="offer-list" role="list" aria-label="Adjustment conflict reasons">
-          {view.conflicts.map((conflict) => <AdjustmentConflictCard key={conflict.conflictId} conflict={conflict} />)}
-        </div>
-        <div className="offer-list" role="list" aria-label="Adjustment blocked states">
-          {view.blockers.map((blocker) => <AdjustmentBlockerCard key={blocker.reasonCode} blocker={blocker} />)}
-        </div>
-      </section>
-
-      <section className="panel" aria-labelledby="adjustment-summary-heading">
-        <h2 id="adjustment-summary-heading">Adjustment summaries and evidence refs</h2>
-        <div className="offer-list" role="list" aria-label="Adjustment summaries">
-          {view.summaries.map((summary) => <AdjustmentSummaryEvidenceCard key={summary.category} summary={summary} />)}
-        </div>
-        <ChipList label="Adjustment version refs" values={view.versionRefs.map(businessFacingText)} />
-        <ChipList label="Adjustment review references" values={view.auditRefs.map(businessFacingText)} />
-        <ChipList label="Adjustment events" values={view.events.map(businessFacingText)} />
-      </section>
-    </>
-  );
-}
-
-function AdjustmentEvidenceCard({ adjustment }: { adjustment: AdjustmentEvidenceRow }) {
-  return (
-    <article className="offer-card" role="listitem" aria-label={`${adjustment.label} adjustment`}>
-      <div className="offer-card__header">
-        <div>
-          <h3>{businessFacingText(adjustment.label)}</h3>
-          <p>{businessFacingText(adjustment.adjustmentId)} Â· {businessFacingText(adjustment.sourceRef)}</p>
-        </div>
-        <strong>{businessFacingText(adjustment.status)}</strong>
-      </div>
-      <p>{businessFacingText(adjustment.summary)}</p>
-      <dl className="status-grid">
-        <dt>Category</dt><dd>{businessFacingText(adjustment.category)}</dd>
-        <dt>Source version</dt><dd>{businessFacingText(adjustment.sourceVersionRef)}</dd>
-      </dl>
-      <ChipList label={`${adjustment.label} fact refs`} values={adjustment.factRefs.map(businessFacingText)} />
-      <ChipList label={`${adjustment.label} compensation hooks`} values={adjustment.compensationHooks.map(businessFacingText)} />
-      <ChipList label={`${adjustment.label} conflict ids`} values={adjustment.conflictIds.map(businessFacingText)} />
-    </article>
-  );
-}
-
-function AdjustmentConflictCard({ conflict }: { conflict: AdjustmentConflictView }) {
-  return (
-    <article className="offer-card" role="listitem" aria-label={`${conflict.conflictId} conflict`}>
-      <div className="offer-card__header">
-        <div>
-          <h3>{businessFacingText(conflict.reasonCode)}</h3>
-          <p>{businessFacingText(conflict.reason)}</p>
-        </div>
-        <strong>{businessFacingText(conflict.severity)}</strong>
-      </div>
-      <p>Resolution owner: {businessFacingText(conflict.resolutionOwner)}</p>
-      <ChipList label={`${conflict.conflictId} affected adjustments`} values={conflict.affectedAdjustmentIds.map(businessFacingText)} />
-    </article>
-  );
-}
-
-function AdjustmentBlockerCard({ blocker }: { blocker: AdjustmentBlockedState }) {
-  return (
-    <article className="offer-card" role="listitem" aria-label={`${blocker.reasonCode} blocked state`}>
-      <h3>{businessFacingText(blocker.reasonCode)}</h3>
-      <p>{businessFacingText(blocker.message)}</p>
-      <p>Source: {businessFacingText(blocker.sourceRef)}</p>
-      <p>Resolution owner: {businessFacingText(blocker.resolutionOwner)}</p>
-    </article>
-  );
-}
-
-function AdjustmentSummaryEvidenceCard({ summary }: { summary: AdjustmentSummaryCard }) {
-  return (
-    <article className="offer-card" role="listitem" aria-label={`${summary.category} summary`}>
-      <h3>{businessFacingText(summary.category)}</h3>
-      <p>{businessFacingText(summary.summary)}</p>
-      <ChipList label={`${summary.category} evidence refs`} values={summary.evidenceRefs.map(businessFacingText)} />
-    </article>
-  );
-}
-
-function MarginProfitabilitySection() {
-  const [marginState, setMarginState] = useState<MarginProfitabilityState>({ kind: 'loading' });
-
-  useEffect(() => {
-    let active = true;
-    fetchMarginProfitability(tenantBoundaryPlaceholder)
-      .then((view) => {
-        if (active) setMarginState({ kind: 'loaded', view });
-      })
-      .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'Margin profitability evidence is unavailable.';
-        if (active) setMarginState({ kind: 'unreachable', message });
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  if (marginState.kind === 'loading') {
-    return <section className="panel" aria-labelledby="margin-heading"><h2 id="margin-heading">Margin profitability</h2><p role="status">Loading margin profitability evidence...</p></section>;
-  }
-
-  if (marginState.kind === 'unreachable') {
-    return (
-      <section className="panel" aria-labelledby="margin-heading">
-        <h2 id="margin-heading">Margin profitability</h2>
-        <div className="banner banner--blocked" role="alert">{marginState.message}</div>
-      </section>
-    );
-  }
-
-  const view = marginState.view;
-  return (
-    <>
-      <section className="hero hero--admin" aria-labelledby="margin-title">
-        <p className="eyebrow">Margin service Â· PII-22-S16</p>
-        <h2 id="margin-title">Margin profitability cockpit</h2>
-        <p>
-          Review connected company, channel, branch, compensation, profitability floor, approval, redaction, and processing
-          evidence. The workbench displays margin-service facts and keeps profitability floors service-governed.
-        </p>
-      </section>
-
-      <section className="panel" aria-labelledby="margin-heading">
-        <div className="panel-heading-row">
-          <div>
-            <p className="eyebrow">Permission-aware evidence</p>
-            <h2 id="margin-heading">Margin and compensation sections</h2>
-          </div>
-           <DiagnosticsDetails items={[`Support reference: ${view.uiTraceId}`, `Processing record: ${view.replayHash}`]} />
-        </div>
-        <div className="banner banner--blocked" role="alert">
-          <strong>{businessFacingText(view.dependencyStatus)}</strong>
-          <span>{businessFacingText(view.fallbackReason)}</span>
-          <span>Compensation details visible: {view.compensationDetailsVisible ? 'yes' : 'no'}</span>
-        </div>
-        <div className="offer-list" role="list" aria-label="Margin profitability sections">
-          {view.sections.map((section) => <MarginEvidenceCard key={section.sectionId} section={section} />)}
-        </div>
-      </section>
-
-      <section className="panel" aria-labelledby="margin-floor-heading">
-        <h2 id="margin-floor-heading">Profitability floor blocker and exception path</h2>
-        <dl className="status-grid">
-          <dt>Quote option</dt><dd>{businessFacingText(view.floorEvidence.quoteOptionId)}</dd>
-          <dt>Decision</dt><dd>{businessFacingText(view.floorEvidence.decision)}</dd>
-          <dt>Decision code</dt><dd>{businessFacingText(view.floorEvidence.decisionCode)}</dd>
-          <dt>Floor version</dt><dd>{businessFacingText(view.floorEvidence.floorPolicyVersionRef)}</dd>
-          <dt>Threshold reference</dt><dd>{businessFacingText(view.floorEvidence.thresholdRef)}</dd>
-          <dt>Exception path</dt><dd>{businessFacingText(view.floorEvidence.exceptionRouteRef)}</dd>
-        </dl>
-        <p>{businessFacingText(view.floorEvidence.displayGuidance)}</p>
-        <ChipList label="Floor review references" values={view.floorEvidence.auditRefs.map(businessFacingText)} />
-        <ChipList label="Margin version refs" values={view.versionRefs.map(businessFacingText)} />
-        <ChipList label="Margin review references" values={view.auditRefs.map(businessFacingText)} />
-        <ChipList label="Margin events" values={view.events.map(businessFacingText)} />
-      </section>
-    </>
-  );
-}
-
-function MarginEvidenceCard({ section }: { section: MarginEvidenceSection }) {
-  return (
-    <article className="offer-card" role="listitem" aria-label={`${section.label} evidence`}>
-      <div className="offer-card__header">
-        <div>
-          <h3>{businessFacingText(section.label)}</h3>
-          <p>{businessFacingText(section.sourceRef)}</p>
-        </div>
-        <strong>{businessFacingText(section.permissionState)}</strong>
-      </div>
-      <ChipList label={`${section.label} evidence refs`} values={section.evidenceRefs.map(businessFacingText)} />
-      {section.redactions.length > 0 ? (
-        <div className="banner banner--blocked">
-          {section.redactions.map((redaction) => (
-            <span key={`${redaction.fieldLabel}-${redaction.auditRef}`}>
-              {businessFacingText(redaction.fieldLabel)}: {businessFacingText(redaction.state)} Â· {businessFacingText(redaction.reason)} Â· Review {businessFacingText(redaction.auditRef)}
-            </span>
-          ))}
-        </div>
-      ) : null}
-    </article>
-  );
-}
 
 function QuoteJourneyMapSection({ runId }: { runId: string }) {
   const [journeyState, setJourneyState] = useState<QuoteJourneyMapState>({ kind: 'loading' });

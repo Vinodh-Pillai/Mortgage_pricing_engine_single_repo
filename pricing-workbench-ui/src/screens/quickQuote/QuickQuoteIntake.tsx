@@ -1,5 +1,4 @@
-import { type FormEvent } from 'react';
-import { MortgageInput } from '../../components/MortgageInput';
+import { type FormEvent, useState } from 'react';
 import { ChipList } from '../../components/ChipList';
 import type {
   BorrowerIntake,
@@ -17,6 +16,15 @@ import { Step5IncomeAssets } from './steps/Step5IncomeAssets';
 import { Step6ProductLock } from './steps/Step6ProductLock';
 
 const uiTraceId = 'brw-s01-local-trace';
+const draftStorageKey = 'wcpe:quickQuoteIntakeDraft:v2';
+const progressiveSteps = [
+  { id: 1, label: 'Identity', fields: ['quoteIntent', 'channel', 'scenarioName', 'externalLoanId'] },
+  { id: 2, label: 'Borrower', fields: ['borrowerName', 'contactEmail', 'creditScore', 'creditStatus'] },
+  { id: 3, label: 'Loan', fields: ['loanPurpose', 'loanAmount', 'termMonths', 'requestedLockPeriodDays'] },
+  { id: 4, label: 'Property', fields: ['propertyState', 'propertyZip', 'propertyType', 'occupancyType'] },
+  { id: 5, label: 'Income', fields: ['monthlyIncome', 'monthlyDebt', 'reserveMonths'] },
+  { id: 6, label: 'Launch', fields: ['productFamily', 'productPreference', 'quoteFilters', 'effectiveDate'] },
+] as const;
 
 export default function QuickQuoteIntake({
   intake,
@@ -35,9 +43,30 @@ export default function QuickQuoteIntake({
   onRetry: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  const [activeStep, setActiveStep] = useState(1);
+  const [resumeMessage, setResumeMessage] = useState(() => loadDraftSummary());
   const quickQuoteState = metadataState.kind === 'loaded' ? metadataState.metadata.quickQuoteState : undefined;
+  const currentStep = progressiveSteps.find((step) => step.id === activeStep) ?? progressiveSteps[0];
+  const contractBlockers = quickQuoteState?.blockedByContracts ?? [];
+
+  function saveDraft() {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(draftStorageKey, JSON.stringify({ savedAt: new Date().toISOString(), intake, activeStep }));
+    setResumeMessage(`Draft saved at step ${activeStep}.`);
+  }
+
+  function resumeDraft() {
+    const draft = readDraft();
+    if (!draft) return;
+    Object.entries(draft.intake).forEach(([field, value]) => {
+      if (field in intake && typeof value === 'string') onChange(field as keyof BorrowerIntake, value);
+    });
+    setActiveStep(draft.activeStep);
+    setResumeMessage(`Resumed draft from ${new Date(draft.savedAt).toLocaleString()}.`);
+  }
+
   return (
-    <section id="borrower-intake" className="panel quick-quote-module" aria-labelledby="intake-heading">
+    <section id="borrower-intake" className="panel quick-quote-module" aria-labelledby="intake-heading" aria-describedby="active-quote-step">
       <div className="panel-heading-row">
         <div>
           <p className="eyebrow">Guided quick quote</p>
@@ -51,8 +80,29 @@ export default function QuickQuoteIntake({
         for a pricing scenario. The workbench records facts only and does not infer rates, thresholds, or eligibility decisions.
       </p>
       <LaunchBanner state={launchState} onRetry={onRetry} />
+      {resumeMessage ? (
+        <div className="banner banner--info" role="status">
+          <span>{resumeMessage}</span>
+          {readDraft() ? <button type="button" onClick={resumeDraft}>Resume saved draft</button> : null}
+        </div>
+      ) : null}
       <ScenarioIntakeMetadataPanel state={metadataState} />
       <QuickQuoteStatePanel state={quickQuoteState} />
+      {contractBlockers.length > 0 ? (
+        <div className="banner banner--blocked" role="alert">
+          <strong>Setup needed before connected quote launch</strong>
+          <ChipList label="Connected service setup items" values={contractBlockers.map(businessFacingText)} />
+        </div>
+      ) : null}
+
+      <nav aria-label="Quote intake progress" className="quick-quote-state">
+        {progressiveSteps.map((step) => (
+          <button key={step.id} type="button" aria-current={step.id === activeStep ? 'step' : undefined} onClick={() => setActiveStep(step.id)}>
+            Step {step.id}: {step.label} <span>{stepStatus(step.fields, intake, errors)}</span>
+          </button>
+        ))}
+      </nav>
+      <p id="active-quote-step" className="field-help">Active step: Step {currentStep.id} {currentStep.label}. The form keeps prior step facts available for review and draft save.</p>
 
       <form className="intake-form quick-quote-form" onSubmit={onSubmit} noValidate>
         <Step1DraftScenario intake={intake} errors={errors} onChange={onChange} />
@@ -64,12 +114,43 @@ export default function QuickQuoteIntake({
 
         {metadataState.kind === 'loaded' ? <AdvancedScenarioIntake metadata={metadataState.metadata} intake={intake} errors={errors} onChange={onChange} /> : null}
 
-        <button type="submit" disabled={launchState.kind === 'submitting'}>
-          {launchState.kind === 'submitting' ? 'Starting quote...' : 'Start quick quote'}
-        </button>
+        <div className="quick-quote-state" aria-label="Step actions">
+          <button type="button" disabled={activeStep === 1} onClick={() => setActiveStep((step) => Math.max(1, step - 1))}>Previous</button>
+          <button type="button" onClick={saveDraft}>Save draft</button>
+          <button type="button" disabled={activeStep === progressiveSteps.length} onClick={() => setActiveStep((step) => Math.min(progressiveSteps.length, step + 1))}>Next</button>
+          <button type="submit" disabled={launchState.kind === 'submitting'}>
+            {launchState.kind === 'submitting' ? 'Starting quote...' : activeStep === progressiveSteps.length ? 'Launch quote run' : 'Start quick quote'}
+          </button>
+        </div>
       </form>
     </section>
   );
+}
+
+function stepStatus(fields: readonly string[], intake: BorrowerIntake, errors: Partial<Record<keyof BorrowerIntake, string>>) {
+  if (fields.some((field) => errors[field as keyof BorrowerIntake])) return 'needs attention';
+  if (fields.some((field) => intake[field as keyof BorrowerIntake]?.trim())) return 'in progress';
+  return 'empty';
+}
+
+function loadDraftSummary() {
+  const draft = readDraft();
+  if (!draft) return '';
+  return `Saved draft available from ${new Date(draft.savedAt).toLocaleString()}.`;
+}
+
+function readDraft(): { savedAt: string; activeStep: number; intake: Partial<BorrowerIntake> } | null {
+  if (typeof window === 'undefined') return null;
+  const raw = window.localStorage.getItem(draftStorageKey);
+  if (!raw) return null;
+  try {
+    const draft = JSON.parse(raw) as { savedAt?: unknown; activeStep?: unknown; intake?: unknown };
+    if (typeof draft.savedAt !== 'string' || typeof draft.intake !== 'object' || draft.intake === null) return null;
+    const activeStep = typeof draft.activeStep === 'number' && draft.activeStep >= 1 && draft.activeStep <= progressiveSteps.length ? draft.activeStep : 1;
+    return { savedAt: draft.savedAt, activeStep, intake: draft.intake as Partial<BorrowerIntake> };
+  } catch {
+    return null;
+  }
 }
 
 function QuickQuoteStatePanel({ state }: { state?: ProgressiveQuickQuoteState }) {

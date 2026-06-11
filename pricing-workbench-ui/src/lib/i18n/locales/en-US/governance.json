@@ -1,0 +1,11 @@
+{
+  "config": "Config",
+  "catalog": "Catalog",
+  "rule": "Rule",
+  "version": "Version",
+  "publish": "Publish",
+  "audit": "Audit",
+  "replay": "Replay",
+  "drift": "Drift",
+  "incident": "Incident"
+}

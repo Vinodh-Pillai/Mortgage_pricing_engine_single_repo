@@ -1,0 +1,12 @@
+{
+  "requiredField": "Required field",
+  "optionalField": "Optional field",
+  "placeholder.search": "Search",
+  "help.required": "Required fields must be completed before continuing.",
+  "labels.name": "Name",
+  "labels.email": "Email",
+  "labels.status": "Status",
+  "labels.notes": "Notes",
+  "labels.date": "Date",
+  "labels.amount": "Amount"
+}

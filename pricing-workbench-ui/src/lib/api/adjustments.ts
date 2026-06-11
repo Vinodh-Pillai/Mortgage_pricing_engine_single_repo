@@ -53,11 +53,11 @@ export async function fetchAdjustmentEvidence(
   tenantContext: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<AdjustmentEvidenceView> {
-  const response = await fetchImpl('/api/v1/adjustments/evidence', {
+  const response = await fetchImpl(`/api/v1/adjustments/evidence?tenantContext=${encodeURIComponent(tenantContext)}`, {
     headers: {
       Accept: 'application/json',
       'X-Tenant-Context': tenantContext,
-      'X-Ui-Trace-Id': 'adjustment-s17-local-trace',
+      'X-Ui-Trace-Id': 'adjustment-s15-local-trace',
     },
   });
 

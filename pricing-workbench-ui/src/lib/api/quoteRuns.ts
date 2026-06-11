@@ -141,10 +141,12 @@ export type RedactedWaterfallValue = {
   value: string | null;
   redacted: boolean;
   reason: string | null;
+  auditRef?: string | null;
 };
 
 export type WaterfallLedgerRow = {
   ordinal: number;
+  section?: 'Base Rate' | 'Adjustments' | 'Margins' | 'Rounding' | string;
   step: string;
   inputValue: RedactedWaterfallValue;
   operation: string;
@@ -152,6 +154,10 @@ export type WaterfallLedgerRow = {
   configRef: string;
   reasonCode: string;
   roundingMode: string | null;
+  inputDetails?: string[];
+  outputDetails?: string[];
+  marginRefs?: string[];
+  adjustmentRefs?: string[];
 };
 
 export type PricingWaterfallView = {
@@ -172,9 +178,12 @@ export type PricingWaterfallView = {
     roundedFinalPrice: RedactedWaterfallValue;
     ledger: WaterfallLedgerRow[];
     adjustmentRefs: string[];
+    marginRefs?: string[];
     roundingTraceRefs: string[];
+    roundingMode?: string | null;
+    precision?: string | null;
   };
-  blockers: Array<{ code: string; message: string; sourceRef: string }>;
+  blockers: Array<{ code: string; message: string; sourceRef: string; remediation?: string }>;
   versionRefs: string[];
   auditRefs: string[];
   replayHash: string;
@@ -225,6 +234,97 @@ export type QuoteJourneyMapView = {
   uiTraceId: string;
   events: string[];
   fallbackReason: string;
+};
+
+export type LockWorkflowStatus = 'READY' | 'CONFIRMED' | 'EXPIRED' | 'EXTENDED' | 'RELOCKED' | 'FLOAT_DOWN' | 'BLOCKED';
+
+export type LockWorkflowActionType = 'extend' | 'relock' | 'float_down';
+
+export type LockWorkflowTerms = {
+  productLabel: string;
+  investor: string;
+  channel: string;
+  noteRate: string;
+  finalPriceBps: string;
+  lockPeriodDays: number;
+  expiresAt: string;
+  waterfallRef: string;
+  adjustmentRefs: string[];
+  marginRefs: string[];
+  investorConfirmationRequired: boolean;
+};
+
+export type LockWorkflowDisclosure = {
+  disclosureId: string;
+  title: string;
+  text: string;
+  complianceRef: string;
+};
+
+export type LockWorkflowBlocker = {
+  code: string;
+  message: string;
+  remediation: string;
+  sourceRef: string;
+};
+
+export type LockWorkflowAction = {
+  action: LockWorkflowActionType;
+  label: string;
+  eligible: boolean;
+  fee: string | null;
+  maxDays: number | null;
+  approvalRequired: boolean;
+  terms: string;
+  blocker?: string | null;
+};
+
+export type LockWorkflowHistoryEvent = {
+  eventId: string;
+  eventType: string;
+  timestamp: string;
+  actor: string;
+  terms: string;
+  approvalRef: string | null;
+  auditRef: string;
+};
+
+export type LockWorkflowView = {
+  tenantContext: string;
+  runId: string;
+  selectedOfferId: string;
+  status: LockWorkflowStatus;
+  lockIdPreview: string;
+  lockId: string | null;
+  terms: LockWorkflowTerms;
+  disclosures: LockWorkflowDisclosure[];
+  lockDisabled: boolean;
+  lockDisabledReason: string | null;
+  blockers: LockWorkflowBlocker[];
+  postLockActions: LockWorkflowAction[];
+  history: LockWorkflowHistoryEvent[];
+  uiTraceId: string;
+  events: string[];
+  fallbackReason: string;
+};
+
+export type LockConfirmationRequest = {
+  selectedOfferId: string;
+  action: 'confirm' | LockWorkflowActionType;
+  disclosuresAccepted: boolean;
+  disclosureScrollComplete: boolean;
+  signatureName: string;
+  signedAt: string;
+};
+
+export type LockConfirmationResult = {
+  status: 'CONFIRMED' | 'CONFLICT' | 'BLOCKED';
+  lockId: string | null;
+  expiresAt: string | null;
+  message: string;
+  conflictResolution?: string | null;
+  auditRef: string;
+  historyEvent?: LockWorkflowHistoryEvent;
 };
 
 export async function fetchScenarioIntakeMetadata(
@@ -304,4 +404,44 @@ export async function fetchQuoteJourneyMap(
   }
 
   return (await response.json()) as QuoteJourneyMapView;
+}
+
+export async function fetchLockWorkflow(
+  tenantId: string,
+  runId: string,
+  selectedOfferId: string | null | undefined,
+  fetchImpl: typeof fetch = fetch,
+): Promise<LockWorkflowView> {
+  const query = selectedOfferId ? `?selectedOfferId=${encodeURIComponent(selectedOfferId)}` : '';
+  const response = await fetchImpl(`/api/v1/tenants/${encodeURIComponent(tenantId)}/quote-runs/${encodeURIComponent(runId)}/lock${query}`, {
+    headers: {
+      Accept: 'application/json',
+      'X-Ui-Trace-Id': 'ql-s12-local-trace',
+    },
+  });
+
+  if (response.status >= 500) {
+    throw new Error('Lock workflow evidence is temporarily unavailable.');
+  }
+
+  return (await response.json()) as LockWorkflowView;
+}
+
+export async function confirmLockWorkflowAction(
+  tenantId: string,
+  runId: string,
+  request: LockConfirmationRequest,
+  fetchImpl: typeof fetch = fetch,
+): Promise<LockConfirmationResult> {
+  const response = await fetchImpl(`/api/v1/tenants/${encodeURIComponent(tenantId)}/quote-runs/${encodeURIComponent(runId)}/lock/confirm`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'X-Ui-Trace-Id': 'ql-s12-local-trace',
+    },
+    body: JSON.stringify(request),
+  });
+
+  return (await response.json()) as LockConfirmationResult;
 }
