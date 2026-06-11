@@ -27,6 +27,28 @@ export type ComplianceDecisionRationale = {
   disclosureArtifactRef: string;
 };
 
+export type ComplianceAdvisoryReview = {
+  reviewId: string;
+  reviewType: string;
+  subjectRef: string;
+  status: string;
+  reasonCodes: string[];
+  auditSnapshotRefs: string[];
+  regulatoryApprovalState: string;
+  exportRefs: string[];
+  blockedByConfiguration: boolean;
+  configurationGaps: string[];
+};
+
+export type FairLendingMonitoringDrilldown = {
+  drilldownId: string;
+  dimensions: string[];
+  redacted: boolean;
+  redactionState: string;
+  evidenceRefs: string[];
+  blockers: string[];
+};
+
 export type PrivacyRequestSummary = {
   requestId: string;
   borrowerRef: string;
@@ -72,10 +94,13 @@ export type ComplianceEvidenceRegistryView = {
   dependencyStatus: string;
   artifacts: ComplianceEvidenceArtifact[];
   decisions: ComplianceDecisionRationale[];
+  advisoryReviews: ComplianceAdvisoryReview[];
+  fairLendingMonitoring: FairLendingMonitoringDrilldown[];
   privacyRequests: PrivacyRequestSummary[];
   securityEvents: SecurityEventSummary[];
   alerts: ComplianceAlertSummary[];
   retentionControls: RetentionControlSummary[];
+  configurationGaps: string[];
   uiTraceId: string;
   events: string[];
   fallbackReason: string;

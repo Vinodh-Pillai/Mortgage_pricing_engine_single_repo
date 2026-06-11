@@ -16,6 +16,7 @@ public final class ExceptionHistoryController {
   public static final String GET_EXCEPTION_HISTORY = "GET /api/v1/tenants/{tenantId}/exception-history";
   public static final String POST_EXCEPTION_HISTORY_REPLAY = "POST /api/v1/tenants/{tenantId}/exception-history/replay";
   public static final String POST_EXCEPTION_HISTORY_EXPORT = "POST /api/v1/tenants/{tenantId}/exception-history/export";
+  public static final String GET_EXCEPTION_CONCESSION_WORKBENCH = "GET /api/v1/tenants/{tenantId}/exceptions/concessions/{caseId}/workbench";
 
   private final ExceptionService service;
 
@@ -43,5 +44,13 @@ public final class ExceptionHistoryController {
     Instant expiresAt
   ) {
     return service.exportExceptionHistory(request, includeEvidenceRefs, expiresAt);
+  }
+
+  public ExceptionModels.ExceptionWorkbenchCase getExceptionConcessionWorkbench(
+    java.util.UUID tenantId,
+    String caseId,
+    String quoteId
+  ) {
+    return service.exceptionConcessionWorkbench(tenantId, caseId, quoteId);
   }
 }

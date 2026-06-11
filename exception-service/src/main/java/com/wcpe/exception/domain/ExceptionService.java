@@ -823,6 +823,62 @@ public class ExceptionService {
     return export;
   }
 
+  public ExceptionModels.ExceptionWorkbenchCase exceptionConcessionWorkbench(UUID tenantId, String caseId, String quoteId) {
+    requireTenant(tenantId);
+    String normalizedCaseId = isBlank(caseId) ? "exception-case-config-required" : caseId.trim();
+    String normalizedQuoteId = isBlank(quoteId) ? "quote-ref-required" : quoteId.trim();
+    List<ExceptionModels.ExceptionWorkbenchSection> sections = List.of(
+      workbenchSection("concession-request", "Concession request", "VISIBLE",
+        List.of("exception-service.concession-request", "pricing-service.quote-ref"),
+        List.of("audit:concession-request-required"),
+        "Concession request status, reason refs, route hash, and request hash are visible without pricing calculations."),
+      workbenchSection("eligibility-exception", "Eligibility exception", "VISIBLE",
+        List.of("exception-service.eligibility-exception", "eligibility-service.finding-ref"),
+        List.of("audit:eligibility-exception-required"),
+        "Eligibility exception finding refs, original result hash, and related concession refs are surfaced as backend-owned evidence."),
+      workbenchSection("authority-matrix", "Authority matrix", "VISIBLE",
+        List.of("exception-service.authority-matrix", "governance-service.role-scope"),
+        List.of("audit:authority-matrix-required"),
+        "Approval route, matrix version, validation hash, and separation-of-duties evidence are displayed from configured refs."),
+      workbenchSection("manual-price-mutation-guard", "Manual price mutation guard", "BLOCKED",
+        List.of("exception-service.manual-price-edit-guard", "pricing-service.ledger-hash"),
+        List.of("audit:manual-price-edit-blocked"),
+        "Manual price mutation commit remains disabled when backend guard returns denial reason codes and escalation path."),
+      workbenchSection("risk-events", "Monitoring and risk events", "VISIBLE",
+        List.of("exception-service.risk-monitoring-events", "observability-service.alert-ref"),
+        List.of("audit:risk-monitoring-required"),
+        "Risk events, alert severity, redaction state, and replay flags are shown as non-PII refs."),
+      workbenchSection("history-replay-export", "History, replay, and export", "VISIBLE",
+        List.of("exception-service.exception-history", "audit-replay-service.replay-package"),
+        List.of("audit:exception-history-required", "audit:exception-export-required"),
+        "History timeline, replay hash, export manifest, retention, and redaction refs are grouped for governed review.")
+    );
+    String replayHash = hash(tenantId + "|" + normalizedCaseId + "|" + normalizedQuoteId + "|exception-workbench");
+    return new ExceptionModels.ExceptionWorkbenchCase(
+      tenantId,
+      normalizedCaseId,
+      normalizedQuoteId,
+      "GOVERNED_REVIEW",
+      sections,
+      new ExceptionModels.ExceptionWorkbenchMutationGuard(
+        true,
+        ExceptionModels.PriceMutationGuardDecision.BLOCKED,
+        List.of("MANUAL_PRICE_EDIT_FORBIDDEN", "LEDGER_HASH_REQUIRED"),
+        "exception-approval-escalation-path-required",
+        "audit:manual-price-edit-blocked",
+        replayHash
+      ),
+      List.of("quote-service.quote-ref", "pricing-service.ledger-ref", "margin-service.margin-ref", "adjustment-service.adjustment-ref", "lock-service.lock-ref", "compliance-service.review-ref"),
+      List.of("authority-matrix-version-ref-required", "concession-policy-version-ref-required", "price-guard-policy-version-ref-required"),
+      List.of("audit:exception-workbench-opened", "audit:manual-price-edit-blocked", "audit:exception-export-required"),
+      List.of("Configured exception-service live integration is unavailable in local mode; actions stay disabled until backend guard and export contracts are wired."),
+      replayHash,
+      "exception-history-export-manifest-required",
+      "Local exception-service workbench response exposes backend-owned refs, blocker states, audit refs, replay hashes, and export refs only; it does not infer pricing policy.",
+      Instant.now()
+    );
+  }
+
   public ExceptionModels.ExceptionRequestStatus status(String exceptionRequestId) {
     return repository.findById(exceptionRequestId)
       .map(this::toStatus)
@@ -858,6 +914,17 @@ public class ExceptionService {
 
   public ExceptionModels.ExceptionError toError(ExceptionServiceException exception, String requestId) {
     return new ExceptionModels.ExceptionError(exception.code(), exception.getMessage(), requestId);
+  }
+
+  private static ExceptionModels.ExceptionWorkbenchSection workbenchSection(
+    String sectionId,
+    String label,
+    String status,
+    List<String> backendRefs,
+    List<String> auditRefs,
+    String summary
+  ) {
+    return new ExceptionModels.ExceptionWorkbenchSection(sectionId, label, status, backendRefs, auditRefs, summary);
   }
 
   private ExceptionModels.ExceptionRequestStatus toStatus(ExceptionModels.ExceptionRequestRecord record) {

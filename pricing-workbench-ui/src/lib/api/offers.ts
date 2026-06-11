@@ -1,3 +1,5 @@
+import type { PricingWaterfallView } from './quoteRuns';
+
 export type OfferSummary = {
   offerId: string;
   rank: number;
@@ -63,6 +65,41 @@ export type OfferSelectionResult = {
   events: string[];
 };
 
+export type QuoteDetailPanel = {
+  panelId: string;
+  label: string;
+  status: string;
+  fields: string[];
+  backendRefs: string[];
+  blockers: string[];
+};
+
+export type QuoteDetailRedaction = {
+  fieldPath: string;
+  state: string;
+  reason: string;
+  auditRef: string;
+};
+
+export type QuoteDetailView = {
+  tenantContext: string;
+  runId: string;
+  offerId: string;
+  status: string;
+  summary: OfferSummary;
+  explanation: OfferExplanationView;
+  waterfall: PricingWaterfallView;
+  panels: QuoteDetailPanel[];
+  redactions: QuoteDetailRedaction[];
+  complianceFlags: string[];
+  auditRefs: string[];
+  replayHash: string;
+  evidenceHash: string;
+  uiTraceId: string;
+  events: string[];
+  fallbackReason: string;
+};
+
 const traceHeaders = {
   Accept: 'application/json',
   'X-Ui-Trace-Id': 'brw-s02-local-trace',
@@ -92,6 +129,20 @@ export async function fetchOfferExplanation(
   );
   if (response.status >= 500) throw new Error('BFF explainability boundary is temporarily unavailable.');
   return (await response.json()) as OfferExplanationView;
+}
+
+export async function fetchQuoteDetail(
+  tenantId: string,
+  runId: string,
+  offerId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<QuoteDetailView> {
+  const response = await fetchImpl(
+    `/api/v1/tenants/${encodeURIComponent(tenantId)}/quote-runs/${encodeURIComponent(runId)}/offers/${encodeURIComponent(offerId)}/detail`,
+    { headers: { ...traceHeaders, 'X-Ui-Trace-Id': 'qd-s23-local-trace' } },
+  );
+  if (response.status >= 500) throw new Error('Quote detail evidence boundary is temporarily unavailable.');
+  return (await response.json()) as QuoteDetailView;
 }
 
 export async function selectOffer(

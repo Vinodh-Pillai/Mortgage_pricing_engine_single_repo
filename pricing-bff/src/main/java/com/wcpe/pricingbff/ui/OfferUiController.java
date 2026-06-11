@@ -29,6 +29,12 @@ class OfferUiController {
     return adapter.offerExplanation(runId, offerId, uiTraceId);
   }
 
+  @GetMapping("/api/v1/tenants/{tenantId}/quote-runs/{runId}/offers/{offerId}/detail")
+  Object quoteDetail(@PathVariable String tenantId, @PathVariable String runId, @PathVariable String offerId,
+      @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
+    return adapter.quoteDetail(tenantId, runId, offerId, uiTraceId);
+  }
+
   @PostMapping("/api/v1/tenants/{tenantId}/quote-runs/{runId}/offers/{offerId}/select")
   ResponseEntity<?> selectOffer(@PathVariable String runId, @PathVariable String offerId,
       @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {

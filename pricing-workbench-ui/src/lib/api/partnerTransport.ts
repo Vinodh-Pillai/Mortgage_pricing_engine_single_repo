@@ -11,6 +11,43 @@ export type PartnerWebhookDeliveryAttempt = {
   consentIndicator: string;
 };
 
+export type PartnerChannelWorkbenchItem = {
+  itemId: string;
+  label: string;
+  state: string;
+  retryState: string;
+  dlqReason: string;
+  payloadRedactionState: string;
+  auditRefs: string[];
+};
+
+export type PartnerChannelWorkbenchTab = {
+  tabId: string;
+  label: string;
+  route: string;
+  status: string;
+  recoveryOwner: string;
+  items: PartnerChannelWorkbenchItem[];
+};
+
+export type PartnerServiceAccountBlockedState = {
+  blocked: boolean;
+  missingCapability: string;
+  recoveryOwner: string;
+  credentialExposure: string;
+};
+
+export type PartnerChannelWorkbenchView = {
+  partnerId: string;
+  tenantContext: string;
+  dependencyStatus: string;
+  tabs: PartnerChannelWorkbenchTab[];
+  serviceAccount: PartnerServiceAccountBlockedState;
+  fallbackReason: string;
+  uiTraceId: string;
+  events: string[];
+};
+
 export type PartnerSafetyToggle = {
   webhookId: string;
   route: string;
@@ -76,6 +113,17 @@ export async function fetchPartnerWebhookHealth(
   });
   if (response.status >= 500) throw new Error('BFF partner transport boundary is temporarily unavailable.');
   return (await response.json()) as PartnerWebhookHealthView;
+}
+
+export async function fetchPartnerChannelWorkbench(
+  partnerId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<PartnerChannelWorkbenchView> {
+  const response = await fetchImpl(`/api/v1/partners/${encodeURIComponent(partnerId)}/integrations/workbench`, {
+    headers: partnerTransportHeaders,
+  });
+  if (response.status >= 500) throw new Error('BFF partner integration workbench boundary is temporarily unavailable.');
+  return (await response.json()) as PartnerChannelWorkbenchView;
 }
 
 export async function requestPartnerWebhookReplay(

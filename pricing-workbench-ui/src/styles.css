@@ -211,6 +211,49 @@ main {
   font-size: 0.82rem;
 }
 
+.custom-rules-shell {
+  display: grid;
+  gap: 1rem;
+}
+
+.custom-rules-route-shell {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.custom-rules-shell__nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.custom-rules-shell__nav a {
+  background: rgb(239 246 255 / 12%);
+  border: 1px solid rgb(191 219 254 / 22%);
+  border-radius: 999px;
+  color: #e7f0ff;
+  padding: 0.45rem 0.7rem;
+  text-decoration: none;
+}
+
+.custom-rules-field-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+}
+
+.custom-rules-field {
+  background: #f8fafc;
+  border: 1px solid #d7dce8;
+  border-radius: 0.75rem;
+  padding: 1rem;
+}
+
+.custom-rules-field input:disabled,
+.custom-rules-field textarea:disabled {
+  background: #e2e8f0;
+  color: #475569;
+}
+
 .signal-stack {
   background: rgb(248 250 252 / 72%);
   border: 1px solid #d7dce8;
@@ -322,6 +365,36 @@ main {
   border-radius: 0.75rem;
   margin: 1rem 0;
   padding: 1rem;
+}
+
+.quick-quote-module {
+  background:
+    linear-gradient(135deg, rgb(248 251 255 / 96%), rgb(238 246 255 / 96%)),
+    radial-gradient(circle at 12% 8%, rgb(34 211 238 / 18%), transparent 18rem);
+}
+
+.quick-quote-state,
+.quick-quote-minimal {
+  border: 1px solid #bfdbfe;
+  border-radius: 0.9rem;
+  display: grid;
+  gap: 1rem;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 1rem;
+}
+
+.quick-quote-state {
+  background: #f8fbff;
+  margin: 1rem 0;
+}
+
+.quick-quote-minimal {
+  background: rgb(14 165 233 / 7%);
+}
+
+.quick-quote-form > button {
+  justify-self: start;
 }
 
 .field-help {
@@ -540,6 +613,60 @@ main {
   background: #eef2ff;
 }
 
+.quote-table__row--blocked,
+.evidence-card--blocked {
+  background: #fff7ed;
+  border-left: 0.35rem solid #c2410c;
+}
+
+.quote-table__row--blocked code,
+.evidence-card--blocked code {
+  color: #7c2d12;
+}
+
+.copyable-ref-list {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.35rem 0;
+}
+
+.copyable-ref-list ul,
+.evidence-error-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.copyable-ref-list li,
+.evidence-error-list li {
+  background: #f8fafc;
+  border: 1px solid #d7dce8;
+  border-radius: 0.5rem;
+  padding: 0.25rem 0.45rem;
+}
+
+code {
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.blocker-details {
+  border: 1px solid #fecaca;
+  border-radius: 0.75rem;
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0;
+  padding: 1rem;
+}
+
+.blocker-details summary {
+  cursor: pointer;
+  font-weight: 800;
+}
+
 .partner-detail-grid {
   display: grid;
   gap: 1rem;
@@ -630,7 +757,10 @@ button:disabled {
 
   .panel-heading-row,
   .intake-form,
+  .quick-quote-state,
+  .quick-quote-minimal,
   .offer-toolbar,
+  .custom-rules-field-grid,
   .eligibility-decision-grid,
   .quote-table__row {
     display: block;

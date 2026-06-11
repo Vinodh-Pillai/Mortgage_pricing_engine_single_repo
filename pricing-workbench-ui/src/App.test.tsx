@@ -3,6 +3,27 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 
+function partnerChannelWorkbenchFixture() {
+  return {
+    partnerId: 'partner-preview',
+    tenantContext: 'ui-preview-tenant',
+    dependencyStatus: 'INTEGRATION_SERVICE_CHANNEL_CONTRACT_NOT_CONFIGURED',
+    tabs: [
+      { tabId: 'quote-requests', label: 'Quote requests', route: '/partners/integrations/quote-requests', status: 'QUOTE_REQUESTS_VISIBLE_WITH_CONTRACT_BLOCKERS', recoveryOwner: 'partner-operations-owner', items: [{ itemId: 'quote-request-fallback', label: 'Quote request intake setup', state: 'READY_FALLBACK', retryState: 'manual-review-required', dlqReason: 'none', payloadRedactionState: 'payload-redacted', auditRefs: ['audit:partner-quote-request-required'] }] },
+      { tabId: 'webhook-delivery', label: 'Webhook delivery', route: '/partners/integrations/webhook-delivery', status: 'WEBHOOK_DELIVERY_VISIBLE_WITH_RETRY_STATE', recoveryOwner: 'integration-platform-owner', items: [{ itemId: 'webhook-pricing-updates', label: 'Pricing update webhook', state: 'FAILED', retryState: 'retry-confirmation-required', dlqReason: 'none', payloadRedactionState: 'payload-redacted', auditRefs: ['audit:webhook-delivery-required'] }] },
+      { tabId: 'retries', label: 'Retries', route: '/partners/integrations/retries', status: 'RETRY_QUEUE_VISIBLE', recoveryOwner: 'integration-platform-owner', items: [{ itemId: 'retry-webhook-pricing-updates', label: 'Webhook retry queue', state: 'PENDING_CONFIRMATION', retryState: 'idempotency-confirmation-required', dlqReason: 'none', payloadRedactionState: 'payload-redacted', auditRefs: ['audit:webhook-retry-required'] }] },
+      { tabId: 'dlq', label: 'Exception queue', route: '/partners/integrations/dlq', status: 'EXCEPTION_QUEUE_VISIBLE_WITH_REASON', recoveryOwner: 'integration-platform-owner', items: [{ itemId: 'dlq-lock-alerts', label: 'Lock alert exception queue entry', state: 'EXCEPTION_QUEUE_PENDING', retryState: 'retry-window-contract-required', dlqReason: 'EXCEPTION_QUEUE_METRICS_REQUIRED', payloadRedactionState: 'payload-redacted', auditRefs: ['audit:partner-dlq-required'] }] },
+      { tabId: 'feed-adapters', label: 'Investor delivery connections', route: '/partners/integrations/feed-adapters', status: 'INVESTOR_DELIVERY_CONNECTIONS_BLOCKED_UNTIL_CONFIGURED', recoveryOwner: 'feed-operations-owner', items: [{ itemId: 'investor-feed-adapter', label: 'Investor delivery connection', state: 'BLOCKED', retryState: 'configured-feed-contract-required', dlqReason: 'none', payloadRedactionState: 'payload-redacted', auditRefs: ['audit:feed-adapter-required'] }] },
+      { tabId: 'sftp-adapters', label: 'Partner file delivery', route: '/partners/integrations/sftp-adapters', status: 'PARTNER_FILE_DELIVERY_BLOCKED_UNTIL_CONFIGURED', recoveryOwner: 'feed-operations-owner', items: [{ itemId: 'partner-sftp-adapter', label: 'Partner file delivery setup', state: 'BLOCKED', retryState: 'configured-sftp-contract-required', dlqReason: 'none', payloadRedactionState: 'payload-redacted', auditRefs: ['audit:sftp-adapter-required'] }] },
+      { tabId: 'health', label: 'Health', route: '/partners/integrations/health', status: 'HEALTH_VISIBLE_WITH_BLOCKED_ACCESS', recoveryOwner: 'integration-platform-owner', items: [{ itemId: 'service-account-access', label: 'Service account access', state: 'BLOCKED', retryState: 'capability-grant-required', dlqReason: 'none', payloadRedactionState: 'credentials-not-rendered', auditRefs: ['audit:service-account-access-required'] }] },
+    ],
+    serviceAccount: { blocked: true, missingCapability: 'integration-service.partner-channel.workbench.read', recoveryOwner: 'integration-platform-owner', credentialExposure: 'credentials-not-rendered' },
+    fallbackReason: 'Configured integration-service partner channel state is unavailable; pricing-bff exposes non-secret fallback modules, retry state, exception queue reasons, redaction state, and audit references only.',
+    uiTraceId: 'ch-s12-local-trace',
+    events: ['PartnerIntegrationWorkbenchOpened'],
+  };
+}
+
 describe('App shell', () => {
   beforeEach(() => {
     window.history.pushState({}, '', '/quote/start');
@@ -15,10 +36,10 @@ describe('App shell', () => {
           return {
             ok: true,
             json: async () => ({
-              service: 'pricing-bff',
-              status: 'UP',
+              service: 'pricing-workbench',
+              status: 'AVAILABLE',
               ready: true,
-              dependencyStatus: 'NO_UPSTREAMS_CONFIGURED',
+              dependencyStatus: 'Connected services need setup',
               dependencies: [],
             }),
           };
@@ -210,6 +231,47 @@ describe('App shell', () => {
           };
         }
 
+        if (url === '/api/v1/ml-advisory/insights') {
+          return {
+            ok: true,
+            json: async () => ({
+              tenantContext: 'ui-preview-tenant',
+              dependencyStatus: 'ML_ADVISORY_SERVICE_EVIDENCE_INCOMPLETE',
+              uiTraceId: 'ml-s14-local-trace',
+              recommendations: [
+                {
+                  recommendationId: 'advisory-config-required',
+                  modelVersion: 'model-version-ref-required',
+                  confidence: 'confidence-score-from-model-output',
+                  explanation: 'Backend explanation is visible for analyst review only.',
+                  allowedActions: ['VIEW_EXPLANATION', 'REQUEST_HUMAN_REVIEW', 'EXPORT_AUDIT_EVIDENCE'],
+                  auditRefs: ['audit-ref-required', 'replay-hash-required'],
+                  automaticDecisionApplied: false,
+                },
+              ],
+              modelVersions: [
+                {
+                  modelVersion: 'model-version-ref-required',
+                  driftStatus: 'DRIFT_BASELINE_REQUIRED',
+                  alertState: 'ALERT_REVIEW_REQUIRED',
+                  feedbackLoops: ['feedback-loop-ref-required'],
+                  exportEvidenceRefs: ['evidence-export-ref-required', 'manifest-hash-required'],
+                },
+                {
+                  modelVersion: 'model-version-unavailable',
+                  driftStatus: 'ADVISORY_UNAVAILABLE',
+                  alertState: 'NO_ACTIVE_ALERT',
+                  feedbackLoops: [],
+                  exportEvidenceRefs: [],
+                },
+              ],
+              advisoryUnavailable: true,
+              fallbackReason: 'Configured ml-advisory-service evidence is incomplete; the BFF returns non-secret model refs, alert states, and explicit advisory-unavailable status only.',
+              events: ['MlAdvisoryInsightsOpened', 'MlAdvisoryGovernanceGroupedByModelVersion'],
+            }),
+          };
+        }
+
         if (url === '/api/v1/custom-rules/evidence') {
           return {
             ok: true,
@@ -233,11 +295,24 @@ describe('App shell', () => {
                   fieldId: 'custom-field-decision-quality',
                   label: 'Decision quality',
                   dataType: 'enumeration',
-                  allowedValues: ['VERIFIED', 'UNKNOWN', 'CONFLICTING'],
+                  allowedValues: ['VERIFIED', 'UNKNOWN', 'CONFLICTING', 'ESTIMATED'],
                   helpText: 'Decision state supplied by typed fact evaluation.',
                   decisionQuality: 'CONFLICTING',
                   sourceRef: 'typed-fact-contract',
+                  recoveryOwner: 'typed-fact-service',
+                  sourceRefs: ['typed-fact-contract', 'scenario-fact-source-ref'],
                   validationMessages: ['Conflicting required fact blocks commit until the backend returns a resolved state.'],
+                  requiredForRules: true,
+                },
+                {
+                  fieldId: 'custom-field-estimated-income',
+                  label: 'Estimated income evidence',
+                  dataType: 'currency',
+                  allowedValues: ['backend-estimated-value-present'],
+                  helpText: 'Estimated evidence supplied by backend metadata.',
+                  decisionQuality: 'ESTIMATED',
+                  sourceRef: 'income-verification-service',
+                  validationMessages: ['Estimated typed fact remains a warning until backend evidence confirms it.'],
                   requiredForRules: true,
                 },
               ],
@@ -261,6 +336,76 @@ describe('App shell', () => {
           };
         }
 
+        if (url === '/api/ui/custom-rules/evidence?quoteId=quote-ref-required') {
+          return {
+            ok: true,
+            json: async () => ({
+              quoteId: 'quote-ref-required',
+              tenantContext: 'ui-preview-tenant',
+              dependencyStatus: 'BACKEND_CONTRACT_UNAVAILABLE',
+              resultStatus: 'BLOCKED_FALLBACK',
+              uiTraceId: 'cr-s03-local-trace',
+              matchedRules: [
+                {
+                  ruleRef: 'rule-evidence-contract-required',
+                  versionRef: 'version-ref-required',
+                  outcome: 'MATCHED',
+                  reasonCode: 'RULE_EVIDENCE_VISIBLE',
+                  sourceService: 'governance-service',
+                  factRefs: ['custom-field-evidence-source'],
+                  auditRefs: ['audit:custom-rule-evidence-required'],
+                  replayHashRefs: ['replay-hash-ref-required'],
+                },
+              ],
+              skippedRules: [
+                {
+                  ruleRef: 'rule-skipped-conflicting-fact',
+                  versionRef: 'version-ref-required',
+                  outcome: 'SKIPPED',
+                  reasonCode: 'REQUIRED_FACT_CONFLICTING',
+                  sourceService: 'governance-service',
+                  factRefs: ['custom-field-decision-quality'],
+                  auditRefs: ['audit:custom-rule-skip-required'],
+                  replayHashRefs: ['replay-hash-ref-required'],
+                },
+              ],
+              blockedRules: [
+                {
+                  ruleRef: 'rule-blocked-contract-unavailable',
+                  versionRef: 'version-ref-required',
+                  outcome: 'BLOCKED',
+                  reasonCode: 'RULE_EVIDENCE_BLOCKED',
+                  sourceService: 'quote-service',
+                  factRefs: ['quote-evidence-contract'],
+                  auditRefs: ['audit:quote-rule-blocked-required'],
+                  replayHashRefs: ['replay-hash-ref-required'],
+                },
+              ],
+              calculationSteps: [
+                {
+                  stepRef: 'calculation-step-contract-required',
+                  ledgerStepRef: 'ledger-step-ref-required',
+                  sourceService: 'quote-service',
+                  status: 'BLOCKED',
+                  evidenceRef: 'calculation-evidence-ref-required',
+                  summary: 'No pricing math is computed by pricing-bff fallback.',
+                  precision: 'backend precision ref required',
+                  rounding: 'backend rounding ref required',
+                  units: 'basis points',
+                },
+              ],
+              reasonCodes: ['RULE_EVIDENCE_VISIBLE', 'REQUIRED_FACT_CONFLICTING', 'RULE_EVIDENCE_BLOCKED'],
+              auditRefs: ['audit:custom-rule-evidence-required', 'audit:custom-rule-skip-required', 'audit:quote-rule-blocked-required'],
+              replayHashRefs: ['replay-hash-ref-required'],
+              errors: [
+                { code: 'DEPENDENCY_UNAVAILABLE', sourceService: 'quote-service', message: 'Configured quote-service calculation evidence contract is unavailable.' },
+                { code: 'RULE_EVIDENCE_BLOCKED', sourceService: 'governance-service', message: 'Rule evidence remains blocked until backend contracts return typed facts and approved refs.' },
+              ],
+              events: ['CustomRuleEvidenceFallbackVisible'],
+            }),
+          };
+        }
+
         if (url === '/api/v1/platform/tenant-context') {
           return {
             ok: true,
@@ -280,7 +425,7 @@ describe('App shell', () => {
                 { controlId: 'tenant-resolution', label: 'Tenant resolution', status: 'VISIBLE', guidance: 'tenant-context-service resolves request tenant, actor, channel, and permitted tenant scope.', evidenceRefs: ['tenant-id', 'actor-id'], blockers: [] },
                 { controlId: 'cache-scope', label: 'Tenant-scoped cache keys', status: 'VISIBLE', guidance: 'Cache evidence stays tenant-scoped and shows invalidation references instead of cache contents.', evidenceRefs: ['cache-scope-ref', 'cache-invalidation-event-ref'], blockers: [] },
                 { controlId: 'rate-limit', label: 'Rate limiting guard', status: 'BLOCKED', guidance: 'Rate limit outcomes are visible only when tenant-context-service supplies a configured policy decision.', evidenceRefs: ['rate-limit-policy-ref-required'], blockers: ['Configured tenant rate-limit policy contract is unavailable in local fallback mode.'] },
-                { controlId: 'audit-outbox', label: 'Audit and event envelope', status: 'VISIBLE', guidance: 'Audit refs, outbox refs, event envelope refs, and replay hashes are displayed as backend-owned evidence.', evidenceRefs: ['audit-ref', 'outbox-event-ref', 'event-envelope-ref', 'replay-hash-ref'], blockers: [] },
+                { controlId: 'audit-outbox', label: 'Review and delivery records', status: 'VISIBLE', guidance: 'Review references, delivery records, and processing records are displayed as backend-owned evidence.', evidenceRefs: ['audit-ref', 'outbox-event-ref', 'event-envelope-ref', 'replay-hash-ref'], blockers: [] },
               ],
               blockers: [
                 { code: 'CONFIGURED_TENANT_CONTEXT_CONTRACT_REQUIRED', owner: 'tenant-context-service', message: 'Configured tenant-context diagnostics are required before live platform coverage can be marked ready.' },
@@ -591,17 +736,24 @@ describe('App shell', () => {
               tenantContext: 'ui-preview-tenant',
               retryHealthSummary: 'RETRY_HEALTH_VISIBLE',
               eventWindow: 'latest 30 events',
-              dlqSizeStatus: 'DLQ size requires configured integration-service metrics',
+              dlqSizeStatus: 'Exception queue size requires configured integration-service metrics',
               retryWindowStatus: 'Configured retry window required',
               deliveryAttempts: [
                 { webhookId: 'webhook-pricing-updates', eventId: 'event-quote-blocked', route: '/partners/quotes', status: 'FAILED', rootCauseCode: 'UPSTREAM_PARTNER_CONTRACT_NOT_CONFIGURED', lastSuccessfulAt: '2026-06-08T07:15:00Z', failureReason: 'Configured partner webhook transport is unavailable at the BFF boundary.', idempotencyKeyState: 'CONFIRMED_REQUIRED_FOR_REPLAY', maskingIndicator: 'MASKING_INDICATOR_PRESENT', consentIndicator: 'CONSENT_INDICATOR_PRESENT' },
               ],
               safetyToggles: [{ webhookId: 'webhook-lock-alerts', route: '/partners/alerts', paused: true, visibleState: 'Auto-emit is paused for this route in the visible BFF fallback state.' }],
-              replayAction: { available: true, disabledReason: 'Replay requires request correlation and explicit idempotency confirmation before it can be recorded.', confirmationRequirement: 'Confirm correlation id and idempotency before replay.', supportHandoffRoute: '/partners/support/webhooks' },
+              replayAction: { available: true, disabledReason: 'Processing retry requires a support reference and explicit duplicate-protection confirmation before it can be recorded.', confirmationRequirement: 'Confirm support reference and duplicate protection before processing retry.', supportHandoffRoute: '/partners/support/webhooks' },
               endpointTestAction: { available: false, disabledReason: 'Endpoint test requires the configured partner webhook transport contract.', confirmationRequirement: 'Confirm endpoint ownership before testing.', supportHandoffRoute: '/partners/support/webhooks' },
               uiTraceId: 'ch-s05-local-trace',
               events: ['WebhookHealthChecked'],
             }),
+          };
+        }
+
+        if (url === '/api/v1/partners/partner-preview/integrations/workbench') {
+          return {
+            ok: true,
+            json: async () => partnerChannelWorkbenchFixture(),
           };
         }
 
@@ -640,6 +792,89 @@ describe('App shell', () => {
               backendRefs: ['quote-service.ranking', 'quote-service.explanation', 'quote-service.selection'],
               uiTraceId: 'brw-s02-local-trace',
               events: ['OfferListRendered', 'QuoteServiceEvidenceBound'],
+            }),
+          };
+        }
+
+        if (url.endsWith('/quote-option-contract-required/detail')) {
+          return {
+            ok: true,
+            json: async () => ({
+              tenantContext: 'ui-preview-tenant',
+              runId: 'run-test',
+              offerId: 'quote-option-contract-required',
+              status: 'DETAIL_VISIBLE_WITH_BACKEND_REFS',
+              summary: {
+                offerId: 'quote-option-contract-required',
+                rank: 1,
+                productLabel: 'Backend-ranked offer',
+                payment: 'payment-ref-required',
+                apr: 'apr-ref-required',
+                confidence: 'score:backend-owned',
+                rankScore: 'rank-score-ref-required',
+                rationaleChips: ['Rank 1 from quote-service ranking response'],
+                scenarioFlags: ['LOCK_PERIOD_REQUIRED', 'FILTER_FACTS_PENDING'],
+                explanationStatus: 'AVAILABLE',
+                sourceScenarioId: 'scenario-ref-required',
+                scenarioVersion: 7,
+                upstreamRefs: ['quote-service.option:quote-option-contract-required', 'pricing-service:waterfall-ref-required'],
+                lockEligibilityRefs: ['lock-eligibility:pending:quote-option-contract-required'],
+                snapshotRefs: ['snapshot:quote-service:run:run-test'],
+                auditIds: ['audit:quote-ready-required', 'replay-hash-required'],
+                explanationSections: ['summary', 'ranking', 'waterfall', 'compliance', 'audit-replay'],
+              },
+              explanation: {
+                runId: 'run-test',
+                offerId: 'quote-option-contract-required',
+                status: 'AVAILABLE',
+                rationaleLines: ['quote-service supplied rank, score, warnings, and source refs for this option.'],
+                scenarioFlags: ['LOCK_PERIOD_REQUIRED'],
+                upstreamRefs: ['quote-service.option:quote-option-contract-required'],
+                snapshotRefs: ['snapshot:quote-service:run:run-test'],
+                auditIds: ['audit:quote-explanation-required', 'replay-hash-required'],
+                explanationSections: ['ranking', 'comparison', 'detail'],
+                commitBlocked: false,
+                message: 'Explanation data is available from backend-owned refs; no UI-side pricing rules are inferred.',
+                uiTraceId: 'qd-s23-local-trace',
+              },
+              waterfall: {
+                tenantContext: 'ui-preview-tenant',
+                runId: 'run-test',
+                status: 'BLOCKED',
+                restrictedValuesVisible: false,
+                dependencyStatus: 'PRICING_SERVICE_WATERFALL_CONTRACT_NOT_CONFIGURED',
+                baseSelection: { selectionId: 'base-selection-ref-required', gridVersionRef: 'grid-version-ref-required', selectedNoteRate: { value: null, redacted: true, reason: 'pricing.waterfall.restricted.read permission is required for selected note rate' }, basePrice: { value: null, redacted: true, reason: 'pricing.waterfall.restricted.read permission is required for base price' }, ledgerSteps: ['grid-resolution'] },
+                finalPrice: { finalPriceId: 'final-price-ref-required', roundedFinalPrice: { value: null, redacted: true, reason: 'pricing.waterfall.restricted.read permission is required for rounded final price' }, ledger: [{ ordinal: 1, step: 'BASE_PRICE', inputValue: { value: null, redacted: true, reason: 'pricing.waterfall.restricted.read permission is required for ledger values' }, operation: 'START', outputValue: { value: null, redacted: true, reason: 'pricing.waterfall.restricted.read permission is required for ledger values' }, configRef: 'grid-version-ref-required', reasonCode: 'BASE_RATE_SELECTED', roundingMode: null }], adjustmentRefs: ['adjustment-version-refs-required'], roundingTraceRefs: ['rounding-policy-ref-required'] },
+                blockers: [{ code: 'PRICING_SERVICE_CONTRACT_REQUIRED', message: 'Pricing-service waterfall evidence must provide base selection and final price ledger.', sourceRef: 'pricing-service.waterfall' }],
+                versionRefs: ['grid-version-ref-required'],
+                auditRefs: ['audit:base-selection-required'],
+                replayHash: 'replay-hash-required',
+                versionGraphHash: 'version-graph-hash-required',
+                resultHash: 'result-hash-required',
+                evidenceHash: 'waterfall-evidence-hash-required',
+                uiTraceId: 'qd-s23-local-trace',
+                events: ['PricingWaterfallOpened'],
+                fallbackReason: 'Configured pricing-service waterfall contract is unavailable; this response exposes non-secret references, redactions, and blockers only.',
+              },
+              panels: [
+                { panelId: 'summary', label: 'Card summary', status: 'VISIBLE', fields: ['product id', 'investor id', 'channel', 'lock period'], backendRefs: ['quote-service.option:quote-option-contract-required'], blockers: [] },
+                { panelId: 'ranking', label: 'Ranking and tie breakers', status: 'VISIBLE', fields: ['rank', 'criterion scores', 'tie breakers', 'warnings'], backendRefs: ['quote-service.ranking'], blockers: ['tie-breaker-evidence-required'] },
+                { panelId: 'waterfall', label: 'Pricing waterfall', status: 'REDACTED', fields: ['note rate', 'final price bps', 'adjustments', 'margins', 'rounding review references'], backendRefs: ['pricing-service.waterfall'], blockers: ['restricted pricing values require backend permission'] },
+                { panelId: 'compliance', label: 'Compliance flags', status: 'VISIBLE_WITH_BLOCKERS', fields: ['compliance flags', 'hidden fields', 'unavailable reasons'], backendRefs: ['compliance-service.review-ref-required'], blockers: ['configured compliance evidence required'] },
+                { panelId: 'audit-replay', label: 'Review and processing records', status: 'VISIBLE', fields: ['review references', 'processing records', 'version references'], backendRefs: ['audit-replay-service.package-ref-required'], blockers: [] },
+              ],
+              redactions: [
+                { fieldPath: 'selectedNoteRate', state: 'REDACTED', reason: 'pricing.waterfall.restricted.read permission is required for selected note rate', auditRef: 'audit:note-rate-redaction-required' },
+                { fieldPath: 'finalPriceBps', state: 'REDACTED', reason: 'pricing.waterfall.restricted.read permission is required for final price', auditRef: 'audit:final-price-redaction-required' },
+                { fieldPath: 'hiddenFields', state: 'UNAVAILABLE', reason: 'Configured compliance-service hidden-field evidence is required before display', auditRef: 'audit:hidden-field-reason-required' },
+              ],
+              complianceFlags: ['compliance-review-ref-required', 'fair-lending-flag-ref-required'],
+              auditRefs: ['audit:quote-detail-opened', 'audit:waterfall-redactions-required'],
+              replayHash: 'quote-detail-replay-hash-required',
+              evidenceHash: 'quote-detail-evidence-hash-required',
+              uiTraceId: 'qd-s23-local-trace',
+              events: ['QuoteDetailOpened'],
+              fallbackReason: 'Configured quote, pricing, compliance, and review evidence contracts are unavailable; pricing-bff exposes non-secret references, redaction reasons, blockers, and processing records only.',
             }),
           };
         }
@@ -744,6 +979,114 @@ describe('App shell', () => {
           };
         }
 
+        if (url.endsWith('/journey')) {
+          return {
+            ok: true,
+            json: async () => ({
+              tenantContext: 'ui-preview-tenant',
+              runId: 'run-test',
+              status: 'BLOCKED_WITH_FALLBACK_FACTS',
+              dependencyStatus: 'CROSS_SERVICE_CONTRACTS_PARTIAL_OR_UNAVAILABLE',
+              nodes: [
+                { nodeId: 'scenario-facts', label: 'Scenario facts', serviceName: 'scenario-service', status: 'BLOCKED', freshness: { status: 'STALE_OR_UNKNOWN', evidenceRef: 'scenario-service.snapshot-required', message: 'Scenario facts are visible only as configured refs.' }, evidenceRefs: ['scenario-version-ref-required'], blockers: ['SCENARIO_SERVICE_CONTRACT_REQUIRED'], replayHash: 'replay-hash-required-after-scenario-service-create', downstreamDependencies: ['catalog-candidates', 'eligibility'], drilldownRoute: '/quote/run-test/status', drilldownRefs: { runId: 'run-test', scenarioRef: 'scenario-ref-required', quoteRef: 'quote-option-contract-required', lockRef: 'lock-ref-required', correlationRef: 'journey-s19-local-trace' } },
+                { nodeId: 'catalog-candidates', label: 'Catalog candidates', serviceName: 'catalog-service', status: 'UNAVAILABLE', freshness: { status: 'UNKNOWN', evidenceRef: 'catalog-service.catalog-version-required', message: 'Catalog participation is not configured.' }, evidenceRefs: ['product-catalog-version-ref-required'], blockers: ['CATALOG_CONTRACT_UNAVAILABLE'], replayHash: 'catalog-replay-hash-required', downstreamDependencies: ['rate-grids', 'eligibility'], drilldownRoute: '/admin/products/catalog', drilldownRefs: { runId: 'run-test', scenarioRef: 'scenario-ref-required', quoteRef: 'quote-option-contract-required', lockRef: 'lock-ref-required', correlationRef: 'journey-s19-local-trace' } },
+                { nodeId: 'pricing-waterfall', label: 'Pricing waterfall', serviceName: 'pricing-service', status: 'BLOCKED', freshness: { status: 'FRESHNESS_REQUIRED', evidenceRef: 'pricing-service.waterfall-version-required', message: 'Pricing values remain redacted.' }, evidenceRefs: ['pricing-service:waterfall-ref-required'], blockers: ['PRICING_SERVICE_CONTRACT_REQUIRED'], replayHash: 'replay-hash-required', downstreamDependencies: ['quote-ranking'], drilldownRoute: '/quote/run-test/pricing-waterfall', drilldownRefs: { runId: 'run-test', scenarioRef: 'scenario-ref-required', quoteRef: 'quote-option-contract-required', lockRef: 'lock-ref-required', correlationRef: 'journey-s19-local-trace' } },
+              ],
+              blockers: ['Configured cross-service contracts are partial or unavailable.'],
+              serviceContracts: ['ScenarioService', 'CatalogService', 'PricingService', 'QuoteService', 'LockService'],
+              uiTraceId: 'journey-s19-local-trace',
+              events: ['QuoteJourneyMapOpened'],
+              fallbackReason: 'Configured service journey facts are unavailable or partial; pricing-bff exposes non-secret references, blockers, freshness labels, processing records, and safe drilldown routes only.',
+            }),
+          };
+        }
+
+        if (url === '/api/v1/margins/profitability') {
+          return {
+            ok: true,
+            json: async () => ({
+              tenantContext: 'ui-preview-tenant',
+              dependencyStatus: 'MARGIN_SERVICE_PROFITABILITY_CONTRACT_NOT_CONFIGURED',
+              compensationDetailsVisible: false,
+              sections: [
+                { sectionId: 'company-margin', label: 'Company', sourceRef: 'margin-service company margin policy', permissionState: 'VISIBLE', evidenceRefs: ['company-policy-version-ref-required'], redactions: [] },
+                { sectionId: 'channel-margin', label: 'Channel', sourceRef: 'margin-service channel margin policy', permissionState: 'VISIBLE', evidenceRefs: ['channel-policy-version-ref-required'], redactions: [] },
+                { sectionId: 'branch-margin', label: 'Branch', sourceRef: 'margin-service branch overlay policy', permissionState: 'VISIBLE', evidenceRefs: ['branch-overlay-version-ref-required'], redactions: [] },
+                { sectionId: 'lo-compensation', label: 'LO compensation', sourceRef: 'margin-service LO compensation plan', permissionState: 'REDACTED', evidenceRefs: ['lo-comp-plan-version-ref-required'], redactions: [{ fieldLabel: 'LO compensation amount', state: 'REDACTED', reason: 'pricing.margin.compensation.view_sensitive is required', auditRef: 'audit:lo-compensation-redaction-required' }] },
+                { sectionId: 'broker-compensation', label: 'Broker compensation', sourceRef: 'margin-service broker compensation plan', permissionState: 'REDACTED', evidenceRefs: ['broker-comp-plan-version-ref-required'], redactions: [{ fieldLabel: 'Broker compensation amount', state: 'REDACTED', reason: 'pricing.margin.compensation.view_sensitive is required', auditRef: 'audit:broker-compensation-redaction-required' }] },
+                { sectionId: 'profitability-floor', label: 'Profitability floor', sourceRef: 'margin-service profitability floor policy', permissionState: 'VISIBLE', evidenceRefs: ['profitability-floor-version-ref-required'], redactions: [] },
+                { sectionId: 'approval-governance', label: 'Approval', sourceRef: 'margin-service approval governance', permissionState: 'VISIBLE', evidenceRefs: ['approval-audit-ref-required'], redactions: [] },
+                { sectionId: 'replay', label: 'Replay', sourceRef: 'margin-service replay hash boundary', permissionState: 'VISIBLE', evidenceRefs: ['margin-replay-hash-required'], redactions: [] },
+              ],
+              floorEvidence: { quoteOptionId: 'quote-option-contract-required', decision: 'BLOCKED', decisionCode: 'PROFITABILITY_FLOOR_BREACH', floorPolicyVersionRef: 'profitability-floor-version-ref-required', thresholdRef: 'profitability-threshold-ref-required', exceptionRouteRef: 'profitability-exception-route-ref-required', auditRefs: ['profitability-floor-audit-ref-required'], displayGuidance: 'Display backend floor evidence and exception path only; profitability floors remain backend-owned.' },
+              versionRefs: ['company-policy-version-ref-required', 'profitability-floor-version-ref-required'],
+              auditRefs: ['audit:margin-profitability-required', 'audit:compensation-redaction-required'],
+              replayHash: 'margin-profitability-replay-hash-required',
+              uiTraceId: 'margin-s16-local-trace',
+              events: ['MarginProfitabilityModuleOpened'],
+              fallbackReason: 'Configured margin-service evidence contracts are unavailable; pricing-bff exposes non-secret section references, floor blockers, redaction reasons, review references, and processing records only.',
+            }),
+          };
+        }
+
+        if (url === '/api/v1/adjustments/evidence') {
+          return {
+            ok: true,
+            json: async () => ({
+              tenantContext: 'ui-preview-tenant',
+              dependencyStatus: 'ADJUSTMENT_SERVICE_CONFIG_PARTIAL',
+              status: 'BLOCKED',
+              adjustments: [
+                { adjustmentId: 'adjustment-llpa-contract-required', label: 'LLPA evaluator evidence', category: 'LLPA', status: 'VISIBLE', factRefs: ['fact:representative-credit', 'fact:loan-to-value'], sourceRef: 'adjustment-service.llpa-evaluator', sourceVersionRef: 'llpa-rulebook-version-ref-required', summary: 'Backend-owned LLPA evaluator refs are visible; values remain unavailable until configured adjustment-service contracts respond.', compensationHooks: [], conflictIds: ['conflict-manual-review-required'] },
+                { adjustmentId: 'adjustment-fee-catalog-contract-required', label: 'Fee calculation evidence', category: 'FEE', status: 'BLOCKED', factRefs: ['fact:quote-option', 'fact:fee-catalog-version'], sourceRef: 'adjustment-service.fee-calculation', sourceVersionRef: 'fee-catalog-version-ref-required', summary: 'Fee amounts are blocked because configured fee catalog values are not available at this BFF boundary.', compensationHooks: [], conflictIds: [] },
+                { adjustmentId: 'adjustment-compensation-hook-contract-required', label: 'Compensation hook evidence', category: 'COMPENSATION', status: 'VISIBLE', factRefs: ['fact:channel', 'fact:compensation-plan-ref'], sourceRef: 'adjustment-service.compensation-hooks', sourceVersionRef: 'compensation-hook-version-ref-required', summary: 'Compensation hook source and audit references are visible without exposing compensation amounts.', compensationHooks: ['lo-compensation-hook-ref-required', 'broker-compensation-hook-ref-required'], conflictIds: [] },
+              ],
+              conflicts: [{ conflictId: 'conflict-manual-review-required', severity: 'BLOCKING', reasonCode: 'REQUIRE_MANUAL_REVIEW', reason: 'Configured conflict policy reports overlapping adjustment evidence and requires manual review before values can be used.', resolutionOwner: 'Pricing Operations', affectedAdjustmentIds: ['adjustment-llpa-contract-required', 'adjustment-fee-catalog-contract-required'] }],
+              blockers: [{ reasonCode: 'ADJUSTMENT_CONFIG_MISSING', message: 'Adjustment-service configuration is incomplete; UI must not infer LLPA, fee, or compensation values.', sourceRef: 'adjustment-service.configuration', resolutionOwner: 'Pricing Operations' }],
+              summaries: [
+                { category: 'LLPA', summary: 'LLPA evaluator evidence is represented by backend-owned adjustment ids, fact refs, rulebook refs, and conflict refs.', evidenceRefs: ['llpa-rulebook-version-ref-required', 'audit:adjustment-llpa-required'] },
+                { category: 'FEE', summary: 'Fee calculation evidence is blocked until a configured fee catalog response supplies authoritative values.', evidenceRefs: ['fee-catalog-version-ref-required', 'audit:fee-calculation-required'] },
+                { category: 'COMPENSATION', summary: 'Compensation hook refs are shown as source evidence only; sensitive amounts remain backend-owned.', evidenceRefs: ['compensation-hook-version-ref-required', 'audit:compensation-hook-required'] },
+              ],
+              versionRefs: ['llpa-rulebook-version-ref-required', 'fee-catalog-version-ref-required', 'compensation-hook-version-ref-required'],
+              auditRefs: ['audit:adjustment-evidence-required', 'audit:adjustment-conflict-required'],
+              replayHash: 'adjustment-evidence-replay-hash-required',
+              uiTraceId: 'adjustment-s17-local-trace',
+              events: ['AdjustmentEvidenceModuleOpened'],
+              fallbackReason: 'Configured adjustment-service contracts are partial; pricing-bff exposes ids, fact references, sources, conflicts, compensation hooks, summaries, blockers, review references, and processing references only.',
+            }),
+          };
+        }
+
+        if (url === '/api/v1/exceptions/concessions/workbench') {
+          return {
+            ok: true,
+            json: async () => ({
+              tenantContext: 'ui-preview-tenant',
+              dependencyStatus: 'EXCEPTION_SERVICE_CONCESSION_WORKBENCH_CONTRACT_NOT_CONFIGURED',
+              status: 'GOVERNED_REVIEW',
+              sections: [
+                { sectionId: 'concession-request', label: 'Concession request', status: 'VISIBLE', backendRefs: ['exception-service.concession-request', 'pricing-service.quote-ref'], auditRefs: ['audit:concession-request-required'], summary: 'Concession request state, reason refs, route hash, request hash, and policy refs are visible without pricing calculations.' },
+                { sectionId: 'eligibility-exception', label: 'Eligibility exception', status: 'VISIBLE', backendRefs: ['exception-service.eligibility-exception', 'eligibility-service.finding-ref'], auditRefs: ['audit:eligibility-exception-required'], summary: 'Eligibility exception finding refs, original result hash, exceptionable state, and related concession refs are shown as backend-owned evidence.' },
+                { sectionId: 'authority-matrix', label: 'Authority matrix', status: 'VISIBLE', backendRefs: ['exception-service.authority-matrix', 'governance-service.role-scope'], auditRefs: ['audit:authority-matrix-required'], summary: 'Approval route, matrix version, validation hash, conflict attestation, and separation-of-duties evidence are displayed from configured refs.' },
+                { sectionId: 'manual-price-mutation-guard', label: 'Manual price mutation guard', status: 'BLOCKED', backendRefs: ['exception-service.manual-price-edit-guard', 'pricing-service.ledger-hash'], auditRefs: ['audit:manual-price-edit-blocked'], summary: 'Manual price mutation commit is disabled while backend guard returns denial reason codes and escalation path.' },
+                { sectionId: 'risk-events', label: 'Monitoring and risk events', status: 'VISIBLE', backendRefs: ['exception-service.risk-monitoring-events', 'observability-service.alert-ref'], auditRefs: ['audit:risk-monitoring-required'], summary: 'Risk events, alert severity, redaction state, and replay flags are visible as non-PII refs.' },
+                { sectionId: 'history-replay-export', label: 'History, replay, and export', status: 'VISIBLE', backendRefs: ['exception-service.exception-history', 'audit-replay-service.replay-package'], auditRefs: ['audit:exception-history-required', 'audit:exception-export-required'], summary: 'History timeline, replay hash, export manifest, retention, and redaction refs are grouped for governed review.' },
+              ],
+              manualPriceMutationGuard: { commitDisabled: true, decision: 'BLOCKED', reasonCodes: ['MANUAL_PRICE_EDIT_FORBIDDEN', 'LEDGER_HASH_REQUIRED'], escalationPath: 'exception-approval-escalation-path-required', auditRef: 'audit:manual-price-edit-blocked', replayHash: 'exception-concession-replay-hash-required' },
+              crossServiceRefs: ['quote-service.quote-ref', 'pricing-service.ledger-ref', 'margin-service.margin-ref', 'adjustment-service.adjustment-ref', 'lock-service.lock-ref', 'compliance-service.review-ref'],
+              versionRefs: ['authority-matrix-version-ref-required', 'concession-policy-version-ref-required', 'price-guard-policy-version-ref-required'],
+              auditRefs: ['audit:exception-workbench-opened', 'audit:manual-price-edit-blocked', 'audit:exception-export-required'],
+              blockers: ['Configured exception-service live integration is unavailable in local mode; actions stay disabled until backend guard and export contracts are wired.'],
+              replayHash: 'exception-concession-replay-hash-required',
+              exportManifestRef: 'exception-history-export-manifest-required',
+              uiTraceId: 'exception-s18-local-trace',
+              events: ['ExceptionConcessionWorkbenchOpened', 'ManualPriceMutationGuardRendered'],
+              fallbackReason: 'Configured exception-service contracts are unavailable; pricing-bff exposes backend-owned references, blocker states, review references, processing records, and export references only.',
+            }),
+          };
+        }
+
         if (url === '/api/v1/tenants/ui-preview-tenant/quote-runs/intake-metadata') {
           return {
             ok: true,
@@ -756,6 +1099,8 @@ describe('App shell', () => {
                   label: 'Scenario identity',
                   helpText: 'Capture identifiers and channel context.',
                   fields: [
+                    { fieldId: 'scenarioId', label: 'Scenario id', groupId: 'scenario-identity', dataType: 'text', required: false, helpText: 'Use a configured scenario id.', sourceRef: 'scenario-service scenario id', decisionQuality: 'UNKNOWN', validationMessages: ['Required by quote-service before live quote creation can mutate.'] },
+                    { fieldId: 'scenarioVersion', label: 'Scenario version', groupId: 'scenario-identity', dataType: 'text', required: false, helpText: 'Version supplied by scenario-service.', sourceRef: 'scenario-service version ref', decisionQuality: 'UNKNOWN', validationMessages: [] },
                     { fieldId: 'scenarioName', label: 'Scenario name', groupId: 'scenario-identity', dataType: 'text', required: false, helpText: 'Optional local label.', sourceRef: 'scenario-service metadata contract', decisionQuality: 'UNKNOWN', validationMessages: ['Configured scenario-service metadata is required before this field can be marked verified.'] },
                     { fieldId: 'channel', label: 'Channel', groupId: 'scenario-identity', dataType: 'text', required: false, helpText: 'Originating channel.', sourceRef: 'submission-profile contract', decisionQuality: 'UNKNOWN', validationMessages: [] },
                     { fieldId: 'externalLoanId', label: 'External loan id', groupId: 'scenario-identity', dataType: 'text', required: false, helpText: 'Caller-provided loan reference.', sourceRef: 'scenario-service create request', decisionQuality: 'UNKNOWN', validationMessages: [] },
@@ -770,13 +1115,38 @@ describe('App shell', () => {
                     { fieldId: 'propertyState', label: 'Property state', groupId: 'borrower-loan-property', dataType: 'text', required: false, helpText: 'State reference for configured downstream validation.', sourceRef: 'property metadata', decisionQuality: 'UNKNOWN', validationMessages: [] },
                   ],
                 },
+                {
+                  groupId: 'quote-filters',
+                  label: 'Filters and effective date',
+                  helpText: 'Capture quote-service filters explicitly so they are not dropped at launch.',
+                  fields: [
+                    { fieldId: 'quoteFilters', label: 'Quote filters', groupId: 'quote-filters', dataType: 'textarea', required: false, helpText: 'Filter refs or plain labels to pass to quote-service.', sourceRef: 'quote-service creation filters', decisionQuality: 'UNKNOWN', validationMessages: ['Configured filter schema is required before validation can be verified.'] },
+                    { fieldId: 'effectiveDate', label: 'Effective date', groupId: 'quote-filters', dataType: 'text', required: false, helpText: 'Effective date supplied by actor or client context.', sourceRef: 'quote-service effective date', decisionQuality: 'UNKNOWN', validationMessages: ['Quote-service requires an explicit effective date before live creation.'] },
+                  ],
+                },
+                {
+                  groupId: 'lock-periods',
+                  label: 'Lock periods',
+                  helpText: 'Capture requested lock-period refs without defaulting lock policy.',
+                  fields: [
+                    { fieldId: 'requestedLockPeriods', label: 'Requested lock periods', groupId: 'lock-periods', dataType: 'text', required: false, helpText: 'Requested lock-period refs passed through for quote-service and lock-service.', sourceRef: 'quote-service requested lock periods', decisionQuality: 'UNKNOWN', validationMessages: ['Configured lock-period catalog is required before options can be verified.'] },
+                  ],
+                },
               ],
               decisionControls: ['Disable quote progression when required backend facts are missing.', 'Keep pricing calculations outside the workbench intake surface.'],
               validationIssues: [{ code: 'SCENARIO_SERVICE_CONTRACT_REQUIRED', fieldPath: 'scenarioService', severity: 'BLOCKING', message: 'Scenario-service metadata must be configured before downstream quote decisions can mutate.' }],
-              auditPackageId: 'audit-package-required-after-scenario-service-create',
-              replayHashRef: 'replay-hash-required-after-scenario-service-create',
-              fallbackReason: 'Configured scenario-service metadata is unavailable; fallback records only.',
+              auditPackageId: 'review-package-required-after-scenario-create',
+              replayHashRef: 'review-reference-required-after-scenario-create',
+              fallbackReason: 'Scenario setup is unavailable; local preview records only.',
               uiTraceId: 'brw-s01-local-trace',
+              quickQuoteState: {
+                minimalFirstStepFields: ['borrowerName', 'borrowerRole', 'coBorrowerName', 'contactEmail', 'quoteGoal', 'scenarioIntent'],
+                progressiveSectionOrder: ['scenario-identity', 'borrower-credit', 'loan-structure', 'property', 'income-assets', 'product-preferences', 'quote-filters', 'lock-periods', 'decision-quality'],
+                quoteServiceRequiredFacts: ['scenarioId', 'scenarioVersion', 'quoteFilters', 'requestedLockPeriods', 'effectiveDate', 'actorId', 'clientContext'],
+                backendOwnedFactSources: ['scenario-service snapshot', 'quote-service create request', 'catalog-service product preference', 'tenant-context actor/client context'],
+                blockedByContracts: ['SCENARIO_SERVICE_CONTRACT_REQUIRED', 'QUOTE_SERVICE_CONTRACT_REQUIRED'],
+                fallbackReason: 'First step shows borrower name, contact email, and quote goal only; advanced sections progressively collect backend-owned refs without local pricing rules.',
+              },
             }),
           };
         }
@@ -796,6 +1166,9 @@ describe('App shell', () => {
             auditPackageId: 'audit-package-required-after-scenario-service-create',
             replayHashRef: 'replay-hash-required-after-scenario-service-create',
             validationIssues: [],
+            backendFactRefs: ['fact:scenarioId'],
+            missingContractBlockers: ['Quote-service creation filters are missing or unverified; configured filter schema is required.'],
+            quickQuoteState: null,
           }),
         };
       }),
@@ -824,7 +1197,7 @@ describe('App shell', () => {
     expect(screen.getByRole('main')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Tenant onboarding' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Product management' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Borrower quote details' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Progressive quick quote intake' })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: /Borrower name/i })).toHaveAttribute('aria-invalid', 'false');
 
     await waitFor(() => expect(screen.getByText('Workbench service reachable')).toBeInTheDocument());
@@ -833,24 +1206,44 @@ describe('App shell', () => {
   });
 
   it('renders modular screen package boundaries, states, and evidence targets from the route registry', async () => {
+    window.history.pushState({}, '', '/service-modules');
+
     render(<App />);
 
     expect(screen.getByRole('heading', { name: 'Modular route shell' })).toBeInTheDocument();
     const modules = screen.getByRole('list', { name: 'Workbench screen modules' });
-    expect(within(modules).getByText('screens/workbenchShell')).toBeInTheDocument();
-    expect(within(modules).getByText('lib/api/offers')).toBeInTheDocument();
-    expect(within(modules).getByText('.local-harness/evidence/PII-22-S21/custom-rules.json')).toBeInTheDocument();
-    expect(within(modules).getAllByText('blocked').length).toBeGreaterThan(0);
+    expect(within(modules).getByText('workbenchShell')).toBeInTheDocument();
+    expect(within(modules).getByText('offers')).toBeInTheDocument();
+    expect(within(modules).getAllByText('Story review record').length).toBeGreaterThan(0);
+    expect(within(modules).getAllByText('loan officer').length).toBeGreaterThan(0);
+    expect(within(modules).getAllByText('Workbench service connection registered').length).toBeGreaterThan(0);
+    expect(within(modules).getAllByText('loading').length).toBeGreaterThan(0);
+    expect(within(modules).getAllByText('needs attention').length).toBeGreaterThan(0);
+
+    await waitFor(() => expect(screen.getByText('Workbench service reachable')).toBeInTheDocument());
+  });
+
+  it('opens the feature screen registry route with dependency status instead of hiding modules', async () => {
+    window.history.pushState({}, '', '/service-modules');
+
+    render(<App />);
+
+    expect(screen.getByRole('link', { name: 'Feature screen registry' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('heading', { name: 'Feature registry dependency status' })).toBeInTheDocument();
+    expect(screen.getByText(/available even when connected service setup is incomplete/i)).toBeInTheDocument();
+    const modules = screen.getByRole('list', { name: 'Workbench screen modules' });
+    expect(within(modules).getByText('Quote detail waterfall')).toBeInTheDocument();
+    expect(within(modules).getByText('Registry reads local module metadata plus workbench health status.')).toBeInTheDocument();
 
     await waitFor(() => expect(screen.getByText('Workbench service reachable')).toBeInTheDocument());
   });
 
   it('marks the active modular route in navigation without breaking existing routed screens', async () => {
-    window.history.pushState({}, '', '/custom-rules/evidence');
+    window.history.pushState({}, '', '/custom-rules');
 
     render(<App />);
 
-    expect(screen.getByRole('link', { name: 'Custom rule evidence' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'Custom rules workbench' })).toHaveAttribute('aria-current', 'page');
     expect(await screen.findByRole('heading', { name: 'Custom field and calculation evidence' })).toBeInTheDocument();
   });
 
@@ -900,11 +1293,13 @@ describe('App shell', () => {
 
   it.each([
     ['/quote/run-test/offers', 'Offer comparison'],
+    ['/quote/run-test/offers/quote-option-contract-required', 'Quote detail review panels'],
     ['/quote/run-test/pricing-waterfall', 'Waterfall evidence'],
+    ['/quote/run-test/journey', 'Service node map'],
     ['/quote/run-test/lock', 'Lock workflow'],
       ['/ops/dashboard', 'Operations case triage'],
       ['/partners/quotes', 'Partner quote lifecycle'],
-      ['/partners/webhooks', 'Partner connection reliability'],
+      ['/partners/webhooks', 'Partner integration channel workbench'],
       ['/ops/performance', 'Service performance cockpit'],
       ['/ops/rate-feeds', 'Rate feed operations'],
     ['/compliance/evidence', 'Compliance evidence registry'],
@@ -912,7 +1307,8 @@ describe('App shell', () => {
       ['/admin/products/catalog', 'Product catalog manager'],
       ['/admin/governance', 'Admin governance and readiness controls'],
       ['/platform/tenant-context', 'Tenant platform coverage'],
-      ['/audit/replay', 'Audit replay evidence workbench'],
+      ['/audit/replay', 'Review record workbench'],
+      ['/advisory/ml', 'ML advisory insights cockpit'],
     ])('keeps primary rendered copy free of implementation jargon on %s', async (path, heading) => {
     window.history.pushState({}, '', path);
     render(<App />);
@@ -922,22 +1318,62 @@ describe('App shell', () => {
     expect(primaryRenderedText()).not.toMatch(forbiddenPrimaryJargon);
   });
 
-  it('renders custom field metadata, decision blockers, and backend rule evidence without local pricing math', async () => {
-    window.history.pushState({}, '', '/custom-rules/evidence');
+  it('renders cross-service quote journey map nodes with blockers, freshness, processing references, and safe drilldowns', async () => {
+    window.history.pushState({}, '', '/quote/run-test/journey');
 
     render(<App />);
 
+    expect(screen.getByRole('link', { name: 'Quote journey map' })).toHaveAttribute('aria-current', 'page');
+    expect(await screen.findByRole('heading', { name: 'Service node map' })).toBeInTheDocument();
+    expect(screen.getByRole('list', { name: 'Quote journey service nodes' })).toBeInTheDocument();
+    expect(screen.getByText('Scenario facts')).toBeInTheDocument();
+    expect(screen.getByText('Catalog candidates')).toBeInTheDocument();
+    expect(screen.getAllByText('UNAVAILABLE').length).toBeGreaterThan(0);
+    expect(screen.getByText('CATALOG setup UNAVAILABLE')).toBeInTheDocument();
+    expect(screen.getAllByText('replay-hash-required').length).toBeGreaterThan(0);
+    expect(screen.getByRole('link', { name: '/quote/run-test/pricing-waterfall' })).toHaveAttribute('href', expect.stringContaining('/quote/run-test/pricing-waterfall?runId=run-test'));
+    expect(screen.getByRole('link', { name: '/quote/run-test/pricing-waterfall' })).toHaveAttribute('href', expect.stringContaining('correlationRef=journey-s19-local-trace'));
+    expect(screen.getAllByText('scenario-ref-required').length).toBeGreaterThan(0);
+    expect(fetch).toHaveBeenCalledWith('/api/v1/tenants/ui-preview-tenant/quote-runs/run-test/journey', expect.objectContaining({ headers: expect.objectContaining({ 'X-Ui-Trace-Id': 'journey-s19-local-trace' }) }));
+  });
+
+  it('renders custom field metadata, decision blockers, and backend rule evidence without local pricing math', async () => {
+    window.history.pushState({}, '', '/custom-rules');
+
+    render(<App />);
+
+    expect(screen.getByRole('heading', { name: 'Custom rules workbench' })).toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: 'Custom field and calculation evidence' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Field capture' })).toHaveAttribute('href', expect.stringContaining('#custom-rules-capture-heading'));
+    expect(screen.getByRole('group', { name: 'Custom rule field capture controls' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Evidence source' })).toBeDisabled();
     expect(await screen.findByRole('table', { name: 'Custom field metadata' })).toBeInTheDocument();
     expect(screen.getByText('Evidence source')).toBeInTheDocument();
     expect(screen.getAllByText('UNKNOWN').length).toBeGreaterThan(0);
     expect(screen.getAllByText('CONFLICTING').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('ESTIMATED').length).toBeGreaterThan(0);
+    expect(screen.getByText('Typed fact blocker details')).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: 'Typed fact blocker details' })).toBeInTheDocument();
+    expect(screen.getByText('typed-fact-service')).toBeInTheDocument();
+    expect(screen.getByText('scenario-fact-source-ref')).toBeInTheDocument();
+    expect(screen.getByText('Estimated typed fact evidence')).toBeInTheDocument();
+    expect(screen.getByText('Estimated values stay labeled as ESTIMATED and are not displayed as confirmed facts.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Commit rule-backed calculation' })).toBeDisabled();
     expect(screen.getByRole('table', { name: 'Matched rules' })).toBeInTheDocument();
     expect(screen.getByRole('table', { name: 'Skipped rules' })).toBeInTheDocument();
-    expect(screen.getByText('replay-hash-ref-required')).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: 'Blocked rules' })).toBeInTheDocument();
+    expect(screen.getByRole('row', { name: 'BLOCKED rule-blocked-contract-unavailable' })).toBeInTheDocument();
+    expect(screen.getByText('DEPENDENCY_UNAVAILABLE')).toBeInTheDocument();
+    expect(screen.getByText('RULE_EVIDENCE_BLOCKED')).toBeInTheDocument();
+    expect(screen.getAllByText('audit:quote-rule-blocked-required').length).toBeGreaterThan(0);
+    expect(screen.getByText('ledger-step-ref-required')).toBeInTheDocument();
+    expect(screen.getByText('backend precision ref required')).toBeInTheDocument();
+    expect(screen.getByText('backend rounding ref required')).toBeInTheDocument();
+    expect(screen.getByText('basis points')).toBeInTheDocument();
+    expect(screen.getAllByText('replay-hash-ref-required').length).toBeGreaterThan(0);
     expect(screen.getByText(/External screenshot\/PDF evidence is unavailable/)).toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith('/api/v1/custom-rules/evidence', expect.objectContaining({ headers: expect.objectContaining({ 'X-Ui-Trace-Id': 'cr-s01-local-trace' }) }));
+    expect(fetch).toHaveBeenCalledWith('/api/ui/custom-rules/evidence?quoteId=quote-ref-required', expect.objectContaining({ headers: expect.objectContaining({ 'X-Ui-Trace-Id': 'cr-s01-local-trace' }) }));
   });
 
   it('renders governance descriptors, pending review impact, and dynamic rule evidence on /admin/governance', async () => {
@@ -950,7 +1386,7 @@ describe('App shell', () => {
     expect(screen.getByText('config-lifecycle')).toBeInTheDocument();
     expect(screen.getByText('simulate')).toBeInTheDocument();
     expect(screen.getByText('governance-service.config-lifecycle')).toBeInTheDocument();
-    expect(screen.getByText('config-lifecycle-version-ref-required')).toBeInTheDocument();
+    expect(document.body.textContent).toContain('config-lifecycle-version-ref-required');
     expect(screen.getByRole('heading', { name: 'Pending config review impact' })).toBeInTheDocument();
     expect(screen.getByText('PCR-config-lifecycle-required · PENDING REVIEW')).toBeInTheDocument();
     expect(screen.getByText('pricing-workbench-ui')).toBeInTheDocument();
@@ -962,14 +1398,36 @@ describe('App shell', () => {
     expect(document.body.textContent).not.toMatch(/rate table|eligibility threshold|fee amount/i);
   });
 
-  it('renders audit replay records, replay diffs, retention, redaction, and export blockers', async () => {
+  it('renders ML advisory recommendations, model governance, and unavailable state without automatic pricing decisions', async () => {
+    window.history.pushState({}, '', '/advisory/ml');
+
+    render(<App />);
+
+    expect(screen.getByRole('link', { name: 'ML advisory insights' })).toHaveAttribute('aria-current', 'page');
+    expect(await screen.findByRole('heading', { name: 'Advisory recommendation review' })).toBeInTheDocument();
+    expect(screen.getAllByText('model-version-ref-required').length).toBeGreaterThan(0);
+    expect(screen.getByText('confidence-score-from-model-output')).toBeInTheDocument();
+    expect(screen.getByText('VIEW_EXPLANATION')).toBeInTheDocument();
+    expect(screen.getByText('audit-ref-required')).toBeInTheDocument();
+    expect(screen.getByText('No automatic pricing decision applied.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Model governance grouped by model version' })).toBeInTheDocument();
+    expect(screen.getByText('DRIFT_BASELINE_REQUIRED')).toBeInTheDocument();
+    expect(screen.getByText('ALERT_REVIEW_REQUIRED')).toBeInTheDocument();
+    expect(screen.getByText('feedback-loop-ref-required')).toBeInTheDocument();
+    expect(screen.getByText('evidence-export-ref-required')).toBeInTheDocument();
+    expect(screen.getByText('Advisory unavailable')).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/rate table|eligibility threshold|fee amount/i);
+    expect(fetch).toHaveBeenCalledWith('/api/v1/ml-advisory/insights', expect.objectContaining({ headers: expect.objectContaining({ 'X-Ui-Trace-Id': 'ml-s14-local-trace' }) }));
+  });
+
+  it('renders review records, processing comparisons, retention, redaction, and export blockers', async () => {
     window.history.pushState({}, '', '/audit/replay');
 
     render(<App />);
 
-    expect(screen.getByRole('link', { name: 'Audit replay evidence' })).toHaveAttribute('aria-current', 'page');
-    expect(await screen.findByRole('heading', { name: 'Audit record search results' })).toBeInTheDocument();
-    const recordsTable = screen.getByRole('table', { name: 'Audit replay records' });
+    expect(screen.getByRole('link', { name: 'Review record workbench' })).toHaveAttribute('aria-current', 'page');
+    expect(await screen.findByRole('heading', { name: 'Review record search results' })).toBeInTheDocument();
+    const recordsTable = screen.getByRole('table', { name: 'Review processing records' });
     expect(recordsTable).toBeInTheDocument();
     expect(screen.getByText('event-id-required')).toBeInTheDocument();
     expect(screen.getAllByText('INTEGRITY PENDING').length).toBeGreaterThan(0);
@@ -983,7 +1441,7 @@ describe('App shell', () => {
     expect(fetch).toHaveBeenCalledWith('/api/v1/audit-replay/workbench', expect.objectContaining({ headers: expect.objectContaining({ 'X-Ui-Trace-Id': 'ar-s10-local-trace' }) }));
   });
 
-  it('renders tenant platform coverage with trace refs, blockers, and no secrets', async () => {
+  it('renders tenant platform coverage with support references, blockers, and no secrets', async () => {
     window.history.pushState({}, '', '/platform/tenant-context');
 
     render(<App />);
@@ -1002,7 +1460,7 @@ describe('App shell', () => {
     expect(document.body.textContent).not.toMatch(/password|access token|connection string/i);
   });
 
-  it('renders service performance dashboard grouped by service, workspace, correlation id, and freshness', async () => {
+  it('renders service performance dashboard grouped by service, workspace, support reference, and freshness', async () => {
     window.history.pushState({}, '', '/ops/performance');
 
     render(<App />);
@@ -1047,26 +1505,44 @@ describe('App shell', () => {
   it('renders scenario intake metadata, advanced facts, blockers, audit id, and replay hash without local pricing math', async () => {
     render(<App />);
 
-    expect(await screen.findByText('Advanced scenario facts from backend metadata')).toBeInTheDocument();
-    expect(screen.getByLabelText('Scenario intake metadata evidence')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Progressive quick quote intake' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Borrower and scenario basics')).toBeInTheDocument();
+    expect(screen.getByLabelText('Progressive quick quote setup status')).toBeInTheDocument();
+    expect(screen.getByText('scenarioId')).toBeInTheDocument();
+    expect(screen.getByText('quoteFilters')).toBeInTheDocument();
+    expect(screen.getByText('requestedLockPeriods')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /Borrower role/i })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /Co-borrower role/i })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /Scenario or business intent/i })).toBeInTheDocument();
+    expect(screen.getByRole('spinbutton', { name: /Representative credit score/i })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /Credit score source/i })).toBeInTheDocument();
+    expect(screen.getByRole('spinbutton', { name: /Purchase price or estimated value/i })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /Property ZIP/i })).toBeInTheDocument();
+    expect(screen.getByRole('spinbutton', { name: /Monthly debt/i })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /Reserves/i })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /Product family preference/i })).toBeInTheDocument();
+    expect(await screen.findByText('Additional mortgage scenario facts')).toBeInTheDocument();
+    expect(screen.getByLabelText('Scenario intake setup guidance')).toBeInTheDocument();
     expect(screen.getByText('Scenario identity')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /Scenario id/i })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: /Scenario name/i })).toBeInTheDocument();
     expect(screen.getByRole('spinbutton', { name: /Loan amount/i })).toBeInTheDocument();
-    expect(screen.getByText('audit-package-required-after-scenario-service-create')).toBeInTheDocument();
-    expect(screen.getByText('replay-hash-required-after-scenario-service-create')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /Quote filters/i })).toBeInTheDocument();
+    expect(screen.getByText('review package required after scenario create')).toBeInTheDocument();
+    expect(screen.getByText('review reference required after scenario create')).toBeInTheDocument();
     expect(screen.getByText(/Scenario-service metadata must be configured/)).toBeInTheDocument();
 
     fireEvent.change(screen.getByRole('textbox', { name: /Scenario name/i }), { target: { value: 'Purchase comparison intake' } });
     fireEvent.change(screen.getByRole('spinbutton', { name: /Loan amount/i }), { target: { value: '425000' } });
     expect(screen.getByDisplayValue('Purchase comparison intake')).toBeInTheDocument();
     expect(screen.getByDisplayValue('425000')).toBeInTheDocument();
-    expect(document.body.textContent).not.toMatch(/APR|rate table|eligibility threshold/i);
+    expect(screen.getByRole('region', { name: 'Progressive quick quote intake' }).textContent).not.toMatch(/APR|rate table|eligibility threshold/i);
   });
 
   it('shows retry guidance and support reference when the BFF launch boundary is unavailable', async () => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
       if (input.toString() === '/api/ui/health') {
-        return { ok: true, json: async () => ({ service: 'pricing-bff', status: 'UP', ready: true, dependencyStatus: 'NO_UPSTREAMS_CONFIGURED', dependencies: [] }) } as Response;
+        return { ok: true, json: async () => ({ service: 'pricing-workbench', status: 'AVAILABLE', ready: true, dependencyStatus: 'Connected services need setup', dependencies: [] }) } as Response;
       }
       throw new Error('BFF borrower intake boundary is temporarily unavailable.');
     });
@@ -1079,7 +1555,7 @@ describe('App shell', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Start quick quote' }));
 
     expect(await screen.findByText('Service outage fallback')).toBeInTheDocument();
-    expect(screen.getByText(/Support reference: brw-s01-local-trace/)).toBeInTheDocument();
+    expect(screen.getByText(/Support detail brw s01 local trace/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry intake' })).toBeInTheDocument();
   });
 
@@ -1125,12 +1601,12 @@ describe('App shell', () => {
     expect(screen.getAllByText('activation-audit-ref-required').length).toBeGreaterThan(0);
     expect(screen.getAllByText('cache-invalidation-command-required').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: 'Publish rate sheet' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Request replay' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Request processing review' })).toBeDisabled();
     expect(document.body.textContent).not.toMatch(/APR|eligibility threshold|fee amount/i);
     expect(fetch).toHaveBeenCalledWith('/api/v1/ops/rate-feeds', expect.objectContaining({ headers: expect.objectContaining({ 'X-Ui-Trace-Id': 'rf-s03-local-trace' }) }));
   });
 
-  it('renders pricing waterfall ledger, redactions, blockers, audit refs, and replay hashes without local pricing math', async () => {
+  it('renders pricing waterfall ledger, redactions, blockers, review references, and processing records without local pricing math', async () => {
     window.history.pushState({}, '', '/quote/run-test/pricing-waterfall');
 
     render(<App />);
@@ -1146,6 +1622,93 @@ describe('App shell', () => {
     expect(screen.getByText('waterfall-evidence-hash-required')).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/rate table|eligibility threshold|fee amount/i);
     expect(fetch).toHaveBeenCalledWith('/api/v1/tenants/ui-preview-tenant/quote-runs/run-test/pricing-waterfall', expect.objectContaining({ headers: expect.objectContaining({ 'X-Ui-Trace-Id': 'pw-s05-local-trace' }) }));
+  });
+
+  it('renders quote detail summary, waterfall, redactions, compliance flags, and review processing references without local pricing math', async () => {
+    window.history.pushState({}, '', '/quote/run-test/offers/quote-option-contract-required');
+
+    render(<App />);
+
+    expect(screen.getByRole('link', { name: 'Quote detail waterfall' })).toHaveAttribute('aria-current', 'page');
+    expect(await screen.findByRole('heading', { name: 'Quote detail review panels' })).toBeInTheDocument();
+    expect(screen.getByRole('list', { name: 'Quote detail review panels' })).toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: 'Card summary panel' })).toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: 'Pricing waterfall panel' })).toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: 'Compliance flags panel' })).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: 'Quote detail redactions' })).toBeInTheDocument();
+    expect(screen.getAllByText(/Redacted:/).length).toBeGreaterThan(0);
+    expect(screen.getByText('audit:note-rate-redaction-required')).toBeInTheDocument();
+    expect(screen.getByText('quote-detail-replay-hash-required')).toBeInTheDocument();
+    expect(screen.getByText('fair-lending-flag-ref-required')).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: 'Quote detail waterfall ledger' })).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/rate table|eligibility threshold|fee amount|ui-side pricing/i);
+    expect(fetch).toHaveBeenCalledWith('/api/v1/tenants/ui-preview-tenant/quote-runs/run-test/offers/quote-option-contract-required/detail', expect.objectContaining({ headers: expect.objectContaining({ 'X-Ui-Trace-Id': 'qd-s23-local-trace' }) }));
+  });
+
+  it('renders margin profitability sections, floor blocker, redaction reasons, review references, and processing evidence', async () => {
+    window.history.pushState({}, '', '/pricing/margins');
+
+    render(<App />);
+
+    expect(screen.getByRole('link', { name: 'Margin profitability' })).toHaveAttribute('aria-current', 'page');
+    expect(await screen.findByRole('heading', { name: 'Margin and compensation sections' })).toBeInTheDocument();
+    expect(screen.getByRole('list', { name: 'Margin profitability sections' })).toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: 'Company evidence' })).toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: 'Channel evidence' })).toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: 'Branch evidence' })).toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: 'LO compensation evidence' })).toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: 'Broker compensation evidence' })).toBeInTheDocument();
+    expect(screen.getAllByText(/view sensitive is required/i).length).toBeGreaterThan(0);
+    expect(screen.getByText('profitability-exception-path-ref-required')).toBeInTheDocument();
+    expect(screen.getByText(/margin-profitability-replay-hash-required/)).toBeInTheDocument();
+    expect(screen.getByText('audit:compensation-redaction-required')).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/ui-side override|rate table|eligibility threshold|fee amount/i);
+    expect(fetch).toHaveBeenCalledWith('/api/v1/margins/profitability', expect.objectContaining({ headers: expect.objectContaining({ 'X-Tenant-Context': 'ui-preview-tenant', 'X-Ui-Trace-Id': 'margin-s16-local-trace' }) }));
+  });
+
+  it('renders adjustment ids, fact refs, sources, conflicts, compensation hooks, summaries, and blocked config state', async () => {
+    window.history.pushState({}, '', '/pricing/adjustments');
+
+    render(<App />);
+
+    expect(screen.getByRole('link', { name: 'Adjustment evidence' })).toHaveAttribute('aria-current', 'page');
+    expect(await screen.findByRole('heading', { name: 'Adjustment ids, facts, sources, and summaries' })).toBeInTheDocument();
+    expect(screen.getByRole('list', { name: 'Adjustment evidence rows' })).toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: 'LLPA evaluator evidence adjustment' })).toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: 'Fee calculation evidence adjustment' })).toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: 'Compensation hook evidence adjustment' })).toBeInTheDocument();
+    expect(screen.getAllByText('adjustment-llpa-setup-required', { exact: false }).length).toBeGreaterThan(0);
+    expect(screen.getByText('adjustment-service.llpa-evaluator', { exact: false })).toBeInTheDocument();
+    expect(screen.getByText('fact:representative-credit')).toBeInTheDocument();
+    expect(screen.getByText('lo-compensation-hook-ref-required')).toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: 'conflict-manual-review-required conflict' })).toBeInTheDocument();
+    expect(screen.getAllByText('Pricing Operations', { exact: false }).length).toBeGreaterThan(0);
+    expect(screen.getByRole('listitem', { name: 'ADJUSTMENT_CONFIG_MISSING blocked state' })).toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: 'FEE summary' })).toBeInTheDocument();
+    expect(screen.getByText('audit:adjustment-conflict-required')).toBeInTheDocument();
+    expect(screen.getByText('adjustment-evidence-replay-hash-required', { exact: false })).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/0\.125|rate table|eligibility threshold/i);
+    expect(fetch).toHaveBeenCalledWith('/api/v1/adjustments/evidence', expect.objectContaining({ headers: expect.objectContaining({ 'X-Tenant-Context': 'ui-preview-tenant', 'X-Ui-Trace-Id': 'adjustment-s17-local-trace' }) }));
+  });
+
+  it('renders exception concession sections and disables manual price mutation commit', async () => {
+    window.history.pushState({}, '', '/exceptions/concessions');
+
+    render(<App />);
+
+    expect(screen.getByRole('link', { name: 'Exception concessions' })).toHaveAttribute('aria-current', 'page');
+    expect(await screen.findByRole('heading', { name: /concession and exception operating cockpit/i })).toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: 'Concession request section' })).toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: 'Eligibility exception section' })).toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: 'Authority matrix section' })).toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: 'Manual price mutation guard section' })).toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: 'Monitoring and risk events section' })).toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: 'History, replay, and export section' })).toBeInTheDocument();
+    expect(screen.getByText(/manual price edit forbidden/i)).toBeInTheDocument();
+    expect(screen.getByText(/exception-approval-escalation-path-required/i)).toBeInTheDocument();
+    expect(screen.getByText(/pricing-service.ledger-ref/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /commit manual price mutation/i })).toBeDisabled();
+    expect(fetch).toHaveBeenCalledWith('/api/v1/exceptions/concessions/workbench', expect.objectContaining({ headers: expect.objectContaining({ 'X-Tenant-Context': 'ui-preview-tenant', 'X-Ui-Trace-Id': 'exception-s18-local-trace' }) }));
   });
 
   it('gates operations escalation and resolution controls on explicit text inputs', async () => {
@@ -1428,7 +1991,7 @@ describe('App shell', () => {
             tenantContext: 'ui-preview-tenant',
             retryHealthSummary: 'RETRY_HEALTH_VISIBLE',
             eventWindow: 'latest 30 events',
-            dlqSizeStatus: 'DLQ size requires configured integration-service metrics',
+            dlqSizeStatus: 'exception queue size requires configured integration-service metrics',
             retryWindowStatus: 'Configured retry window required',
             deliveryAttempts: [
               { webhookId: 'webhook-pricing-updates', eventId: 'event-quote-blocked', route: '/partners/quotes', status: 'FAILED', rootCauseCode: 'UPSTREAM_PARTNER_CONTRACT_NOT_CONFIGURED', lastSuccessfulAt: '2026-06-08T07:15:00Z', failureReason: 'Configured partner webhook transport is unavailable at the BFF boundary.', idempotencyKeyState: 'CONFIRMED_REQUIRED_FOR_REPLAY', maskingIndicator: 'MASKING_INDICATOR_PRESENT', consentIndicator: 'CONSENT_INDICATOR_PRESENT' },
@@ -1436,15 +1999,18 @@ describe('App shell', () => {
             safetyToggles: [
               { webhookId: 'webhook-lock-alerts', route: '/partners/alerts', paused: true, visibleState: 'Auto-emit is paused for this route in the visible BFF fallback state.' },
             ],
-            replayAction: { available: true, disabledReason: 'Replay requires request correlation and explicit idempotency confirmation before it can be recorded.', confirmationRequirement: 'Confirm correlation id and idempotency before replay.', supportHandoffRoute: '/partners/support/webhooks' },
+            replayAction: { available: true, disabledReason: 'Processing retry requires a support reference and explicit duplicate-protection confirmation before it can be recorded.', confirmationRequirement: 'Confirm support reference and duplicate protection before processing retry.', supportHandoffRoute: '/partners/support/webhooks' },
             endpointTestAction: { available: false, disabledReason: 'Endpoint test requires the configured partner webhook transport contract.', confirmationRequirement: 'Confirm endpoint ownership before testing.', supportHandoffRoute: '/partners/support/webhooks' },
             uiTraceId: 'ch-s05-local-trace',
             events: ['WebhookHealthChecked'],
           }),
         } as Response;
       }
+      if (url === '/api/v1/partners/partner-preview/integrations/workbench') {
+        return { ok: true, json: async () => partnerChannelWorkbenchFixture() } as Response;
+      }
       if (url.endsWith('/replay') && init?.method === 'POST') {
-        return { ok: true, status: 202, json: async () => ({ webhookId: 'webhook-pricing-updates', eventId: 'event-quote-blocked', status: 'ACCEPTED', message: 'Webhook replay request recorded by pricing-bff fallback.', guidance: 'Configured upstream replay execution remains outside this UI fallback slice.', downstreamExecuted: false, uiTraceId: 'ch-s05-local-trace', events: ['WebhookReplayRequested'] }) } as Response;
+        return { ok: true, status: 202, json: async () => ({ webhookId: 'webhook-pricing-updates', eventId: 'event-quote-blocked', status: 'ACCEPTED', message: 'Webhook processing retry recorded by pricing-bff fallback.', guidance: 'Configured upstream processing execution remains outside this UI fallback slice.', downstreamExecuted: false, uiTraceId: 'ch-s05-local-trace', events: ['WebhookReplayRequested'] }) } as Response;
       }
       if (url.endsWith('/safety') && init?.method === 'POST') {
         return { ok: true, status: 202, json: async () => ({ webhookId: 'webhook-lock-alerts', route: '/partners/alerts', paused: false, status: 'VISIBLE', message: 'Safety toggle change is visible in the BFF fallback response.', uiTraceId: 'ch-s05-local-trace', events: ['WebhookSafetyToggled'] }) } as Response;
@@ -1454,17 +2020,28 @@ describe('App shell', () => {
 
     render(<App />);
 
-    expect(await screen.findByRole('heading', { name: 'Partner connection reliability' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Partner integration channel workbench' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Integration channel workbench' })).toBeInTheDocument();
+    expect(screen.getAllByText('Quote requests').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Webhook delivery').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Retries').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Exception queue').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Investor delivery connections').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Partner file delivery').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Health').length).toBeGreaterThan(0);
+    expect(screen.getByText('integration-service.partner-channel.workbench.read')).toBeInTheDocument();
+    expect(screen.getAllByText('payload-redacted').length).toBeGreaterThan(0);
+    expect(screen.getByText('audit:partner-dlq-required')).toBeInTheDocument();
     expect(await screen.findByText('latest 30 events')).toBeInTheDocument();
     expect(screen.getByText('exception queue size requires configured integration-service metrics')).toBeInTheDocument();
     expect(screen.getByText('configured service PARTNER setup NOT CONFIGURED')).toBeInTheDocument();
-    expect(screen.getByText('Replay requires request correlation and explicit idempotency confirmation before it can be recorded.')).toBeInTheDocument();
+    expect(screen.getByText('Processing retry requires a support reference and explicit duplicate-protection confirmation before it can be recorded.')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText('Replay correlation id'), { target: { value: 'corr-123' } });
-    fireEvent.click(screen.getByLabelText('I confirm idempotency for this replay request.'));
-    fireEvent.click(screen.getByRole('button', { name: 'Request replay' }));
+    fireEvent.change(screen.getByLabelText('Processing support reference'), { target: { value: 'corr-123' } });
+    fireEvent.click(screen.getByLabelText('I confirm duplicate protection for this processing request.'));
+    fireEvent.click(screen.getByRole('button', { name: 'Request processing retry' }));
 
-    expect(await screen.findByText('Webhook replay requested')).toBeInTheDocument();
+    expect(await screen.findByText('Webhook processing retry requested')).toBeInTheDocument();
     expect(screen.getByText('Connected workflow run: no')).toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith('/api/v1/partners/partner-preview/integrations/webhooks/webhook-pricing-updates/replay', expect.objectContaining({ method: 'POST' }));
 
@@ -1509,10 +2086,13 @@ describe('App shell', () => {
               },
             ],
             decisions: [{ decisionId: 'decision-explainability-required', reasonCode: 'RULE_SOURCE_REQUIRED', humanText: 'Human-readable explanations require configured policy contracts.', jurisdictionCode: 'jurisdiction-config-required', reasonTiers: ['policy'], exportBlocked: true, disclosureArtifactRef: 'disclosure-artifact-required' }],
+            advisoryReviews: [{ reviewId: 'quote-review-config-required', reviewType: 'quote', subjectRef: 'quote-id-required', status: 'ADVISORY_BLOCKED_UNTIL_CONFIGURED', reasonCodes: ['HIGH_COST_THRESHOLD_UNAVAILABLE', 'APR_ADVISORY_LEDGER_REQUIRED'], auditSnapshotRefs: ['audit-snapshot-ref-required'], regulatoryApprovalState: 'REGULATORY_APPROVAL_PENDING_CONFIG', exportRefs: ['evidence-export-ref-required'], blockedByConfiguration: true, configurationGaps: ['Configured regulatory thresholds are unavailable; no local threshold or APR value is inferred.'] }],
+            fairLendingMonitoring: [{ drilldownId: 'fair-lending-monitoring-config-required', dimensions: ['masked-class-label', 'geography-bucket-ref'], redacted: true, redactionState: 'redaction-profile-required', evidenceRefs: ['fair-lending-snapshot-ref-required'], blockers: ['Configured fair-lending monitoring dimensions must be supplied by compliance-service.'] }],
             privacyRequests: [{ requestId: 'dsar-config-required', borrowerRef: 'Borrower reference redacted', requestedScope: 'restricted', identityStatus: 'unverified', slaState: 'SLA deadline supplied by configured privacy service', consentAuditRef: 'consentAuditRef-required', blockers: ['Identity verification contract unavailable'] }],
             securityEvents: [{ eventId: 'security-event-config-required', category: 'vulnerability finding', severity: 'P2', owner: 'Security owner required', logRecordId: 'logRecordId-required', correlationId: 'trace-ch-s05', acknowledged: false, blockers: ['Explicit owner acknowledgment required before release handoff'] }],
             alerts: [{ alertId: 'alert-missing-evidence', severity: 'P2', alertClass: 'workflow', triggerType: 'missing_evidence', routeTarget: 'Owner queue required', acknowledged: false, blockers: ['Evidence attachment pending'] }],
             retentionControls: [{ ruleId: 'retention-rule-config-required', retentionClass: 'Configured retention class required', retentionWindow: 'Retention window supplied by configured policy', legalHoldActive: true, deletionGateReason: 'OD-005 unresolved blocks destructive retention actions', backupEvidence: 'backup inventory supplied by configured evidence store' }],
+            configurationGaps: ['Configured regulatory threshold values are unavailable; the UI records this blocked gap instead of embedding plausible constants.'],
             uiTraceId: 'sec-s07-local-trace',
             events: ['ComplianceEvidenceRegistryOpened'],
             fallbackReason: 'Configured compliance, audit-replay, security, privacy, and retention service contracts are unavailable; this response carries non-secret UI fallback records only.',
@@ -1524,12 +2104,20 @@ describe('App shell', () => {
 
     render(<App />);
 
-    expect(await screen.findByRole('heading', { name: 'Compliance evidence registry' })).toBeInTheDocument();
-    expect(await screen.findByText('tenant: ui-preview-tenant')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Evidence catalog' })).toBeInTheDocument();
+    expect(await screen.findByText('Workspace ui-preview-tenant')).toBeInTheDocument();
     expect(screen.getByRole('table', { name: 'Compliance evidence artifacts' })).toBeInTheDocument();
     expect(screen.getByText('guidance version-required / jurisdiction-config-required')).toBeInTheDocument();
     expect(screen.getByText('CHAIN CONTINUITY UNVERIFIED')).toBeInTheDocument();
     expect(screen.getByText('RULE SOURCE REQUIRED')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Quote and portfolio compliance review' })).toBeInTheDocument();
+    expect(screen.getByText('HIGH COST THRESHOLD UNAVAILABLE')).toBeInTheDocument();
+    expect(screen.getByText(/Audit snapshots:/i)).toBeInTheDocument();
+    expect(screen.getByText(/Regulatory approval: REGULATORY APPROVAL PENDING CONFIG/i)).toBeInTheDocument();
+    expect(screen.getByText(/Export refs:/i)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Fair-lending monitoring drilldown' })).toBeInTheDocument();
+    expect(screen.getByText('Protected attributes: Backend redacted')).toBeInTheDocument();
+    expect(screen.getByText('masked-class-label')).toBeInTheDocument();
     expect(screen.getByText('Identity: unverified')).toBeInTheDocument();
     expect(screen.getByText('Security record: logRecordId-required')).toBeInTheDocument();
     expect(screen.getByText('P2 · workflow · missing evidence')).toBeInTheDocument();
@@ -1547,7 +2135,7 @@ describe('App shell', () => {
     expect(screen.getByRole('table', { name: 'Validation stages' })).toBeInTheDocument();
     expect(screen.getByText('V2 · Contract Validation')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Approve for rollout' })).toBeDisabled();
-    expect(screen.getByText('Deployment action disabled until readiness passes and blockers clear.')).toBeInTheDocument();
+    expect(screen.getByText('Live action is unavailable until business readiness items are resolved.')).toBeInTheDocument();
     expect(screen.getByText('Comparison controls are locked until baseline and sample-window evidence are supplied.')).toBeInTheDocument();
     expect(screen.getByText('Protected class labels masked')).toBeInTheDocument();
     expect(screen.getByRole('table', { name: 'Quality incidents' })).toBeInTheDocument();
@@ -1608,6 +2196,69 @@ describe('App shell', () => {
     expect(screen.getByText('Filter-out explanation must come from eligibility-service; the BFF does not infer policy logic.')).toBeInTheDocument();
     expect(screen.queryByText(/LTV > 80/)).not.toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith('/api/v1/tenants/ui-preview-tenant/quote-runs/run-test/eligibility', expect.any(Object));
+  });
+
+  it('renders scenario analysis workspace and sends backend variant facts for recalculation', async () => {
+    window.history.pushState({}, '', '/quote/run-test/what-if');
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      if (url === '/api/ui/health') {
+        return { ok: true, json: async () => ({ service: 'pricing-bff', status: 'UP', ready: true, dependencyStatus: 'NO_UPSTREAMS_CONFIGURED', dependencies: [] }) } as Response;
+      }
+      if (url === '/api/v1/tenants/ui-preview-tenant/quote-runs/intake-metadata') {
+        return { ok: true, json: async () => ({ tenantContext: 'ui-preview-tenant', dependencyStatus: 'SCENARIO_SERVICE_CONTRACT_NOT_CONFIGURED', fieldGroups: [], decisionControls: [], validationIssues: [], auditPackageId: 'audit-required', replayHashRef: 'replay-required', fallbackReason: 'metadata unavailable', uiTraceId: 'brw-s01-local-trace' }) } as Response;
+      }
+      if (url === '/api/v1/tenants/ui-preview-tenant/quote-runs/run-test/what-if/workspace') {
+        return { ok: true, json: async () => ({
+          tenantContext: 'ui-preview-tenant',
+          runId: 'run-test',
+          dependencyStatus: 'SCENARIO_ANALYSIS_SERVICE_CONTRACT_NOT_CONFIGURED',
+          dimensions: [
+            { dimensionId: 'fico', label: 'FICO sensitivity', value: 'backend-current-fico-ref', sourceRef: 'scenario-analysis-service.fico-sensitivity', requiredFacts: ['fact:fico-score-ref'], backendOnly: true },
+            { dimensionId: 'ltv', label: 'LTV sensitivity', value: 'backend-current-ltv-ref', sourceRef: 'scenario-analysis-service.ltv-sensitivity', requiredFacts: ['fact:ltv-ref'], backendOnly: true },
+            { dimensionId: 'lockPeriod', label: 'Lock period sensitivity', value: 'backend-current-lock-period-ref', sourceRef: 'scenario-analysis-service.lock-period-comparison', requiredFacts: ['fact:lock-period-ref'], backendOnly: true },
+            { dimensionId: 'product', label: 'Product sensitivity', value: 'backend-product-comparison-ref', sourceRef: 'scenario-analysis-service.product-comparison', requiredFacts: ['fact:product-ref'], backendOnly: true },
+          ],
+          variants: [
+            { variantId: 'variant-base', label: 'Backend baseline variant', status: 'VISIBLE', dimensionRefs: ['fico', 'ltv'], factRefs: ['fact:fico-score-ref', 'fact:ltv-ref'], guardrailBlockers: [], resultRefs: ['analysis-result-ref:base'] },
+            { variantId: 'variant-blocked', label: 'Guardrail blocked variant', status: 'BLOCKED', dimensionRefs: ['fico', 'product'], factRefs: ['fact:fico-score-ref', 'fact:product-ref'], guardrailBlockers: [{ blockerCode: 'REQUIRED_FACTS_MISSING', severity: 'BLOCKER', reason: 'Backend blocker reason from scenario-analysis-service.', requiredFacts: ['fact:product-ref'], sourceRef: 'scenario-analysis-service.guardrail-policy' }], resultRefs: ['analysis-result-ref:blocker-details'] },
+          ],
+          batchGrid: [{ rowId: 'row-001', variantId: 'variant-base', dimensionSummary: 'fico + ltv', status: 'VISIBLE', backendResultRef: 'batch-result-ref:row-001', guardrailSummary: 'no open guardrail blockers' }],
+          savedAnalyses: [{ analysisId: 'analysis-saved-required', name: 'Saved FICO/LTV sensitivity', versionRef: 'analysis-version-ref-required', savedAt: 'timestamp-supplied-by-scenario-analysis-service', exportRef: 'export-ref-required', replayHash: 'replay-hash-required' }],
+          exportRefs: ['export-ref-required'],
+          replayRefs: ['replay-hash-required'],
+          blockers: [{ blockerCode: 'REQUIRED_FACTS_MISSING', severity: 'BLOCKER', reason: 'Backend blocker reason from scenario-analysis-service.', requiredFacts: ['fact:product-ref'], sourceRef: 'scenario-analysis-service.guardrail-policy' }],
+          fallbackReason: 'Configured scenario-analysis-service workspace contract is unavailable in this local BFF fallback.',
+          uiTraceId: 'sa-s15-local-trace',
+          events: ['ScenarioAnalysisWorkspaceOpened'],
+        }) } as Response;
+      }
+      if (url === '/api/v1/tenants/ui-preview-tenant/quote-runs/run-test/what-if/recalculate' && init?.method === 'POST') {
+        const body = JSON.parse(init.body as string) as { variantFacts: string[] };
+        expect(body.variantFacts).toContain('fact:fico-score-ref');
+        expect(body.variantFacts).toContain('fact:product-ref');
+        return { ok: true, status: 202, json: async () => ({ status: 'BACKEND_RESULT_VISIBLE', message: 'Scenario recalculation request recorded for fico using backend facts.', backendResultRefs: ['scenario-analysis-service.result:fico'], blockers: [{ blockerCode: 'POLICY_DECISION_BACKEND_REQUIRED', severity: 'WARNING', reason: 'Guardrail policy reasons remain backend-owned.', requiredFacts: body.variantFacts, sourceRef: 'scenario-analysis-service.guardrail-evaluate' }], events: ['ScenarioAnalysisRecalculationRequested', 'VariantFactsForwarded'], uiTraceId: 'sa-s15-local-trace' }) } as Response;
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'What-if analysis cockpit for run run-test' })).toBeInTheDocument();
+    expect(screen.getAllByText('FICO sensitivity').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('LTV sensitivity').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Lock period sensitivity').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Product sensitivity').length).toBeGreaterThan(0);
+    expect(screen.getByRole('table', { name: 'Scenario batch grid' })).toBeInTheDocument();
+    expect(screen.getByText('Saved FICO/LTV sensitivity')).toBeInTheDocument();
+    expect(screen.getAllByText('export-ref-required').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('replay-hash-required').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Backend blocker reason from scenario-analysis-service.').length).toBeGreaterThan(0);
+
+    fireEvent.change(screen.getByLabelText('Requested value'), { target: { value: 'borrower-fico-ref-updated' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Request recalculation' }));
+    expect(await screen.findByText('Backend recalculation result received')).toBeInTheDocument();
+    expect(screen.getByText('scenario-analysis-service.result:fico')).toBeInTheDocument();
   });
 
   it('renders admin governance release gates with open decisions as blockers', async () => {

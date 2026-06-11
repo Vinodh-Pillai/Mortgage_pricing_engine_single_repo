@@ -49,6 +49,13 @@ class PartnerUiController {
     return adapter.partnerWebhookHealth(partnerId, tenantContext, uiTraceId);
   }
 
+  @GetMapping("/api/v1/partners/{partnerId}/integrations/workbench")
+  Object partnerChannelWorkbench(@PathVariable String partnerId,
+      @RequestHeader(value = "X-Tenant-Context", required = false) String tenantContext,
+      @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
+    return adapter.partnerChannelWorkbench(partnerId, tenantContext, uiTraceId);
+  }
+
   @PostMapping("/api/v1/partners/{partnerId}/integrations/webhooks/{webhookId}/test")
   ResponseEntity<?> testPartnerWebhook(@PathVariable String webhookId,
       @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {

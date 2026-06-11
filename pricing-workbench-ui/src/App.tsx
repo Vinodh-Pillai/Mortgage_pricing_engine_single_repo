@@ -1,19 +1,25 @@
-import { type FormEvent, useEffect, useRef, useState } from 'react';
+import { type FormEvent, type ReactNode, type RefObject, useEffect, useRef, useState } from 'react';
 import {
   fetchOfferComparison,
   fetchOfferExplanation,
+  fetchQuoteDetail,
   selectOffer,
   type OfferComparisonView,
   type OfferExplanationView,
   type OfferSummary,
+  type QuoteDetailView,
 } from './lib/api/offers';
 import {
   fetchPricingWaterfall,
+  fetchQuoteJourneyMap,
   fetchScenarioIntakeMetadata,
   launchQuoteRun,
   type BorrowerIntake,
   type IntakeValidation,
   type PricingWaterfallView,
+  type ProgressiveQuickQuoteState,
+  type QuoteJourneyMapView,
+  type QuoteJourneyNode,
   type QuoteRunLaunch,
   type ScenarioIntakeField,
   type ScenarioIntakeMetadata,
@@ -36,10 +42,13 @@ import {
   type PartnerRepriceResult,
 } from './lib/api/partnerQuotes';
 import {
+  fetchPartnerChannelWorkbench,
   fetchPartnerWebhookHealth,
   requestPartnerWebhookEndpointTest,
   requestPartnerWebhookReplay,
   requestPartnerWebhookSafetyToggle,
+  type PartnerChannelWorkbenchTab,
+  type PartnerChannelWorkbenchView,
   type PartnerSafetyToggleResult,
   type PartnerWebhookActionResult,
   type PartnerWebhookDeliveryAttempt,
@@ -83,16 +92,57 @@ import {
   type IncidentReviewSummary,
 } from './lib/api/adminGovernance';
 import {
+  fetchMlAdvisoryInsights,
+  type AdvisoryRecommendationInsight,
+  type MlAdvisoryInsightsView,
+  type ModelVersionGovernanceInsight,
+} from './lib/api/mlAdvisoryInsights';
+import {
+  fetchCustomRuleCalculationEvidence,
   fetchCustomRuleEvidence,
+  type CalculationStepEvidence,
+  type CustomFieldMetadata,
   type CustomRuleEvidenceView,
+  type CustomRuleUiError,
+  type RuleCalculationEvidenceRow,
+  type RuleCalculationEvidenceView,
   type RuleEvidenceRow,
 } from './lib/api/customRules';
+import {
+  fetchAdjustmentEvidence,
+  type AdjustmentBlockedState,
+  type AdjustmentConflictView,
+  type AdjustmentEvidenceRow,
+  type AdjustmentEvidenceView,
+  type AdjustmentSummaryCard,
+} from './lib/api/adjustments';
+import {
+  fetchMarginProfitability,
+  type MarginEvidenceSection,
+  type MarginProfitabilityView,
+} from './lib/api/marginProfitability';
 import {
   fetchAuditReplayWorkbench,
   type AuditReplayRecordSummary,
   type AuditReplayRunSummary,
   type AuditReplayWorkbenchView,
 } from './lib/api/auditReplay';
+import {
+  fetchExceptionConcessionWorkbench,
+  type ExceptionConcessionSection,
+  type ExceptionConcessionWorkbenchView,
+} from './lib/api/exceptionConcessions';
+import {
+  fetchScenarioAnalysisWorkspace,
+  recalculateScenarioAnalysis,
+  type ScenarioAnalysisBatchRow,
+  type ScenarioAnalysisBlocker,
+  type ScenarioAnalysisDimension,
+  type ScenarioAnalysisSavedAnalysis,
+  type ScenarioAnalysisVariant,
+  type ScenarioAnalysisWorkspaceView,
+  type ScenarioRecalculationResult,
+} from './lib/api/scenarioAnalysis';
 import {
   fetchTenantPlatformCoverage,
   type TenantPlatformControl,
@@ -134,20 +184,45 @@ type MetadataState =
 
 const initialIntake: BorrowerIntake = {
   borrowerName: '',
+  borrowerRole: '',
+  coBorrowerName: '',
+  coBorrowerRole: '',
   contactEmail: '',
   quoteGoal: '',
   scenarioName: '',
+  scenarioIntent: '',
   channel: '',
   externalLoanId: '',
   sourceSystem: '',
+  scenarioId: '',
+  scenarioVersion: '',
   borrowerCreditStatus: '',
   creditScore: '',
+  creditScoreSource: '',
+  creditReportDate: '',
+  creditReadiness: '',
   loanPurpose: '',
   loanAmount: '',
+  purchasePriceOrValue: '',
+  downPaymentOrEquity: '',
   propertyState: '',
+  propertyCounty: '',
+  propertyZip: '',
+  propertyType: '',
   occupancyType: '',
+  unitCount: '',
   monthlyIncome: '',
+  incomeType: '',
+  monthlyDebt: '',
   liquidAssets: '',
+  reserves: '',
+  productPreference: '',
+  productFamily: '',
+  quoteFilters: '',
+  requestedLockPeriods: '',
+  effectiveDate: '',
+  actorId: '',
+  clientContext: '',
 };
 
 const initialTenantSetup: TenantSetupRequest = {
@@ -175,7 +250,7 @@ export function App() {
   const [tenantResult, setTenantResult] = useState<TenantSetupResult | null>(null);
   const [productResult, setProductResult] = useState<ProductSetupResult | null>(null);
   const [activeRunId, setActiveRunId] = useState<string | null>(() => runIdFromPath(window.location.pathname));
-  const [activeScreen, setActiveScreen] = useState<'offers' | 'lock' | 'status' | 'eligibility' | 'waterfall' | null>(() => screenFromPath(window.location.pathname));
+  const [activeScreen, setActiveScreen] = useState<'offers' | 'quoteDetail' | 'lock' | 'status' | 'eligibility' | 'waterfall' | 'journey' | 'whatIf' | null>(() => screenFromPath(window.location.pathname));
   const [partnerTransportActive] = useState(() => partnerTransportPathActive(window.location.pathname));
   const [partnerQuotesActive] = useState(() => window.location.pathname.startsWith('/partners/quotes'));
   const [opsCasesActive] = useState(() => opsPathActive(window.location.pathname));
@@ -184,11 +259,17 @@ export function App() {
   const [complianceActive] = useState(() => compliancePathActive(window.location.pathname));
   const [qualityActive] = useState(() => qualityPathActive(window.location.pathname));
   const [adminActive] = useState(() => adminPathActive(window.location.pathname));
+  const [mlAdvisoryActive] = useState(() => mlAdvisoryPathActive(window.location.pathname));
   const [productCatalogManagerActive] = useState(() => productCatalogManagerPathActive(window.location.pathname));
   const [customRulesActive] = useState(() => customRulesPathActive(window.location.pathname));
+  const [adjustmentEvidenceActive] = useState(() => adjustmentEvidencePathActive(window.location.pathname));
+  const [marginProfitabilityActive] = useState(() => marginProfitabilityPathActive(window.location.pathname));
   const [auditReplayActive] = useState(() => auditReplayPathActive(window.location.pathname));
+  const [exceptionConcessionsActive] = useState(() => exceptionConcessionPathActive(window.location.pathname));
   const [tenantPlatformActive] = useState(() => tenantPlatformPathActive(window.location.pathname));
+  const [scenarioAnalysisActive] = useState(() => scenarioAnalysisPathActive(window.location.pathname));
   const activeModule = resolveWorkbenchModule(window.location.pathname);
+  const featureRegistryActive = activeModule.id === 'service-modules' && window.location.pathname.startsWith('/service-modules');
   const borrowerNameRef = useRef<HTMLInputElement>(null);
   const contactEmailRef = useRef<HTMLInputElement>(null);
   const quoteGoalRef = useRef<HTMLTextAreaElement>(null);
@@ -365,7 +446,7 @@ export function App() {
           <h2>Workspace</h2>
           {workbenchModules.map((screen) => (
             <a key={screen.id} href={screen.routePattern.replace(':runId', activeRunId ?? 'run-test')} aria-current={screen.id === activeModule.id ? 'page' : undefined}>
-              {screen.label}
+              {screen.routePattern.startsWith('/audit/replay') ? 'Review record workbench' : businessFacingText(screen.label)}
             </a>
           ))}
           <a href="#status-panel">Connection status</a>
@@ -381,14 +462,22 @@ export function App() {
             </ol>
           </nav>
 
-          {!activeRunId && activeModule.id === 'shell' ? <WorkbenchModuleRail activeModuleId={activeModule.id} /> : null}
+          {!activeRunId && featureRegistryActive ? <WorkbenchModuleRail activeModuleId={activeModule.id} /> : null}
 
           {tenantPlatformActive ? (
             <TenantPlatformCoverageSection />
+          ) : scenarioAnalysisActive && activeRunId ? (
+            <ScenarioAnalysisWorkspaceSection runId={activeRunId} />
+          ) : exceptionConcessionsActive ? (
+            <ExceptionConcessionWorkbenchSection />
           ) : auditReplayActive ? (
             <AuditReplayWorkbenchSection />
           ) : customRulesActive ? (
             <CustomRuleEvidenceSection />
+          ) : adjustmentEvidenceActive ? (
+            <AdjustmentEvidenceSection />
+          ) : marginProfitabilityActive ? (
+            <MarginProfitabilitySection />
           ) : performanceActive ? (
             <PerformanceDashboardSection />
           ) : rateFeedOpsActive ? (
@@ -397,6 +486,8 @@ export function App() {
             <ProductCatalogManagerSection />
           ) : adminActive ? (
             <AdminGovernanceSection />
+          ) : mlAdvisoryActive ? (
+            <MlAdvisoryInsightsSection />
           ) : qualityActive ? (
             <QualityGuardrailsSection />
           ) : complianceActive ? (
@@ -407,14 +498,31 @@ export function App() {
             <PartnerTransportReliabilitySection partnerId={partnerBoundaryPlaceholder} />
           ) : partnerQuotesActive ? (
             <PartnerQuoteLifecycleSection partnerId={partnerBoundaryPlaceholder} />
+          ) : activeRunId && activeScreen === 'quoteDetail' ? (
+            <QuoteDetailSection runId={activeRunId} offerId={offerIdFromPath(window.location.pathname) ?? 'quote-option-contract-required'} />
           ) : activeRunId && activeScreen === 'lock' ? (
             <LockLifecycleSection runId={activeRunId} />
           ) : activeRunId && activeScreen === 'eligibility' ? (
             <EligibilityExplanationSection runId={activeRunId} />
           ) : activeRunId && activeScreen === 'waterfall' ? (
             <PricingWaterfallSection runId={activeRunId} />
+          ) : activeRunId && activeScreen === 'journey' ? (
+            <QuoteJourneyMapSection runId={activeRunId} />
           ) : activeRunId ? (
             <OfferComparisonSection runId={activeRunId} />
+          ) : featureRegistryActive ? (
+            <section className="panel" aria-labelledby="feature-registry-status-heading">
+              <div className="panel-heading-row">
+                <div>
+                  <p className="eyebrow">Dependency status</p>
+                  <h2 id="feature-registry-status-heading">Feature registry dependency status</h2>
+                </div>
+              </div>
+              <p role="status">
+                The feature screen registry is available even when connected service setup is incomplete.
+                Each module card shows its workbench path, intended users, setup status, and expected loading or attention states in plain language.
+              </p>
+            </section>
           ) : (
             <>
               <section className="hero" aria-labelledby="borrower-title">
@@ -460,70 +568,18 @@ export function App() {
                 {productResult ? <WorkflowResultBanner result={productResult} successLabel="Product draft recorded" blockedLabel="Product setup needs attention" /> : null}
               </section>
 
-              <section id="borrower-intake" className="panel" aria-labelledby="intake-heading">
-                <div className="panel-heading-row">
-                  <div>
-                    <p className="eyebrow">Quick quote</p>
-                    <h2 id="intake-heading">Borrower quote details</h2>
-                  </div>
-                  {launchState.kind === 'outage' ? null : <DiagnosticsDetails items={[`Support reference: ${uiTraceId}`]} />}
-                </div>
-
-                <LaunchBanner state={launchState} onRetry={() => setLaunchState({ kind: 'idle' })} />
-                <ScenarioIntakeMetadataPanel state={metadataState} />
-
-                <form className="intake-form" onSubmit={submitIntake} noValidate>
-                  <div className="field-group">
-                    <label htmlFor="borrowerName">Borrower name <span aria-hidden="true">*</span></label>
-                    <input
-                      ref={borrowerNameRef}
-                      id="borrowerName"
-                      name="borrowerName"
-                      value={intake.borrowerName}
-                      aria-invalid={Boolean(errors.borrowerName)}
-                      aria-describedby={errors.borrowerName ? 'borrowerName-error' : undefined}
-                      onChange={(event) => updateField('borrowerName', event.target.value)}
-                    />
-                    {errors.borrowerName ? <p id="borrowerName-error" role="alert">{errors.borrowerName}</p> : null}
-                  </div>
-
-                  <div className="field-group">
-                    <label htmlFor="contactEmail">Contact email <span aria-hidden="true">*</span></label>
-                    <input
-                      ref={contactEmailRef}
-                      id="contactEmail"
-                      name="contactEmail"
-                      type="email"
-                      value={intake.contactEmail}
-                      aria-invalid={Boolean(errors.contactEmail)}
-                      aria-describedby={errors.contactEmail ? 'contactEmail-error' : undefined}
-                      onChange={(event) => updateField('contactEmail', event.target.value)}
-                    />
-                    {errors.contactEmail ? <p id="contactEmail-error" role="alert">{errors.contactEmail}</p> : null}
-                  </div>
-
-                  <div className="field-group field-group--full">
-                    <label htmlFor="quoteGoal">Quote goal <span aria-hidden="true">*</span></label>
-                    <textarea
-                      ref={quoteGoalRef}
-                      id="quoteGoal"
-                      name="quoteGoal"
-                      value={intake.quoteGoal}
-                      aria-invalid={Boolean(errors.quoteGoal)}
-                      aria-describedby={errors.quoteGoal ? 'quoteGoal-error' : 'quoteGoal-help'}
-                      onChange={(event) => updateField('quoteGoal', event.target.value)}
-                    />
-                    <p id="quoteGoal-help" className="field-help">Describe what the borrower wants to compare without entering pricing assumptions.</p>
-                    {errors.quoteGoal ? <p id="quoteGoal-error" role="alert">{errors.quoteGoal}</p> : null}
-                  </div>
-
-                  {metadataState.kind === 'loaded' ? <AdvancedScenarioIntake metadata={metadataState.metadata} intake={intake} errors={errors} onChange={updateField} /> : null}
-
-                  <button type="submit" disabled={launchState.kind === 'submitting'}>
-                    {launchState.kind === 'submitting' ? 'Starting quote...' : 'Start quick quote'}
-                  </button>
-                </form>
-              </section>
+              <ProgressiveQuickQuoteModule
+                intake={intake}
+                errors={errors}
+                launchState={launchState}
+                metadataState={metadataState}
+                borrowerNameRef={borrowerNameRef}
+                contactEmailRef={contactEmailRef}
+                quoteGoalRef={quoteGoalRef}
+                onChange={updateField}
+                onRetry={() => setLaunchState({ kind: 'idle' })}
+                onSubmit={submitIntake}
+              />
             </>
           )}
 
@@ -570,6 +626,11 @@ type PartnerTransportState =
   | { kind: 'loaded'; view: PartnerWebhookHealthView }
   | { kind: 'unreachable'; message: string };
 
+type PartnerChannelWorkbenchState =
+  | { kind: 'loading' }
+  | { kind: 'loaded'; view: PartnerChannelWorkbenchView }
+  | { kind: 'unreachable'; message: string };
+
 type OpsCaseState =
   | { kind: 'loading' }
   | { kind: 'loaded'; view: OpsCaseListView }
@@ -606,19 +667,37 @@ type AdminGovernanceState =
   | { kind: 'loaded'; view: AdminGovernanceView }
   | { kind: 'unreachable'; message: string };
 
+type MlAdvisoryInsightsState =
+  | { kind: 'loading' }
+  | { kind: 'loaded'; view: MlAdvisoryInsightsView }
+  | { kind: 'unreachable'; message: string };
+
 type CustomRuleEvidenceState =
   | { kind: 'loading' }
-  | { kind: 'loaded'; view: CustomRuleEvidenceView }
+  | { kind: 'loaded'; view: CustomRuleEvidenceView; calculationEvidence: RuleCalculationEvidenceView }
   | { kind: 'unreachable'; message: string };
+
+const blockingDecisionQualities = new Set(['UNKNOWN', 'CONFLICTING']);
+const estimatedDecisionQualities = new Set(['ESTIMATED']);
 
 type AuditReplayWorkbenchState =
   | { kind: 'loading' }
   | { kind: 'loaded'; view: AuditReplayWorkbenchView }
   | { kind: 'unreachable'; message: string };
 
+type ExceptionConcessionWorkbenchState =
+  | { kind: 'loading' }
+  | { kind: 'loaded'; view: ExceptionConcessionWorkbenchView }
+  | { kind: 'unreachable'; message: string };
+
 type TenantPlatformCoverageState =
   | { kind: 'loading' }
   | { kind: 'loaded'; view: TenantPlatformCoverageView }
+  | { kind: 'unreachable'; message: string };
+
+type ScenarioAnalysisWorkspaceState =
+  | { kind: 'loading' }
+  | { kind: 'loaded'; view: ScenarioAnalysisWorkspaceView }
   | { kind: 'unreachable'; message: string };
 
 type ProductCatalogManagerState =
@@ -639,7 +718,7 @@ function performancePathActive(pathname: string) {
 }
 
 function partnerTransportPathActive(pathname: string) {
-  return pathname.startsWith('/partners/webhooks') || pathname.startsWith('/partners/admin/safety') || pathname.startsWith('/partners/alerts');
+  return pathname.startsWith('/partners/integrations') || pathname.startsWith('/partners/webhooks') || pathname.startsWith('/partners/admin/safety') || pathname.startsWith('/partners/alerts');
 }
 
 function compliancePathActive(pathname: string) {
@@ -654,20 +733,260 @@ function adminPathActive(pathname: string) {
   return pathname.startsWith('/admin/');
 }
 
+function mlAdvisoryPathActive(pathname: string) {
+  return pathname.startsWith('/advisory/ml');
+}
+
 function productCatalogManagerPathActive(pathname: string) {
   return pathname.startsWith('/admin/products/catalog');
 }
 
 function customRulesPathActive(pathname: string) {
-  return pathname.startsWith('/custom-rules/');
+  return pathname === '/custom-rules' || pathname.startsWith('/custom-rules/');
+}
+
+function marginProfitabilityPathActive(pathname: string) {
+  return pathname.startsWith('/pricing/margins');
+}
+
+function adjustmentEvidencePathActive(pathname: string) {
+  return pathname.startsWith('/pricing/adjustments');
 }
 
 function auditReplayPathActive(pathname: string) {
   return pathname.startsWith('/audit/replay');
 }
 
+function exceptionConcessionPathActive(pathname: string) {
+  return pathname.startsWith('/exceptions/concessions');
+}
+
 function tenantPlatformPathActive(pathname: string) {
   return pathname.startsWith('/platform/tenant-context');
+}
+
+function scenarioAnalysisPathActive(pathname: string) {
+  return /^\/quote\/[^/]+\/what-if/.test(pathname);
+}
+
+function ProgressiveQuickQuoteModule({
+  intake,
+  errors,
+  launchState,
+  metadataState,
+  borrowerNameRef,
+  contactEmailRef,
+  quoteGoalRef,
+  onChange,
+  onRetry,
+  onSubmit,
+}: {
+  intake: BorrowerIntake;
+  errors: Partial<Record<keyof BorrowerIntake, string>>;
+  launchState: LaunchState;
+  metadataState: MetadataState;
+  borrowerNameRef: RefObject<HTMLInputElement | null>;
+  contactEmailRef: RefObject<HTMLInputElement | null>;
+  quoteGoalRef: RefObject<HTMLTextAreaElement | null>;
+  onChange: (field: keyof BorrowerIntake, value: string) => void;
+  onRetry: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const quickQuoteState = metadataState.kind === 'loaded' ? metadataState.metadata.quickQuoteState : undefined;
+  return (
+    <section id="borrower-intake" className="panel quick-quote-module" aria-labelledby="intake-heading">
+      <div className="panel-heading-row">
+        <div>
+          <p className="eyebrow">Guided quick quote</p>
+          <h2 id="intake-heading">Progressive quick quote intake</h2>
+        </div>
+        {launchState.kind === 'outage' ? null : <DiagnosticsDetails items={[`Assisted quote intake session ${uiTraceId}`]} />}
+      </div>
+
+      <p className="field-help">
+        Capture the borrower, credit, loan, property, income, product preference, lock timing, and business intent facts needed
+        for a pricing scenario. The workbench records facts only and does not infer rates, thresholds, or eligibility decisions.
+      </p>
+      <LaunchBanner state={launchState} onRetry={onRetry} />
+      <ScenarioIntakeMetadataPanel state={metadataState} />
+      <QuickQuoteStatePanel state={quickQuoteState} />
+
+      <form className="intake-form quick-quote-form" onSubmit={onSubmit} noValidate>
+        <div className="quick-quote-minimal" aria-label="Borrower and scenario basics">
+          <div className="field-group">
+            <label htmlFor="borrowerName">Borrower name <span aria-hidden="true">*</span></label>
+            <input
+              ref={borrowerNameRef}
+              id="borrowerName"
+              name="borrowerName"
+              value={intake.borrowerName}
+              aria-invalid={Boolean(errors.borrowerName)}
+              aria-describedby={errors.borrowerName ? 'borrowerName-error' : undefined}
+              onChange={(event) => onChange('borrowerName', event.target.value)}
+            />
+            {errors.borrowerName ? <p id="borrowerName-error" role="alert">{errors.borrowerName}</p> : null}
+          </div>
+
+          <div className="field-group">
+            <label htmlFor="borrowerRole">Borrower role</label>
+            <input id="borrowerRole" name="borrowerRole" value={intake.borrowerRole} onChange={(event) => onChange('borrowerRole', event.target.value)} />
+          </div>
+
+          <div className="field-group">
+            <label htmlFor="coBorrowerName">Co-borrower name</label>
+            <input id="coBorrowerName" name="coBorrowerName" value={intake.coBorrowerName} onChange={(event) => onChange('coBorrowerName', event.target.value)} />
+          </div>
+
+          <div className="field-group">
+            <label htmlFor="coBorrowerRole">Co-borrower role</label>
+            <input id="coBorrowerRole" name="coBorrowerRole" value={intake.coBorrowerRole} onChange={(event) => onChange('coBorrowerRole', event.target.value)} />
+          </div>
+
+          <div className="field-group">
+            <label htmlFor="contactEmail">Contact email <span aria-hidden="true">*</span></label>
+            <input
+              ref={contactEmailRef}
+              id="contactEmail"
+              name="contactEmail"
+              type="email"
+              value={intake.contactEmail}
+              aria-invalid={Boolean(errors.contactEmail)}
+              aria-describedby={errors.contactEmail ? 'contactEmail-error' : undefined}
+              onChange={(event) => onChange('contactEmail', event.target.value)}
+            />
+            {errors.contactEmail ? <p id="contactEmail-error" role="alert">{errors.contactEmail}</p> : null}
+          </div>
+
+          <div className="field-group field-group--full">
+            <label htmlFor="quoteGoal">Quote goal <span aria-hidden="true">*</span></label>
+            <textarea
+              ref={quoteGoalRef}
+              id="quoteGoal"
+              name="quoteGoal"
+              value={intake.quoteGoal}
+              aria-invalid={Boolean(errors.quoteGoal)}
+              aria-describedby={errors.quoteGoal ? 'quoteGoal-error' : 'quoteGoal-help'}
+              onChange={(event) => onChange('quoteGoal', event.target.value)}
+            />
+            <p id="quoteGoal-help" className="field-help">Describe what the borrower wants to compare without entering pricing assumptions.</p>
+            {errors.quoteGoal ? <p id="quoteGoal-error" role="alert">{errors.quoteGoal}</p> : null}
+          </div>
+
+          <div className="field-group field-group--full">
+            <label htmlFor="scenarioIntent">Scenario or business intent</label>
+            <textarea id="scenarioIntent" name="scenarioIntent" value={intake.scenarioIntent} aria-describedby="scenarioIntent-help" onChange={(event) => onChange('scenarioIntent', event.target.value)} />
+            <p id="scenarioIntent-help" className="field-help">Examples: purchase quick quote, rate/term refinance, cash-out refinance, lock-period comparison, product comparison, or no-eligible-product review.</p>
+          </div>
+        </div>
+
+        <fieldset className="quick-quote-section">
+          <legend>Credit readiness</legend>
+          <div className="quick-quote-minimal">
+            <MortgageInput id="creditScore" label="Representative credit score" value={intake.creditScore} error={errors.creditScore} type="number" onChange={onChange} />
+            <MortgageInput id="creditScoreSource" label="Credit score source" value={intake.creditScoreSource} error={errors.creditScoreSource} onChange={onChange} />
+            <MortgageInput id="creditReportDate" label="Credit report date" value={intake.creditReportDate} error={errors.creditReportDate} onChange={onChange} />
+            <MortgageInput id="creditReadiness" label="Credit readiness notes" value={intake.creditReadiness} error={errors.creditReadiness} onChange={onChange} />
+          </div>
+        </fieldset>
+
+        <fieldset className="quick-quote-section">
+          <legend>Loan request</legend>
+          <div className="quick-quote-minimal">
+            <MortgageInput id="loanPurpose" label="Loan purpose" value={intake.loanPurpose} error={errors.loanPurpose} onChange={onChange} />
+            <MortgageInput id="loanAmount" label="Loan amount" value={intake.loanAmount} error={errors.loanAmount} type="number" onChange={onChange} />
+            <MortgageInput id="purchasePriceOrValue" label="Purchase price or estimated value" value={intake.purchasePriceOrValue} error={errors.purchasePriceOrValue} type="number" onChange={onChange} />
+            <MortgageInput id="downPaymentOrEquity" label="Down payment or equity" value={intake.downPaymentOrEquity} error={errors.downPaymentOrEquity} type="number" onChange={onChange} />
+          </div>
+        </fieldset>
+
+        <fieldset className="quick-quote-section">
+          <legend>Property</legend>
+          <div className="quick-quote-minimal">
+            <MortgageInput id="occupancyType" label="Occupancy" value={intake.occupancyType} error={errors.occupancyType} onChange={onChange} />
+            <MortgageInput id="propertyType" label="Property type" value={intake.propertyType} error={errors.propertyType} onChange={onChange} />
+            <MortgageInput id="propertyState" label="Property state" value={intake.propertyState} error={errors.propertyState} onChange={onChange} />
+            <MortgageInput id="propertyCounty" label="Property county" value={intake.propertyCounty} error={errors.propertyCounty} onChange={onChange} />
+            <MortgageInput id="propertyZip" label="Property ZIP" value={intake.propertyZip} error={errors.propertyZip} onChange={onChange} />
+            <MortgageInput id="unitCount" label="Unit count" value={intake.unitCount} error={errors.unitCount} type="number" onChange={onChange} />
+          </div>
+        </fieldset>
+
+        <fieldset className="quick-quote-section">
+          <legend>Income, debts, and assets</legend>
+          <div className="quick-quote-minimal">
+            <MortgageInput id="monthlyIncome" label="Monthly income" value={intake.monthlyIncome} error={errors.monthlyIncome} type="number" onChange={onChange} />
+            <MortgageInput id="incomeType" label="Employment or income type" value={intake.incomeType} error={errors.incomeType} onChange={onChange} />
+            <MortgageInput id="monthlyDebt" label="Monthly debt" value={intake.monthlyDebt} error={errors.monthlyDebt} type="number" onChange={onChange} />
+            <MortgageInput id="liquidAssets" label="Assets available" value={intake.liquidAssets} error={errors.liquidAssets} type="number" onChange={onChange} />
+            <MortgageInput id="reserves" label="Reserves" value={intake.reserves} error={errors.reserves} onChange={onChange} />
+          </div>
+        </fieldset>
+
+        <fieldset className="quick-quote-section">
+          <legend>Product and lock preferences</legend>
+          <div className="quick-quote-minimal">
+            <MortgageInput id="productFamily" label="Product family preference" value={intake.productFamily} error={errors.productFamily} onChange={onChange} />
+            <MortgageInput id="productPreference" label="Product preference notes" value={intake.productPreference} error={errors.productPreference} onChange={onChange} />
+            <MortgageInput id="requestedLockPeriods" label="Requested lock period" value={intake.requestedLockPeriods} error={errors.requestedLockPeriods} onChange={onChange} />
+          </div>
+        </fieldset>
+
+        {metadataState.kind === 'loaded' ? <AdvancedScenarioIntake metadata={metadataState.metadata} intake={intake} errors={errors} onChange={onChange} /> : null}
+
+        <button type="submit" disabled={launchState.kind === 'submitting'}>
+          {launchState.kind === 'submitting' ? 'Starting quote...' : 'Start quick quote'}
+        </button>
+      </form>
+    </section>
+  );
+}
+
+function QuickQuoteStatePanel({ state }: { state?: ProgressiveQuickQuoteState }) {
+  if (!state) return null;
+  return (
+    <div className="quick-quote-state" aria-label="Progressive quick quote setup status">
+      <div>
+        <strong>Minimal first step</strong>
+        <ChipList label="Minimal first step fields" values={state.minimalFirstStepFields.map(businessFacingText)} />
+      </div>
+      <div>
+        <strong>Progressive sections</strong>
+        <ChipList label="Progressive quick quote sections" values={state.progressiveSectionOrder.map(businessFacingText)} />
+      </div>
+      <div className="field-group--full">
+        <strong>Needed scenario facts and attention state</strong>
+        <p className="field-help">{businessFacingText(state.fallbackReason)}</p>
+        <ChipList label="Quote facts still needed" values={state.quoteServiceRequiredFacts.map(businessFacingText)} />
+        <ChipList label="Authoritative fact sources" values={state.backendOwnedFactSources.map(businessFacingText)} />
+        <ChipList label="Setup items needing attention" values={state.blockedByContracts.map(businessFacingText)} />
+      </div>
+    </div>
+  );
+}
+
+function MortgageInput({
+  id,
+  label,
+  value,
+  error,
+  type = 'text',
+  onChange,
+}: {
+  id: keyof BorrowerIntake;
+  label: string;
+  value: string;
+  error?: string;
+  type?: 'text' | 'number';
+  onChange: (field: keyof BorrowerIntake, value: string) => void;
+}) {
+  const errorId = `${id}-error`;
+  return (
+    <div className="field-group">
+      <label htmlFor={id}>{label}</label>
+      <input id={id} name={id} type={type} value={value} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} onChange={(event) => onChange(id, event.target.value)} />
+      {error ? <p id={errorId} role="alert">{error}</p> : null}
+    </div>
+  );
 }
 
 function WorkflowField({
@@ -715,8 +1034,8 @@ function DiagnosticsDetails({ items }: { items: string[] }) {
   if (!items.length) return null;
   return (
     <details className="trace-badge">
-      <summary>Technical details for support</summary>
-      <ul>{items.map((item) => <li key={item}>{item}</li>)}</ul>
+      <summary>Support details</summary>
+      <ul>{items.map((item) => <li key={item}>{businessFacingText(item)}</li>)}</ul>
     </details>
   );
 }
@@ -728,7 +1047,7 @@ function serviceReadinessText(value: string | null | undefined) {
 
 function ScenarioIntakeMetadataPanel({ state }: { state: MetadataState }) {
   if (state.kind === 'loading') {
-    return <p className="banner banner--info" role="status">Loading backend-owned scenario intake metadata...</p>;
+    return <p className="banner banner--info" role="status">Loading scenario intake guidance...</p>;
   }
 
   if (state.kind === 'unreachable') {
@@ -737,14 +1056,14 @@ function ScenarioIntakeMetadataPanel({ state }: { state: MetadataState }) {
 
   const metadata = state.metadata;
   return (
-    <div className="scenario-metadata-panel" aria-label="Scenario intake metadata evidence">
+    <div className="scenario-metadata-panel" aria-label="Scenario intake setup guidance">
       <dl className="status-grid">
-        <dt>Metadata source</dt><dd>{businessFacingText(metadata.dependencyStatus)}</dd>
-        <dt>Audit package</dt><dd>{businessFacingText(metadata.auditPackageId)}</dd>
-        <dt>Replay hash</dt><dd>{businessFacingText(metadata.replayHashRef)}</dd>
+        <dt>Setup source</dt><dd>{businessFacingText(metadata.dependencyStatus)}</dd>
+        <dt>Review package</dt><dd>{businessFacingText(metadata.auditPackageId)}</dd>
+        <dt>Review reference</dt><dd>{businessFacingText(metadata.replayHashRef)}</dd>
       </dl>
       <ChipList label="Decision-quality controls" values={metadata.decisionControls.map(businessFacingText)} />
-      <ChipList label="Scenario intake blockers" values={metadata.validationIssues.map((issue) => `${issue.severity}: ${issue.message}`)} />
+      <ChipList label="Scenario intake items needing attention" values={metadata.validationIssues.map((issue) => `${issue.severity}: ${issue.message}`).map(businessFacingText)} />
       <p className="field-help">{businessFacingText(metadata.fallbackReason)}</p>
     </div>
   );
@@ -763,7 +1082,7 @@ function AdvancedScenarioIntake({
 }) {
   return (
     <details className="advanced-intake" open>
-      <summary>Advanced scenario facts from backend metadata</summary>
+      <summary>Additional mortgage scenario facts</summary>
       <div className="advanced-intake__groups">
         {metadata.fieldGroups.map((group) => (
           <fieldset key={group.groupId} className="advanced-intake__group">
@@ -798,7 +1117,7 @@ function MetadataField({
       ) : (
         <input id={field.fieldId} type={field.dataType === 'email' ? 'email' : field.dataType === 'number' ? 'number' : 'text'} value={intake[field.fieldId]} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : helpId} onChange={(event) => onChange(field.fieldId, event.target.value)} />
       )}
-      <p id={helpId} className="field-help">{field.helpText} Source: {businessFacingText(field.sourceRef)}. Decision quality: {businessFacingText(field.decisionQuality)}.</p>
+      <p id={helpId} className="field-help">{businessFacingText(field.helpText)} Source: {businessFacingText(field.sourceRef)}. Readiness: {businessFacingText(field.decisionQuality)}.</p>
       <ChipList label={`${field.fieldId} validation messages`} values={field.validationMessages.map(businessFacingText)} />
       {error ? <p id={errorId} role="alert">{error}</p> : null}
     </div>
@@ -843,7 +1162,7 @@ function ProductCatalogManagerSection() {
         <p className="eyebrow">Catalog cockpit</p>
         <h2 id="product-catalog-title">Product catalog manager</h2>
         <p>
-          Review product drafts, domain lists, lifecycle controls, snapshots, events, and audit evidence from backend-owned
+          Review product drafts, domain lists, lifecycle controls, snapshots, events, and review evidence from configured catalog
           metadata. Publishing stays blocked when catalog contracts are unavailable instead of using UI-side product policy.
         </p>
       </section>
@@ -851,7 +1170,7 @@ function ProductCatalogManagerSection() {
       <section className="panel" aria-labelledby="product-catalog-manager-heading">
         <div className="panel-heading-row">
           <div>
-            <p className="eyebrow">Backend-owned catalog areas</p>
+            <p className="eyebrow">Configured catalog areas</p>
             <h2 id="product-catalog-manager-heading">Catalog sections and validation</h2>
           </div>
           <DiagnosticsDetails items={[`Workspace ${view.tenantContext}`, `Support reference: ${view.uiTraceId}`]} />
@@ -878,7 +1197,7 @@ function ProductCatalogManagerSection() {
         <div className="panel-heading-row">
           <div>
             <p className="eyebrow">Lifecycle and evidence</p>
-            <h2 id="catalog-lifecycle-heading">Approval, publish, rollback, snapshots, and audit</h2>
+            <h2 id="catalog-lifecycle-heading">Approval, publish, rollback, snapshots, and review history</h2>
           </div>
         </div>
         <div className="banner banner--blocked" role="alert">
@@ -891,7 +1210,7 @@ function ProductCatalogManagerSection() {
         </dl>
         <ChipList label="Lifecycle actions" values={view.lifecycle.actions.map(businessFacingText)} />
         <ChipList label="Snapshot and event references" values={view.lifecycle.snapshotRefs.map(businessFacingText)} />
-        <ChipList label="Audit and replay references" values={view.lifecycle.auditRefs.map(businessFacingText)} />
+        <ChipList label="Review and processing references" values={view.lifecycle.auditRefs.map(businessFacingText)} />
         <ChipList label="Catalog manager events" values={view.events.map(businessFacingText)} />
       </section>
     </>
@@ -903,9 +1222,9 @@ function CustomRuleEvidenceSection() {
 
   useEffect(() => {
     let active = true;
-    fetchCustomRuleEvidence()
-      .then((view) => {
-        if (active) setRuleState({ kind: 'loaded', view });
+    Promise.all([fetchCustomRuleEvidence(), fetchCustomRuleCalculationEvidence()])
+      .then(([view, calculationEvidence]) => {
+        if (active) setRuleState({ kind: 'loaded', view, calculationEvidence });
       })
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : 'Custom rule evidence is unavailable.';
@@ -917,28 +1236,61 @@ function CustomRuleEvidenceSection() {
   }, []);
 
   if (ruleState.kind === 'loading') {
-    return <section className="panel" aria-labelledby="custom-rules-heading"><h2 id="custom-rules-heading">Custom rule evidence</h2><p role="status">Loading custom rule evidence...</p></section>;
+    return (
+      <CustomRulesRouteShell>
+        <section className="panel" aria-labelledby="custom-rules-heading">
+          <h2 id="custom-rules-heading">Custom rule workbench loading state</h2>
+          <p role="status">Loading custom rule evidence from pricing-bff...</p>
+        </section>
+      </CustomRulesRouteShell>
+    );
   }
 
   if (ruleState.kind === 'unreachable') {
     return (
-      <section className="panel" aria-labelledby="custom-rules-heading">
-        <h2 id="custom-rules-heading">Custom rule evidence</h2>
-        <div className="banner banner--blocked" role="alert">{ruleState.message}</div>
-      </section>
+      <CustomRulesRouteShell>
+        <section className="panel" aria-labelledby="custom-rules-heading">
+          <h2 id="custom-rules-heading">Custom rule workbench blocked state</h2>
+          <div className="banner banner--blocked" role="alert">
+            <strong>Custom rules unavailable</strong>
+            <span>{ruleState.message}</span>
+            <span>Backend contracts are not available, so the shell is not rendering field capture, blockers, or evidence rows.</span>
+          </div>
+        </section>
+      </CustomRulesRouteShell>
     );
   }
 
   const view = ruleState.view;
+  const calculationEvidence = ruleState.calculationEvidence;
+  const typedFactBlockers = view.fields.filter((field) => field.requiredForRules && blockingDecisionQualities.has(field.decisionQuality.toUpperCase()));
+  const estimatedFacts = view.fields.filter((field) => estimatedDecisionQualities.has(field.decisionQuality.toUpperCase()));
   return (
-    <>
+    <CustomRulesRouteShell diagnostics={[`Support reference: ${view.uiTraceId}`, `Workspace ${view.tenantContext}`]} showPanelNav>
       <section className="hero" aria-labelledby="custom-rules-title">
-        <p className="eyebrow">Custom rules · PII-21-S01</p>
+        <p className="eyebrow">Custom rules · PII-21-S06</p>
         <h2 id="custom-rules-title">Custom field and calculation evidence</h2>
         <p>
-          Review backend-supplied field metadata, decision-quality blockers, matched and skipped rules, and replay references.
+          Review backend-supplied field metadata, decision-quality blockers, matched and skipped rules, and processing references.
           The workbench displays configured evidence only; it does not calculate prices or infer mortgage policy.
         </p>
+      </section>
+
+      <section className="panel" aria-labelledby="custom-rules-capture-heading">
+        <div className="panel-heading-row">
+          <div>
+            <p className="eyebrow">Field capture</p>
+            <h2 id="custom-rules-capture-heading">Configured custom rule fields</h2>
+          </div>
+        </div>
+        <p className="field-help">Fields are displayed only when pricing-bff supplies metadata. Inputs remain disabled until the configured save contract is available.</p>
+        {view.fields.length === 0 ? (
+          <div className="banner banner--info" role="status">No backend field metadata is available yet; the shell will not render placeholder custom-rule fields.</div>
+        ) : (
+          <div className="custom-rules-field-grid" role="group" aria-label="Custom rule field capture controls">
+            {view.fields.map((field) => <CustomRuleCaptureField key={field.fieldId} field={field} />)}
+          </div>
+        )}
       </section>
 
       <section className="panel" aria-labelledby="custom-rules-heading">
@@ -956,6 +1308,9 @@ function CustomRuleEvidenceSection() {
           <span>Setup status: {serviceReadinessText(view.dependencyStatus)}</span>
           <ChipList label="Commit blockers" values={view.commitBlockers.map(businessFacingText)} />
         </div>
+
+        {typedFactBlockers.length > 0 ? <TypedFactBlockerDetails fields={typedFactBlockers} rules={view.evidence.skippedRules} /> : null}
+        {estimatedFacts.length > 0 ? <EstimatedFactWarning fields={estimatedFacts} /> : null}
 
         <div className="quote-table" role="table" aria-label="Custom field metadata">
           <div role="row" className="quote-table__row quote-table__row--head">
@@ -980,14 +1335,31 @@ function CustomRuleEvidenceSection() {
       </section>
 
       <section className="panel" aria-labelledby="calculation-evidence-heading">
-        <h2 id="calculation-evidence-heading">Calculation evidence panel</h2>
+        <div className="panel-heading-row">
+          <div>
+            <p className="eyebrow">Backend rule ledger</p>
+            <h2 id="calculation-evidence-heading">Calculation evidence panel</h2>
+          </div>
+          <DiagnosticsDetails items={[`Support reference: ${calculationEvidence.uiTraceId}`, `Quote ref: ${calculationEvidence.quoteId}`]} />
+        </div>
+        <div className={calculationEvidence.resultStatus.toLowerCase().includes('blocked') ? 'banner banner--blocked' : 'banner banner--info'} role={calculationEvidence.resultStatus.toLowerCase().includes('blocked') ? 'alert' : 'status'}>
+          <strong>{businessFacingText(calculationEvidence.resultStatus)}</strong>
+          <span>Setup status: {serviceReadinessText(calculationEvidence.dependencyStatus)}</span>
+          <span>Blocked evidence rows keep backend refusal semantics and are not recalculated in the browser.</span>
+          <RuleEvidenceErrors errors={calculationEvidence.errors} />
+        </div>
         <dl className="status-grid">
+          <dt>Quote evidence ref</dt><dd><code>{calculationEvidence.quoteId}</code></dd>
           <dt>Precision</dt><dd>{businessFacingText(view.evidence.precision)}</dd>
-          <dt>Replay hash</dt><dd>{businessFacingText(view.evidence.replayHashRef)}</dd>
+          <dt>Result status</dt><dd>{businessFacingText(calculationEvidence.resultStatus)}</dd>
         </dl>
-        <ChipList label="Reason codes" values={view.evidence.reasonCodes.map(businessFacingText)} />
-        <RuleEvidenceTable label="Matched rules" rows={view.evidence.matchedRules} />
-        <RuleEvidenceTable label="Skipped rules" rows={view.evidence.skippedRules} />
+        <CopyableRefList label="Review references" values={calculationEvidence.auditRefs} />
+        <CopyableRefList label="Processing record references" values={calculationEvidence.replayHashRefs.length > 0 ? calculationEvidence.replayHashRefs : [view.evidence.replayHashRef]} />
+        <ChipList label="Reason codes" values={calculationEvidence.reasonCodes.map(businessFacingText)} />
+        <RuleEvidenceTable label="Matched rules" rows={calculationEvidence.matchedRules} />
+        <RuleEvidenceTable label="Skipped rules" rows={calculationEvidence.skippedRules} />
+        <RuleEvidenceTable label="Blocked rules" rows={calculationEvidence.blockedRules} blocked />
+        <CalculationStepList steps={calculationEvidence.calculationSteps} />
       </section>
 
       <section className="panel" aria-labelledby="design-evidence-heading">
@@ -998,7 +1370,254 @@ function CustomRuleEvidenceSection() {
           <ChipList label="Safe design evidence options" values={view.designEvidence.safeOptions} />
         </div>
       </section>
+    </CustomRulesRouteShell>
+  );
+}
+
+function CustomRulesRouteShell({ children, diagnostics = [], showPanelNav = false }: { children: ReactNode; diagnostics?: string[]; showPanelNav?: boolean }) {
+  return (
+    <div className="custom-rules-shell" aria-labelledby="custom-rules-shell-heading">
+      <section className="module-rail custom-rules-route-shell" aria-labelledby="custom-rules-shell-heading">
+        <div className="module-rail__copy">
+          <p className="eyebrow">Custom rules workspace</p>
+          <h2 id="custom-rules-shell-heading">Custom rules workbench</h2>
+          <p>
+            This screen composes field capture, decision attention items, and review panels through the existing workbench service connection.
+            If required setup is unavailable, the screen asks for configuration instead of inventing fields or calculation records.
+          </p>
+        </div>
+        {showPanelNav ? (
+          <nav className="custom-rules-shell__nav" aria-label="Custom rules panel order">
+            <a href="#custom-rules-capture-heading">Field capture</a>
+            <a href="#custom-rules-heading">Decision attention items</a>
+            <a href="#calculation-evidence-heading">Review panels</a>
+            <a href="#design-evidence-heading">Design setup state</a>
+          </nav>
+        ) : null}
+        {diagnostics.length > 0 ? <DiagnosticsDetails items={diagnostics} /> : null}
+      </section>
+      {children}
+    </div>
+  );
+}
+
+function CustomRuleCaptureField({ field }: { field: CustomFieldMetadata }) {
+  const helpId = `${field.fieldId}-capture-help`;
+  return (
+    <div className="field-group custom-rules-field">
+      <label htmlFor={`${field.fieldId}-capture`}>{field.label}</label>
+      {field.dataType.toLowerCase() === 'textarea' ? (
+        <textarea id={`${field.fieldId}-capture`} value="" disabled aria-describedby={helpId} readOnly />
+      ) : (
+        <input id={`${field.fieldId}-capture`} value="" disabled aria-describedby={helpId} readOnly />
+      )}
+      <p id={helpId} className="field-help">
+        {field.helpText} Source: {businessFacingText(field.sourceRef)}. Decision quality: {businessFacingText(field.decisionQuality)}.
+      </p>
+      <ChipList label={`${field.fieldId} allowed values`} values={field.allowedValues.map(businessFacingText)} />
+    </div>
+  );
+}
+
+function TypedFactBlockerDetails({ fields, rules }: { fields: CustomFieldMetadata[]; rules: RuleEvidenceRow[] }) {
+  return (
+    <details className="blocker-details" open>
+      <summary>Typed fact blocker details</summary>
+      <div className="quote-table" role="table" aria-label="Typed fact blocker details">
+        <div role="row" className="quote-table__row quote-table__row--head">
+          <span role="columnheader">Field ID</span>
+          <span role="columnheader">Decision quality</span>
+          <span role="columnheader">Source refs</span>
+          <span role="columnheader">Recovery owner</span>
+          <span role="columnheader">Rule refs</span>
+        </div>
+        {fields.map((field) => (
+          <div key={field.fieldId} role="row" className="quote-table__row">
+            <span role="cell"><strong>{businessFacingText(field.fieldId)}</strong></span>
+            <span role="cell">{businessFacingText(field.decisionQuality)}</span>
+            <span role="cell"><ChipList label={`${field.fieldId} source references`} values={sourceReferencesForField(field).map(businessFacingText)} /></span>
+            <span role="cell">{businessFacingText(recoveryOwnerForField(field))}</span>
+            <span role="cell"><ChipList label={`${field.fieldId} blocking rules`} values={ruleRefsForField(field.fieldId, rules).map(businessFacingText)} /></span>
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function EstimatedFactWarning({ fields }: { fields: CustomFieldMetadata[] }) {
+  return (
+    <div className="banner banner--info" role="status">
+      <strong>Estimated typed fact evidence</strong>
+      <span>Estimated values stay labeled as ESTIMATED and are not displayed as confirmed facts.</span>
+      <ChipList label="Estimated fields" values={fields.map((field) => businessFacingText(`${field.fieldId}: ${field.decisionQuality}`))} />
+    </div>
+  );
+}
+
+function sourceReferencesForField(field: CustomFieldMetadata) {
+  const references = field.sourceRefs && field.sourceRefs.length > 0 ? field.sourceRefs : [field.sourceRef];
+  return references.filter(Boolean);
+}
+
+function recoveryOwnerForField(field: CustomFieldMetadata) {
+  return field.recoveryOwner || field.sourceRef;
+}
+
+function ruleRefsForField(fieldId: string, rules: RuleEvidenceRow[]) {
+  const refs = rules.filter((rule) => rule.factRefs.includes(fieldId)).map((rule) => rule.ruleRef);
+  return refs.length > 0 ? refs : ['No backend rule reference supplied'];
+}
+
+function RuleEvidenceErrors({ errors }: { errors: CustomRuleUiError[] }) {
+  if (errors.length === 0) return null;
+  return (
+    <ul className="evidence-error-list" aria-label="Backend refusal semantics">
+      {errors.map((error) => (
+        <li key={`${error.code}-${error.sourceService}`}>
+          <code>{error.code}</code> · <code>{error.sourceService}</code> · {error.message}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function CopyableRefList({ label, values }: { label: string; values: string[] }) {
+  if (values.length === 0) return null;
+  return (
+    <div className="copyable-ref-list" aria-label={label}>
+      <strong>{label}</strong>
+      <ul>
+        {values.map((value) => <li key={value}><code>{value}</code></li>)}
+      </ul>
+    </div>
+  );
+}
+
+function CalculationStepList({ steps }: { steps: CalculationStepEvidence[] }) {
+  if (steps.length === 0) return null;
+  return (
+    <div className="module-rail__grid" role="list" aria-label="Calculation ledger steps">
+      {steps.map((step) => (
+        <article key={step.stepRef} className={step.status.toLowerCase().includes('blocked') ? 'module-card evidence-card--blocked' : 'module-card'} role="listitem">
+          <p className="module-card__route"><code>{step.stepRef}</code></p>
+          <strong className="module-card__title">{businessFacingText(step.status)}</strong>
+          <p>{step.summary}</p>
+          <dl>
+            <dt>Source</dt><dd><code>{step.sourceService}</code></dd>
+            <dt>Evidence ref</dt><dd><code>{step.evidenceRef}</code></dd>
+            <dt>Ledger step ref</dt><dd><code>{step.ledgerStepRef ?? step.stepRef}</code></dd>
+            <dt>Precision</dt><dd>{step.precision ?? 'Backend did not supply precision metadata'}</dd>
+            <dt>Rounding</dt><dd>{step.rounding ?? 'Backend did not supply rounding metadata'}</dd>
+            <dt>Units</dt><dd>{step.units ?? 'Backend did not supply units metadata'}</dd>
+          </dl>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function ExceptionConcessionWorkbenchSection() {
+  const [exceptionState, setExceptionState] = useState<ExceptionConcessionWorkbenchState>({ kind: 'loading' });
+
+  useEffect(() => {
+    let active = true;
+    fetchExceptionConcessionWorkbench(tenantBoundaryPlaceholder)
+      .then((view) => {
+        if (active) setExceptionState({ kind: 'loaded', view });
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : 'Exception concession workbench is unavailable.';
+        if (active) setExceptionState({ kind: 'unreachable', message });
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  if (exceptionState.kind === 'loading') {
+    return <section className="panel" aria-labelledby="exception-concession-heading"><h2 id="exception-concession-heading">Exception concession workbench</h2><p role="status">Loading exception concession workbench...</p></section>;
+  }
+
+  if (exceptionState.kind === 'unreachable') {
+    return (
+      <section className="panel" aria-labelledby="exception-concession-heading">
+        <h2 id="exception-concession-heading">Exception concession workbench</h2>
+        <div className="banner banner--blocked" role="alert">{exceptionState.message}</div>
+      </section>
+    );
+  }
+
+  const view = exceptionState.view;
+  return (
+    <>
+      <section className="hero hero--admin" aria-labelledby="exception-concession-title">
+        <p className="eyebrow">Exception service · PII-22-S18</p>
+        <h2 id="exception-concession-title">Concession and exception operating cockpit</h2>
+        <p>
+          Review concession requests, eligibility exceptions, authority routing, mutation guard evidence, risk events, history,
+          processing records, and export references in one governed workbench. The UI displays connected service facts only and does not infer pricing policy.
+        </p>
+      </section>
+
+      <section className="panel" aria-labelledby="exception-concession-heading">
+        <div className="panel-heading-row">
+          <div>
+            <p className="eyebrow">Governed exception case</p>
+            <h2 id="exception-concession-heading">Workbench coverage</h2>
+          </div>
+          <DiagnosticsDetails items={[`Support reference: ${view.uiTraceId}`, `Processing record: ${view.replayHash}`, `Export package: ${view.exportManifestRef}`]} />
+        </div>
+        <div className="banner banner--blocked" role="alert">
+          <strong>{businessFacingText(view.status)}</strong>
+          <span>{businessFacingText(view.dependencyStatus)}</span>
+          <span>{businessFacingText(view.fallbackReason)}</span>
+        </div>
+        <div className="offer-list" role="list" aria-label="Exception concession workbench sections">
+          {view.sections.map((section) => <ExceptionConcessionSectionCard key={section.sectionId} section={section} />)}
+        </div>
+      </section>
+
+      <section className="panel" aria-labelledby="manual-mutation-guard-heading">
+        <h2 id="manual-mutation-guard-heading">Manual price mutation guard</h2>
+        <div className="banner banner--blocked" role="alert">
+          <strong>{businessFacingText(view.manualPriceMutationGuard.decision)}</strong>
+          <span>Commit disabled: {view.manualPriceMutationGuard.commitDisabled ? 'yes' : 'no'}</span>
+          <span>Escalation path: {businessFacingText(view.manualPriceMutationGuard.escalationPath)}</span>
+        </div>
+        <button type="button" disabled={view.manualPriceMutationGuard.commitDisabled} aria-describedby="manual-mutation-guard-reasons">Commit manual price mutation</button>
+        <div id="manual-mutation-guard-reasons">
+          <ChipList label="Backend denial reason codes" values={view.manualPriceMutationGuard.reasonCodes.map(businessFacingText)} />
+          <ChipList label="Guard review and processing references" values={[view.manualPriceMutationGuard.auditRef, view.manualPriceMutationGuard.replayHash].map(businessFacingText)} />
+        </div>
+      </section>
+
+      <section className="panel" aria-labelledby="exception-evidence-heading">
+        <h2 id="exception-evidence-heading">Cross-service references, versions, review records, processing records, and export</h2>
+        <ChipList label="Cross-service refs" values={view.crossServiceRefs.map(businessFacingText)} />
+        <ChipList label="Version refs" values={view.versionRefs.map(businessFacingText)} />
+        <ChipList label="Review references" values={view.auditRefs.map(businessFacingText)} />
+        <ChipList label="Workbench blockers" values={view.blockers.map(businessFacingText)} />
+        <ChipList label="Workbench events" values={view.events.map(businessFacingText)} />
+      </section>
     </>
+  );
+}
+
+function ExceptionConcessionSectionCard({ section }: { section: ExceptionConcessionSection }) {
+  return (
+    <article className="offer-card" role="listitem" aria-label={`${section.label} section`}>
+      <div className="offer-card__header">
+        <div>
+          <h3>{businessFacingText(section.label)}</h3>
+          <p>{businessFacingText(section.sectionId)}</p>
+        </div>
+        <strong>{businessFacingText(section.status)}</strong>
+      </div>
+      <p>{businessFacingText(section.summary)}</p>
+      <ChipList label={`${section.label} backend refs`} values={section.backendRefs.map(businessFacingText)} />
+      <ChipList label={`${section.label} review references`} values={section.auditRefs.map(businessFacingText)} />
+    </article>
   );
 }
 
@@ -1012,7 +1631,7 @@ function AuditReplayWorkbenchSection() {
         if (active) setAuditState({ kind: 'loaded', view });
       })
       .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'Audit replay workbench is unavailable.';
+        const message = error instanceof Error ? error.message : 'Review record workbench is unavailable.';
         if (active) setAuditState({ kind: 'unreachable', message });
       });
     return () => {
@@ -1021,13 +1640,13 @@ function AuditReplayWorkbenchSection() {
   }, []);
 
   if (auditState.kind === 'loading') {
-    return <section className="panel" aria-labelledby="audit-replay-heading"><h2 id="audit-replay-heading">Audit replay evidence workbench</h2><p role="status">Loading audit replay evidence...</p></section>;
+    return <section className="panel" aria-labelledby="audit-replay-heading"><h2 id="audit-replay-heading">Review record workbench</h2><p role="status">Loading review records...</p></section>;
   }
 
   if (auditState.kind === 'unreachable') {
     return (
       <section className="panel" aria-labelledby="audit-replay-heading">
-        <h2 id="audit-replay-heading">Audit replay evidence workbench</h2>
+        <h2 id="audit-replay-heading">Review record workbench</h2>
         <div className="banner banner--blocked" role="alert">{auditState.message}</div>
       </section>
     );
@@ -1037,11 +1656,11 @@ function AuditReplayWorkbenchSection() {
   return (
     <>
       <section className="hero" aria-labelledby="audit-replay-title">
-        <p className="eyebrow">Audit replay · PII-22-S10</p>
-        <h2 id="audit-replay-title">Audit replay evidence workbench</h2>
+        <p className="eyebrow">Review records · PII-22-S10</p>
+        <h2 id="audit-replay-title">Review record workbench</h2>
         <p>
-          Search audit records, verify integrity, inspect quote and lock replay blockers, and keep evidence export decisions
-          backend-owned. The UI displays refs and states only; it does not infer pricing, retention, or compliance rules.
+          Search review records, verify integrity, inspect quote and lock processing blockers, and keep evidence export decisions
+          service-governed. The UI displays refs and states only; it does not infer pricing, retention, or compliance rules.
         </p>
       </section>
 
@@ -1049,21 +1668,21 @@ function AuditReplayWorkbenchSection() {
         <div className="panel-heading-row">
           <div>
             <p className="eyebrow">Search and integrity</p>
-            <h2 id="audit-replay-heading">Audit record search results</h2>
+            <h2 id="audit-replay-heading">Review record search results</h2>
           </div>
           <DiagnosticsDetails items={[`Support reference: ${view.uiTraceId}`, `Workspace ${view.tenantContext}`]} />
         </div>
         <div className="banner banner--blocked" role="alert">
-          <strong>Audit replay setup required</strong>
+          <strong>Review record setup required</strong>
           <span>{businessFacingText(view.fallbackReason)}</span>
           <span>Setup status: {serviceReadinessText(view.dependencyStatus)}</span>
-          <ChipList label="Audit replay blockers" values={view.blockers.map(businessFacingText)} />
+          <ChipList label="Review record blockers" values={view.blockers.map(businessFacingText)} />
         </div>
-        <div className="quote-table" role="table" aria-label="Audit replay records">
+        <div className="quote-table" role="table" aria-label="Review processing records">
           <div role="row" className="quote-table__row quote-table__row--head">
             <span role="columnheader">Event</span>
             <span role="columnheader">Subject</span>
-            <span role="columnheader">Hash integrity</span>
+            <span role="columnheader">Processing check</span>
             <span role="columnheader">Redaction and retention</span>
             <span role="columnheader">Export eligibility</span>
           </div>
@@ -1072,8 +1691,8 @@ function AuditReplayWorkbenchSection() {
       </section>
 
       <section className="panel" aria-labelledby="audit-replay-runs-heading">
-        <h2 id="audit-replay-runs-heading">Quote and lock replay diffs</h2>
-        <div className="module-rail__grid" role="list" aria-label="Replay run summaries">
+        <h2 id="audit-replay-runs-heading">Quote and lock processing comparisons</h2>
+        <div className="module-rail__grid" role="list" aria-label="Processing run summaries">
           {view.replayRuns.map((run) => <AuditReplayRunCard key={run.runId} run={run} />)}
         </div>
       </section>
@@ -1087,18 +1706,18 @@ function AuditReplayWorkbenchSection() {
           <dt>Retention until</dt><dd>{businessFacingText(view.exportSummary.retentionUntil)}</dd>
           <dt>Legal hold</dt><dd>{view.exportSummary.legalHold ? 'Active' : 'Not active'}</dd>
           <dt>Download eligible</dt><dd>{view.exportSummary.downloadEligible ? 'Yes' : 'No'}</dd>
-          <dt>Manifest hash</dt><dd>{businessFacingText(view.exportSummary.manifestHash)}</dd>
+          <dt>Export package record</dt><dd>{businessFacingText(view.exportSummary.manifestHash)}</dd>
         </dl>
         <button type="button" disabled={!view.exportSummary.downloadEligible} aria-describedby="audit-export-blockers">Download evidence export</button>
         <div id="audit-export-blockers">
           <ChipList label="Export blockers" values={view.exportSummary.blockers.map(businessFacingText)} />
-          <ChipList label="Audit replay events" values={view.events.map(businessFacingText)} />
+          <ChipList label="Review record events" values={view.events.map(businessFacingText)} />
         </div>
       </section>
 
       <section className="panel" aria-labelledby="audit-contract-heading">
         <h2 id="audit-contract-heading">Backend contract registry</h2>
-        <div className="quote-table" role="table" aria-label="Audit replay contract registry">
+        <div className="quote-table" role="table" aria-label="Review record contract registry">
           <div role="row" className="quote-table__row quote-table__row--head">
             <span role="columnheader">Contract</span>
             <span role="columnheader">Route</span>
@@ -1122,7 +1741,7 @@ function AuditRecordEvidenceRow({ record }: { record: AuditReplayRecordSummary }
     <div role="row" className="quote-table__row">
       <span role="cell"><strong>{businessFacingText(record.eventId)}</strong><br /><span className="field-help">{businessFacingText(record.action)}</span></span>
       <span role="cell">{businessFacingText(record.subjectType)} · {businessFacingText(record.subjectId)}</span>
-      <span role="cell">{businessFacingText(record.hashIntegrity)}<ChipList label={`${record.eventId} evidence refs`} values={record.evidenceRefs.map(businessFacingText)} /></span>
+      <span role="cell">{businessFacingText(record.hashIntegrity)}<ChipList label={`${businessFacingText(record.eventId)} review references`} values={record.evidenceRefs.map(businessFacingText)} /></span>
       <span role="cell">{businessFacingText(record.redactionProfile)}<br />{businessFacingText(record.retentionState)}<br />Legal hold: {record.legalHold ? 'active' : 'not active'}</span>
       <span role="cell">{businessFacingText(record.exportEligibility)}</span>
     </div>
@@ -1133,10 +1752,10 @@ function AuditReplayRunCard({ run }: { run: AuditReplayRunSummary }) {
   return (
     <article className="module-card module-card--light" role="listitem">
       <p className="module-card__route">{businessFacingText(run.status)}</p>
-      <strong className="module-card__title">{businessFacingText(run.replayType)} replay for {businessFacingText(run.subjectId)}</strong>
+        <strong className="module-card__title">{businessFacingText(run.replayType)} processing review for {businessFacingText(run.subjectId)}</strong>
       <dl>
-        <dt>Original hash</dt><dd>{businessFacingText(run.originalHash)}</dd>
-        <dt>Replay hash</dt><dd>{businessFacingText(run.replayHash)}</dd>
+        <dt>Original processing record</dt><dd>{businessFacingText(run.originalHash)}</dd>
+        <dt>Updated processing record</dt><dd>{businessFacingText(run.replayHash)}</dd>
       </dl>
       <ChipList label={`${run.runId} diffs`} values={run.diffs.map(businessFacingText)} />
       <ChipList label={`${run.runId} version refs`} values={run.versionRefs.map(businessFacingText)} />
@@ -1183,7 +1802,7 @@ function TenantPlatformCoverageSection() {
         <p className="eyebrow">Platform · PII-22-S08</p>
         <h2 id="tenant-platform-title">Tenant platform coverage</h2>
         <p>
-          Review tenant context propagation, cache scoping, rate limiting, audit, event envelope, replay, and readiness
+          Review tenant context propagation, cache scoping, rate limiting, review records, delivery packages, processing records, and readiness
           evidence from configured services. The workbench shows references and blockers only; it does not expose secrets.
         </p>
       </section>
@@ -1203,11 +1822,11 @@ function TenantPlatformCoverageSection() {
         </div>
         <dl className="status-grid">
           <dt>Tenant id</dt><dd>{businessFacingText(view.trace.tenantIdRef)}</dd>
-          <dt>Correlation id</dt><dd>{businessFacingText(view.trace.correlationIdRef)}</dd>
-          <dt>Idempotency key</dt><dd>{businessFacingText(view.trace.idempotencyKeyRef)}</dd>
-          <dt>Event envelope</dt><dd>{businessFacingText(view.trace.eventEnvelopeRef)}</dd>
-          <dt>Audit reference</dt><dd>{businessFacingText(view.trace.auditRef)}</dd>
-          <dt>Replay hash</dt><dd>{businessFacingText(view.trace.replayHashRef)}</dd>
+          <dt>Support reference</dt><dd>{businessFacingText(view.trace.correlationIdRef)}</dd>
+          <dt>Request safety record</dt><dd>{businessFacingText(view.trace.idempotencyKeyRef)}</dd>
+          <dt>Delivery package</dt><dd>{businessFacingText(view.trace.eventEnvelopeRef)}</dd>
+          <dt>Review reference</dt><dd>{businessFacingText(view.trace.auditRef)}</dd>
+          <dt>Processing record</dt><dd>{businessFacingText(view.trace.replayHashRef)}</dd>
         </dl>
       </section>
 
@@ -1248,7 +1867,7 @@ function TenantPlatformControlCard({ control }: { control: TenantPlatformControl
   );
 }
 
-function RuleEvidenceTable({ label, rows }: { label: string; rows: RuleEvidenceRow[] }) {
+function RuleEvidenceTable({ label, rows, blocked = false }: { label: string; rows: (RuleEvidenceRow | RuleCalculationEvidenceRow)[]; blocked?: boolean }) {
   return (
     <div className="quote-table" role="table" aria-label={label}>
       <div role="row" className="quote-table__row quote-table__row--head">
@@ -1259,12 +1878,16 @@ function RuleEvidenceTable({ label, rows }: { label: string; rows: RuleEvidenceR
         <span role="columnheader">Facts</span>
       </div>
       {rows.map((row) => (
-        <div key={`${row.ruleRef}-${row.versionRef}-${row.reasonCode}`} role="row" className="quote-table__row">
-          <span role="cell">{businessFacingText(row.ruleRef)}</span>
-          <span role="cell">{businessFacingText(row.versionRef)}</span>
+        <div key={`${row.ruleRef}-${row.versionRef}-${row.reasonCode}`} role="row" className={blocked || row.outcome.toLowerCase().includes('blocked') ? 'quote-table__row quote-table__row--blocked' : 'quote-table__row'} aria-label={`${row.outcome} ${row.ruleRef}`}>
+          <span role="cell"><code>{row.ruleRef}</code></span>
+          <span role="cell"><code>{row.versionRef}</code></span>
           <span role="cell">{businessFacingText(row.outcome)}</span>
           <span role="cell">{businessFacingText(row.reasonCode)}</span>
-          <span role="cell"><ChipList label={`${row.ruleRef} fact references`} values={row.factRefs.map(businessFacingText)} /></span>
+          <div role="cell">
+            <CopyableRefList label={`${row.ruleRef} fact references`} values={row.factRefs} />
+            {'sourceService' in row ? <CopyableRefList label={`${row.ruleRef} review references`} values={row.auditRefs} /> : null}
+            {'sourceService' in row ? <CopyableRefList label={`${row.ruleRef} processing record references`} values={row.replayHashRefs} /> : null}
+          </div>
         </div>
       ))}
     </div>
@@ -1274,6 +1897,28 @@ function RuleEvidenceTable({ label, rows }: { label: string; rows: RuleEvidenceR
 function businessFacingText(value: string | number | null | undefined) {
   if (value === null || value === undefined || value === '') return 'Not provided';
   return String(value)
+    .replace(/NO_UPSTREAMS_CONFIGURED/gi, 'Connected services need setup')
+    .replace(/FALLBACK_STATIC_DEPENDENCIES_UNAVAILABLE/gi, 'Configuration details need setup')
+    .replace(/Support reference/gi, 'Support detail')
+    .replace(/validation_result\.json|validation_trace\.jsonl|module_evidence_index\.json|blocker_register\.json/gi, 'review package item')
+    .replace(/ui_trace_id|uiTraceId|trace id|trace refs?|correlation id/gi, 'support reference')
+    .replace(/deployment disabled|deployment-disabled/gi, 'live action unavailable')
+    .replace(/release readiness|release candidate readiness|release candidate/gi, 'business readiness')
+    .replace(/contract conformance blocker/gi, 'setup review item')
+    .replace(/evidence set completeness|completeness status/gi, 'review package completeness')
+    .replace(/quality owner signature required|release owner signature required|owner signature required/gi, 'owner review required')
+    .replace(/smoke check: configured result required|schema compatibility: blocked|config validation: pending|policy signatures: required/gi, 'setup review required')
+    .replace(/adapter boundary|adapter status|adapter/gi, 'service connection')
+    .replace(/backend[- ]owned/gi, 'authoritative')
+    .replace(/backend/gi, 'connected service')
+    .replace(/blockers?/gi, 'items needing attention')
+    .replace(/blocked/gi, 'needs attention')
+    .replace(/evidence/gi, 'review record')
+    .replace(/audit/gi, 'review')
+    .replace(/replay hash|replay/gi, 'review reference')
+    .replace(/hash/gi, 'processing record')
+    .replace(/integrity/gi, 'processing check')
+    .replace(/rounding trace/gi, 'rounding review')
     .replace(/BFF/gi, 'workbench service')
     .replace(/Configured upstream/gi, 'Configured service')
     .replace(/upstream/gi, 'configured service')
@@ -1293,6 +1938,7 @@ function businessFacingText(value: string | number | null | undefined) {
     .replace(/dependency status/gi, 'setup status')
     .replace(/route/gi, 'path')
     .replace(/contract/gi, 'setup')
+    .replace(/[_:./-]+/g, ' ')
     .replace(/_/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -1336,8 +1982,8 @@ function AdminGovernanceSection() {
         <p className="eyebrow">Admin · AG-S01 / AG-S07</p>
         <h2 id="admin-title">Admin governance and readiness controls</h2>
         <p>
-          Review guidance updates, flag conflicts, market guidance completeness, change approvals, release readiness,
-          incidents, and audit evidence in one guided board. Release actions stay disabled while configured governance
+          Review guidance updates, flag conflicts, market guidance completeness, change approvals, business readiness,
+          incidents, and review records in one guided board. Release actions stay disabled while configured governance
           setup and open decisions are unresolved.
         </p>
       </section>
@@ -1369,7 +2015,7 @@ function AdminGovernanceSection() {
               <span role="cell">{businessFacingText(descriptor.type)}</span>
               <span role="cell"><ChipList label={`${descriptor.stableId} allowed operators`} values={descriptor.allowedOperators.map(businessFacingText)} /></span>
               <span role="cell"><ChipList label={`${descriptor.stableId} value sources`} values={descriptor.valueSources.map(businessFacingText)} /></span>
-              <span role="cell">{businessFacingText(descriptor.versionRef)}<br />{businessFacingText(descriptor.decisionQualityRequirement)}<ChipList label={`${descriptor.stableId} validation messages`} values={descriptor.validationMessages.map(businessFacingText)} /></span>
+              <span role="cell">{descriptor.versionRef}<br />{businessFacingText(descriptor.decisionQualityRequirement)}<ChipList label={`${descriptor.stableId} validation messages`} values={descriptor.validationMessages.map(businessFacingText)} /></span>
             </div>
           ))}
         </div>
@@ -1414,8 +2060,8 @@ function AdminGovernanceSection() {
         <h2 id="config-review-heading">Pending config review impact</h2>
         <div className="banner banner--blocked" role="alert">
           <strong>{view.pendingReview.reviewId} · {businessFacingText(view.pendingReview.state)}</strong>
-          <span>Simulation, approval, publish, rollback, audit, and consumer impact stay visible from backend-owned refs.</span>
-          <span>Audit record: {businessFacingText(view.pendingReview.auditRef)}</span>
+          <span>Simulation, approval, publish, rollback, review, and consumer impact stay visible from connected service records.</span>
+          <span>Review record: {businessFacingText(view.pendingReview.auditRef)}</span>
         </div>
         <dl className="status-grid">
           <dt>Simulation</dt><dd>{view.pendingReview.simulationVisible ? 'Visible' : 'Blocked'}</dd>
@@ -1431,7 +2077,7 @@ function AdminGovernanceSection() {
         <h2 id="dynamic-rule-evidence-heading">Dynamic rule evidence</h2>
         <dl className="status-grid">
           <dt>Precision metadata</dt><dd>{businessFacingText(view.dynamicRuleEvidence.precisionMetadataRef)}</dd>
-          <dt>Replay hash</dt><dd>{businessFacingText(view.dynamicRuleEvidence.replayHashRef)}</dd>
+          <dt>Processing record</dt><dd>{businessFacingText(view.dynamicRuleEvidence.replayHashRef)}</dd>
         </dl>
         <ChipList label="Action outputs" values={view.dynamicRuleEvidence.actionOutputs.map(businessFacingText)} />
         <ChipList label="Fact references" values={view.dynamicRuleEvidence.factRefs.map(businessFacingText)} />
@@ -1459,7 +2105,7 @@ function AdminGovernanceSection() {
             <span role="columnheader">Version</span>
             <span role="columnheader">Status</span>
             <span role="columnheader">Owner</span>
-            <span role="columnheader">Hash</span>
+            <span role="columnheader">Record</span>
             <span role="columnheader">Lineage</span>
           </div>
           {view.policies.map((policy) => (
@@ -1467,7 +2113,7 @@ function AdminGovernanceSection() {
               <span role="cell">{policy.versionId}</span>
               <span role="cell">{policy.status}</span>
               <span role="cell">{policy.owner}</span>
-              <span role="cell">{policy.hashSignature}</span>
+              <span role="cell">{businessFacingText(policy.hashSignature)}</span>
               <span role="cell">previous {policy.parentVersionId}</span>
             </div>
           ))}
@@ -1505,7 +2151,7 @@ function AdminGovernanceSection() {
       </section>
 
       <section className="panel" aria-labelledby="drift-incident-heading">
-        <h2 id="drift-incident-heading">Change alerts, incidents, rollback, and audit history</h2>
+        <h2 id="drift-incident-heading">Change alerts, incidents, rollback, and review history</h2>
         {view.driftAlerts.map((alert) => (
           <div key={alert.alertId} className="banner banner--blocked" role="alert">
             <strong>{alert.alertId} · {alert.severity}</strong>
@@ -1516,13 +2162,13 @@ function AdminGovernanceSection() {
         <ul className="offer-list" aria-label="Admin incidents">
           {view.incidents.map((incident) => <AdminIncidentCard key={incident.incidentId} incident={incident} />)}
         </ul>
-        <div className="quote-table" role="table" aria-label="Change audit history">
+        <div className="quote-table" role="table" aria-label="Change review history">
           <div role="row" className="quote-table__row quote-table__row--head">
             <span role="columnheader">Record</span>
             <span role="columnheader">Actor</span>
             <span role="columnheader">Field</span>
             <span role="columnheader">Policy</span>
-            <span role="columnheader">Audit ref</span>
+            <span role="columnheader">Review reference</span>
           </div>
           {view.overrideLedger.map((entry) => (
             <div key={entry.ledgerId} role="row" className="quote-table__row">
@@ -1530,12 +2176,117 @@ function AdminGovernanceSection() {
               <span role="cell">{entry.actor}</span>
               <span role="cell">{entry.fieldPath}</span>
               <span role="cell">{entry.policyRef}</span>
-              <span role="cell">{entry.auditRef}</span>
+              <span role="cell">{businessFacingText(entry.auditRef)}</span>
             </div>
           ))}
         </div>
       </section>
     </>
+  );
+}
+
+function MlAdvisoryInsightsSection() {
+  const [insightsState, setInsightsState] = useState<MlAdvisoryInsightsState>({ kind: 'loading' });
+
+  useEffect(() => {
+    let active = true;
+    fetchMlAdvisoryInsights()
+      .then((view) => {
+        if (active) setInsightsState({ kind: 'loaded', view });
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : 'ML advisory insights are unavailable.';
+        if (active) setInsightsState({ kind: 'unreachable', message });
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  if (insightsState.kind === 'loading') {
+    return <section className="panel" aria-labelledby="ml-advisory-heading"><h2 id="ml-advisory-heading">ML advisory insights cockpit</h2><p role="status">Loading ML advisory insights...</p></section>;
+  }
+
+  if (insightsState.kind === 'unreachable') {
+    return (
+      <section className="panel" aria-labelledby="ml-advisory-heading">
+        <h2 id="ml-advisory-heading">ML advisory insights cockpit</h2>
+        <div className="banner banner--blocked" role="alert">{insightsState.message}</div>
+      </section>
+    );
+  }
+
+  const view = insightsState.view;
+  return (
+    <>
+      <section className="hero" aria-labelledby="ml-advisory-title">
+        <p className="eyebrow">ML advisory · PII-22-S14</p>
+        <h2 id="ml-advisory-title">ML advisory insights cockpit</h2>
+        <p>
+          Inspect model-owned recommendation evidence, governance state, feedback loops, alert status, and export refs without
+          applying automated pricing decisions or inferring mortgage policy.
+        </p>
+      </section>
+
+      <section className="panel" aria-labelledby="ml-advisory-heading">
+        <div className="panel-heading-row">
+          <div>
+            <p className="eyebrow">Recommendation evidence</p>
+            <h2 id="ml-advisory-heading">Advisory recommendation review</h2>
+          </div>
+          <DiagnosticsDetails items={[`Support reference: ${view.uiTraceId}`, `Workspace ${view.tenantContext}`]} />
+        </div>
+        <div className={view.advisoryUnavailable ? 'banner banner--blocked' : 'banner banner--info'} role={view.advisoryUnavailable ? 'alert' : 'status'}>
+          <strong>{view.advisoryUnavailable ? 'Advisory unavailable' : 'Advisory evidence visible'}</strong>
+          <span>{businessFacingText(view.fallbackReason)}</span>
+          <span>Setup status: {serviceReadinessText(view.dependencyStatus)}</span>
+        </div>
+        <div className="quote-table" role="table" aria-label="ML advisory recommendations">
+          <div role="row" className="quote-table__row quote-table__row--head">
+            <span role="columnheader">Recommendation</span>
+            <span role="columnheader">Model version</span>
+            <span role="columnheader">Confidence</span>
+            <span role="columnheader">Explanation and actions</span>
+            <span role="columnheader">Review references</span>
+          </div>
+          {view.recommendations.map((recommendation) => <MlAdvisoryRecommendationRow key={recommendation.recommendationId} recommendation={recommendation} />)}
+        </div>
+      </section>
+
+      <section className="panel" aria-labelledby="ml-governance-heading">
+        <h2 id="ml-governance-heading">Model governance grouped by model version</h2>
+        <div className="module-rail__grid" role="list" aria-label="Model version governance groups">
+          {view.modelVersions.map((modelVersion) => <ModelVersionGovernanceCard key={modelVersion.modelVersion} modelVersion={modelVersion} />)}
+        </div>
+        <ChipList label="ML advisory events" values={view.events.map(businessFacingText)} />
+      </section>
+    </>
+  );
+}
+
+function MlAdvisoryRecommendationRow({ recommendation }: { recommendation: AdvisoryRecommendationInsight }) {
+  return (
+    <div role="row" className="quote-table__row">
+      <span role="cell"><strong>{recommendation.recommendationId}</strong></span>
+      <span role="cell">{recommendation.modelVersion}</span>
+      <span role="cell">{recommendation.confidence}</span>
+      <span role="cell">{recommendation.explanation}<ChipList label={`${recommendation.recommendationId} allowed actions`} values={recommendation.allowedActions} />{recommendation.automaticDecisionApplied ? <strong>Automatic pricing decision applied</strong> : <span className="field-help">No automatic pricing decision applied.</span>}</span>
+      <span role="cell"><ChipList label={`${recommendation.recommendationId} review references`} values={recommendation.auditRefs} /></span>
+    </div>
+  );
+}
+
+function ModelVersionGovernanceCard({ modelVersion }: { modelVersion: ModelVersionGovernanceInsight }) {
+  return (
+    <article className="module-card" role="listitem">
+      <p className="module-card__route">{modelVersion.modelVersion}</p>
+      <strong className="module-card__title">{modelVersion.driftStatus}</strong>
+      <dl>
+        <dt>Alert state</dt><dd>{modelVersion.alertState}</dd>
+      </dl>
+      <ChipList label={`${modelVersion.modelVersion} feedback loops`} values={modelVersion.feedbackLoops} />
+      <ChipList label={`${modelVersion.modelVersion} export evidence`} values={modelVersion.exportEvidenceRefs} />
+    </article>
   );
 }
 
@@ -1594,8 +2345,8 @@ function QualityGuardrailsSection() {
         <p className="eyebrow">Quality · QL-S01 / QL-S07</p>
         <h2 id="quality-title">Quality guardrails dashboard</h2>
         <p>
-          Review validation status, release readiness, fairness, incidents, replay readiness, and evidence checks.
-          The UI reports configured evidence states and does not invent thresholds.
+          Review validation status, business readiness, fairness, incidents, review readiness, and setup checks.
+          The UI reports configured review states and does not invent thresholds.
         </p>
       </section>
 
@@ -1644,18 +2395,18 @@ function QualityGuardrailsSection() {
         <div className="panel-heading-row">
           <div>
             <p className="eyebrow">Readiness</p>
-            <h2 id="readiness-heading">Release gate health board</h2>
+            <h2 id="readiness-heading">Setup readiness board</h2>
           </div>
-          <span className="trace-badge">readiness: {view.readiness.readinessStatus}</span>
+          <span className="trace-badge">business readiness: {businessFacingText(view.readiness.readinessStatus)}</span>
         </div>
         <button type="button" disabled={view.readiness.deploymentDisabled} aria-disabled={view.readiness.deploymentDisabled}>
           Approve for rollout
         </button>
-        {view.readiness.deploymentDisabled ? <p role="status">Deployment action disabled until readiness passes and blockers clear.</p> : null}
-        <ChipList label="Readiness blockers" values={view.readiness.blockList} />
-        <ChipList label="Signoff refs" values={view.readiness.signoffRefs} />
+        {view.readiness.deploymentDisabled ? <p role="status">Live action is unavailable until business readiness items are resolved.</p> : null}
+        <ChipList label="Readiness items needing attention" values={view.readiness.blockList.map(businessFacingText)} />
+        <ChipList label="Owner reviews" values={view.readiness.signoffRefs.map(businessFacingText)} />
         <ChipList label="Setup checks" values={view.readiness.dependencyChecks.map(businessFacingText)} />
-        <p>Evidence set completeness: {businessFacingText(view.readiness.evidenceSetCompleteness)}</p>
+        <p>Review package completeness: {businessFacingText(view.readiness.evidenceSetCompleteness)}</p>
       </section>
 
       <section className="panel" aria-labelledby="drift-fairness-heading">
@@ -1686,7 +2437,7 @@ function QualityGuardrailsSection() {
       </section>
 
       <section className="panel" aria-labelledby="incident-replay-heading">
-        <h2 id="incident-replay-heading">Incidents and deterministic replay</h2>
+        <h2 id="incident-replay-heading">Incidents and processing review</h2>
         <div className="quote-table" role="table" aria-label="Quality incidents">
           <div role="row" className="quote-table__row quote-table__row--head">
             <span role="columnheader">Incident</span>
@@ -1706,10 +2457,10 @@ function QualityGuardrailsSection() {
           ))}
         </div>
         <div className="banner banner--blocked" role="alert">
-          <strong>Replay blocked</strong>
+          <strong>Processing review blocked</strong>
           <span>{view.replay.blockedReason}</span>
         </div>
-        <ChipList label="Replay modes" values={view.replay.replayModes} />
+        <ChipList label="Processing review modes" values={view.replay.replayModes} />
       </section>
 
       <section className="panel" aria-labelledby="contracts-heading">
@@ -1774,6 +2525,15 @@ function ComplianceEvidenceRegistrySection() {
   }
 
   const view = registryState.view;
+  const artifacts = view.artifacts ?? [];
+  const decisions = view.decisions ?? [];
+  const advisoryReviews = view.advisoryReviews ?? [];
+  const fairLendingMonitoring = view.fairLendingMonitoring ?? [];
+  const privacyRequests = view.privacyRequests ?? [];
+  const securityEvents = view.securityEvents ?? [];
+  const alerts = view.alerts ?? [];
+  const retentionControls = view.retentionControls ?? [];
+  const configurationGaps = view.configurationGaps ?? [];
   return (
     <>
       <section className="hero hero--compliance" aria-labelledby="compliance-title">
@@ -1806,7 +2566,7 @@ function ComplianceEvidenceRegistrySection() {
             <span role="columnheader">Retention</span>
             <span role="columnheader">Reference</span>
           </div>
-          {view.artifacts.map((artifact) => (
+          {artifacts.map((artifact) => (
             <div key={artifact.artifactId} role="row" className="quote-table__row">
               <span role="cell">{artifact.artifactId} ({artifact.artifactType})</span>
               <span role="cell">{businessFacingText(artifact.policyVersion)} / {artifact.jurisdictionCode}</span>
@@ -1816,7 +2576,7 @@ function ComplianceEvidenceRegistrySection() {
             </div>
           ))}
         </div>
-        {view.artifacts.map((artifact) => (
+        {artifacts.map((artifact) => (
           <div key={`${artifact.artifactId}-blockers`} className="banner banner--blocked" role="alert">
             <strong>{artifact.artifactId} progression blocked</strong>
             <ChipList label="Workflow links" values={artifact.moduleLinks.map(businessFacingText)} />
@@ -1828,7 +2588,7 @@ function ComplianceEvidenceRegistrySection() {
       <section className="panel" aria-labelledby="decision-heading">
         <h2 id="decision-heading">Decision rationale and privacy gates</h2>
         <div className="partner-detail-grid">
-          {view.decisions.map((decision) => (
+          {decisions.map((decision) => (
             <article key={decision.decisionId} className="status-card status-card--offline">
               <h3>{businessFacingText(decision.reasonCode)}</h3>
               <p>{decision.humanText}</p>
@@ -1837,14 +2597,55 @@ function ComplianceEvidenceRegistrySection() {
               <ChipList label="Reason categories" values={decision.reasonTiers.map(businessFacingText)} />
             </article>
           ))}
-          {view.privacyRequests.map((request) => (
+          {privacyRequests.map((request) => (
             <article key={request.requestId} className="status-card status-card--offline">
               <h3>Privacy request {request.requestId}</h3>
               <p>Borrower: {request.borrowerRef}</p>
               <p>Identity: {businessFacingText(request.identityStatus)}</p>
               <p>Response target: {businessFacingText(request.slaState)}</p>
-              <p>Consent history: {businessFacingText(request.consentAuditRef)}</p>
+              <p>Consent review history: {businessFacingText(request.consentAuditRef)}</p>
               <ChipList label="Privacy blockers" values={request.blockers.map(businessFacingText)} />
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel" aria-labelledby="advisory-heading">
+        <div className="panel-heading-row">
+          <div>
+            <p className="eyebrow">Advisory findings</p>
+            <h2 id="advisory-heading">Quote and portfolio compliance review</h2>
+          </div>
+          <DiagnosticsDetails items={configurationGaps.map(businessFacingText)} />
+        </div>
+        <div className="partner-detail-grid">
+          {advisoryReviews.map((review) => (
+            <article key={review.reviewId} className={review.blockedByConfiguration ? 'status-card status-card--offline' : 'status-card'} role={review.blockedByConfiguration ? 'alert' : undefined}>
+              <h3>{businessFacingText(review.reviewType)} review · {businessFacingText(review.status)}</h3>
+              <p>Subject: {businessFacingText(review.subjectRef)}</p>
+              <p>Regulatory approval: {businessFacingText(review.regulatoryApprovalState)}</p>
+              <p>Review snapshots: {review.auditSnapshotRefs.map(businessFacingText).join(', ')}</p>
+              <p>Export refs: {review.exportRefs.map(businessFacingText).join(', ')}</p>
+              <ChipList label="Reason codes" values={review.reasonCodes.map(businessFacingText)} />
+              <ChipList label="Review snapshots" values={review.auditSnapshotRefs.map(businessFacingText)} />
+              <ChipList label="Export refs" values={review.exportRefs.map(businessFacingText)} />
+              <ChipList label="Blocked configuration gaps" values={review.configurationGaps.map(businessFacingText)} />
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel" aria-labelledby="fair-lending-heading">
+        <h2 id="fair-lending-heading">Fair-lending monitoring drilldown</h2>
+        <div className="partner-detail-grid">
+          {fairLendingMonitoring.map((drilldown) => (
+            <article key={drilldown.drilldownId} className="status-card status-card--offline">
+              <h3>{businessFacingText(drilldown.drilldownId)}</h3>
+              <p>Redaction state: {businessFacingText(drilldown.redactionState)}</p>
+              <p>Protected attributes: {drilldown.redacted ? 'Backend redacted' : 'Backend authorized'}</p>
+              <ChipList label="Monitoring dimensions" values={drilldown.dimensions.map(businessFacingText)} />
+              <ChipList label="Monitoring evidence refs" values={drilldown.evidenceRefs.map(businessFacingText)} />
+              <ChipList label="Monitoring blockers" values={drilldown.blockers.map(businessFacingText)} />
             </article>
           ))}
         </div>
@@ -1853,7 +2654,7 @@ function ComplianceEvidenceRegistrySection() {
       <section className="panel" aria-labelledby="security-alerts-heading">
         <h2 id="security-alerts-heading">Security events, alerts, and retention</h2>
         <div className="partner-detail-grid">
-          {view.securityEvents.map((event) => (
+          {securityEvents.map((event) => (
             <article key={event.eventId} className="status-card status-card--offline">
               <h3>{event.category} · {event.severity}</h3>
               <p>Security record: {businessFacingText(event.logRecordId)}</p>
@@ -1862,7 +2663,7 @@ function ComplianceEvidenceRegistrySection() {
               <ChipList label="Security blockers" values={event.blockers.map(businessFacingText)} />
             </article>
           ))}
-          {view.alerts.map((alert) => (
+          {alerts.map((alert) => (
             <article key={alert.alertId} className="status-card status-card--offline">
               <h3>{alert.alertId}</h3>
               <p>{alert.severity} · {businessFacingText(alert.alertClass)} · {businessFacingText(alert.triggerType)}</p>
@@ -1870,7 +2671,7 @@ function ComplianceEvidenceRegistrySection() {
               <ChipList label="Alert blockers" values={alert.blockers.map(businessFacingText)} />
             </article>
           ))}
-          {view.retentionControls.map((control) => (
+          {retentionControls.map((control) => (
             <article key={control.ruleId} className="status-card status-card--offline" role="alert">
               <h3>{control.ruleId}</h3>
               <p>{businessFacingText(control.retentionClass)}</p>
@@ -2080,7 +2881,7 @@ function RateFeedOperationsSection() {
         <p className="eyebrow">Rate operations · PII-22-S03</p>
         <h2 id="rate-feed-title">Rate feed operations</h2>
         <p>
-          Track upload, parse, validation, activation, rejection, replay, and cache evidence from backend-owned rate feed
+          Track upload, parse, validation, activation, rejection, processing records, and cache evidence from configured rate feed
           facts. The workbench shows row blockers and source references without recalculating rates.
         </p>
       </section>
@@ -2089,7 +2890,7 @@ function RateFeedOperationsSection() {
         <div className="panel-heading-row">
           <div>
             <p className="eyebrow">Workflow cockpit</p>
-            <h2 id="rate-feed-heading">Upload-to-replay workflow</h2>
+            <h2 id="rate-feed-heading">Upload-to-processing workflow</h2>
           </div>
           <DiagnosticsDetails items={[`Workspace ${view.tenantContext}`, `Support reference: ${view.uiTraceId}`]} />
         </div>
@@ -2103,10 +2904,10 @@ function RateFeedOperationsSection() {
             <article key={step.stepId} className="module-card module-card--light" role="listitem">
               <p className="module-card__route">{businessFacingText(step.status)}</p>
               <strong className="module-card__title">{step.label}</strong>
-              <p>{businessFacingText(step.sourceBoundary)}</p>
               <dl>
-                <dt>Audit reference</dt><dd>{businessFacingText(step.auditRef)}</dd>
-                <dt>Result hash</dt><dd>{businessFacingText(step.resultHashRef)}</dd>
+                <dt>Source system</dt><dd>{businessFacingText(step.sourceBoundary)}</dd>
+                <dt>Review reference</dt><dd>{businessFacingText(step.auditRef)}</dd>
+                <dt>Processing record</dt><dd>{businessFacingText(step.resultHashRef)}</dd>
               </dl>
             </article>
           ))}
@@ -2129,11 +2930,11 @@ function RateFeedOperationsSection() {
       </section>
 
       <section className="panel" aria-labelledby="rate-evidence-heading">
-        <h2 id="rate-evidence-heading">Activation, cache invalidation, and replay evidence</h2>
+        <h2 id="rate-evidence-heading">Activation, cache invalidation, and processing evidence</h2>
         <button type="button" disabled={view.actionsDisabled} aria-describedby="rate-feed-action-blockers">Publish rate sheet</button>
-        <button type="button" className="button-secondary" disabled={view.actionsDisabled}>Request replay</button>
+        <button type="button" className="button-secondary" disabled={view.actionsDisabled}>Request processing review</button>
         <div id="rate-feed-action-blockers">
-          <ChipList label="Replay and cache evidence" values={view.replayEvidence.map(businessFacingText)} />
+          <ChipList label="Processing and cache evidence" values={view.replayEvidence.map(businessFacingText)} />
           <ChipList label="Rate feed events" values={view.events.map(businessFacingText)} />
         </div>
       </section>
@@ -2179,7 +2980,7 @@ function PerformanceDashboardSection() {
         <p className="eyebrow">Observability · PII-22-S09</p>
         <h2 id="performance-title">Service performance cockpit</h2>
         <p>
-          Group performance, cache, backpressure, and load-test evidence by service, workspace, correlation id, and
+          Group performance, cache, backpressure, and load-test evidence by service, workspace, support reference, and
           freshness. The dashboard shows configured service refs and blockers only; it does not change runtime settings.
         </p>
       </section>
@@ -2244,7 +3045,7 @@ function PerformanceSignalGroupCard({ group }: { group: PerformanceSignalGroup }
       <strong className="module-card__title">{businessFacingText(group.serviceName)}</strong>
       <dl>
         <dt>Workspace</dt><dd>{businessFacingText(group.tenantContext)}</dd>
-        <dt>Correlation id</dt><dd>{businessFacingText(group.correlationId)}</dd>
+        <dt>Support reference</dt><dd>{businessFacingText(group.correlationId)}</dd>
       </dl>
       {group.signals.map((signal) => (
         <div key={signal.signalId} className="signal-stack">
@@ -2483,6 +3284,7 @@ function PartnerQuoteDetailPanel({ detail, result, onAttemptReprice }: { detail:
 
 function PartnerTransportReliabilitySection({ partnerId }: { partnerId: string }) {
   const [transportState, setTransportState] = useState<PartnerTransportState>({ kind: 'loading' });
+  const [workbenchState, setWorkbenchState] = useState<PartnerChannelWorkbenchState>({ kind: 'loading' });
   const [selectedAttempt, setSelectedAttempt] = useState<PartnerWebhookDeliveryAttempt | null>(null);
   const [correlationId, setCorrelationId] = useState('');
   const [idempotencyConfirmed, setIdempotencyConfirmed] = useState(false);
@@ -2490,6 +3292,22 @@ function PartnerTransportReliabilitySection({ partnerId }: { partnerId: string }
   const [replayResult, setReplayResult] = useState<PartnerWebhookActionResult | null>(null);
   const [endpointTestResult, setEndpointTestResult] = useState<PartnerWebhookActionResult | null>(null);
   const [safetyResult, setSafetyResult] = useState<PartnerSafetyToggleResult | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setWorkbenchState({ kind: 'loading' });
+    fetchPartnerChannelWorkbench(partnerId)
+      .then((view) => {
+        if (active) setWorkbenchState({ kind: 'loaded', view });
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : 'Partner integration workbench is unavailable.';
+        if (active) setWorkbenchState({ kind: 'unreachable', message });
+      });
+    return () => {
+      active = false;
+    };
+  }, [partnerId]);
 
   useEffect(() => {
     let active = true;
@@ -2552,12 +3370,14 @@ function PartnerTransportReliabilitySection({ partnerId }: { partnerId: string }
   return (
     <>
       <section className="hero" aria-labelledby="partner-transport-title">
-        <p className="eyebrow">Partner · CH-S05 / CH-S06 / CH-S07</p>
-        <h2 id="partner-transport-title">Partner connection reliability</h2>
+        <p className="eyebrow">Partner · integration-service</p>
+        <h2 id="partner-transport-title">Partner integration channel workbench</h2>
         <p>
-          Inspect partner message delivery health, replay gating, and safety controls through the approved workbench service only.
+          Inspect quote requests, message delivery, retry queues, exception queues, investor delivery connections, partner file delivery, service account access, and health through the approved workbench service only.
         </p>
       </section>
+
+      <PartnerChannelWorkbenchPanel state={workbenchState} />
 
       <section className="panel" aria-labelledby="partner-transport-heading">
         <div className="panel-heading-row">
@@ -2596,7 +3416,7 @@ function PartnerTransportReliabilitySection({ partnerId }: { partnerId: string }
       </section>
 
       <section className="panel" aria-labelledby="webhook-controls-heading">
-        <h2 id="webhook-controls-heading">Replay and endpoint controls</h2>
+        <h2 id="webhook-controls-heading">Processing retry and endpoint controls</h2>
         {selectedAttempt ? (
           <div className="partner-detail-grid">
             <dl>
@@ -2608,20 +3428,20 @@ function PartnerTransportReliabilitySection({ partnerId }: { partnerId: string }
               <dt>Consent</dt><dd>{businessFacingText(selectedAttempt.consentIndicator)}</dd>
             </dl>
             <div className="field-group">
-              <label htmlFor="webhook-correlation">Replay correlation id</label>
+              <label htmlFor="webhook-correlation">Processing support reference</label>
               <input id="webhook-correlation" value={correlationId} onChange={(event) => setCorrelationId(event.target.value)} />
               <p className="field-help">{businessFacingText(view.replayAction.confirmationRequirement)}</p>
             </div>
             <label className="checkbox-row">
               <input type="checkbox" checked={idempotencyConfirmed} onChange={(event) => setIdempotencyConfirmed(event.target.checked)} />
-              I confirm idempotency for this replay request.
+              I confirm duplicate protection for this processing request.
             </label>
-            <button type="button" disabled={replayDisabled} onClick={() => void requestReplay()}>Request replay</button>
+            <button type="button" disabled={replayDisabled} onClick={() => void requestReplay()}>Request processing retry</button>
             {replayDisabled ? <p role="status">{businessFacingText(view.replayAction.disabledReason)}</p> : null}
             <button type="button" className="button-secondary" onClick={() => void requestEndpointTest()}>Show endpoint test guidance</button>
           </div>
         ) : <p role="status">No webhook events are available.</p>}
-        {replayResult ? <TransportResultBanner result={replayResult} acceptedLabel="Webhook replay requested" blockedLabel="Webhook replay blocked" /> : null}
+        {replayResult ? <TransportResultBanner result={replayResult} acceptedLabel="Webhook processing retry requested" blockedLabel="Webhook processing retry blocked" /> : null}
         {endpointTestResult ? <TransportResultBanner result={endpointTestResult} acceptedLabel="Endpoint test requested" blockedLabel="Endpoint test blocked" /> : null}
       </section>
 
@@ -2654,6 +3474,78 @@ function PartnerTransportReliabilitySection({ partnerId }: { partnerId: string }
         ) : null}
       </section>
     </>
+  );
+}
+
+function PartnerChannelWorkbenchPanel({ state }: { state: PartnerChannelWorkbenchState }) {
+  if (state.kind === 'loading') {
+    return <section className="panel" aria-labelledby="partner-channel-heading"><h2 id="partner-channel-heading">Integration channel workbench</h2><p role="status">Loading integration channel state...</p></section>;
+  }
+
+  if (state.kind === 'unreachable') {
+    return (
+      <section className="panel" aria-labelledby="partner-channel-heading">
+        <h2 id="partner-channel-heading">Integration channel workbench</h2>
+        <div className="banner banner--blocked" role="alert">{state.message}</div>
+      </section>
+    );
+  }
+
+  const view = state.view;
+  return (
+    <section className="panel" aria-labelledby="partner-channel-heading">
+      <div className="panel-heading-row">
+        <div>
+          <p className="eyebrow">Channel modules</p>
+          <h2 id="partner-channel-heading">Integration channel workbench</h2>
+        </div>
+        <DiagnosticsDetails items={[`Workspace ${view.tenantContext}`, `Support reference: ${view.uiTraceId}`]} />
+      </div>
+      <p className="field-help">{view.fallbackReason}</p>
+      <dl className="status-grid">
+        <dt>Dependency state</dt><dd>{businessFacingText(view.dependencyStatus)}</dd>
+        <dt>Missing service capability</dt><dd>{businessFacingText(view.serviceAccount.missingCapability)}</dd>
+        <dt>Recovery owner</dt><dd>{view.serviceAccount.recoveryOwner}</dd>
+        <dt>Credential exposure</dt><dd>{view.serviceAccount.credentialExposure}</dd>
+      </dl>
+      <div className="quote-table" role="table" aria-label="Integration channel tabs">
+        <div role="row" className="quote-table__row quote-table__row--head">
+          <span role="columnheader">Tab</span>
+          <span role="columnheader">Route</span>
+          <span role="columnheader">Status</span>
+          <span role="columnheader">Recovery owner</span>
+        </div>
+        {view.tabs.map((tab) => (
+          <div role="row" className="quote-table__row" key={tab.tabId}>
+            <span role="cell">{tab.label}</span>
+            <span role="cell">{tab.route}</span>
+            <span role="cell">{businessFacingText(tab.status)}</span>
+            <span role="cell">{tab.recoveryOwner}</span>
+          </div>
+        ))}
+      </div>
+      <div className="partner-detail-grid">
+        {view.tabs.map((tab) => <PartnerChannelTabCard key={tab.tabId} tab={tab} />)}
+      </div>
+    </section>
+  );
+}
+
+function PartnerChannelTabCard({ tab }: { tab: PartnerChannelWorkbenchTab }) {
+  return (
+    <article className="panel" aria-labelledby={`${tab.tabId}-heading`}>
+      <h3 id={`${tab.tabId}-heading`}>{tab.label}</h3>
+      <p className="field-help">{businessFacingText(tab.status)}</p>
+      {tab.items.map((item) => (
+        <dl key={item.itemId} className="status-grid">
+          <dt>Item</dt><dd>{item.label}</dd>
+          <dt>Retry state</dt><dd>{businessFacingText(item.retryState)}</dd>
+          <dt>Exception queue reason</dt><dd>{businessFacingText(item.dlqReason)}</dd>
+          <dt>Payload redaction</dt><dd>{businessFacingText(item.payloadRedactionState)}</dd>
+          <dt>Review references</dt><dd>{item.auditRefs.join(', ')}</dd>
+        </dl>
+      ))}
+    </article>
   );
 }
 
@@ -2888,13 +3780,13 @@ function LockConfirmationPanel({ result }: { result: LockConfirmationResult }) {
 function LockAuditGroups({ groups }: { groups: NonNullable<LockWorkflowView['auditGroups']> }) {
   if (!groups.length) return null;
   return (
-    <div className="lock-audit-groups" aria-label="Lock audit evidence grouped by backend event ids">
+    <div className="lock-audit-groups" aria-label="Lock review evidence grouped by backend event ids">
       {groups.map((group) => (
         <article key={group.eventId} className="lock-audit-groups__card">
           <h4>{businessFacingText(group.label)}</h4>
           <dl>
             <dt>Event id</dt><dd>{group.eventId}</dd>
-            <dt>Replay hash</dt><dd>{businessFacingText(group.replayHash)}</dd>
+            <dt>Processing record</dt><dd>{businessFacingText(group.replayHash)}</dd>
             <dt>Export evidence</dt><dd>{businessFacingText(group.exportRef)}</dd>
           </dl>
           <ChipList label={`${group.eventId} evidence refs`} values={group.evidenceRefs.map(businessFacingText)} />
@@ -2946,6 +3838,11 @@ type OfferState =
   | { kind: 'loaded'; comparison: OfferComparisonView }
   | { kind: 'unreachable'; message: string };
 
+type QuoteDetailState =
+  | { kind: 'loading' }
+  | { kind: 'loaded'; detail: QuoteDetailView }
+  | { kind: 'unreachable'; message: string };
+
 type EligibilityState =
   | { kind: 'loading' }
   | { kind: 'loaded'; view: EligibilityModuleView }
@@ -2955,6 +3852,383 @@ type PricingWaterfallState =
   | { kind: 'loading' }
   | { kind: 'loaded'; view: PricingWaterfallView }
   | { kind: 'unreachable'; message: string };
+
+type QuoteJourneyMapState =
+  | { kind: 'loading' }
+  | { kind: 'loaded'; view: QuoteJourneyMapView }
+  | { kind: 'unreachable'; message: string };
+
+type MarginProfitabilityState =
+  | { kind: 'loading' }
+  | { kind: 'loaded'; view: MarginProfitabilityView }
+  | { kind: 'unreachable'; message: string };
+
+type AdjustmentEvidenceState =
+  | { kind: 'loading' }
+  | { kind: 'loaded'; view: AdjustmentEvidenceView }
+  | { kind: 'unreachable'; message: string };
+
+function AdjustmentEvidenceSection() {
+  const [adjustmentState, setAdjustmentState] = useState<AdjustmentEvidenceState>({ kind: 'loading' });
+
+  useEffect(() => {
+    let active = true;
+    fetchAdjustmentEvidence(tenantBoundaryPlaceholder)
+      .then((view) => {
+        if (active) setAdjustmentState({ kind: 'loaded', view });
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : 'Adjustment evidence is unavailable.';
+        if (active) setAdjustmentState({ kind: 'unreachable', message });
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  if (adjustmentState.kind === 'loading') {
+    return <section className="panel" aria-labelledby="adjustment-heading"><h2 id="adjustment-heading">Adjustment evidence</h2><p role="status">Loading adjustment evidence...</p></section>;
+  }
+
+  if (adjustmentState.kind === 'unreachable') {
+    return (
+      <section className="panel" aria-labelledby="adjustment-heading">
+        <h2 id="adjustment-heading">Adjustment evidence</h2>
+        <div className="banner banner--blocked" role="alert">{adjustmentState.message}</div>
+      </section>
+    );
+  }
+
+  const view = adjustmentState.view;
+  return (
+    <>
+      <section className="hero hero--admin" aria-labelledby="adjustment-title">
+        <p className="eyebrow">Adjustment service · PII-22-S17</p>
+        <h2 id="adjustment-title">Adjustment evidence cockpit</h2>
+        <p>
+          Inspect connected adjustment records, fact references, sources, conflict reasons, compensation hook refs, summaries,
+          review references and processing references without calculating LLPA, fee, or compensation values in the UI.
+        </p>
+      </section>
+
+      <section className="panel" aria-labelledby="adjustment-heading">
+        <div className="panel-heading-row">
+          <div>
+            <p className="eyebrow">Connected adjustment references</p>
+            <h2 id="adjustment-heading">Adjustment ids, facts, sources, and summaries</h2>
+          </div>
+           <DiagnosticsDetails items={[`Support reference: ${view.uiTraceId}`, `Processing record: ${view.replayHash}`]} />
+        </div>
+        <div className="banner banner--blocked" role="alert">
+          <strong>{businessFacingText(view.status)}</strong>
+          <span>{businessFacingText(view.dependencyStatus)}</span>
+          <span>{businessFacingText(view.fallbackReason)}</span>
+        </div>
+        <div className="offer-list" role="list" aria-label="Adjustment evidence rows">
+          {view.adjustments.map((adjustment) => <AdjustmentEvidenceCard key={adjustment.adjustmentId} adjustment={adjustment} />)}
+        </div>
+      </section>
+
+      <section className="panel" aria-labelledby="adjustment-conflicts-heading">
+        <h2 id="adjustment-conflicts-heading">Conflict reasons and resolution ownership</h2>
+        <div className="offer-list" role="list" aria-label="Adjustment conflict reasons">
+          {view.conflicts.map((conflict) => <AdjustmentConflictCard key={conflict.conflictId} conflict={conflict} />)}
+        </div>
+        <div className="offer-list" role="list" aria-label="Adjustment blocked states">
+          {view.blockers.map((blocker) => <AdjustmentBlockerCard key={blocker.reasonCode} blocker={blocker} />)}
+        </div>
+      </section>
+
+      <section className="panel" aria-labelledby="adjustment-summary-heading">
+        <h2 id="adjustment-summary-heading">Adjustment summaries and evidence refs</h2>
+        <div className="offer-list" role="list" aria-label="Adjustment summaries">
+          {view.summaries.map((summary) => <AdjustmentSummaryEvidenceCard key={summary.category} summary={summary} />)}
+        </div>
+        <ChipList label="Adjustment version refs" values={view.versionRefs.map(businessFacingText)} />
+        <ChipList label="Adjustment review references" values={view.auditRefs.map(businessFacingText)} />
+        <ChipList label="Adjustment events" values={view.events.map(businessFacingText)} />
+      </section>
+    </>
+  );
+}
+
+function AdjustmentEvidenceCard({ adjustment }: { adjustment: AdjustmentEvidenceRow }) {
+  return (
+    <article className="offer-card" role="listitem" aria-label={`${adjustment.label} adjustment`}>
+      <div className="offer-card__header">
+        <div>
+          <h3>{businessFacingText(adjustment.label)}</h3>
+          <p>{businessFacingText(adjustment.adjustmentId)} · {businessFacingText(adjustment.sourceRef)}</p>
+        </div>
+        <strong>{businessFacingText(adjustment.status)}</strong>
+      </div>
+      <p>{businessFacingText(adjustment.summary)}</p>
+      <dl className="status-grid">
+        <dt>Category</dt><dd>{businessFacingText(adjustment.category)}</dd>
+        <dt>Source version</dt><dd>{businessFacingText(adjustment.sourceVersionRef)}</dd>
+      </dl>
+      <ChipList label={`${adjustment.label} fact refs`} values={adjustment.factRefs.map(businessFacingText)} />
+      <ChipList label={`${adjustment.label} compensation hooks`} values={adjustment.compensationHooks.map(businessFacingText)} />
+      <ChipList label={`${adjustment.label} conflict ids`} values={adjustment.conflictIds.map(businessFacingText)} />
+    </article>
+  );
+}
+
+function AdjustmentConflictCard({ conflict }: { conflict: AdjustmentConflictView }) {
+  return (
+    <article className="offer-card" role="listitem" aria-label={`${conflict.conflictId} conflict`}>
+      <div className="offer-card__header">
+        <div>
+          <h3>{businessFacingText(conflict.reasonCode)}</h3>
+          <p>{businessFacingText(conflict.reason)}</p>
+        </div>
+        <strong>{businessFacingText(conflict.severity)}</strong>
+      </div>
+      <p>Resolution owner: {businessFacingText(conflict.resolutionOwner)}</p>
+      <ChipList label={`${conflict.conflictId} affected adjustments`} values={conflict.affectedAdjustmentIds.map(businessFacingText)} />
+    </article>
+  );
+}
+
+function AdjustmentBlockerCard({ blocker }: { blocker: AdjustmentBlockedState }) {
+  return (
+    <article className="offer-card" role="listitem" aria-label={`${blocker.reasonCode} blocked state`}>
+      <h3>{businessFacingText(blocker.reasonCode)}</h3>
+      <p>{businessFacingText(blocker.message)}</p>
+      <p>Source: {businessFacingText(blocker.sourceRef)}</p>
+      <p>Resolution owner: {businessFacingText(blocker.resolutionOwner)}</p>
+    </article>
+  );
+}
+
+function AdjustmentSummaryEvidenceCard({ summary }: { summary: AdjustmentSummaryCard }) {
+  return (
+    <article className="offer-card" role="listitem" aria-label={`${summary.category} summary`}>
+      <h3>{businessFacingText(summary.category)}</h3>
+      <p>{businessFacingText(summary.summary)}</p>
+      <ChipList label={`${summary.category} evidence refs`} values={summary.evidenceRefs.map(businessFacingText)} />
+    </article>
+  );
+}
+
+function MarginProfitabilitySection() {
+  const [marginState, setMarginState] = useState<MarginProfitabilityState>({ kind: 'loading' });
+
+  useEffect(() => {
+    let active = true;
+    fetchMarginProfitability(tenantBoundaryPlaceholder)
+      .then((view) => {
+        if (active) setMarginState({ kind: 'loaded', view });
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : 'Margin profitability evidence is unavailable.';
+        if (active) setMarginState({ kind: 'unreachable', message });
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  if (marginState.kind === 'loading') {
+    return <section className="panel" aria-labelledby="margin-heading"><h2 id="margin-heading">Margin profitability</h2><p role="status">Loading margin profitability evidence...</p></section>;
+  }
+
+  if (marginState.kind === 'unreachable') {
+    return (
+      <section className="panel" aria-labelledby="margin-heading">
+        <h2 id="margin-heading">Margin profitability</h2>
+        <div className="banner banner--blocked" role="alert">{marginState.message}</div>
+      </section>
+    );
+  }
+
+  const view = marginState.view;
+  return (
+    <>
+      <section className="hero hero--admin" aria-labelledby="margin-title">
+        <p className="eyebrow">Margin service · PII-22-S16</p>
+        <h2 id="margin-title">Margin profitability cockpit</h2>
+        <p>
+          Review connected company, channel, branch, compensation, profitability floor, approval, redaction, and processing
+          evidence. The workbench displays margin-service facts and keeps profitability floors service-governed.
+        </p>
+      </section>
+
+      <section className="panel" aria-labelledby="margin-heading">
+        <div className="panel-heading-row">
+          <div>
+            <p className="eyebrow">Permission-aware evidence</p>
+            <h2 id="margin-heading">Margin and compensation sections</h2>
+          </div>
+           <DiagnosticsDetails items={[`Support reference: ${view.uiTraceId}`, `Processing record: ${view.replayHash}`]} />
+        </div>
+        <div className="banner banner--blocked" role="alert">
+          <strong>{businessFacingText(view.dependencyStatus)}</strong>
+          <span>{businessFacingText(view.fallbackReason)}</span>
+          <span>Compensation details visible: {view.compensationDetailsVisible ? 'yes' : 'no'}</span>
+        </div>
+        <div className="offer-list" role="list" aria-label="Margin profitability sections">
+          {view.sections.map((section) => <MarginEvidenceCard key={section.sectionId} section={section} />)}
+        </div>
+      </section>
+
+      <section className="panel" aria-labelledby="margin-floor-heading">
+        <h2 id="margin-floor-heading">Profitability floor blocker and exception path</h2>
+        <dl className="status-grid">
+          <dt>Quote option</dt><dd>{businessFacingText(view.floorEvidence.quoteOptionId)}</dd>
+          <dt>Decision</dt><dd>{businessFacingText(view.floorEvidence.decision)}</dd>
+          <dt>Decision code</dt><dd>{businessFacingText(view.floorEvidence.decisionCode)}</dd>
+          <dt>Floor version</dt><dd>{businessFacingText(view.floorEvidence.floorPolicyVersionRef)}</dd>
+          <dt>Threshold reference</dt><dd>{businessFacingText(view.floorEvidence.thresholdRef)}</dd>
+          <dt>Exception path</dt><dd>{businessFacingText(view.floorEvidence.exceptionRouteRef)}</dd>
+        </dl>
+        <p>{businessFacingText(view.floorEvidence.displayGuidance)}</p>
+        <ChipList label="Floor review references" values={view.floorEvidence.auditRefs.map(businessFacingText)} />
+        <ChipList label="Margin version refs" values={view.versionRefs.map(businessFacingText)} />
+        <ChipList label="Margin review references" values={view.auditRefs.map(businessFacingText)} />
+        <ChipList label="Margin events" values={view.events.map(businessFacingText)} />
+      </section>
+    </>
+  );
+}
+
+function MarginEvidenceCard({ section }: { section: MarginEvidenceSection }) {
+  return (
+    <article className="offer-card" role="listitem" aria-label={`${section.label} evidence`}>
+      <div className="offer-card__header">
+        <div>
+          <h3>{businessFacingText(section.label)}</h3>
+          <p>{businessFacingText(section.sourceRef)}</p>
+        </div>
+        <strong>{businessFacingText(section.permissionState)}</strong>
+      </div>
+      <ChipList label={`${section.label} evidence refs`} values={section.evidenceRefs.map(businessFacingText)} />
+      {section.redactions.length > 0 ? (
+        <div className="banner banner--blocked">
+          {section.redactions.map((redaction) => (
+            <span key={`${redaction.fieldLabel}-${redaction.auditRef}`}>
+              {businessFacingText(redaction.fieldLabel)}: {businessFacingText(redaction.state)} · {businessFacingText(redaction.reason)} · Review {businessFacingText(redaction.auditRef)}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function QuoteJourneyMapSection({ runId }: { runId: string }) {
+  const [journeyState, setJourneyState] = useState<QuoteJourneyMapState>({ kind: 'loading' });
+
+  useEffect(() => {
+    let active = true;
+    fetchQuoteJourneyMap(tenantBoundaryPlaceholder, runId)
+      .then((view) => {
+        if (active) setJourneyState({ kind: 'loaded', view });
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : 'Quote journey map is unavailable.';
+        if (active) setJourneyState({ kind: 'unreachable', message });
+      });
+    return () => {
+      active = false;
+    };
+  }, [runId]);
+
+  if (journeyState.kind === 'loading') {
+    return <section className="panel" aria-labelledby="journey-heading"><h2 id="journey-heading">Quote journey map</h2><p role="status">Loading quote journey map...</p></section>;
+  }
+
+  if (journeyState.kind === 'unreachable') {
+    return (
+      <section className="panel" aria-labelledby="journey-heading">
+        <h2 id="journey-heading">Quote journey map</h2>
+        <div className="banner banner--blocked" role="alert">{journeyState.message}</div>
+      </section>
+    );
+  }
+
+  const view = journeyState.view;
+  return (
+    <>
+      <section className="hero hero--admin" aria-labelledby="journey-title">
+        <p className="eyebrow">Service UI · PII-22-S19</p>
+        <h2 id="journey-title">Cross-service quote journey for run {runId}</h2>
+        <p>
+          Trace scenario facts through catalog, rate feed, eligibility, pricing, ranking, selection, lock, exception,
+          compliance, review, and integration events using connected service references. Unavailable services stay visible as blocked nodes.
+        </p>
+      </section>
+
+      <section className="panel" aria-labelledby="journey-heading">
+        <div className="panel-heading-row">
+          <div>
+            <p className="eyebrow">Journey boundary</p>
+            <h2 id="journey-heading">Service node map</h2>
+          </div>
+          <DiagnosticsDetails items={[`Support reference: ${view.uiTraceId}`, `Dependency status: ${view.dependencyStatus}`]} />
+        </div>
+
+        <div className="banner banner--blocked" role="alert">
+          <strong>{businessFacingText(view.status)}</strong>
+          <span>{businessFacingText(view.fallbackReason)}</span>
+        </div>
+        <ChipList label="Journey blockers" values={view.blockers.map(businessFacingText)} />
+        <ChipList label="Service contracts represented" values={view.serviceContracts.map(businessFacingText)} />
+
+        <div className="offer-grid" role="list" aria-label="Quote journey service nodes">
+          {view.nodes.map((node) => <QuoteJourneyNodeCard key={node.nodeId} node={node} />)}
+        </div>
+      </section>
+    </>
+  );
+}
+
+function QuoteJourneyNodeCard({ node }: { node: QuoteJourneyNode }) {
+  const blocked = node.status.toLowerCase().includes('blocked') || node.status.toLowerCase().includes('unavailable');
+  return (
+    <article className={blocked ? 'offer-card offer-card--selected' : 'offer-card'} role="listitem" aria-label={`${node.label} ${node.status}`}>
+      <div className="offer-card__header">
+        <div>
+          <p className="eyebrow">{businessFacingText(node.serviceName)}</p>
+          <h3>{businessFacingText(node.label)}</h3>
+        </div>
+        <strong>{businessFacingText(node.status)}</strong>
+      </div>
+      <dl className="status-grid">
+        <dt>Freshness</dt><dd>{businessFacingText(node.freshness.status)}</dd>
+        <dt>Freshness ref</dt><dd>{businessFacingText(node.freshness.evidenceRef)}</dd>
+        <dt>Processing record</dt><dd>{businessFacingText(node.replayHash)}</dd>
+        <dt>Drilldown route</dt><dd><a href={journeyDrilldownHref(node)}>{node.drilldownRoute}</a></dd>
+        <dt>Run ref</dt><dd>{businessFacingText(node.drilldownRefs.runId)}</dd>
+        <dt>Scenario ref</dt><dd>{businessFacingText(node.drilldownRefs.scenarioRef)}</dd>
+        <dt>Quote ref</dt><dd>{businessFacingText(node.drilldownRefs.quoteRef)}</dd>
+        <dt>Lock ref</dt><dd>{businessFacingText(node.drilldownRefs.lockRef)}</dd>
+        <dt>Support reference</dt><dd>{businessFacingText(node.drilldownRefs.correlationRef)}</dd>
+      </dl>
+      <p className="field-help">{businessFacingText(node.freshness.message)}</p>
+      <ChipList label={`${node.label} evidence refs`} values={node.evidenceRefs.map(businessFacingText)} />
+      <ChipList label={`${node.label} blockers`} values={node.blockers.map(businessFacingText)} />
+      <ChipList label={`${node.label} downstream dependencies`} values={node.downstreamDependencies.map(businessFacingText)} />
+    </article>
+  );
+}
+
+function safeJourneyRoute(route: string) {
+  return route.startsWith('/') && !route.startsWith('//') ? route : '#';
+}
+
+function journeyDrilldownHref(node: QuoteJourneyNode) {
+  const route = safeJourneyRoute(node.drilldownRoute);
+  if (route === '#') return route;
+  const params = new URLSearchParams({
+    runId: node.drilldownRefs.runId,
+    scenarioRef: node.drilldownRefs.scenarioRef,
+    quoteRef: node.drilldownRefs.quoteRef,
+    lockRef: node.drilldownRefs.lockRef,
+    correlationRef: node.drilldownRefs.correlationRef,
+  });
+  return `${route}?${params.toString()}`;
+}
 
 function PricingWaterfallSection({ runId }: { runId: string }) {
   const [waterfallState, setWaterfallState] = useState<PricingWaterfallState>({ kind: 'loading' });
@@ -2994,18 +4268,18 @@ function PricingWaterfallSection({ runId }: { runId: string }) {
         <p className="eyebrow">Pricing · PII-22-S05</p>
         <h2 id="waterfall-title">Pricing waterfall for run {runId}</h2>
         <p>
-          Inspect base grid selection, final price ledger steps, rounding trace references, missing-price blockers, audit ids,
-          and replay hashes from backend-owned evidence. The workbench displays facts only and does not calculate prices.
+          Inspect base grid selection, final price ledger steps, rounding review references, missing-price blockers, support references,
+          and processing records from connected service records. The workbench displays facts only and does not calculate prices.
         </p>
       </section>
 
       <section className="panel" aria-labelledby="waterfall-heading">
         <div className="panel-heading-row">
           <div>
-            <p className="eyebrow">Backend-owned waterfall</p>
+            <p className="eyebrow">Connected pricing records</p>
             <h2 id="waterfall-heading">Waterfall evidence</h2>
           </div>
-          <DiagnosticsDetails items={[`Support reference: ${view.uiTraceId}`, `Evidence hash: ${view.evidenceHash}`]} />
+          <DiagnosticsDetails items={[`Support reference: ${view.uiTraceId}`, `Evidence record: ${view.evidenceHash}`]} />
         </div>
 
         <div className="banner banner--blocked" role="alert">
@@ -3021,13 +4295,13 @@ function PricingWaterfallSection({ runId }: { runId: string }) {
           <dt>Base price</dt><dd>{waterfallValueText(view.baseSelection.basePrice)}</dd>
           <dt>Final price</dt><dd>{businessFacingText(view.finalPrice.finalPriceId)}</dd>
           <dt>Rounded final price</dt><dd>{waterfallValueText(view.finalPrice.roundedFinalPrice)}</dd>
-          <dt>Result hash</dt><dd>{businessFacingText(view.resultHash)}</dd>
-          <dt>Replay hash</dt><dd>{businessFacingText(view.replayHash)}</dd>
+          <dt>Result record</dt><dd>{businessFacingText(view.resultHash)}</dd>
+          <dt>Processing record</dt><dd>{businessFacingText(view.replayHash)}</dd>
         </dl>
 
         <ChipList label="Version refs" values={view.versionRefs.map(businessFacingText)} />
-        <ChipList label="Audit refs" values={view.auditRefs.map(businessFacingText)} />
-        <ChipList label="Rounding trace refs" values={view.finalPrice.roundingTraceRefs.map(businessFacingText)} />
+        <ChipList label="Review references" values={view.auditRefs.map(businessFacingText)} />
+        <ChipList label="Rounding review references" values={view.finalPrice.roundingTraceRefs.map(businessFacingText)} />
       </section>
 
       <section className="panel" aria-labelledby="waterfall-ledger-heading">
@@ -3046,7 +4320,7 @@ function PricingWaterfallSection({ runId }: { runId: string }) {
       </section>
 
       <section className="panel" aria-labelledby="waterfall-blockers-heading">
-        <h2 id="waterfall-blockers-heading">Missing-price blockers and replay evidence</h2>
+        <h2 id="waterfall-blockers-heading">Missing-price blockers and processing evidence</h2>
         <div className="offer-list" role="list" aria-label="Pricing waterfall blockers">
           {view.blockers.map((blocker) => (
             <article key={blocker.code} className="banner banner--blocked" role="listitem">
@@ -3078,6 +4352,232 @@ function WaterfallLedgerTableRow({ row }: { row: WaterfallLedgerRow }) {
 function waterfallValueText(value: { value: string | null; redacted: boolean; reason: string | null }) {
   if (value.redacted) return `Redacted: ${businessFacingText(value.reason)}`;
   return businessFacingText(value.value);
+}
+
+function ScenarioAnalysisWorkspaceSection({ runId }: { runId: string }) {
+  const [workspaceState, setWorkspaceState] = useState<ScenarioAnalysisWorkspaceState>({ kind: 'loading' });
+  const [dimensionId, setDimensionId] = useState('');
+  const [requestedValue, setRequestedValue] = useState('');
+  const [recalculation, setRecalculation] = useState<ScenarioRecalculationResult | null>(null);
+  const [recalculateError, setRecalculateError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    fetchScenarioAnalysisWorkspace(tenantBoundaryPlaceholder, runId)
+      .then((view) => {
+        if (!active) return;
+        setWorkspaceState({ kind: 'loaded', view });
+        setDimensionId(view.dimensions[0]?.dimensionId ?? '');
+        setRequestedValue(view.dimensions[0]?.value ?? '');
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : 'Scenario analysis workspace is unavailable.';
+        if (active) setWorkspaceState({ kind: 'unreachable', message });
+      });
+    return () => {
+      active = false;
+    };
+  }, [runId]);
+
+  async function requestRecalculation() {
+    if (workspaceState.kind !== 'loaded') return;
+    setRecalculateError('');
+    const selectedDimension = workspaceState.view.dimensions.find((dimension) => dimension.dimensionId === dimensionId);
+    const facts = Array.from(new Set([
+      ...(selectedDimension?.requiredFacts ?? []),
+      ...workspaceState.view.variants.flatMap((variant) => variant.factRefs),
+    ]));
+    try {
+      const result = await recalculateScenarioAnalysis(tenantBoundaryPlaceholder, runId, {
+        changedDimensionId: dimensionId,
+        requestedValue,
+        variantFacts: facts,
+      });
+      setRecalculation(result);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Scenario analysis recalculation is unavailable.';
+      setRecalculateError(message);
+    }
+  }
+
+  if (workspaceState.kind === 'loading') {
+    return <section className="panel" aria-labelledby="scenario-analysis-heading"><h2 id="scenario-analysis-heading">Scenario analysis workspace</h2><p role="status">Loading scenario analysis workspace...</p></section>;
+  }
+
+  if (workspaceState.kind === 'unreachable') {
+    return (
+      <section className="panel" aria-labelledby="scenario-analysis-heading">
+        <h2 id="scenario-analysis-heading">Scenario analysis workspace</h2>
+        <div className="banner banner--blocked" role="alert">{workspaceState.message}</div>
+      </section>
+    );
+  }
+
+  const view = workspaceState.view;
+
+  return (
+    <>
+      <section className="hero" aria-labelledby="scenario-analysis-title">
+        <p className="eyebrow">Scenario analysis · PII-22-S15</p>
+        <h2 id="scenario-analysis-title">What-if analysis cockpit for run {runId}</h2>
+        <p>
+          Inspect connected variants, sensitivity dimensions, guardrails, batch grids, saved analysis records, export refs,
+          and processing references. The UI sends variant facts back to the BFF and does not calculate pricing locally.
+        </p>
+      </section>
+
+      <section className="panel" aria-labelledby="scenario-analysis-heading">
+        <div className="panel-heading-row">
+          <div>
+            <p className="eyebrow">Workspace</p>
+            <h2 id="scenario-analysis-heading">Dimensions and variant facts</h2>
+          </div>
+          <DiagnosticsDetails items={[`Support reference: ${view.uiTraceId}`, `Dependency: ${view.dependencyStatus}`]} />
+        </div>
+        {view.fallbackReason ? <div className="banner banner--blocked" role="alert"><strong>Backend analysis contract required</strong><span>{businessFacingText(view.fallbackReason)}</span></div> : null}
+        <div className="offer-grid" role="list" aria-label="What-if dimensions">
+          {view.dimensions.map((dimension) => <ScenarioDimensionCard key={dimension.dimensionId} dimension={dimension} />)}
+        </div>
+        <div className="offer-grid" role="list" aria-label="What-if variants">
+          {view.variants.map((variant) => <ScenarioVariantCard key={variant.variantId} variant={variant} />)}
+        </div>
+      </section>
+
+      <section className="panel" aria-labelledby="scenario-recalculate-heading">
+        <h2 id="scenario-recalculate-heading">Request backend recalculation</h2>
+        <p className="field-help">Changing a dimension packages backend fact refs for scenario-analysis-service. No UI or BFF pricing formula runs here.</p>
+        <div className="offer-toolbar" aria-label="Scenario recalculation controls">
+          <label htmlFor="scenario-dimension">Dimension</label>
+          <select id="scenario-dimension" value={dimensionId} onChange={(event) => {
+            const nextDimension = view.dimensions.find((dimension) => dimension.dimensionId === event.target.value);
+            setDimensionId(event.target.value);
+            setRequestedValue(nextDimension?.value ?? '');
+          }}>
+            {view.dimensions.map((dimension) => <option key={dimension.dimensionId} value={dimension.dimensionId}>{dimension.label}</option>)}
+          </select>
+          <label htmlFor="scenario-requested-value">Requested value</label>
+          <input id="scenario-requested-value" value={requestedValue} onChange={(event) => setRequestedValue(event.target.value)} />
+          <button type="button" onClick={() => void requestRecalculation()}>Request recalculation</button>
+        </div>
+        {recalculateError ? <div className="banner banner--blocked" role="alert">{recalculateError}</div> : null}
+        {recalculation ? <ScenarioRecalculationBanner result={recalculation} /> : null}
+      </section>
+
+      <section className="panel" aria-labelledby="scenario-batch-heading">
+        <h2 id="scenario-batch-heading">Batch sensitivity grid</h2>
+        <div className="quote-table" role="table" aria-label="Scenario batch grid">
+          <div role="row" className="quote-table__row quote-table__row--head">
+            <span role="columnheader">Row</span>
+            <span role="columnheader">Variant</span>
+            <span role="columnheader">Dimensions</span>
+            <span role="columnheader">Status</span>
+            <span role="columnheader">Backend result</span>
+            <span role="columnheader">Guardrail</span>
+          </div>
+          {view.batchGrid.map((row) => <ScenarioBatchGridRow key={row.rowId} row={row} />)}
+        </div>
+      </section>
+
+      <section className="panel" aria-labelledby="scenario-evidence-heading">
+        <h2 id="scenario-evidence-heading">Saved analyses, exports, processing records, and guardrails</h2>
+        <div className="offer-grid" role="list" aria-label="Saved what-if analyses">
+          {view.savedAnalyses.map((analysis) => <ScenarioSavedAnalysisCard key={analysis.analysisId} analysis={analysis} />)}
+        </div>
+        <ChipList label="Workspace export refs" values={view.exportRefs.map(businessFacingText)} />
+        <ChipList label="Workspace processing references" values={view.replayRefs.map(businessFacingText)} />
+        <ScenarioBlockerList blockers={view.blockers} label="Scenario guardrail blockers" />
+        <ChipList label="Scenario analysis events" values={view.events.map(businessFacingText)} />
+      </section>
+    </>
+  );
+}
+
+function ScenarioDimensionCard({ dimension }: { dimension: ScenarioAnalysisDimension }) {
+  return (
+    <article className="module-card module-card--light" role="listitem">
+      <p className="module-card__route">{businessFacingText(dimension.dimensionId)}</p>
+      <strong className="module-card__title">{businessFacingText(dimension.label)}</strong>
+      <dl>
+        <dt>Current value</dt><dd>{businessFacingText(dimension.value)}</dd>
+        <dt>Source ref</dt><dd>{businessFacingText(dimension.sourceRef)}</dd>
+        <dt>Backend owned</dt><dd>{dimension.backendOnly ? 'yes' : 'no'}</dd>
+      </dl>
+      <ChipList label={`${dimension.label} required facts`} values={dimension.requiredFacts.map(businessFacingText)} />
+    </article>
+  );
+}
+
+function ScenarioVariantCard({ variant }: { variant: ScenarioAnalysisVariant }) {
+  return (
+    <article className="offer-card" role="listitem" aria-label={`Variant ${variant.variantId}`}>
+      <h3>{businessFacingText(variant.label)}</h3>
+      <dl>
+        <dt>Variant id</dt><dd>{businessFacingText(variant.variantId)}</dd>
+        <dt>Status</dt><dd>{businessFacingText(variant.status)}</dd>
+      </dl>
+      <ChipList label="Dimension refs" values={variant.dimensionRefs.map(businessFacingText)} />
+      <ChipList label="Variant facts" values={variant.factRefs.map(businessFacingText)} />
+      <ChipList label="Backend result refs" values={variant.resultRefs.map(businessFacingText)} />
+      <ScenarioBlockerList blockers={variant.guardrailBlockers} label={`${variant.variantId} guardrail blockers`} />
+    </article>
+  );
+}
+
+function ScenarioBatchGridRow({ row }: { row: ScenarioAnalysisBatchRow }) {
+  return (
+    <div role="row" className="quote-table__row">
+      <span role="cell">{businessFacingText(row.rowId)}</span>
+      <span role="cell">{businessFacingText(row.variantId)}</span>
+      <span role="cell">{businessFacingText(row.dimensionSummary)}</span>
+      <span role="cell">{businessFacingText(row.status)}</span>
+      <span role="cell">{businessFacingText(row.backendResultRef)}</span>
+      <span role="cell">{businessFacingText(row.guardrailSummary)}</span>
+    </div>
+  );
+}
+
+function ScenarioSavedAnalysisCard({ analysis }: { analysis: ScenarioAnalysisSavedAnalysis }) {
+  return (
+    <article className="module-card module-card--light" role="listitem">
+      <p className="module-card__route">{businessFacingText(analysis.analysisId)}</p>
+      <strong className="module-card__title">{businessFacingText(analysis.name)}</strong>
+      <dl>
+        <dt>Version</dt><dd>{businessFacingText(analysis.versionRef)}</dd>
+        <dt>Saved</dt><dd>{businessFacingText(analysis.savedAt)}</dd>
+        <dt>Export ref</dt><dd>{businessFacingText(analysis.exportRef)}</dd>
+        <dt>Processing record</dt><dd>{businessFacingText(analysis.replayHash)}</dd>
+      </dl>
+    </article>
+  );
+}
+
+function ScenarioBlockerList({ blockers, label }: { blockers: ScenarioAnalysisBlocker[]; label: string }) {
+  if (!blockers.length) return null;
+  return (
+    <div className="offer-list" role="list" aria-label={label}>
+      {blockers.map((blocker) => (
+        <article key={`${blocker.blockerCode}-${blocker.sourceRef}`} className="banner banner--blocked" role="listitem">
+          <strong>{businessFacingText(blocker.blockerCode)} · {businessFacingText(blocker.severity)}</strong>
+          <span>{businessFacingText(blocker.reason)}</span>
+          <span>Source: {businessFacingText(blocker.sourceRef)}</span>
+          <ChipList label="Required facts" values={blocker.requiredFacts.map(businessFacingText)} />
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function ScenarioRecalculationBanner({ result }: { result: ScenarioRecalculationResult }) {
+  const blocked = result.status === 'BLOCKED' || result.blockers.some((blocker) => blocker.severity.toUpperCase() === 'BLOCKER');
+  return (
+    <div className={blocked ? 'banner banner--blocked' : 'banner banner--success'} role={blocked ? 'alert' : 'status'}>
+      <strong>{blocked ? 'Recalculation blocked by backend guardrails' : 'Backend recalculation result received'}</strong>
+      <span>{businessFacingText(result.message)}</span>
+      <ChipList label="Backend result refs" values={result.backendResultRefs.map(businessFacingText)} />
+      <ScenarioBlockerList blockers={result.blockers} label="Recalculation blockers" />
+      <ChipList label="Recalculation events" values={result.events.map(businessFacingText)} />
+    </div>
+  );
 }
 
 function EligibilityExplanationSection({ runId }: { runId: string }) {
@@ -3120,7 +4620,7 @@ function EligibilityExplanationSection({ runId }: { runId: string }) {
         <p className="eyebrow">Borrower · BRW-S04</p>
         <h2 id="eligibility-title">Eligibility explanation for run {runId}</h2>
         <p>
-          Review backend-owned eligibility decisions, reason codes, fact references, overlay references, cache freshness, and
+          Review connected eligibility decisions, reason codes, fact references, overlay references, cache freshness, and
           explanation text without local eligibility policy logic.
         </p>
       </section>
@@ -3331,7 +4831,7 @@ function OfferComparisonSection({ runId }: { runId: string }) {
                 <ChipList label="Configured service refs" values={(offer.upstreamRefs ?? []).map(businessFacingText)} />
                 <ChipList label="Lock eligibility refs" values={offer.lockEligibilityRefs ?? []} />
                 <ChipList label="Snapshot refs" values={offer.snapshotRefs ?? []} />
-                <ChipList label="Audit ids" values={offer.auditIds ?? []} />
+                <ChipList label="Review references" values={(offer.auditIds ?? []).map(businessFacingText)} />
                 <ChipList label="Explanation sections" values={offer.explanationSections ?? []} />
                 <button type="button" aria-pressed={selectedOffer?.offerId === offer.offerId} onClick={() => void inspectOffer(offer)}>
                   Inspect explanation
@@ -3351,7 +4851,7 @@ function OfferComparisonSection({ runId }: { runId: string }) {
               <ChipList label="Explanation sections" values={(explanation.explanationSections ?? []).map(businessFacingText)} />
               <ChipList label="Explanation configured service refs" values={(explanation.upstreamRefs ?? []).map(businessFacingText)} />
               <ChipList label="Explanation snapshot refs" values={(explanation.snapshotRefs ?? []).map(businessFacingText)} />
-              <ChipList label="Explanation audit ids" values={(explanation.auditIds ?? []).map(businessFacingText)} />
+              <ChipList label="Explanation review references" values={(explanation.auditIds ?? []).map(businessFacingText)} />
             </>
           ) : (
             <div className="banner banner--blocked" role="alert">
@@ -3366,6 +4866,137 @@ function OfferComparisonSection({ runId }: { runId: string }) {
           Continue to lock workflow
         </button>
         {selectionMessage ? <p role="status">{selectionMessage}</p> : null}
+      </section>
+    </>
+  );
+}
+
+function QuoteDetailSection({ runId, offerId }: { runId: string; offerId: string }) {
+  const [detailState, setDetailState] = useState<QuoteDetailState>({ kind: 'loading' });
+
+  useEffect(() => {
+    let active = true;
+    fetchQuoteDetail(tenantBoundaryPlaceholder, runId, offerId)
+      .then((detail) => {
+        if (active) setDetailState({ kind: 'loaded', detail });
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : 'Quote detail evidence is unavailable.';
+        if (active) setDetailState({ kind: 'unreachable', message });
+      });
+    return () => {
+      active = false;
+    };
+  }, [runId, offerId]);
+
+  if (detailState.kind === 'loading') {
+    return <section className="panel" aria-labelledby="quote-detail-heading"><h2 id="quote-detail-heading">Quote detail</h2><p role="status">Loading quote detail evidence...</p></section>;
+  }
+
+  if (detailState.kind === 'unreachable') {
+    return (
+      <section className="panel" aria-labelledby="quote-detail-heading">
+        <h2 id="quote-detail-heading">Quote detail</h2>
+        <div className="banner banner--blocked" role="alert">{detailState.message}</div>
+      </section>
+    );
+  }
+
+  const detail = detailState.detail;
+  return (
+    <>
+      <section className="hero hero--admin" aria-labelledby="quote-detail-title">
+        <p className="eyebrow">Quote detail · PII-22-S23</p>
+        <h2 id="quote-detail-title">Quote detail waterfall for {detail.offerId}</h2>
+        <p>
+          Review card summary, ranking, pricing waterfall references, redactions, compliance flags, and review/processing evidence from
+          configured service facts. The workbench does not calculate note rate, final price, margin, or adjustments.
+        </p>
+      </section>
+
+      <section className="panel" aria-labelledby="quote-detail-heading">
+        <div className="panel-heading-row">
+          <div>
+            <p className="eyebrow">Connected quote details</p>
+            <h2 id="quote-detail-heading">Quote detail review panels</h2>
+          </div>
+          <DiagnosticsDetails items={[`Support reference: ${detail.uiTraceId}`, `Evidence record: ${detail.evidenceHash}`]} />
+        </div>
+        <div className="banner banner--blocked" role="alert">
+          <strong>{businessFacingText(detail.status)}</strong>
+          <span>{businessFacingText(detail.fallbackReason)}</span>
+        </div>
+        <dl className="status-grid">
+          <dt>Product</dt><dd>{valueText(detail.summary.productLabel)}</dd>
+          <dt>Rank</dt><dd>{valueText(detail.summary.rank)}</dd>
+          <dt>Rank score</dt><dd>{valueText(detail.summary.rankScore)}</dd>
+          <dt>Scenario version</dt><dd>{valueText(detail.summary.scenarioVersion)}</dd>
+          <dt>Processing record</dt><dd>{businessFacingText(detail.replayHash)}</dd>
+          <dt>Waterfall record</dt><dd>{businessFacingText(detail.waterfall.evidenceHash)}</dd>
+        </dl>
+        <ChipList label="Quote detail review references" values={detail.auditRefs.map(businessFacingText)} />
+        <ChipList label="Quote detail compliance flags" values={detail.complianceFlags.map(businessFacingText)} />
+      </section>
+
+      <section className="panel" aria-labelledby="quote-detail-panels-heading">
+        <h2 id="quote-detail-panels-heading">Accessible detail panels</h2>
+        <div className="module-rail__grid" role="list" aria-label="Quote detail review panels">
+          {detail.panels.map((panel) => {
+            const panelLabel = businessFacingText(panel.label);
+            return (
+              <article key={panel.panelId} className="module-card" role="listitem" aria-label={`${panelLabel} panel`}>
+                <p className="module-card__route">{businessFacingText(panel.status)}</p>
+                <strong className="module-card__title">{panelLabel}</strong>
+                <ChipList label={`${panelLabel} fields`} values={panel.fields.map(businessFacingText)} />
+                <ChipList label={`${panelLabel} connected service references`} values={panel.backendRefs.map(businessFacingText)} />
+                <ChipList label={`${panelLabel} items needing attention`} values={panel.blockers.map(businessFacingText)} />
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="panel" aria-labelledby="quote-detail-redactions-heading">
+        <h2 id="quote-detail-redactions-heading">Restricted and unavailable fields</h2>
+        <div className="quote-table" role="table" aria-label="Quote detail redactions">
+          <div role="row" className="quote-table__row quote-table__row--head">
+            <span role="columnheader">Field</span>
+            <span role="columnheader">State</span>
+            <span role="columnheader">Why unavailable</span>
+            <span role="columnheader">Review reference</span>
+          </div>
+          {detail.redactions.map((redaction) => (
+            <div key={`${redaction.fieldPath}-${redaction.auditRef}`} role="row" className="quote-table__row">
+              <span role="cell">{businessFacingText(redaction.fieldPath)}</span>
+              <span role="cell">{businessFacingText(redaction.state)}</span>
+              <span role="cell">{businessFacingText(redaction.reason)}</span>
+              <span role="cell">{businessFacingText(redaction.auditRef)}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel" aria-labelledby="quote-detail-waterfall-heading">
+        <h2 id="quote-detail-waterfall-heading">Waterfall sections and rounding review</h2>
+        <dl className="status-grid">
+          <dt>Base selection</dt><dd>{businessFacingText(detail.waterfall.baseSelection.selectionId)}</dd>
+          <dt>Selected note rate</dt><dd>{waterfallValueText(detail.waterfall.baseSelection.selectedNoteRate)}</dd>
+          <dt>Rounded final price</dt><dd>{waterfallValueText(detail.waterfall.finalPrice.roundedFinalPrice)}</dd>
+          <dt>Result record</dt><dd>{businessFacingText(detail.waterfall.resultHash)}</dd>
+        </dl>
+        <div className="quote-table" role="table" aria-label="Quote detail waterfall ledger">
+          <div role="row" className="quote-table__row quote-table__row--head">
+            <span role="columnheader">Step</span>
+            <span role="columnheader">Input</span>
+            <span role="columnheader">Operation</span>
+            <span role="columnheader">Output</span>
+            <span role="columnheader">Config</span>
+            <span role="columnheader">Reason</span>
+          </div>
+          {detail.waterfall.finalPrice.ledger.map((row) => <WaterfallLedgerTableRow key={`${row.ordinal}-${row.step}`} row={row} />)}
+        </div>
+        <ChipList label="Quote detail rounding review references" values={detail.waterfall.finalPrice.roundingTraceRefs.map(businessFacingText)} />
+        <ChipList label="Quote detail events" values={detail.events.map(businessFacingText)} />
       </section>
     </>
   );
@@ -3403,18 +5034,29 @@ function valueText(value: string | number | null | undefined) {
 }
 
 function runIdFromPath(pathname: string) {
-  const match = pathname.match(/^\/quote\/([^/]+)\/(offers|lock|status|eligibility|pricing-waterfall)/);
+  const match = pathname.match(/^\/quote\/([^/]+)\/(offers|lock|status|eligibility|pricing-waterfall|journey|what-if)/);
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-function screenFromPath(pathname: string): 'offers' | 'lock' | 'status' | 'eligibility' | 'waterfall' | null {
-  const match = pathname.match(/^\/quote\/[^/]+\/(offers|lock|status|eligibility|pricing-waterfall)/);
+function offerIdFromPath(pathname: string) {
+  const match = pathname.match(/^\/quote\/[^/]+\/offers\/([^/]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function screenFromPath(pathname: string): 'offers' | 'quoteDetail' | 'lock' | 'status' | 'eligibility' | 'waterfall' | 'journey' | 'whatIf' | null {
+  const match = pathname.match(/^\/quote\/[^/]+\/(offers|lock|status|eligibility|pricing-waterfall|journey|what-if)(?:\/[^/]+)?/);
   if (!match) return null;
+  if (match[1] === 'offers' && offerIdFromPath(pathname)) return 'quoteDetail';
+  if (match[1] === 'what-if') return 'whatIf';
+  if (match[1] === 'journey') return 'journey';
   return match[1] === 'pricing-waterfall' ? 'waterfall' : (match[1] as 'offers' | 'lock' | 'status' | 'eligibility');
 }
 
-function screenLabel(screen: 'offers' | 'lock' | 'status' | 'eligibility' | 'waterfall' | null) {
+function screenLabel(screen: 'offers' | 'quoteDetail' | 'lock' | 'status' | 'eligibility' | 'waterfall' | 'journey' | 'whatIf' | null) {
+  if (screen === 'quoteDetail') return 'Quote Detail';
+  if (screen === 'whatIf') return 'Scenario Analysis';
   if (screen === 'waterfall') return 'Pricing Waterfall';
+  if (screen === 'journey') return 'Quote Journey Map';
   if (screen === 'eligibility') return 'Eligibility Explanation';
   if (screen === 'lock') return 'Lock Terms';
   if (screen === 'status') return 'Lock Status';

@@ -8,10 +8,55 @@ export type WorkbenchScreenModule = {
   screenPackage: string;
   dataBoundary: string;
   stateCoverage: string[];
+  personaVisibility?: string[];
+  dependencyStatus?: string;
+  adapterStatus?: string;
   evidenceTarget: string;
   match: (pathname: string) => boolean;
   Component?: ComponentType;
 };
+
+type RegistryCopy = {
+  pathLabel: string;
+  screenArea: string;
+  sourceLabel: string;
+  stateLabels: string[];
+  evidenceLabel: string;
+};
+
+const defaultPersonaVisibility = ['loan officer', 'pricing analyst', 'operations lead', 'governance reviewer'];
+const requiredVisualStateContract = ['loading', 'needs attention', 'ready'];
+const configuredFallbackStatus = 'Visible with clear setup status; unavailable connected services show business-readable attention messages instead of hiding the capability.';
+
+function uniqueValues(values: string[]) {
+  return Array.from(new Set(values));
+}
+
+function personaVisibilityFor(screen: WorkbenchScreenModule) {
+  return screen.personaVisibility?.length ? screen.personaVisibility : defaultPersonaVisibility;
+}
+
+function visualStateContractFor(screen: WorkbenchScreenModule) {
+  return uniqueValues([...requiredVisualStateContract, ...screen.stateCoverage]);
+}
+
+function adapterStatusFor(screen: WorkbenchScreenModule) {
+  return screen.adapterStatus ?? (screen.dataBoundary.startsWith('lib/api/') ? 'Connected work area is ready for setup review.' : 'Workbench screen is ready for setup review.');
+}
+
+function dependencyStatusFor(screen: WorkbenchScreenModule) {
+  return screen.dependencyStatus ?? configuredFallbackStatus;
+}
+
+function registryCopyFor(screen: WorkbenchScreenModule): RegistryCopy {
+  return {
+    pathLabel: screen.routePattern.replace(':runId', 'a quote').replace(':optionId', 'a selected offer'),
+    screenArea: `${screen.label} work area`,
+    sourceLabel: `Guides ${screen.label.toLowerCase()} activity`,
+    stateLabels: visualStateContractFor(screen).map((state) => state.replace(/load-state|loading/i, 'loading').replace(/blocked|unavailable-contract|blocked-evidence/i, 'needs attention').replace(/audit-evidence|replay-evidence|export-evidence|recommendation-evidence|floor-evidence|evidence-panels/i, 'review records').replace(/backend-recalculation/i, 'connected recalculation').replace(/dlq/i, 'exception queue').replace(/feed-adapters?/i, 'investor delivery connections').replace(/sftp-adapters?/i, 'partner file delivery').replace(/[._/-]+/g, ' ')),
+    evidenceLabel: screen.evidenceTarget.includes('/quality/') ? 'Quality readiness review' : 'Product readiness review',
+  };
+}
 
 export const workbenchModules: WorkbenchScreenModule[] = [
   {
@@ -34,7 +79,18 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     dataBoundary: 'lib/api/offers',
     stateCoverage: ['load-state', 'empty', 'blocked', 'ready'],
     evidenceTarget: '.local-harness/evidence/PII-22-S21/quote-offers.json',
-    match: (pathname) => /^\/quote\/[^/]+\/offers/.test(pathname),
+    match: (pathname) => /^\/quote\/[^/]+\/offers\/?$/.test(pathname),
+  },
+  {
+    id: 'quote-detail',
+    label: 'Quote detail waterfall',
+    routePattern: '/quote/:runId/offers/:optionId',
+    breadcrumb: 'Quote Detail',
+    screenPackage: 'screens/quoteDetail',
+    dataBoundary: 'lib/api/offers.fetchQuoteDetail',
+    stateCoverage: ['load-state', 'summary', 'ranking', 'waterfall', 'redacted', 'compliance', 'audit-replay'],
+    evidenceTarget: '.local-harness/evidence/PII-22-S23/quote-detail-waterfall.json',
+    match: (pathname) => /^\/quote\/[^/]+\/offers\/[^/]+/.test(pathname),
   },
   {
     id: 'pricing-waterfall',
@@ -48,6 +104,28 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     match: (pathname) => /^\/quote\/[^/]+\/pricing-waterfall/.test(pathname),
   },
   {
+    id: 'quote-journey',
+    label: 'Quote journey map',
+    routePattern: '/quote/:runId/journey',
+    breadcrumb: 'Quote Journey Map',
+    screenPackage: 'screens/quoteJourneyMap',
+    dataBoundary: 'lib/api/quoteRuns.fetchQuoteJourneyMap',
+    stateCoverage: ['load-state', 'blocked', 'unavailable-contract', 'service-nodes', 'freshness', 'drilldown-refs'],
+    evidenceTarget: '.local-harness/evidence/PII-22-S19/quote-journey-map.json',
+    match: (pathname) => /^\/quote\/[^/]+\/journey/.test(pathname),
+  },
+  {
+    id: 'scenario-analysis',
+    label: 'Scenario analysis',
+    routePattern: '/quote/:runId/what-if',
+    breadcrumb: 'Scenario Analysis',
+    screenPackage: 'screens/scenarioAnalysis',
+    dataBoundary: 'lib/api/scenarioAnalysis',
+    stateCoverage: ['load-state', 'dimensions', 'guardrails', 'batch-grid', 'saved-analysis', 'export-replay', 'backend-recalculation'],
+    evidenceTarget: '.local-harness/evidence/PII-22-S15/scenario-analysis-workspace.json',
+    match: (pathname) => /^\/quote\/[^/]+\/what-if/.test(pathname),
+  },
+  {
     id: 'quote-lock',
     label: 'Lock workflow',
     routePattern: '/quote/:runId/lock',
@@ -57,6 +135,39 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     stateCoverage: ['load-state', 'blocked', 'ready'],
     evidenceTarget: '.local-harness/evidence/PII-22-S21/quote-lock.json',
     match: (pathname) => /^\/quote\/[^/]+\/lock/.test(pathname),
+  },
+  {
+    id: 'adjustment-evidence',
+    label: 'Adjustment evidence',
+    routePattern: '/pricing/adjustments',
+    breadcrumb: 'Adjustment Evidence',
+    screenPackage: 'screens/adjustmentEvidence',
+    dataBoundary: 'lib/api/adjustments',
+    stateCoverage: ['load-state', 'blocked', 'ids', 'fact-refs', 'conflicts', 'compensation-hooks', 'summaries'],
+    evidenceTarget: '.local-harness/evidence/PII-22-S17/adjustment-evidence.json',
+    match: (pathname) => pathname.startsWith('/pricing/adjustments'),
+  },
+  {
+    id: 'margin-profitability',
+    label: 'Margin profitability',
+    routePattern: '/pricing/margins',
+    breadcrumb: 'Margin Profitability',
+    screenPackage: 'screens/marginProfitability',
+    dataBoundary: 'lib/api/marginProfitability',
+    stateCoverage: ['load-state', 'blocked', 'redacted', 'floor-evidence', 'approval', 'replay-evidence'],
+    evidenceTarget: '.local-harness/evidence/PII-22-S16/margin-profitability.json',
+    match: (pathname) => pathname.startsWith('/pricing/margins'),
+  },
+  {
+    id: 'exception-concessions',
+    label: 'Exception concessions',
+    routePattern: '/exceptions/concessions',
+    breadcrumb: 'Exception Concessions',
+    screenPackage: 'screens/exceptionConcessions',
+    dataBoundary: 'lib/api/exceptionConcessions',
+    stateCoverage: ['load-state', 'concession-request', 'eligibility-exception', 'authority-matrix', 'manual-price-guard', 'risk-events', 'history-replay-export'],
+    evidenceTarget: '.local-harness/evidence/PII-22-S18/exception-concession-workbench.json',
+    match: (pathname) => pathname.startsWith('/exceptions/concessions'),
   },
   {
     id: 'quote-eligibility',
@@ -82,14 +193,14 @@ export const workbenchModules: WorkbenchScreenModule[] = [
   },
   {
     id: 'partner-transport',
-    label: 'Partner connections',
-    routePattern: '/partners/webhooks',
-    breadcrumb: 'Partner Connections',
-    screenPackage: 'screens/partnerTransport',
+    label: 'Partner integrations',
+    routePattern: '/partners/integrations',
+    breadcrumb: 'Partner Integrations',
+    screenPackage: 'screens/partnerIntegrations',
     dataBoundary: 'lib/api/partnerTransport',
-    stateCoverage: ['load-state', 'blocked', 'ready'],
-    evidenceTarget: '.local-harness/evidence/PII-22-S21/partner-transport.json',
-    match: (pathname) => pathname.startsWith('/partners/webhooks') || pathname.startsWith('/partners/admin/safety') || pathname.startsWith('/partners/alerts'),
+    stateCoverage: ['load-state', 'quote-requests', 'webhook-delivery', 'retries', 'dlq', 'feed-adapters', 'sftp-adapters', 'health', 'blocked'],
+    evidenceTarget: '.local-harness/evidence/PII-22-S12/partner-integration-workbench.json',
+    match: (pathname) => pathname.startsWith('/partners/integrations') || pathname.startsWith('/partners/webhooks') || pathname.startsWith('/partners/admin/safety') || pathname.startsWith('/partners/alerts'),
   },
   {
     id: 'rate-feed-ops',
@@ -170,14 +281,14 @@ export const workbenchModules: WorkbenchScreenModule[] = [
   },
   {
     id: 'custom-rules',
-    label: 'Custom rule evidence',
-    routePattern: '/custom-rules/evidence',
-    breadcrumb: 'Custom Rule Evidence',
+    label: 'Custom rules workbench',
+    routePattern: '/custom-rules',
+    breadcrumb: 'Custom Rules Workbench',
     screenPackage: 'screens/customRules',
     dataBoundary: 'lib/api/customRules',
-    stateCoverage: ['load-state', 'blocked', 'ready'],
-    evidenceTarget: '.local-harness/evidence/PII-22-S21/custom-rules.json',
-    match: (pathname) => pathname.startsWith('/custom-rules/'),
+    stateCoverage: ['load-state', 'blocked', 'empty', 'field-capture', 'decision-blockers', 'evidence-panels', 'ready'],
+    evidenceTarget: '.local-harness/evidence/PII-21-S06/custom-rules-workbench-route-shell.json',
+    match: (pathname) => pathname === '/custom-rules' || pathname.startsWith('/custom-rules/'),
   },
   {
     id: 'tenant-platform',
@@ -202,14 +313,27 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     match: (pathname) => pathname.startsWith('/audit/replay'),
   },
   {
+    id: 'ml-advisory-insights',
+    label: 'ML advisory insights',
+    routePattern: '/advisory/ml',
+    breadcrumb: 'ML Advisory Insights',
+    screenPackage: 'screens/mlAdvisoryInsights',
+    dataBoundary: 'lib/api/mlAdvisoryInsights',
+    stateCoverage: ['load-state', 'recommendation-evidence', 'model-version-governance', 'advisory-unavailable'],
+    evidenceTarget: '.local-harness/evidence/PII-22-S14/ml-advisory-insights.json',
+    match: (pathname) => pathname.startsWith('/advisory/ml'),
+  },
+  {
     id: 'service-modules',
-    label: 'Service modules',
+    label: 'Feature screen registry',
     routePattern: '/service-modules',
-    breadcrumb: 'Service Modules',
+    breadcrumb: 'Feature Screen Registry',
     screenPackage: 'screens/serviceModules',
     dataBoundary: 'lib/api/uiHealth',
     stateCoverage: ['empty', 'blocked', 'ready'],
-    evidenceTarget: '.local-harness/evidence/PII-22-S21/service-modules.json',
+    dependencyStatus: 'Local registry screen is available now; each connected module keeps its own setup status visible.',
+    adapterStatus: 'Registry uses local setup details plus workbench availability status.',
+    evidenceTarget: '.local-harness/evidence/PII-22-S24/feature-navigation-screen-registry.json',
     match: (pathname) => pathname.startsWith('/service-modules'),
   },
 ];
@@ -225,8 +349,8 @@ export function WorkbenchModuleRail({ activeModuleId }: { activeModuleId: string
         <p className="eyebrow">Screen registry</p>
         <h2 id="module-shell-heading">Modular route shell</h2>
         <p>
-          Each workbench behavior now has an explicit screen package, data boundary, state coverage, and story evidence target.
-          External visual references are unavailable until copied into project-relative evidence, so this shell uses repo-local requirements.
+          Each workbench behavior now has a visible path, intended users, connected work area, and expected screen states.
+          The registry avoids internal file names and uses plain setup language for screens that need more configuration.
         </p>
       </div>
       <div className="module-rail__grid" role="list" aria-label="Workbench screen modules">
@@ -237,19 +361,31 @@ export function WorkbenchModuleRail({ activeModuleId }: { activeModuleId: string
             role="listitem"
             aria-current={screen.id === activeModuleId ? 'page' : undefined}
           >
-            <p className="module-card__route">{screen.routePattern}</p>
+            {(() => {
+              const copy = registryCopyFor(screen);
+              return <>
+                <p className="module-card__route">{copy.pathLabel}</p>
             <strong className="module-card__title">{screen.label}</strong>
             <dl>
-              <dt>Screen package</dt>
-              <dd>{screen.screenPackage}</dd>
-              <dt>Data boundary</dt>
-              <dd>{screen.dataBoundary}</dd>
-              <dt>Evidence target</dt>
-              <dd>{screen.evidenceTarget}</dd>
+              <dt>Screen purpose</dt>
+              <dd>{copy.screenArea}</dd>
+              <dt>Connected work area</dt>
+              <dd>{copy.sourceLabel}</dd>
+              <dt>Setup readiness</dt>
+              <dd>{adapterStatusFor(screen)}</dd>
+              <dt>Setup status</dt>
+              <dd>{dependencyStatusFor(screen)}</dd>
+              <dt>Next review step</dt>
+              <dd>{copy.evidenceLabel}</dd>
             </dl>
-            <ul className="chip-list" aria-label={`${screen.label} state coverage`}>
-              {screen.stateCoverage.map((state) => <li key={state}>{state}</li>)}
+            <ul className="chip-list" aria-label={`${screen.label} role and persona visibility`}>
+              {personaVisibilityFor(screen).map((persona) => <li key={persona}>{persona}</li>)}
             </ul>
+            <ul className="chip-list" aria-label={`${screen.label} loading error blocked state coverage`}>
+              {uniqueValues(copy.stateLabels).map((state) => <li key={state}>{state}</li>)}
+            </ul>
+              </>;
+            })()}
           </article>
         ))}
       </div>

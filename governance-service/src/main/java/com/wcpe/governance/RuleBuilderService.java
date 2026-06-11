@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
+import java.time.LocalDate;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -24,7 +25,9 @@ public final class RuleBuilderService {
   public static final String SIMULATE_PERMISSION = "admin.config.simulate";
   public static final String DRAFT_EVENT_TYPE = "RuleSetDraftSaved.v1";
   public static final String SIMULATION_EVENT_TYPE = "RuleSetSimulationCompleted.v1";
+  public static final String EVALUATION_COMPLETED_EVENT_TYPE = "CustomRuleEvaluationCompleted.v1";
   public static final String AUDIT_ACTION = "RULE_BUILDER_UI_COMPLETED";
+  public static final String CONSUMER_CONTRACT_VERSION = "custom-rule-evaluation-v1";
 
   private final Clock clock;
   private final Map<String, IdempotencyEntry> idempotencyEntries = new HashMap<>();
@@ -207,6 +210,23 @@ public final class RuleBuilderService {
     List<String> matchedRuleIds = new ArrayList<>();
     List<String> skippedRuleIds = new ArrayList<>();
 
+    if (messages.stream().anyMatch(RuleBuilderValidationMessage::blocking)) {
+      skippedRuleIds.addAll(orderedEnabledRules(command.ruleSet()).stream().map(RuleBuilderRule::ruleId).toList());
+      String evidenceHash = dynamicEvidenceHash(command, actionOutputs, messages);
+      return GovernanceValidationResult.success(
+          new RuleBuilderDynamicEvaluationResult(
+              command.ruleSet().ruleSetId(),
+              "BLOCKED",
+              evidenceHash,
+              evidenceHash,
+              List.copyOf(messages),
+              List.of(),
+              List.of(),
+              List.copyOf(skippedRuleIds),
+              command.correlationId(),
+              clock.instant()));
+    }
+
     for (RuleBuilderRule rule : orderedEnabledRules(command.ruleSet())) {
       List<RuleBuilderValidationMessage> ruleBlockers = requiredFactBlockers(command, rule);
       messages.addAll(ruleBlockers);
@@ -223,6 +243,8 @@ public final class RuleBuilderService {
       matchedRuleIds.add(rule.ruleId());
       List<String> factRefs = factRefs(command.factsByDimension(), rule.conditions());
       for (RuleBuilderAction action : rule.actions()) {
+        RuleBuilderActionMetadata actionMetadata = command.metadata().actions().get(action.actionTypeRef());
+        String unitRef = actionMetadata == null ? "" : actionMetadata.unitRef();
         actionOutputs.add(
             new RuleBuilderDynamicActionOutput(
                 rule.ruleId(),
@@ -232,7 +254,15 @@ public final class RuleBuilderService {
                 factRefs,
                 action.precisionRef(),
                 action.roundingRef(),
-                action.reasonCodeRef()));
+                action.reasonCodeRef(),
+                action.actionTypeRef(),
+                unitRef,
+                deterministicId(command.versionRef(), rule.ruleId(), action.actionId(), "value-ref"),
+                "",
+                true,
+                deterministicId(command.versionRef(), rule.ruleId(), action.actionId(), "ledger-step"),
+                command.actorId(),
+                deterministicId(command.versionRef(), rule.ruleId(), action.actionId(), command.correlationId(), "audit")));
       }
       if (rule.stopProcessing()) {
         break;
@@ -241,17 +271,7 @@ public final class RuleBuilderService {
 
     boolean blocked = messages.stream().anyMatch(RuleBuilderValidationMessage::blocking);
     Instant now = clock.instant();
-    String evidenceMaterial =
-        canonicalRuleSet(command.ruleSet())
-            + "|"
-            + canonicalTypedFacts(command.factsByDimension())
-            + "|"
-            + canonicalDynamicOutputs(actionOutputs)
-            + "|"
-            + canonicalMessages(messages)
-            + "|"
-            + command.versionRef();
-    String evidenceHash = hash(evidenceMaterial);
+    String evidenceHash = dynamicEvidenceHash(command, actionOutputs, messages);
     return GovernanceValidationResult.success(
         new RuleBuilderDynamicEvaluationResult(
             command.ruleSet().ruleSetId(),
@@ -264,6 +284,70 @@ public final class RuleBuilderService {
             List.copyOf(skippedRuleIds),
             command.correlationId(),
             now));
+  }
+
+  public GovernanceValidationResult<CustomRuleEvaluationResultV1> evaluatePublishedRuleVersion(CustomRuleEvaluationRequestV1 request) {
+    GovernanceValidationResult<CustomRuleEvaluationRequestV1> validation = validateConsumerRequest(request);
+    if (!validation.valid()) {
+      return GovernanceValidationResult.success(refusedConsumerResult(request, validation.error().orElseThrow(), List.of(), List.of()));
+    }
+
+    RuleBuilderDynamicEvaluationCommand command =
+        new RuleBuilderDynamicEvaluationCommand(
+            request.tenantId(),
+            request.sourceService(),
+            List.of(SIMULATE_PERMISSION),
+            request.metadata(),
+            request.ruleSet(),
+            factsByDimension(request.facts()),
+            request.ruleVersionRef(),
+            request.correlationId());
+    GovernanceValidationResult<RuleBuilderDynamicEvaluationResult> evaluation = evaluateDynamicRules(command);
+    if (!evaluation.valid()) {
+      return GovernanceValidationResult.success(refusedConsumerResult(request, "POLICY_NOT_SATISFIED", List.of(), List.of()));
+    }
+
+    RuleBuilderDynamicEvaluationResult dynamic = evaluation.value().orElseThrow();
+    CustomRuleEvaluationStatusV1 status = consumerStatus(dynamic.validationMessages());
+    List<String> reasonCodeRefs =
+        dynamic.actionOutputs().stream().map(RuleBuilderDynamicActionOutput::reasonCodeRef).filter(reasonCode -> !isBlank(reasonCode)).distinct().sorted().toList();
+    List<CustomRuleEvidenceV1> ruleEvidence = ruleEvidence(request, dynamic);
+    CustomRuleReplayHashComparisonV1 replayHashComparison =
+        new CustomRuleReplayHashComparisonV1(dynamic.evidenceHash(), dynamic.resultHash(), dynamic.evidenceHash().equals(dynamic.resultHash()), CONSUMER_CONTRACT_VERSION);
+    CustomRuleEvaluationResultV1 result =
+        new CustomRuleEvaluationResultV1(
+            status,
+            request.ruleVersionRefs(),
+            request.facts().stream().map(CustomRuleFactV1::factRef).filter(factRef -> !isBlank(factRef)).sorted().toList(),
+            dynamic.matchedRuleIds(),
+            dynamic.skippedRuleIds(),
+            status == CustomRuleEvaluationStatusV1.PASSED ? List.of() : dynamic.skippedRuleIds(),
+            dynamic.actionOutputs(),
+            reasonCodeRefs,
+            dynamic.evidenceHash(),
+            dynamic.resultHash(),
+            CONSUMER_CONTRACT_VERSION,
+            request.correlationId(),
+            dynamic.validationMessages(),
+            ruleEvidence,
+            replayHashComparison);
+    if (status == CustomRuleEvaluationStatusV1.PASSED) {
+      outboxEvents.add(
+          new ConfigApiOutboxEvent(
+              deterministicId(request.tenantId(), request.requestId(), dynamic.evidenceHash(), CONSUMER_CONTRACT_VERSION),
+              EVALUATION_COMPLETED_EVENT_TYPE,
+              1,
+              request.tenantId(),
+              request.ruleSet().ruleSetId(),
+              request.ruleVersionRef(),
+              request.sourceService(),
+              request.correlationId(),
+              request.tenantId() + ":" + request.requestId(),
+              request.idempotencyKey(),
+              clock.instant(),
+              Map.of("status", result.status().name(), "evidenceRef", result.evidenceRef(), "contractVersion", result.contractVersion())));
+    }
+    return GovernanceValidationResult.success(result);
   }
 
   private GovernanceValidationResult<RuleBuilderDraftCommand> validateCommand(RuleBuilderDraftCommand command) {
@@ -321,6 +405,31 @@ public final class RuleBuilderService {
       return GovernanceValidationResult.failure("POLICY_NOT_SATISFIED: metadata, rule set, and typed facts are required");
     }
     return GovernanceValidationResult.success(command);
+  }
+
+  private GovernanceValidationResult<CustomRuleEvaluationRequestV1> validateConsumerRequest(CustomRuleEvaluationRequestV1 request) {
+    if (request == null) {
+      return GovernanceValidationResult.failure("POLICY_NOT_SATISFIED");
+    }
+    if (!isUuid(request.tenantId()) || isBlank(request.requestId()) || isBlank(request.sourceService()) || isBlank(request.correlationId())) {
+      return GovernanceValidationResult.failure("POLICY_NOT_SATISFIED");
+    }
+    if (!List.of("eligibility-service", "adjustment-service", "quote-service").contains(request.sourceService())) {
+      return GovernanceValidationResult.failure("CONSUMER_SCOPE_UNSUPPORTED");
+    }
+    if (request.evaluationDate() == null || request.scenarioRef() == null || isBlank(request.scenarioRef().scenarioId())) {
+      return GovernanceValidationResult.failure("POLICY_NOT_SATISFIED");
+    }
+    if (request.ruleVersionRefs() == null || request.ruleVersionRefs().isEmpty() || isBlank(request.ruleVersionRef()) || !request.ruleVersionRefs().contains(request.ruleVersionRef())) {
+      return GovernanceValidationResult.failure("RULE_VERSION_UNAVAILABLE");
+    }
+    if (request.metadata() == null || request.ruleSet() == null || request.facts() == null) {
+      return GovernanceValidationResult.failure("POLICY_NOT_SATISFIED");
+    }
+    if (!request.ruleSet().metadataVersionRefs().contains(request.metadata().metadataVersion())) {
+      return GovernanceValidationResult.failure("RULE_VERSION_UNAVAILABLE");
+    }
+    return GovernanceValidationResult.success(request);
   }
 
   private List<RuleBuilderValidationMessage> validateRuleSet(RuleBuilderRuleSet ruleSet, RuleBuilderMetadata metadata) {
@@ -389,14 +498,33 @@ public final class RuleBuilderService {
             .sorted()
             .findFirst()
             .orElse("metadata-ref");
+    List<String> valueSources = dimension.valueSourceRefs().stream().sorted().toList();
+    if (valueSources.isEmpty()) {
+      validationMessages.add("value source metadata missing: " + dimension.dimensionRef());
+    }
+    if (isBlank(metadata.metadataVersion())) {
+      validationMessages.add("version metadata missing: " + dimension.dimensionRef());
+    }
     return new RuleBuilderCustomFieldDescriptor(
         dimension.dimensionRef(),
         dimension.label(),
         dataType,
         allowedOperators,
-        dimension.valueSourceRefs().stream().sorted().toList(),
+        valueSources,
         "CONFIRMED_OR_ESTIMATED",
-        metadata.metadataVersionRef(),
+        metadata.metadataVersion(),
+        dimension.dimensionRef(),
+        "",
+        dimension.label(),
+        dimension.domainCategory(),
+        valueSources.isEmpty() ? "" : valueSources.get(0),
+        dimension.ownerService(),
+        dimension.decisionQualityRequired(),
+        dimension.unit(),
+        dimension.precision(),
+        dimension.effectiveWindow(),
+        dimension.validationMessageRefs(),
+        dimension.referenceEvidenceRefs(),
         List.copyOf(validationMessages));
   }
 
@@ -412,6 +540,150 @@ public final class RuleBuilderService {
       }
     }
     return blockers;
+  }
+
+  private Map<String, RuleBuilderTypedFact> factsByDimension(List<CustomRuleFactV1> facts) {
+    Map<String, RuleBuilderTypedFact> factsByDimension = new HashMap<>();
+    for (CustomRuleFactV1 fact : facts) {
+      factsByDimension.put(fact.dimensionRef(), new RuleBuilderTypedFact(fact.value(), fact.factRef(), fact.quality(), fact.sourceRef(), fact.precisionRef()));
+    }
+    return factsByDimension;
+  }
+
+  private CustomRuleEvaluationStatusV1 consumerStatus(List<RuleBuilderValidationMessage> messages) {
+    if (messages.stream().noneMatch(RuleBuilderValidationMessage::blocking)) {
+      return CustomRuleEvaluationStatusV1.PASSED;
+    }
+    if (messages.stream().anyMatch(message -> "UNKNOWN_FACT_FAIL_CLOSED".equals(message.code()))) {
+      return CustomRuleEvaluationStatusV1.REQUIRED_FACT_UNKNOWN;
+    }
+    if (messages.stream().anyMatch(message -> "CONFLICTING_FACT_FAIL_CLOSED".equals(message.code()))) {
+      return CustomRuleEvaluationStatusV1.REQUIRED_FACT_CONFLICTING;
+    }
+    return CustomRuleEvaluationStatusV1.POLICY_NOT_SATISFIED;
+  }
+
+  private CustomRuleEvaluationResultV1 refusedConsumerResult(
+      CustomRuleEvaluationRequestV1 request, String refusalCode, List<String> skippedRules, List<String> blockedRules) {
+    CustomRuleEvaluationStatusV1 status = CustomRuleEvaluationStatusV1.valueOf(refusalCode);
+    String correlationId = request == null ? "" : request.correlationId();
+    List<String> ruleVersionRefs = request == null || request.ruleVersionRefs() == null ? List.of() : request.ruleVersionRefs();
+    List<String> sourceFactRefs = request == null || request.facts() == null ? List.of() : request.facts().stream().map(CustomRuleFactV1::factRef).filter(factRef -> !isBlank(factRef)).sorted().toList();
+    String replayHash = hash(status.name() + "|" + correlationId + "|" + canonicalList(ruleVersionRefs) + "|" + canonicalList(sourceFactRefs));
+    return new CustomRuleEvaluationResultV1(
+        status,
+        ruleVersionRefs,
+        sourceFactRefs,
+        List.of(),
+        skippedRules,
+        blockedRules,
+        List.of(),
+        List.of(),
+        replayHash,
+        replayHash,
+        CONSUMER_CONTRACT_VERSION,
+        correlationId,
+        List.of(new RuleBuilderValidationMessage(status.name(), "$.request", "custom-rule-evaluation.refused", true)),
+        List.of(),
+        new CustomRuleReplayHashComparisonV1(replayHash, replayHash, true, CONSUMER_CONTRACT_VERSION));
+  }
+
+  private List<CustomRuleEvidenceV1> ruleEvidence(CustomRuleEvaluationRequestV1 request, RuleBuilderDynamicEvaluationResult dynamic) {
+    Map<String, RuleBuilderRule> rulesById = new HashMap<>();
+    for (RuleBuilderRule rule : request.ruleSet().rules()) {
+      rulesById.put(rule.ruleId(), rule);
+    }
+    Map<String, RuleBuilderTypedFact> factsByDimension = factsByDimension(request.facts());
+    List<CustomRuleFactEvidenceRefV1> sourceFacts = sourceFactEvidence(request.facts());
+    List<CustomRuleEvidenceV1> evidence = new ArrayList<>();
+    for (String ruleId : dynamic.matchedRuleIds()) {
+      RuleBuilderRule rule = rulesById.get(ruleId);
+      List<RuleBuilderDynamicActionOutput> outputs = outputsForRule(dynamic.actionOutputs(), ruleId);
+      RuleBuilderDynamicActionOutput firstOutput = outputs.isEmpty() ? null : outputs.get(0);
+      evidence.add(
+          new CustomRuleEvidenceV1(
+              deterministicId(request.tenantId(), request.requestId(), ruleId, dynamic.evidenceHash()),
+              request.tenantId(),
+              request.requestId(),
+              request.ruleVersionRef(),
+              ruleId,
+              request.ruleVersionRef(),
+              rule == null ? "" : rule.displayName(),
+              CustomRuleEvidenceStatusV1.MATCHED,
+              firstOutput == null ? "" : firstOutput.reasonCodeRef(),
+              firstOutput == null ? List.of() : firstOutput.factRefs(),
+              outputs,
+              firstOutput == null ? "" : firstOutput.precisionRef(),
+              firstOutput == null ? "" : firstOutput.roundingRef(),
+              firstOutput == null ? "" : firstOutput.unit(),
+              firstOutput == null ? "" : firstOutput.ledgerStepRef(),
+              request.sourceService(),
+              firstOutput == null ? "" : firstOutput.auditRef(),
+              dynamic.evidenceHash(),
+              sourceFacts,
+              List.of()));
+    }
+    for (String ruleId : dynamic.skippedRuleIds()) {
+      RuleBuilderRule rule = rulesById.get(ruleId);
+      List<RuleBuilderValidationMessage> blockers = blockersForRule(dynamic.validationMessages(), ruleId);
+      CustomRuleEvidenceStatusV1 status = blockers.isEmpty() ? CustomRuleEvidenceStatusV1.SKIPPED : CustomRuleEvidenceStatusV1.BLOCKED;
+      String reason = blockers.isEmpty() ? "RULE_CONDITIONS_NOT_MATCHED" : blockers.get(0).code();
+      List<String> factRefs = rule == null ? List.of() : factRefs(factsByDimension, rule.conditions());
+      evidence.add(
+          new CustomRuleEvidenceV1(
+              deterministicId(request.tenantId(), request.requestId(), ruleId, status.name(), dynamic.evidenceHash()),
+              request.tenantId(),
+              request.requestId(),
+              request.ruleVersionRef(),
+              ruleId,
+              request.ruleVersionRef(),
+              rule == null ? "" : rule.displayName(),
+              status,
+              reason,
+              factRefs,
+              List.of(),
+              "",
+              "",
+              "",
+              "",
+              request.sourceService(),
+              deterministicId(request.ruleVersionRef(), ruleId, request.correlationId(), "audit"),
+              dynamic.evidenceHash(),
+              sourceFacts,
+              missingFactEvidence(rule, factsByDimension, request.sourceService())));
+    }
+    return List.copyOf(evidence);
+  }
+
+  private List<RuleBuilderDynamicActionOutput> outputsForRule(List<RuleBuilderDynamicActionOutput> outputs, String ruleId) {
+    return outputs.stream().filter(output -> output.ruleId().equals(ruleId)).toList();
+  }
+
+  private List<RuleBuilderValidationMessage> blockersForRule(List<RuleBuilderValidationMessage> messages, String ruleId) {
+    String rulePath = "$.rules." + ruleId + ".";
+    return messages.stream().filter(message -> message.blocking() && message.jsonPath().startsWith(rulePath)).toList();
+  }
+
+  private List<CustomRuleFactEvidenceRefV1> sourceFactEvidence(List<CustomRuleFactV1> facts) {
+    return facts.stream()
+        .map(fact -> new CustomRuleFactEvidenceRefV1(fact.dimensionRef(), fact.factRef(), fact.quality(), fact.sourceRef(), fact.precisionRef()))
+        .sorted(Comparator.comparing(CustomRuleFactEvidenceRefV1::factRef))
+        .toList();
+  }
+
+  private List<CustomRuleMissingFactEvidenceV1> missingFactEvidence(
+      RuleBuilderRule rule, Map<String, RuleBuilderTypedFact> factsByDimension, String recoveryOwnerService) {
+    if (rule == null) {
+      return List.of();
+    }
+    return rule.conditions().stream()
+        .filter(condition -> factsByDimension.get(condition.dimensionRef()) == null)
+        .map(
+            condition ->
+                new CustomRuleMissingFactEvidenceV1(
+                    condition.dimensionRef(), RuleBuilderFactQuality.UNKNOWN, condition.valueSourceRef(), recoveryOwnerService))
+        .sorted(Comparator.comparing(CustomRuleMissingFactEvidenceV1::dimensionRef))
+        .toList();
   }
 
   private RuleMatchResult matchesRule(Map<String, RuleBuilderDimensionMetadata> dimensions, Map<String, RuleBuilderTypedFact> facts, RuleBuilderRule rule) {
@@ -474,7 +746,24 @@ public final class RuleBuilderService {
       if (isBlank(action.roundingRef()) || !metadata.roundingRefs().contains(action.roundingRef())) {
         messages.add(new RuleBuilderValidationMessage("FORMULA_ROUNDING_REQUIRED", "$.rules." + rule.ruleId() + ".actions." + action.actionId() + ".roundingRef", "rule-builder.formula.rounding.required", true));
       }
+      if (isBlank(actionMetadata.unitRef())) {
+        messages.add(new RuleBuilderValidationMessage("UNIT_CONVERSION_NOT_DECLARED", "$.rules." + rule.ruleId() + ".actions." + action.actionId() + ".unitRef", "rule-builder.formula.unit-conversion.required", true));
+      }
     }
+  }
+
+  private String dynamicEvidenceHash(
+      RuleBuilderDynamicEvaluationCommand command, List<RuleBuilderDynamicActionOutput> actionOutputs, List<RuleBuilderValidationMessage> messages) {
+    return hash(
+        canonicalRuleSet(command.ruleSet())
+            + "|"
+            + canonicalTypedFacts(command.factsByDimension())
+            + "|"
+            + canonicalDynamicOutputs(actionOutputs)
+            + "|"
+            + canonicalMessages(messages)
+            + "|"
+            + command.versionRef());
   }
 
   private List<RuleBuilderRule> orderedEnabledRules(RuleBuilderRuleSet ruleSet) {
@@ -576,7 +865,7 @@ public final class RuleBuilderService {
   private String canonicalDynamicOutputs(List<RuleBuilderDynamicActionOutput> outputs) {
     return outputs.stream()
         .sorted(Comparator.comparing(RuleBuilderDynamicActionOutput::ruleId).thenComparing(RuleBuilderDynamicActionOutput::actionId))
-        .map(output -> output.ruleId() + ":" + output.actionId() + ":" + output.actionOutputRef() + ":" + canonicalList(output.factRefs()))
+        .map(output -> output.ruleId() + ":" + output.actionId() + ":" + output.actionOutputRef() + ":" + output.unit() + ":" + output.valueRef() + ":" + output.ledgerStepRef() + ":" + canonicalList(output.factRefs()))
         .reduce((left, right) -> left + ";" + right)
         .orElse("");
   }
@@ -622,6 +911,87 @@ record RuleBuilderDynamicEvaluationCommand(
     String versionRef,
     String correlationId) {}
 
+record CustomRuleEvaluationRequestV1(
+    String tenantId,
+    String requestId,
+    String sourceService,
+    LocalDate evaluationDate,
+    CustomRuleScenarioRefV1 scenarioRef,
+    List<CustomRuleFactV1> facts,
+    List<String> ruleVersionRefs,
+    String ruleVersionRef,
+    Map<String, String> consumerContext,
+    String correlationId,
+    String idempotencyKey,
+    RuleBuilderMetadata metadata,
+    RuleBuilderRuleSet ruleSet) {}
+
+record CustomRuleScenarioRefV1(String scenarioId, String scenarioVersionRef) {}
+
+record CustomRuleFactV1(String dimensionRef, Object value, String factRef, RuleBuilderFactQuality quality, String sourceRef, String precisionRef) {}
+
+enum CustomRuleEvaluationStatusV1 {
+  PASSED,
+  RULE_VERSION_UNAVAILABLE,
+  REQUIRED_FACT_UNKNOWN,
+  REQUIRED_FACT_CONFLICTING,
+  CONSUMER_SCOPE_UNSUPPORTED,
+  POLICY_NOT_SATISFIED
+}
+
+record CustomRuleEvaluationResultV1(
+    CustomRuleEvaluationStatusV1 status,
+    List<String> ruleVersionRefs,
+    List<String> sourceFactRefs,
+    List<String> matchedRules,
+    List<String> skippedRules,
+    List<String> blockedRules,
+    List<RuleBuilderDynamicActionOutput> actionOutputs,
+    List<String> reasonCodeRefs,
+    String evidenceRef,
+    String replayHash,
+    String contractVersion,
+    String correlationId,
+    List<RuleBuilderValidationMessage> validationMessages,
+    List<CustomRuleEvidenceV1> ruleEvidence,
+    CustomRuleReplayHashComparisonV1 replayHashComparison) {}
+
+enum CustomRuleEvidenceStatusV1 {
+  MATCHED,
+  SKIPPED,
+  BLOCKED
+}
+
+record CustomRuleEvidenceV1(
+    String ruleEvidenceId,
+    String tenantId,
+    String evaluationId,
+    String ruleSetVersionRef,
+    String ruleId,
+    String ruleVersion,
+    String ruleName,
+    CustomRuleEvidenceStatusV1 status,
+    String reasonCodeRef,
+    List<String> factRefs,
+    List<RuleBuilderDynamicActionOutput> actionOutputs,
+    String precision,
+    String roundingMode,
+    String unit,
+    String ledgerStepRef,
+    String sourceService,
+    String auditRef,
+    String replayHash,
+    List<CustomRuleFactEvidenceRefV1> sourceFacts,
+    List<CustomRuleMissingFactEvidenceV1> missingFacts) {}
+
+record CustomRuleFactEvidenceRefV1(
+    String dimensionRef, String factRef, RuleBuilderFactQuality quality, String sourceService, String precisionRef) {}
+
+record CustomRuleMissingFactEvidenceV1(
+    String dimensionRef, RuleBuilderFactQuality quality, String missingSourceRef, String recoveryOwnerService) {}
+
+record CustomRuleReplayHashComparisonV1(String evidenceRef, String replayHash, boolean matches, String contractVersion) {}
+
 enum RuleBuilderFactQuality {
   CONFIRMED,
   ESTIMATED,
@@ -648,11 +1018,43 @@ record RuleBuilderMetadata(
     List<String> reasonCodeRefs,
     boolean duplicatePrioritiesAllowed) {}
 
-record RuleBuilderDimensionMetadata(String dimensionRef, String label, List<String> operatorRefs, List<String> valueSourceRefs) {}
+record RuleBuilderDimensionMetadata(
+    String dimensionRef,
+    String label,
+    List<String> operatorRefs,
+    List<String> valueSourceRefs,
+    String domainCategory,
+    String ownerService,
+    boolean decisionQualityRequired,
+    String unit,
+    String precision,
+    String effectiveWindow,
+    List<String> validationMessageRefs,
+    List<String> referenceEvidenceRefs) {
+  RuleBuilderDimensionMetadata(String dimensionRef, String label, List<String> operatorRefs, List<String> valueSourceRefs) {
+    this(
+        dimensionRef,
+        label,
+        operatorRefs,
+        valueSourceRefs,
+        "",
+        "governance-service",
+        true,
+        "",
+        "",
+        "",
+        List.of("rule-builder.dimension.required"),
+        List.of());
+  }
+}
 
 record RuleBuilderOperatorMetadata(String operatorRef, String label, String valueType) {}
 
-record RuleBuilderActionMetadata(String actionTypeRef, String label, boolean formulaAction) {}
+record RuleBuilderActionMetadata(String actionTypeRef, String label, boolean formulaAction, String unitRef) {
+  RuleBuilderActionMetadata(String actionTypeRef, String label, boolean formulaAction) {
+    this(actionTypeRef, label, formulaAction, "");
+  }
+}
 
 record RuleBuilderRuleSet(
     String ruleSetId,
@@ -723,6 +1125,18 @@ record RuleBuilderCustomFieldDescriptor(
     List<String> valueSources,
     String decisionQualityRequirement,
     String versionRef,
+    String fieldId,
+    String tenantId,
+    String displayKey,
+    String domainCategory,
+    String valueSource,
+    String ownerService,
+    boolean decisionQualityRequired,
+    String unit,
+    String precision,
+    String effectiveWindow,
+    List<String> validationMessageRefs,
+    List<String> referenceEvidenceRefs,
     List<String> validationMessages) {}
 
 record RuleBuilderDynamicActionOutput(
@@ -733,7 +1147,15 @@ record RuleBuilderDynamicActionOutput(
     List<String> factRefs,
     String precisionRef,
     String roundingRef,
-    String reasonCodeRef) {}
+    String reasonCodeRef,
+    String outputType,
+    String unit,
+    String valueRef,
+    String blockedRef,
+    boolean eligibleForCalculationLedger,
+    String ledgerStepRef,
+    String sourceService,
+    String auditRef) {}
 
 record RuleMatchResult(boolean matched, boolean blocked, List<RuleBuilderValidationMessage> messages) {}
 

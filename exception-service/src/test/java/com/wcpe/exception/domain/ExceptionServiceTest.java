@@ -1240,6 +1240,33 @@ class ExceptionServiceTest {
   }
 
   @Test
+  void exceptionWorkbenchAssemblesConcessionCoverageWithoutPricingRules() {
+    ExceptionHistoryController controller = new ExceptionHistoryController(service);
+
+    ExceptionModels.ExceptionWorkbenchCase workbench = controller.getExceptionConcessionWorkbench(
+      UUID.fromString("11111111-1111-1111-1111-111111111111"),
+      "CASE-PII22-S18",
+      "QUOTE-PII22-S18"
+    );
+
+    assertEquals("GET /api/v1/tenants/{tenantId}/exceptions/concessions/{caseId}/workbench", ExceptionHistoryController.GET_EXCEPTION_CONCESSION_WORKBENCH);
+    assertEquals("GOVERNED_REVIEW", workbench.status());
+    assertEquals("QUOTE-PII22-S18", workbench.quoteId());
+    assertTrue(workbench.sections().stream().anyMatch(section -> section.sectionId().equals("concession-request")));
+    assertTrue(workbench.sections().stream().anyMatch(section -> section.sectionId().equals("eligibility-exception")));
+    assertTrue(workbench.sections().stream().anyMatch(section -> section.sectionId().equals("authority-matrix")));
+    assertTrue(workbench.sections().stream().anyMatch(section -> section.sectionId().equals("manual-price-mutation-guard")));
+    assertTrue(workbench.sections().stream().anyMatch(section -> section.sectionId().equals("risk-events")));
+    assertTrue(workbench.sections().stream().anyMatch(section -> section.sectionId().equals("history-replay-export")));
+    assertTrue(workbench.manualPriceMutationGuard().commitDisabled());
+    assertEquals(ExceptionModels.PriceMutationGuardDecision.BLOCKED, workbench.manualPriceMutationGuard().decision());
+    assertTrue(workbench.manualPriceMutationGuard().reasonCodes().contains("MANUAL_PRICE_EDIT_FORBIDDEN"));
+    assertTrue(workbench.crossServiceRefs().contains("pricing-service.ledger-ref"));
+    assertNotNull(workbench.replayHash());
+    assertFalse(workbench.fallbackReason().toLowerCase(java.util.Locale.ROOT).contains("rate"));
+  }
+
+  @Test
   void exceptionHistoryPermissionsFailClosedForViewReplayAndExport() {
     ExceptionModels.PricingConcessionRequestStatus created = approvedConcession("HISTORY-IDEMP-PERM-001", "HISTORY-APPROVE-PERM-001");
 

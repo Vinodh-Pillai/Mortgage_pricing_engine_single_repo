@@ -46,4 +46,10 @@ class QuoteRunUiController {
       @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
     return adapter.pricingWaterfall(tenantId, runId, uiTraceId);
   }
+
+  @GetMapping("/api/v1/tenants/{tenantId}/quote-runs/{runId}/journey")
+  Object quoteJourneyMap(@PathVariable String tenantId, @PathVariable String runId,
+      @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
+    return adapter.quoteJourneyMap(tenantId, runId, uiTraceId);
+  }
 }

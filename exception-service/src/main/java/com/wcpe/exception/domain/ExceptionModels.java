@@ -830,6 +830,41 @@ public final class ExceptionModels {
     Instant createdAt
   ) {}
 
+  public record ExceptionWorkbenchSection(
+    String sectionId,
+    String label,
+    String status,
+    List<String> backendRefs,
+    List<String> auditRefs,
+    String summary
+  ) {}
+
+  public record ExceptionWorkbenchMutationGuard(
+    boolean commitDisabled,
+    PriceMutationGuardDecision decision,
+    List<String> reasonCodes,
+    String escalationPath,
+    String auditRef,
+    String replayHash
+  ) {}
+
+  public record ExceptionWorkbenchCase(
+    UUID tenantId,
+    String caseId,
+    String quoteId,
+    String status,
+    List<ExceptionWorkbenchSection> sections,
+    ExceptionWorkbenchMutationGuard manualPriceMutationGuard,
+    List<String> crossServiceRefs,
+    List<String> versionRefs,
+    List<String> auditRefs,
+    List<String> blockers,
+    String replayHash,
+    String exportManifestRef,
+    String fallbackReason,
+    Instant assembledAt
+  ) {}
+
   public record ExceptionHistoryProjectionRecord(
     UUID tenantId,
     String projectionId,

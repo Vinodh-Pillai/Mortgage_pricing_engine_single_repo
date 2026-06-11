@@ -1,0 +1,32 @@
+{
+  "storyId": "PII-20-S05",
+  "fixtureRoot": "projects/governance-service/golden/PII-20-custom-rules-backend/",
+  "contractVersion": "custom-rule-evaluation-v1",
+  "fixtureCategories": [
+    "confirmed-happy-path",
+    "estimated-warning-path",
+    "unknown-required-fact-blocked",
+    "conflicting-required-fact-blocked",
+    "missing-rule-version",
+    "duplicate-priority",
+    "unsupported-operator",
+    "unit-conversion-not-declared",
+    "replay-hash-stability"
+  ],
+  "expectedOutputFields": [
+    "status",
+    "matchedRules",
+    "skippedRules",
+    "blockedRules",
+    "reasonCodeRefs",
+    "evidenceRef",
+    "replayHash"
+  ],
+  "consumerServices": [
+    "eligibility-service",
+    "adjustment-service",
+    "quote-service",
+    "audit-replay-service"
+  ],
+  "domainDataPolicy": "Synthetic fixture values only; no rates, tiers, fees, compliance thresholds, or investor policy values."
+}

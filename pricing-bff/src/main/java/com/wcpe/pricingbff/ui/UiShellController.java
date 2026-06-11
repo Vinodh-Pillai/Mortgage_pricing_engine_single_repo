@@ -21,7 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 class PricingBffUiFallbackAdapter {
   @GetMapping("/api/ui/health")
   UiHealth health(@RequestHeader(value = "X-Correlation-Id", required = false) String correlationId) {
-    return new UiHealth("pricing-bff", "UP", true, "NO_UPSTREAMS_CONFIGURED", correlationId, List.of());
+    return new UiHealth("pricing-workbench", "AVAILABLE", true, "Connected services need setup", correlationId, List.of());
   }
 
   @GetMapping("/api/v1/ui/menus/{persona}")
@@ -140,24 +140,34 @@ class PricingBffUiFallbackAdapter {
     }
 
     String runId = deterministicRunId(tenantId, intake);
+    ScenarioIntakeMetadata metadata = scenarioIntakeMetadata(tenantId, traceId);
     return ResponseEntity.status(HttpStatus.CREATED)
         .body(new QuoteRunLaunch(runId, "CREATED", "/quote/" + runId + "/offers", validation, traceId,
-            List.of("UIFlowOpened", "ScenarioMetadataReviewed", "BorrowerIntakeSubmitted"), false,
-            "SCENARIO_SERVICE_CONTRACT_NOT_CONFIGURED", "audit-package-required-after-scenario-service-create",
-            "replay-hash-required-after-scenario-service-create", scenarioIntakeMetadata(tenantId, traceId).validationIssues()));
+            List.of("UIFlowOpened", "ProgressiveQuickQuoteReviewed", "ScenarioMetadataReviewed", "BorrowerIntakeSubmitted"), false,
+            "SCENARIO_QUOTE_CATALOG_CONTRACTS_NOT_CONFIGURED", "audit-package-required-after-scenario-service-create",
+            "replay-hash-required-after-scenario-service-create", metadata.validationIssues(), backendFactRefs(intake),
+            quoteServiceMissingFacts(intake), metadata.quickQuoteState()));
   }
 
   @GetMapping("/api/v1/tenants/{tenantId}/quote-runs/intake-metadata")
   ScenarioIntakeMetadata scenarioIntakeMetadata(@PathVariable String tenantId,
       @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
     String traceId = normalizeTrace(uiTraceId);
-    return new ScenarioIntakeMetadata(tenantId, "SCENARIO_SERVICE_CONTRACT_NOT_CONFIGURED", List.of(
+    return new ScenarioIntakeMetadata(tenantId, "Scenario, quote, and catalog setup needs attention", List.of(
         new ScenarioIntakeFieldGroup("scenario-identity", "Scenario identity",
-            "Capture identifiers and channel context. These fields are passed through as facts and are not pricing inputs.",
+            "Capture identifiers and channel context. The first step stays minimal; these refs expand when quote-service needs them.",
             List.of(
+                metadataField("scenarioId", "Scenario id", "scenario-identity", "text", false,
+                    "Use a configured scenario-service id when one already exists; otherwise the fallback records that creation is blocked pending contract wiring.", "scenario-service scenario id", "UNKNOWN",
+                    List.of("Required by quote-service before live quote creation can mutate.")),
+                metadataField("scenarioVersion", "Scenario version", "scenario-identity", "text", false,
+                    "Version reference supplied by scenario-service. The UI does not create or increment versions locally.", "scenario-service version ref", "UNKNOWN",
+                    List.of("Required by quote-service when ranking offers for a persisted scenario.")),
                 metadataField("scenarioName", "Scenario name", "scenario-identity", "text", false,
-                    "Optional local label for support and audit trace review.", "scenario-service metadata contract", "UNKNOWN",
+                    "Optional local label for support and review.", "scenario setup", "UNKNOWN",
                     List.of("Configured scenario-service metadata is required before this field can be marked verified.")),
+                metadataField("scenarioIntent", "Scenario or business intent", "scenario-identity", "textarea", false,
+                    "Capture purchase, refinance, comparison, or no-eligible-product review intent without pricing assumptions.", "scenario setup", "UNKNOWN", List.of()),
                 metadataField("channel", "Channel", "scenario-identity", "text", false,
                     "Record the originating channel supplied by the backend-owned scenario profile.", "submission-profile contract", "UNKNOWN",
                     List.of("Channel remains optional until a configured submission profile marks it required.")),
@@ -165,35 +175,107 @@ class PricingBffUiFallbackAdapter {
                     "Store a caller-provided loan reference when available; do not infer one in the UI.", "scenario-service create request", "UNKNOWN", List.of()),
                 metadataField("sourceSystem", "Source system", "scenario-identity", "text", false,
                     "Optional upstream system reference for replay and audit correlation.", "scenario-service create request", "UNKNOWN", List.of()))),
-        new ScenarioIntakeFieldGroup("borrower-loan-property", "Borrower, loan, and property facts",
-            "Capture fact fields for downstream validation. The BFF does not calculate eligibility, rates, fees, or pricing.",
+        new ScenarioIntakeFieldGroup("borrower-credit", "Borrower and credit",
+            "Capture borrower and credit fact refs for downstream validation. The BFF does not calculate eligibility, rates, fees, or pricing.",
             List.of(
-                metadataField("borrowerCreditStatus", "Borrower credit status", "borrower-loan-property", "text", false,
+                metadataField("borrowerRole", "Borrower role", "borrower-credit", "text", false,
+                    "Identify the primary borrower role for the scenario.", "borrower profile", "UNKNOWN", List.of()),
+                metadataField("coBorrowerName", "Co-borrower name", "borrower-credit", "text", false,
+                    "Optional co-borrower name for multi-borrower review.", "borrower profile", "UNKNOWN", List.of()),
+                metadataField("coBorrowerRole", "Co-borrower role", "borrower-credit", "text", false,
+                    "Optional co-borrower role for multi-borrower credit comparison.", "borrower profile", "UNKNOWN", List.of()),
+                metadataField("borrowerCreditStatus", "Borrower credit status", "borrower-credit", "text", false,
                     "Status label supplied by borrower intake or a configured credit source.", "borrower-credit profile", "UNKNOWN", List.of()),
                 metadataField("creditScore", "Credit score", "borrower-loan-property", "number", false,
-                    "Optional borrower-provided score value; pricing decisions remain downstream.", "borrower-credit profile", "UNKNOWN", List.of()),
+                    "Optional borrower-provided score value; pricing decisions remain connected-service owned.", "borrower-credit profile", "UNKNOWN", List.of()),
+                metadataField("creditScoreSource", "Credit score source", "borrower-credit", "text", false,
+                    "Capture the score source label without verifying credit in the UI.", "borrower-credit profile", "UNKNOWN", List.of()),
+                metadataField("creditReportDate", "Credit report date", "borrower-credit", "text", false,
+                    "Capture the report date when supplied; do not default one.", "borrower-credit profile", "UNKNOWN", List.of()),
+                metadataField("creditReadiness", "Credit readiness", "borrower-credit", "text", false,
+                    "Plain-language readiness notes for credit comparison.", "borrower-credit profile", "UNKNOWN", List.of()))),
+        new ScenarioIntakeFieldGroup("loan-structure", "Loan structure",
+            "Capture requested loan structure facts as pass-through facts only.",
+            List.of(
                 metadataField("loanPurpose", "Loan purpose", "borrower-loan-property", "text", false,
                     "Plain-language purpose captured for scenario completeness only.", "loan-structure metadata", "UNKNOWN", List.of()),
                 metadataField("loanAmount", "Loan amount", "borrower-loan-property", "number", false,
                     "Optional requested amount captured as a fact; the UI does not calculate ratios.", "loan-structure metadata", "UNKNOWN", List.of()),
+                metadataField("purchasePriceOrValue", "Purchase price or estimated value", "borrower-loan-property", "number", false,
+                    "Capture the purchase price or current estimated value without calculating ratios.", "loan-structure metadata", "UNKNOWN", List.of()),
+                metadataField("downPaymentOrEquity", "Down payment or equity", "borrower-loan-property", "number", false,
+                    "Capture down payment or equity as supplied by the user; no ratio is inferred.", "loan-structure metadata", "UNKNOWN", List.of()))),
+        new ScenarioIntakeFieldGroup("property", "Property",
+            "Capture property fact refs for configured downstream validation only.",
+            List.of(
                 metadataField("propertyState", "Property state", "borrower-loan-property", "text", false,
                     "State reference captured for configured downstream validation.", "property metadata", "UNKNOWN", List.of()),
+                metadataField("propertyCounty", "Property county", "borrower-loan-property", "text", false,
+                    "County reference captured for configured validation.", "property metadata", "UNKNOWN", List.of()),
+                metadataField("propertyZip", "Property ZIP", "borrower-loan-property", "text", false,
+                    "ZIP code captured as a scenario fact only.", "property metadata", "UNKNOWN", List.of()),
+                metadataField("propertyType", "Property type", "borrower-loan-property", "text", false,
+                    "Property type captured for downstream scenario validation only.", "property metadata", "UNKNOWN", List.of()),
                 metadataField("occupancyType", "Occupancy type", "borrower-loan-property", "text", false,
-                    "Occupancy fact captured for downstream scenario validation only.", "property metadata", "UNKNOWN", List.of()))),
+                    "Occupancy fact captured for downstream scenario validation only.", "property metadata", "UNKNOWN", List.of()),
+                metadataField("unitCount", "Unit count", "borrower-loan-property", "number", false,
+                    "Unit count captured when supplied; no property eligibility is inferred.", "property metadata", "UNKNOWN", List.of()))),
         new ScenarioIntakeFieldGroup("income-assets", "Income and assets",
             "Capture optional borrower-provided income and asset facts without deriving capacity or pricing.",
             List.of(
                 metadataField("monthlyIncome", "Monthly income", "income-assets", "number", false,
                     "Optional income fact for downstream scenario-service validation.", "income-asset metadata", "UNKNOWN", List.of()),
+                metadataField("incomeType", "Employment or income type", "income-assets", "text", false,
+                    "Capture employment or income type as supplied by the borrower.", "income-asset metadata", "UNKNOWN", List.of()),
+                metadataField("monthlyDebt", "Monthly debt", "income-assets", "number", false,
+                    "Optional monthly debt fact for connected workflow review.", "income-asset metadata", "UNKNOWN", List.of()),
                 metadataField("liquidAssets", "Liquid assets", "income-assets", "number", false,
-                    "Optional asset fact for downstream scenario-service validation.", "income-asset metadata", "UNKNOWN", List.of())))),
+                    "Optional asset fact for downstream scenario-service validation.", "income-asset metadata", "UNKNOWN", List.of()),
+                metadataField("reserves", "Reserves", "income-assets", "text", false,
+                    "Reserve information captured as supplied; no reserve requirement is inferred.", "income-asset metadata", "UNKNOWN", List.of()))),
+        new ScenarioIntakeFieldGroup("product-preferences", "Product preferences",
+            "Capture catalog preference refs without inferring product eligibility or investor behavior.",
+            List.of(
+                metadataField("productPreference", "Product preference", "product-preferences", "text", false,
+                    "Preference label or configured product ref supplied by catalog-service when available.", "catalog-service product preference", "UNKNOWN", List.of("Catalog-service product preference setup is unavailable in local preview mode.")),
+                metadataField("productFamily", "Product family preference", "product-preferences", "text", false,
+                    "Capture preferred product family labels without inferring eligibility or investor behavior.", "catalog-service product preference", "UNKNOWN", List.of()))),
+        new ScenarioIntakeFieldGroup("quote-filters", "Filters and effective date",
+            "Capture quote-service filters explicitly so they are not dropped at launch.",
+            List.of(
+                metadataField("quoteFilters", "Quote filters", "quote-filters", "textarea", false,
+                    "Filter refs or plain labels to pass to quote-service; the UI does not evaluate them.", "quote-service creation filters", "UNKNOWN", List.of("Configured filter schema is required before validation can be verified.")),
+                metadataField("effectiveDate", "Effective date", "quote-filters", "text", false,
+                    "Effective date supplied by the actor or configured client context; no default market date is inferred.", "quote-service effective date", "UNKNOWN", List.of("Quote-service requires an explicit effective date before live creation.")))),
+        new ScenarioIntakeFieldGroup("lock-periods", "Lock periods",
+            "Capture requested lock-period refs without defaulting lock policy.",
+            List.of(
+                metadataField("requestedLockPeriods", "Requested lock periods", "lock-periods", "text", false,
+                    "Requested lock-period refs passed through for quote-service and lock-service; no durations are invented.", "quote-service requested lock periods", "UNKNOWN", List.of("Configured lock-period catalog is required before options can be verified.")))),
+        new ScenarioIntakeFieldGroup("decision-quality", "Decision-quality state",
+            "Capture actor/client context and show blocker refs before downstream quote decisions mutate.",
+            List.of(
+                metadataField("actorId", "Actor id", "decision-quality", "text", false,
+                    "Actor id supplied by identity or calling context. The fallback asks for an explicit value instead of deriving credentials.", "tenant-context actor id", "UNKNOWN", List.of("Actor context is required before configured quote-service mutation.")),
+                metadataField("clientContext", "Client context", "decision-quality", "textarea", false,
+                    "Client context supplied by the caller or tenant platform as non-secret refs.", "tenant-context client context", "UNKNOWN", List.of("Client context contract is unavailable in local fallback mode."))))),
         List.of("Disable quote progression when required backend facts are missing.",
-            "Surface audit package and replay hash references before downstream quote decisions.",
-            "Keep pricing calculations outside the workbench intake surface."),
-        List.of(new ScenarioIntakeValidationIssue("SCENARIO_SERVICE_CONTRACT_REQUIRED", "scenarioService", "BLOCKING",
-            "Scenario-service metadata, validation issues, audit package id, and replay hash must be configured before downstream quote decisions can mutate.")),
-        "audit-package-required-after-scenario-service-create", "replay-hash-required-after-scenario-service-create",
-        "Configured scenario-service metadata is unavailable; this BFF response exposes non-secret field metadata, blockers, audit ids, and replay references only.", traceId);
+            "Surface review references before connected quote decisions.",
+            "Keep pricing calculations outside the workbench intake surface.",
+            "Keep the first step minimal and reveal backend-mapped sections progressively."),
+        List.of(new ScenarioIntakeValidationIssue("SCENARIO_SERVICE_SETUP_REQUIRED", "scenarioService", "BLOCKING",
+            "Scenario setup, validation guidance, review package, and review reference must be configured before connected quote decisions can change."),
+            new ScenarioIntakeValidationIssue("QUOTE_SERVICE_SETUP_REQUIRED", "quoteService", "BLOCKING",
+                "Quote setup needs scenario id/version, filters, requested lock periods, effective date, actor id, and client context before live quote creation.")),
+        "review-package-required-after-scenario-create", "review-reference-required-after-scenario-create",
+        "Scenario, quote, and catalog setup details are unavailable; this local response carries non-secret progressive sections and attention items only.", traceId,
+        new ProgressiveQuickQuoteState(
+            List.of("borrowerName", "borrowerRole", "coBorrowerName", "contactEmail", "quoteGoal", "scenarioIntent"),
+            List.of("scenario-identity", "borrower-credit", "loan-structure", "property", "income-assets", "product-preferences", "quote-filters", "lock-periods", "decision-quality"),
+            List.of("scenarioId", "scenarioVersion", "quoteFilters", "requestedLockPeriods", "effectiveDate", "actorId", "clientContext"),
+            List.of("scenario setup", "quote setup", "catalog product preference", "tenant actor/client context"),
+            List.of("Scenario setup required", "Quote setup required", "Catalog setup required", "Tenant context setup required"),
+            "Quick quote intake collects borrower, credit, loan, property, income, product, lock, and intent facts without local pricing rules."));
   }
 
   @PostMapping("/api/v1/tenants/{tenantId}/quote-runs/{runId}/intake/validate")
@@ -238,7 +320,7 @@ class PricingBffUiFallbackAdapter {
             List.of("rounding-policy-ref-required", "configured-rounding-trace-required")),
         List.of(
             new WaterfallBlocker("PRICING_SERVICE_CONTRACT_REQUIRED",
-                "Pricing-service waterfall evidence must provide base selection, final price ledger, rounding trace, and replay hashes before values can be shown.",
+                "Pricing-service waterfall review must provide base selection, final price steps, rounding review, and processing records before values can be shown.",
                 "pricing-service.waterfall"),
             new WaterfallBlocker("MISSING_PRICE_POLICY_REQUIRED",
                 "Missing-price handling remains fail-closed until pricing-service returns an explicit incident or valid-price result.",
@@ -248,6 +330,190 @@ class PricingBffUiFallbackAdapter {
         "replay-hash-required", "version-graph-hash-required", "result-hash-required", "waterfall-evidence-hash-required",
         traceId, List.of("PricingWaterfallOpened"),
         "Configured pricing-service waterfall contract is unavailable; this BFF response exposes non-secret references, redactions, and blockers only.");
+  }
+
+  QuoteJourneyMapView quoteJourneyMap(String tenantId, String runId, String uiTraceId) {
+    String tenant = tenantId == null || tenantId.isBlank() ? "ui-preview-tenant" : tenantId;
+    String traceId = uiTraceId == null || uiTraceId.isBlank() ? "journey-s19-local-trace" : uiTraceId;
+    JourneyDrilldownRefs refs = new JourneyDrilldownRefs(runId, "scenario-ref-required",
+        "quote-option-contract-required", "lock-ref-required", traceId);
+    return new QuoteJourneyMapView(tenant, runId, "BLOCKED_WITH_FALLBACK_FACTS",
+        "CROSS_SERVICE_CONTRACTS_PARTIAL_OR_UNAVAILABLE",
+        List.of(
+            new QuoteJourneyNode("scenario-facts", "Scenario facts", "scenario-service", "BLOCKED",
+                new JourneyFreshness("STALE_OR_UNKNOWN", "scenario-service.snapshot-required",
+                    "Scenario facts are visible only as configured refs until scenario-service snapshot freshness is supplied."),
+                List.of("scenario-version-ref-required", "audit-package-required-after-scenario-service-create"),
+                List.of("SCENARIO_SERVICE_CONTRACT_REQUIRED"), "replay-hash-required-after-scenario-service-create",
+                List.of("catalog-candidates", "eligibility"), "/quote/" + runId + "/status", refs),
+            new QuoteJourneyNode("catalog-candidates", "Catalog candidates", "catalog-service", "UNAVAILABLE",
+                new JourneyFreshness("UNKNOWN", "catalog-service.catalog-version-required",
+                    "Catalog participation is not configured for this run in the local BFF fallback."),
+                List.of("product-catalog-version-ref-required", "catalog-snapshot-ref-required"),
+                List.of("CATALOG_CONTRACT_UNAVAILABLE"), "catalog-replay-hash-required",
+                List.of("rate-grids", "eligibility"), "/admin/products/catalog", refs),
+            new QuoteJourneyNode("rate-grids", "Rate grids", "rate-feed-service", "UNAVAILABLE",
+                new JourneyFreshness("UNKNOWN", "rate-feed-service.grid-version-required",
+                    "Rate grid freshness must come from rate-feed-service; the BFF does not infer market data."),
+                List.of("grid-version-ref-required", "rate-feed-audit-ref-required"),
+                List.of("RATE_FEED_CONTRACT_UNAVAILABLE"), "rate-feed-replay-hash-required",
+                List.of("pricing-waterfall"), "/ops/rate-feeds", refs),
+            new QuoteJourneyNode("eligibility", "Eligibility", "eligibility-service", "VISIBLE_WITH_BLOCKERS",
+                new JourneyFreshness("FRESHNESS_REQUIRED", "eligibility-service.decision-cache-required",
+                    "Eligibility freshness is backend-owned and shown as a cache ref."),
+                List.of("eligibility-service:decision-ref-required", "eligibility-evidence-id-required"),
+                List.of("UNKNOWN_REQUIRED_FACT", "CONFLICTING_FACT"), "eligibility-replay-hash-required",
+                List.of("pricing-waterfall", "quote-ranking"), "/quote/" + runId + "/eligibility", refs),
+            new QuoteJourneyNode("pricing-waterfall", "Pricing waterfall", "pricing-service", "BLOCKED",
+                new JourneyFreshness("FRESHNESS_REQUIRED", "pricing-service.waterfall-version-required",
+                    "Pricing values remain redacted until a configured pricing-service waterfall contract responds."),
+                List.of("pricing-service:waterfall-ref-required", "waterfall-evidence-hash-required"),
+                List.of("PRICING_SERVICE_CONTRACT_REQUIRED"), "replay-hash-required",
+                List.of("quote-ranking", "adjustments", "margin"), "/quote/" + runId + "/pricing-waterfall", refs),
+            new QuoteJourneyNode("quote-ranking", "Quote ranking", "quote-service", "VISIBLE_WITH_REFS",
+                new JourneyFreshness("FRESHNESS_REQUIRED", "quote-service.ranking-snapshot-required",
+                    "Ranking evidence is shown as backend-owned refs without UI-side score calculation."),
+                List.of("quote-service.ranking", "snapshot:quote-service:run:" + runId, "audit:quote-ready-required"),
+                List.of("QUOTE_SERVICE_SELECTION_POLICY_REQUIRED"), "quote-ranking-replay-hash-required",
+                List.of("selection", "lock"), "/quote/" + runId + "/offers", refs),
+            new QuoteJourneyNode("selection", "Selection handoff", "pricing-bff", "VISIBLE_WITH_REFS",
+                new JourneyFreshness("LOCAL_TRACE", "pricing-bff.selection-handoff", "Selection refs are preserved for downstream lock workflow."),
+                List.of("selected-offer:required", "scenario-version:required", "audit:quote-selection-required"),
+                List.of("SELECTED_OFFER_REQUIRED"), "selection-replay-hash-required",
+                List.of("lock"), "/quote/" + runId + "/offers", refs),
+            new QuoteJourneyNode("lock", "Lock", "lock-service", "BLOCKED",
+                new JourneyFreshness("FRESHNESS_REQUIRED", "lock-service.freshness-check", "Lock freshness and eligibility remain lock-service owned."),
+                List.of("lock-eligibility:pending:quote-option-contract-required", "lock-service.lifecycle-ref-required"),
+                List.of("LOCK_SERVICE_CONTRACT_REQUIRED"), "lock-replay-hash-required",
+                List.of("exception-compliance", "audit-integration"), "/quote/" + runId + "/lock", refs),
+            new QuoteJourneyNode("exception-compliance", "Exception and compliance", "exception-service/compliance-service", "BLOCKED",
+                new JourneyFreshness("UNKNOWN", "exception-compliance.review-required", "Governed review contracts are unavailable in local fallback mode."),
+                List.of("exception-approval-route-ref-required", "compliance-review-ref-required"),
+                List.of("EXCEPTION_SERVICE_CONTRACT_REQUIRED", "COMPLIANCE_SERVICE_CONTRACT_REQUIRED"),
+                "exception-compliance-replay-hash-required", List.of("audit-integration"), "/exceptions/concessions", refs),
+            new QuoteJourneyNode("audit-integration", "Audit and integration events", "audit-replay-service/integration-service", "BLOCKED",
+                new JourneyFreshness("UNKNOWN", "audit-integration.event-envelope-required", "Audit and partner event delivery are represented by refs only."),
+                List.of("audit-record-id-required", "event-envelope-ref-required", "partner-delivery-ref-required"),
+                List.of("AUDIT_REPLAY_SERVICE_CONTRACT_REQUIRED", "INTEGRATION_SERVICE_CONTRACT_REQUIRED"),
+                "audit-integration-replay-hash-required", List.of(), "/audit/replay", refs)),
+        List.of("Configured cross-service contracts are partial or unavailable; the journey map shows fallback refs and blocked states instead of hiding gaps."),
+        List.of("ScenarioService", "CatalogService", "RateFeedService", "EligibilityService", "PricingService", "QuoteService", "LockService", "ExceptionService", "ComplianceService", "AuditReplayService", "IntegrationService"),
+        traceId, List.of("QuoteJourneyMapOpened"),
+        "Configured service journey facts are unavailable or partial; pricing-bff exposes non-secret refs, blockers, freshness labels, replay hashes, and safe drilldown routes only.");
+  }
+
+  MarginProfitabilityView marginProfitability(String tenantContext, String uiTraceId) {
+    String tenant = tenantContext == null || tenantContext.isBlank() ? "ui-preview-tenant" : tenantContext;
+    String traceId = uiTraceId == null || uiTraceId.isBlank() ? "margin-s16-local-trace" : uiTraceId;
+    return new MarginProfitabilityView(tenant, "MARGIN_SERVICE_PROFITABILITY_CONTRACT_NOT_CONFIGURED", false,
+        List.of(
+            new MarginEvidenceSection("company-margin", "Company", "margin-service company margin policy", "VISIBLE",
+                List.of("company-policy-version-ref-required", "company-margin-audit-ref-required"), List.of()),
+            new MarginEvidenceSection("channel-margin", "Channel", "margin-service channel margin policy", "VISIBLE",
+                List.of("channel-policy-version-ref-required", "channel-margin-audit-ref-required"), List.of()),
+            new MarginEvidenceSection("branch-margin", "Branch", "margin-service branch overlay policy", "VISIBLE",
+                List.of("branch-overlay-version-ref-required", "branch-scope-audit-ref-required"), List.of()),
+            new MarginEvidenceSection("lo-compensation", "LO compensation", "margin-service LO compensation plan", "REDACTED",
+                List.of("lo-comp-plan-version-ref-required"),
+                List.of(new MarginRedactionEvidence("LO compensation amount", "REDACTED",
+                    "pricing.margin.compensation.view_sensitive is required", "audit:lo-compensation-redaction-required"))),
+            new MarginEvidenceSection("broker-compensation", "Broker compensation", "margin-service broker compensation plan", "REDACTED",
+                List.of("broker-comp-plan-version-ref-required"),
+                List.of(new MarginRedactionEvidence("Broker compensation amount", "REDACTED",
+                    "pricing.margin.compensation.view_sensitive is required", "audit:broker-compensation-redaction-required"))),
+            new MarginEvidenceSection("profitability-floor", "Profitability floor", "margin-service profitability floor policy", "VISIBLE",
+                List.of("profitability-floor-version-ref-required", "profitability-threshold-ref-required"), List.of()),
+            new MarginEvidenceSection("approval-governance", "Approval", "margin-service approval governance", "VISIBLE",
+                List.of("approval-audit-ref-required", "separation-of-duty-ref-required"), List.of()),
+            new MarginEvidenceSection("replay", "Replay", "margin-service replay hash boundary", "VISIBLE",
+                List.of("margin-replay-hash-required", "margin-version-graph-hash-required"), List.of())),
+        new MarginFloorEvidence("quote-option-contract-required", "BLOCKED", "PROFITABILITY_FLOOR_BREACH",
+            "profitability-floor-version-ref-required", "profitability-threshold-ref-required",
+            "profitability-exception-route-ref-required", List.of("profitability-floor-audit-ref-required"),
+            "Display backend floor evidence and exception path only; profitability floors remain backend-owned."),
+        List.of("company-policy-version-ref-required", "channel-policy-version-ref-required",
+            "branch-overlay-version-ref-required", "lo-comp-plan-version-ref-required", "broker-comp-plan-version-ref-required",
+            "profitability-floor-version-ref-required"),
+        List.of("audit:margin-profitability-required", "audit:compensation-redaction-required"),
+        "margin-profitability-replay-hash-required", traceId, List.of("MarginProfitabilityModuleOpened"),
+        "Configured margin-service evidence contracts are unavailable; pricing-bff exposes non-secret section refs, floor blockers, redaction reasons, audit refs, and replay hashes only.");
+  }
+
+  AdjustmentEvidenceView adjustmentEvidence(String tenantContext, String uiTraceId) {
+    String tenant = tenantContext == null || tenantContext.isBlank() ? "ui-preview-tenant" : tenantContext;
+    String traceId = uiTraceId == null || uiTraceId.isBlank() ? "adjustment-s17-local-trace" : uiTraceId;
+    return new AdjustmentEvidenceView(tenant, "ADJUSTMENT_SERVICE_CONFIG_PARTIAL", "BLOCKED", List.of(
+        new AdjustmentEvidenceRow("adjustment-llpa-contract-required", "LLPA evaluator evidence", "LLPA", "VISIBLE",
+            List.of("fact:representative-credit", "fact:loan-to-value"), "adjustment-service.llpa-evaluator",
+            "llpa-rulebook-version-ref-required", "Backend-owned LLPA evaluator refs are visible; values remain unavailable until configured adjustment-service contracts respond.",
+            List.of(), List.of("conflict-manual-review-required")),
+        new AdjustmentEvidenceRow("adjustment-fee-catalog-contract-required", "Fee calculation evidence", "FEE", "BLOCKED",
+            List.of("fact:quote-option", "fact:fee-catalog-version"), "adjustment-service.fee-calculation",
+            "fee-catalog-version-ref-required", "Fee amounts are blocked because configured fee catalog values are not available at this BFF boundary.",
+            List.of(), List.of()),
+        new AdjustmentEvidenceRow("adjustment-compensation-hook-contract-required", "Compensation hook evidence", "COMPENSATION", "VISIBLE",
+            List.of("fact:channel", "fact:compensation-plan-ref"), "adjustment-service.compensation-hooks",
+            "compensation-hook-version-ref-required", "Compensation hook source and audit references are visible without exposing compensation amounts.",
+            List.of("lo-compensation-hook-ref-required", "broker-compensation-hook-ref-required"), List.of())) ,
+        List.of(new AdjustmentConflictView("conflict-manual-review-required", "BLOCKING", "REQUIRE_MANUAL_REVIEW",
+            "Configured conflict policy reports overlapping adjustment evidence and requires manual review before values can be used.",
+            "Pricing Operations", List.of("adjustment-llpa-contract-required", "adjustment-fee-catalog-contract-required"))),
+        List.of(new AdjustmentBlockedState("ADJUSTMENT_CONFIG_MISSING", "Adjustment-service configuration is incomplete; UI must not infer LLPA, fee, or compensation values.",
+            "adjustment-service.configuration", "Pricing Operations")),
+        List.of(
+            new AdjustmentSummaryCard("LLPA", "LLPA evaluator evidence is represented by backend-owned adjustment ids, fact refs, rulebook refs, and conflict refs.",
+                List.of("llpa-rulebook-version-ref-required", "audit:adjustment-llpa-required")),
+            new AdjustmentSummaryCard("FEE", "Fee calculation evidence is blocked until a configured fee catalog response supplies authoritative values.",
+                List.of("fee-catalog-version-ref-required", "audit:fee-calculation-required")),
+            new AdjustmentSummaryCard("COMPENSATION", "Compensation hook refs are shown as source evidence only; sensitive amounts remain backend-owned.",
+                List.of("compensation-hook-version-ref-required", "audit:compensation-hook-required"))),
+        List.of("llpa-rulebook-version-ref-required", "fee-catalog-version-ref-required", "compensation-hook-version-ref-required"),
+        List.of("audit:adjustment-evidence-required", "audit:adjustment-conflict-required"),
+        "adjustment-evidence-replay-hash-required", traceId, List.of("AdjustmentEvidenceModuleOpened"),
+        "Configured adjustment-service contracts are partial; pricing-bff exposes ids, fact refs, sources, conflicts, compensation hooks, summaries, blockers, audit refs, and replay refs only.");
+  }
+
+  ExceptionConcessionWorkbenchView exceptionConcessionWorkbench(String tenantContext, String uiTraceId) {
+    String tenant = tenantContext == null || tenantContext.isBlank() ? "ui-preview-tenant" : tenantContext;
+    String traceId = uiTraceId == null || uiTraceId.isBlank() ? "exception-s18-local-trace" : uiTraceId;
+    return new ExceptionConcessionWorkbenchView(tenant, "EXCEPTION_SERVICE_CONCESSION_WORKBENCH_CONTRACT_NOT_CONFIGURED",
+        "GOVERNED_REVIEW", List.of(
+            new ExceptionConcessionSection("concession-request", "Concession request", "VISIBLE",
+                List.of("exception-service.concession-request", "pricing-service.quote-ref"),
+                List.of("audit:concession-request-required"),
+                "Concession request state, reason refs, route hash, request hash, and policy refs are visible without pricing calculations."),
+            new ExceptionConcessionSection("eligibility-exception", "Eligibility exception", "VISIBLE",
+                List.of("exception-service.eligibility-exception", "eligibility-service.finding-ref"),
+                List.of("audit:eligibility-exception-required"),
+                "Eligibility exception finding refs, original result hash, exceptionable state, and related concession refs are shown as backend-owned evidence."),
+            new ExceptionConcessionSection("authority-matrix", "Authority matrix", "VISIBLE",
+                List.of("exception-service.authority-matrix", "governance-service.role-scope"),
+                List.of("audit:authority-matrix-required"),
+                "Approval route, matrix version, validation hash, conflict attestation, and separation-of-duties evidence are displayed from configured refs."),
+            new ExceptionConcessionSection("manual-price-mutation-guard", "Manual price mutation guard", "BLOCKED",
+                List.of("exception-service.manual-price-edit-guard", "pricing-service.ledger-hash"),
+                List.of("audit:manual-price-edit-blocked"),
+                "Manual price mutation commit is disabled while backend guard returns denial reason codes and escalation path."),
+            new ExceptionConcessionSection("risk-events", "Monitoring and risk events", "VISIBLE",
+                List.of("exception-service.risk-monitoring-events", "observability-service.alert-ref"),
+                List.of("audit:risk-monitoring-required"),
+                "Risk events, alert severity, redaction state, and replay flags are visible as non-PII refs."),
+            new ExceptionConcessionSection("history-replay-export", "History, replay, and export", "VISIBLE",
+                List.of("exception-service.exception-history", "audit-replay-service.replay-package"),
+                List.of("audit:exception-history-required", "audit:exception-export-required"),
+                "History timeline, replay hash, export manifest, retention, and redaction refs are grouped for governed review.")),
+        new ManualPriceMutationGuardView(true, "BLOCKED",
+            List.of("MANUAL_PRICE_EDIT_FORBIDDEN", "LEDGER_HASH_REQUIRED"),
+            "exception-approval-escalation-path-required", "audit:manual-price-edit-blocked",
+            "exception-concession-replay-hash-required"),
+        List.of("quote-service.quote-ref", "pricing-service.ledger-ref", "margin-service.margin-ref",
+            "adjustment-service.adjustment-ref", "lock-service.lock-ref", "compliance-service.review-ref"),
+        List.of("authority-matrix-version-ref-required", "concession-policy-version-ref-required", "price-guard-policy-version-ref-required"),
+        List.of("audit:exception-workbench-opened", "audit:manual-price-edit-blocked", "audit:exception-export-required"),
+        List.of("Configured exception-service live integration is unavailable in local mode; actions stay disabled until backend guard and export contracts are wired."),
+        "exception-concession-replay-hash-required", "exception-history-export-manifest-required", traceId,
+        List.of("ExceptionConcessionWorkbenchOpened", "ManualPriceMutationGuardRendered"),
+        "Configured exception-service contracts are unavailable; pricing-bff exposes backend-owned refs, blocker states, audit refs, replay hashes, and export refs only.");
   }
 
   @GetMapping("/api/v1/tenants/{tenantId}/quote-runs/{runId}/offers")
@@ -260,6 +526,45 @@ class PricingBffUiFallbackAdapter {
   OfferExplanationView offerExplanation(@PathVariable String runId, @PathVariable String offerId,
       @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
     return OfferExplanationView.available(runId, offerId, normalizeTrace(uiTraceId));
+  }
+
+  QuoteDetailView quoteDetail(String tenantId, String runId, String offerId, String uiTraceId) {
+    String optionId = offerId == null || offerId.isBlank() ? "quote-option-contract-required" : offerId;
+    String traceId = uiTraceId == null || uiTraceId.isBlank() ? "qd-s23-local-trace" : uiTraceId;
+    OfferSummary summary = OfferComparisonView.contractVisible(runId, traceId).offers().stream()
+        .filter(offer -> offer.offerId().equals(optionId))
+        .findFirst()
+        .orElse(new OfferSummary(optionId, 1, "Backend-ranked offer", "payment-ref-required",
+            "apr-ref-required", "score:backend-owned", "rank-score-ref-required",
+            List.of("Rank and score must come from quote-service ranking response"),
+            List.of("DETAIL_EVIDENCE_REQUIRED"), "AVAILABLE", "scenario-ref-required", 7,
+            List.of("quote-service.option:" + optionId, "pricing-service:waterfall-ref-required"),
+            List.of("lock-eligibility:pending:" + optionId), List.of("snapshot:quote-service:run:" + runId),
+            List.of("audit:quote-ready-required", "replay-hash-required"),
+            List.of("summary", "ranking", "waterfall", "compliance", "audit-replay")));
+    PricingWaterfallView waterfall = pricingWaterfall(tenantId, runId, traceId);
+    return new QuoteDetailView(tenantId, runId, optionId, "DETAIL_VISIBLE_WITH_BACKEND_REFS", summary,
+        OfferExplanationView.available(runId, optionId, traceId), waterfall,
+        List.of(
+            new QuoteDetailPanel("summary", "Card summary", "VISIBLE", List.of("product id", "investor id", "channel", "lock period"),
+                List.of("quote-service.option:" + optionId, "catalog-service.product-ref-required"), List.of()),
+            new QuoteDetailPanel("ranking", "Ranking and tie breakers", "VISIBLE", List.of("rank", "criterion scores", "tie breakers", "warnings"),
+                List.of("quote-service.ranking", "quote-service.explanation"), List.of("tie-breaker-evidence-required")),
+            new QuoteDetailPanel("waterfall", "Pricing waterfall", "REDACTED", List.of("note rate", "final price bps", "adjustments", "margins", "rounding review references"),
+                List.of("pricing-service.waterfall", "adjustment-service.evidence", "margin-service.evidence"), List.of("restricted pricing values require backend permission")),
+            new QuoteDetailPanel("compliance", "Compliance flags", "VISIBLE_WITH_BLOCKERS", List.of("compliance flags", "hidden fields", "unavailable reasons"),
+                List.of("compliance-service.review-ref-required"), List.of("configured compliance evidence required")),
+            new QuoteDetailPanel("audit-replay", "Review and processing records", "VISIBLE", List.of("review references", "processing records", "version references"),
+                List.of("audit-replay-service.package-ref-required", "quote-service.snapshot"), List.of())),
+        List.of(
+            new QuoteDetailRedaction("selectedNoteRate", "REDACTED", "pricing.waterfall.restricted.read permission is required for selected note rate", "audit:note-rate-redaction-required"),
+            new QuoteDetailRedaction("finalPriceBps", "REDACTED", "pricing.waterfall.restricted.read permission is required for final price", "audit:final-price-redaction-required"),
+            new QuoteDetailRedaction("hiddenFields", "UNAVAILABLE", "Configured compliance-service hidden-field evidence is required before display", "audit:hidden-field-reason-required")),
+        List.of("compliance-review-ref-required", "fair-lending-flag-ref-required", "privacy-redaction-ref-required"),
+        List.of("audit:quote-detail-opened", "audit:waterfall-redactions-required"),
+        "quote-detail-replay-hash-required", "quote-detail-evidence-hash-required", traceId,
+        List.of("QuoteDetailOpened", "QuoteDetailBackendRefsBound"),
+        "Configured quote, pricing, compliance, and review record setup is unavailable; pricing-bff exposes non-secret refs, redaction reasons, blockers, and processing records only.");
   }
 
   EligibilityModuleView eligibilityModule(String runId, String quoteOptionId, String uiTraceId) {
@@ -514,11 +819,12 @@ class PricingBffUiFallbackAdapter {
   ComplianceEvidenceRegistryView complianceEvidenceRegistry(
       @RequestHeader(value = "X-Tenant-Context", required = false) String tenantContext,
       @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
-    return new ComplianceEvidenceRegistryView(normalizeTenant(tenantContext), "FALLBACK_STATIC_DEPENDENCIES_UNAVAILABLE",
-        complianceEvidenceFallbacks(), complianceDecisionFallbacks(), privacyRequestFallbacks(), securityEventFallbacks(),
-        complianceAlertFallbacks(), retentionControlFallbacks(), normalizeComplianceTrace(uiTraceId),
+    return new ComplianceEvidenceRegistryView(normalizeTenant(tenantContext), "Configuration details need setup",
+        complianceEvidenceFallbacks(), complianceDecisionFallbacks(), complianceAdvisoryReviewFallbacks(),
+        fairLendingMonitoringFallbacks(), privacyRequestFallbacks(), securityEventFallbacks(),
+        complianceAlertFallbacks(), retentionControlFallbacks(), complianceConfigurationGaps(), normalizeComplianceTrace(uiTraceId),
         List.of("ComplianceEvidenceRegistryOpened"),
-        "Configured compliance, audit-replay, security, privacy, and retention service contracts are unavailable; this response carries non-secret UI fallback records only.");
+        "Configured compliance, audit-replay, fair-lending, security, privacy, and retention service contracts are unavailable; this response carries non-secret UI fallback records only.");
   }
 
   @GetMapping("/api/v1/partners/{partnerId}/integrations/webhooks")
@@ -526,7 +832,7 @@ class PricingBffUiFallbackAdapter {
       @RequestHeader(value = "X-Tenant-Context", required = false) String tenantContext,
       @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
     return new PartnerWebhookHealthView(partnerId, normalizeTenant(tenantContext), "RETRY_HEALTH_VISIBLE",
-        "latest 30 events", "DLQ size requires configured integration-service metrics", "Configured retry window required",
+        "latest 30 events", "Exception queue size requires configured integration-service metrics", "Configured retry window required",
         partnerWebhookAttempts(), partnerSafetyToggles(),
         new PartnerWebhookAction(true,
             "Replay requires request correlation and explicit idempotency confirmation before it can be recorded.",
@@ -535,6 +841,18 @@ class PricingBffUiFallbackAdapter {
             "Endpoint test requires the configured partner webhook transport contract.",
             "Confirm endpoint ownership before testing.", "/partners/support/webhooks"),
         normalizePartnerTrace(uiTraceId), List.of("WebhookHealthChecked"));
+  }
+
+  @GetMapping("/api/v1/partners/{partnerId}/integrations/workbench")
+  PartnerChannelWorkbenchView partnerChannelWorkbench(@PathVariable String partnerId,
+      @RequestHeader(value = "X-Tenant-Context", required = false) String tenantContext,
+      @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
+    return new PartnerChannelWorkbenchView(partnerId, normalizeTenant(tenantContext),
+        "INTEGRATION_SERVICE_CHANNEL_CONTRACT_NOT_CONFIGURED", partnerChannelWorkbenchTabs(),
+        new PartnerServiceAccountBlockedState(true, "integration-service.partner-channel.workbench.read",
+            "integration-platform-owner", "credentials-not-rendered"),
+        "Configured integration-service partner channel state is unavailable; pricing-bff exposes non-secret fallback modules, retry state, exception queue reasons, redaction state, and audit references only.",
+        normalizePartnerTrace(uiTraceId), List.of("PartnerIntegrationWorkbenchOpened"));
   }
 
   @PostMapping("/api/v1/partners/{partnerId}/integrations/webhooks/{webhookId}/test")
@@ -587,61 +905,59 @@ class PricingBffUiFallbackAdapter {
     boolean privileged = qualityRole != null && !qualityRole.isBlank()
         && !qualityRole.equalsIgnoreCase("viewer");
     String traceId = normalizeQualityTrace(uiTraceId);
-    return new QualityDashboardView(normalizeTenant(tenantContext), "FALLBACK_STATIC_DEPENDENCIES_UNAVAILABLE",
+    return new QualityDashboardView(normalizeTenant(tenantContext), "Configuration details need setup",
         new QualityValidationRun("validation-run-config-required", "BLOCKED", "RED",
-            "Block package closure and route unresolved blockers to rework until configured evidence is linked.",
+            "Keep package closure paused and route unresolved items for rework until configured review records are linked.",
             List.of(
                 new QualityValidationStage("V1", "Preflight", "PASS", "timestamp supplied by configured validator"),
-                new QualityValidationStage("V2", "Contract Validation", "FAIL", "contract service conformance required"),
+                new QualityValidationStage("V2", "Setup validation", "FAIL", "connected service setup review required"),
                 new QualityValidationStage("V3", "Execution Validation", "PENDING", "execution validator unavailable"),
                 new QualityValidationStage("V4", "End-to-End Consistency", "PENDING", "pipeline evidence required"),
-                new QualityValidationStage("V5", "Closure Validation", "BLOCKED", "blocker evidence required")),
+                new QualityValidationStage("V5", "Closure Validation", "BLOCKED", "attention item review required")),
             List.of(
-                new QualityBlocker("blocker-contract-conformance", "P1", "workflow", "Release engineering", "OPEN",
-                    "Configured contract conformance evidence is missing."),
-                new QualityBlocker("blocker-evidence-completeness", "P2", "data", "Quality operations", "OPEN",
-                    "Evidence package completeness must be supplied by upstream quality APIs.")),
-            List.of("validation_result.json", "validation_trace.jsonl", "module_evidence_index.json",
-                "blocker_register.json")),
+                new QualityBlocker("setup-review-item", "P1", "workflow", "Release engineering", "OPEN",
+                    "Configured setup review record is missing."),
+                new QualityBlocker("review-package-completeness", "P2", "data", "Quality operations", "OPEN",
+                    "Review package completeness must be supplied by configured quality services.")),
+            List.of("validation summary", "review trail", "module review index", "attention item register")),
         new QualityReadinessStatus("fail", true,
-            List.of("P1 contract conformance blocker is open", "Evidence set completeness is incomplete"),
-            List.of("Quality owner signature required", "Release owner signature required"),
-            List.of("smoke check: configured result required", "schema compatibility: blocked", "config validation: pending",
-                "policy signatures: required"),
-            "missing required evidence references"),
+            List.of("P1 setup review item is open", "Review package completeness needs attention"),
+            List.of("Quality owner review required", "Release owner review required"),
+            List.of("Readiness check needs configured result", "Schema review needs attention", "Configuration review pending",
+                "Policy owner review required"),
+            "missing required review records"),
         new QualityDriftSummary("pricing-quality", "configured analysis window required", "configured baseline required",
             List.of("product set supplied by quality API"), "stale",
             "Comparison controls are locked until baseline and sample-window evidence are supplied.",
-            List.of(new QualityDriftMetric("contract_failure_rate", "P2", "deviation value supplied by configured metrics"),
+            List.of(new QualityDriftMetric("setup review failure rate", "P2", "deviation value supplied by configured metrics"),
                 new QualityDriftMetric("validation_rework_queue", "P3", "trend supplied by configured metrics"))),
         new QualityFairnessSummary(qualityDimensions(privileged), !privileged, "sample counts supplied by fairness API",
             "P1", "Risk and compliance owner", List.of("fairness-evidence-package-required")),
         List.of(
-            new QualityIncident("quality-incident-contract", "P1", "Release engineering", "contract", "playbook-required",
-                "mitigating", "evidence-package-required", List.of("pricing-bff", "governance-service")),
-            new QualityIncident("quality-incident-drift", "P2", "Quality operations", "drift", "playbook-required",
-                "acknowledged", "evidence-package-required", List.of("observability-service"))),
+            new QualityIncident("quality-incident-setup", "P1", "Release engineering", "setup", "playbook-required",
+                "mitigating", "review-package-required", List.of("pricing-workbench", "governance-service")),
+            new QualityIncident("quality-incident-change", "P2", "Quality operations", "change", "playbook-required",
+                "acknowledged", "review-package-required", List.of("observability-service"))),
         new QualityReplaySummary("policySnapshotId-required", "inputBundleRef-required", "deterministicSeed-required",
             false, "Replay is blocked until configured snapshot, seed, and event payload evidence are supplied.",
             List.of("regression replay", "deterministic quote replay", "webhook/event replay")),
         List.of(
-            new QualityContractConformance("pricing-bff-ui-quality", "FAIL", "schema compatibility evidence required",
-                List.of("quality-dashboard contract pending upstream conformance")),
-            new QualityContractConformance("partner-transport-events", "PENDING", "event envelope evidence required",
-                List.of("webhook replay conformance requires integration-service contract"))),
+            new QualityContractConformance("pricing-workbench quality", "FAIL", "schema review record required",
+                List.of("quality dashboard setup review is pending configured service confirmation")),
+            new QualityContractConformance("partner event review", "PENDING", "event envelope review required",
+                List.of("webhook review requires integration service setup"))),
         new QualityEvidenceExport("quality-evidence-package-required", "INCOMPLETE", true,
-            List.of("validation_result.json", "validation_trace.jsonl", "module_evidence_index.json",
-                "blocker_register.json"),
-            List.of("Completeness status is incomplete until configured evidence store is available")),
+            List.of("validation summary", "review trail", "module review index", "attention item register"),
+            List.of("Review package remains incomplete until configured review storage is available")),
         traceId, List.of("QualityDashboardOpened"),
-        "Configured quality analytics, drift, fairness, replay, and contract services are unavailable; this response carries non-secret UI fallback records only.");
+        "Configured quality analytics, change, fairness, review, and setup services are unavailable; this response carries non-secret UI fallback records only.");
   }
 
   @GetMapping("/api/v1/quality/evidence/export")
   QualityEvidenceExport qualityEvidenceExport() {
     return new QualityEvidenceExport("quality-evidence-package-required", "INCOMPLETE", true,
-        List.of("validation_result.json", "validation_trace.jsonl", "module_evidence_index.json", "blocker_register.json"),
-        List.of("Export is redacted and incomplete until configured quality evidence storage is available."));
+        List.of("validation summary", "review trail", "module review index", "attention item register"),
+        List.of("Export is redacted and incomplete until configured quality review storage is available."));
   }
 
   @GetMapping("/api/v1/custom-rules/evidence")
@@ -649,7 +965,7 @@ class PricingBffUiFallbackAdapter {
       @RequestHeader(value = "X-Tenant-Context", required = false) String tenantContext,
       @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
     String traceId = uiTraceId == null || uiTraceId.isBlank() ? "cr-s01-local-trace" : uiTraceId;
-    return new CustomRuleEvidenceView(normalizeTenant(tenantContext), "FALLBACK_STATIC_DEPENDENCIES_UNAVAILABLE", traceId,
+    return new CustomRuleEvidenceView(normalizeTenant(tenantContext), "Configuration details need setup", traceId,
         List.of(
             new CustomFieldMetadata("custom-field-evidence-source", "Evidence source", "text",
                 List.of("backend metadata required"),
@@ -678,6 +994,62 @@ class PricingBffUiFallbackAdapter {
                 "Use a future consensus-gated external-path ingestion task.")),
         List.of("CustomRuleEvidenceOpened"),
         "Configured typed-fact and rule evidence services are unavailable; this response carries non-secret fallback metadata and blockers only.");
+  }
+
+  CustomRuleFieldsUiDto customRuleFieldsForUi(String scenarioId, String tenantContext, String uiTraceId) {
+    String traceId = uiTraceId == null || uiTraceId.isBlank() ? "cr-s05-local-trace" : uiTraceId;
+    String scenarioRef = scenarioId == null || scenarioId.isBlank() ? "scenario-ref-required" : scenarioId;
+    List<String> validationMessages = List.of(
+        "BACKEND_CONTRACT_UNAVAILABLE: configured field metadata contract is not wired to pricing-bff.",
+        "METADATA_VERSION_UNAVAILABLE: field descriptors are fallback refs only until governance-service returns versions.");
+    return new CustomRuleFieldsUiDto(scenarioRef, normalizeTenant(tenantContext),
+        "BACKEND_CONTRACT_UNAVAILABLE", "BLOCKED_FALLBACK", traceId,
+        List.of(
+            new CustomRuleFieldUiDto("custom-field-evidence-source", "Evidence source", "text", "governance-service",
+                "metadata-version-ref-required", "UNKNOWN", true,
+                List.of("backend metadata required"), List.of("configured-governance-metadata")),
+            new CustomRuleFieldUiDto("custom-field-decision-quality", "Decision quality", "enumeration",
+                "typed-fact-contract", "typed-fact-version-ref-required", "CONFLICTING", true,
+                List.of("VERIFIED", "UNKNOWN", "CONFLICTING"), List.of("typed-fact-contract")),
+            new CustomRuleFieldUiDto("custom-field-review-note", "Review note", "text", "ui-metadata-contract",
+                "ui-metadata-version-ref-required", "VERIFIED", false,
+                List.of("free text from configured metadata"), List.of("ui-metadata-contract"))),
+        List.of("VERIFIED", "UNKNOWN", "CONFLICTING"), validationMessages,
+        List.of("metadata-version-ref-required", "typed-fact-version-ref-required", "ui-metadata-version-ref-required"),
+        List.of(new CustomRuleUiError("BACKEND_CONTRACT_UNAVAILABLE", "governance-service",
+            "Configured custom-rule field metadata contract is unavailable; UI must show blocked fallback state."),
+            new CustomRuleUiError("METADATA_VERSION_UNAVAILABLE", "governance-service",
+                "Metadata version refs are placeholders until backend returns approved refs.")),
+        List.of("CustomRuleFieldsFallbackVisible"));
+  }
+
+  CustomRuleEvidenceUiDto customRuleEvidenceForUi(String quoteId, String tenantContext, String uiTraceId) {
+    String traceId = uiTraceId == null || uiTraceId.isBlank() ? "cr-s05-local-trace" : uiTraceId;
+    String quoteRef = quoteId == null || quoteId.isBlank() ? "quote-ref-required" : quoteId;
+    List<String> reasonCodes = List.of("RULE_EVIDENCE_VISIBLE", "REQUIRED_FACT_UNKNOWN",
+        "REQUIRED_FACT_CONFLICTING", "RULE_EVIDENCE_BLOCKED");
+    return new CustomRuleEvidenceUiDto(quoteRef, normalizeTenant(tenantContext),
+        "BACKEND_CONTRACT_UNAVAILABLE", "BLOCKED_FALLBACK", traceId,
+        List.of(new CustomRuleEvidenceUiRule("rule-evidence-contract-required", "version-ref-required", "MATCHED",
+            "RULE_EVIDENCE_VISIBLE", "governance-service", List.of("custom-field-evidence-source"),
+            List.of("audit:custom-rule-evidence-required"), List.of("replay-hash-ref-required"))),
+        List.of(new CustomRuleEvidenceUiRule("rule-skipped-conflicting-fact", "version-ref-required", "SKIPPED",
+            "REQUIRED_FACT_CONFLICTING", "governance-service", List.of("custom-field-decision-quality"),
+            List.of("audit:custom-rule-skip-required"), List.of("replay-hash-ref-required"))),
+        List.of(new CustomRuleEvidenceUiRule("rule-blocked-contract-unavailable", "version-ref-required", "BLOCKED",
+            "RULE_EVIDENCE_BLOCKED", "quote-service", List.of("quote-evidence-contract"),
+            List.of("audit:quote-rule-blocked-required"), List.of("replay-hash-ref-required"))),
+        List.of(new CustomRuleCalculationStepUiDto("calculation-step-contract-required", "quote-service",
+            "BLOCKED", "calculation-evidence-ref-required", "No pricing math is computed by pricing-bff fallback.")),
+        reasonCodes,
+        List.of("audit:custom-rule-evidence-required", "audit:custom-rule-skip-required",
+            "audit:quote-rule-blocked-required"),
+        List.of("replay-hash-ref-required"),
+        List.of(new CustomRuleUiError("DEPENDENCY_UNAVAILABLE", "quote-service",
+            "Configured quote-service calculation evidence contract is unavailable."),
+            new CustomRuleUiError("RULE_EVIDENCE_BLOCKED", "governance-service",
+                "Rule evidence remains blocked until backend contracts return typed facts and approved refs.")),
+        List.of("CustomRuleEvidenceFallbackVisible"));
   }
 
   AuditReplayWorkbenchView auditReplayWorkbench(String tenantContext, String uiTraceId) {
@@ -716,6 +1088,62 @@ class PricingBffUiFallbackAdapter {
             "Evidence download remains disabled while legal hold or retention decision is backend-owned."),
         List.of("AuditReplayWorkbenchOpened", "AuditReplayFallbackEvidenceVisible"),
         "Configured audit-replay-service contracts are unavailable; this response carries non-secret fallback evidence refs, blockers, retention states, and redaction states only.");
+  }
+
+  ScenarioAnalysisWorkspaceView scenarioAnalysisWorkspace(String tenantContext, String runId, String uiTraceId) {
+    String traceId = uiTraceId == null || uiTraceId.isBlank() ? "sa-s15-local-trace" : uiTraceId;
+    List<ScenarioAnalysisBlocker> guardrailBlockers = List.of(
+        new ScenarioAnalysisBlocker("REQUIRED_FACTS_MISSING", "BLOCKER",
+            "Scenario-analysis-service requires backend fact refs before this variant can be priced or promoted.",
+            List.of("fact:fico-score-ref", "fact:ltv-ref", "fact:lock-period-ref", "fact:product-ref"),
+            "scenario-analysis-service.guardrail-policy"),
+        new ScenarioAnalysisBlocker("POLICY_DECISION_BACKEND_REQUIRED", "WARNING",
+            "Guardrail policy result is shown as backend-owned text; pricing-bff does not infer eligibility or rate impact.",
+            List.of("policy-version-ref", "audit-ref-required"), "scenario-analysis-service.guardrail-evaluate"));
+    return new ScenarioAnalysisWorkspaceView(normalizeTenant(tenantContext), runId,
+        "SCENARIO_ANALYSIS_SERVICE_CONTRACT_NOT_CONFIGURED",
+        List.of(
+            new ScenarioAnalysisDimension("fico", "FICO sensitivity", "backend-current-fico-ref", "scenario-analysis-service.fico-sensitivity", List.of("fact:fico-score-ref", "sourceQuoteVersion"), true),
+            new ScenarioAnalysisDimension("ltv", "LTV sensitivity", "backend-current-ltv-ref", "scenario-analysis-service.ltv-sensitivity", List.of("fact:property-value-ref", "fact:loan-amount-ref"), true),
+            new ScenarioAnalysisDimension("lockPeriod", "Lock period sensitivity", "backend-current-lock-period-ref", "scenario-analysis-service.lock-period-comparison", List.of("fact:lock-period-ref", "fact:lock-start-date-ref"), true),
+            new ScenarioAnalysisDimension("product", "Product sensitivity", "backend-product-comparison-ref", "scenario-analysis-service.product-comparison", List.of("fact:product-ref", "fact:investor-ref"), true)),
+        List.of(
+            new ScenarioAnalysisVariant("variant-base", "Backend baseline variant", "VISIBLE", List.of("fico", "ltv", "lockPeriod"), List.of("fact:source-quote-version", "fact:fico-score-ref", "fact:ltv-ref"), List.of(), List.of("analysis-result-ref:base")),
+            new ScenarioAnalysisVariant("variant-guardrail-blocked", "Guardrail blocked variant", "BLOCKED", List.of("fico", "ltv", "product"), List.of("fact:fico-score-ref", "fact:ltv-ref", "fact:product-ref"), guardrailBlockers, List.of("analysis-result-ref:blocker-details"))),
+        List.of(
+            new ScenarioAnalysisBatchRow("row-001", "variant-base", "fico + ltv + lockPeriod", "VISIBLE", "batch-result-ref:row-001", "no open guardrail blockers"),
+            new ScenarioAnalysisBatchRow("row-002", "variant-guardrail-blocked", "fico + ltv + product", "BLOCKED", "batch-result-ref:row-002", "REQUIRED_FACTS_MISSING")),
+        List.of(new ScenarioAnalysisSavedAnalysis("analysis-saved-required", "Saved FICO/LTV sensitivity", "analysis-version-ref-required", "timestamp-supplied-by-scenario-analysis-service", "export-ref-required", "replay-hash-required")),
+        List.of("export-ref-required", "what-if-export-manifest-required"),
+        List.of("replay-hash-required", "input-bundle-ref-required", "policy-snapshot-ref-required"),
+        guardrailBlockers,
+        "Configured scenario-analysis-service workspace contract is unavailable in this local BFF fallback; response carries backend-owned refs, blockers, export refs, replay refs, and required facts only.",
+        traceId,
+        List.of("ScenarioAnalysisWorkspaceOpened", "ScenarioAnalysisBackendRefsVisible"));
+  }
+
+  ResponseEntity<ScenarioRecalculationResult> scenarioAnalysisRecalculate(String tenantContext, String runId,
+      String uiTraceId, Map<String, Object> request) {
+    String traceId = uiTraceId == null || uiTraceId.isBlank() ? "sa-s15-local-trace" : uiTraceId;
+    String dimensionId = normalizedRaw(request == null ? null : request.get("changedDimensionId"));
+    String requestedValue = normalizedRaw(request == null ? null : request.get("requestedValue"));
+    List<String> variantFacts = stringList(request == null ? null : request.get("variantFacts"));
+    if (dimensionId.isBlank() || variantFacts.isEmpty()) {
+      return ResponseEntity.badRequest().body(new ScenarioRecalculationResult(runId, normalizeTenant(tenantContext), "BLOCKED",
+          "Recalculation requires changedDimensionId and backend variant fact refs before scenario-analysis-service can be called.",
+          List.of(), List.of(new ScenarioAnalysisBlocker("VARIANT_FACTS_REQUIRED", "BLOCKER",
+              "Send backend fact refs with the what-if request; pricing-bff will not derive them locally.",
+              List.of("changedDimensionId", "variantFacts"), "pricing-bff.scenario-analysis.recalculate")),
+          List.of("ScenarioAnalysisRecalculationBlocked"), traceId));
+    }
+    return ResponseEntity.accepted().body(new ScenarioRecalculationResult(runId, normalizeTenant(tenantContext),
+        "BACKEND_RESULT_VISIBLE",
+        "Scenario recalculation request recorded for " + dimensionId + " using backend facts; requested value is passed through as a fact update only.",
+        List.of("scenario-analysis-service.result:" + dimensionId, "scenario-analysis-service.requested-value-ref:" + Integer.toUnsignedString(requestedValue.hashCode(), 36)),
+        List.of(new ScenarioAnalysisBlocker("POLICY_DECISION_BACKEND_REQUIRED", "WARNING",
+            "Guardrail policy reasons remain backend-owned and must be returned by scenario-analysis-service.",
+            variantFacts, "scenario-analysis-service.guardrail-evaluate")),
+        List.of("ScenarioAnalysisRecalculationRequested", "VariantFactsForwarded"), traceId));
   }
 
   TenantPlatformCoverageView tenantPlatformCoverage(String tenantContext, String uiTraceId) {
@@ -766,7 +1194,7 @@ class PricingBffUiFallbackAdapter {
         "Configured governance-service release execution contract is unavailable.");
 
     return new AdminGovernanceView(normalizeTenant(tenantContext), normalizedAdminRole(adminRole),
-        "FALLBACK_STATIC_DEPENDENCIES_UNAVAILABLE", traceId,
+        "Configuration details need setup", traceId,
         new AdminTraceMetadata(traceId, "artifact-admin-governance-fallback", "policy-version-required",
             "environment-config-required", "signer-contract-required"),
         List.of(
@@ -836,6 +1264,24 @@ class PricingBffUiFallbackAdapter {
         "Configured governance, policy, release, drift, incident, and audit services are unavailable; this response carries non-secret UI fallback records only.");
   }
 
+  MlAdvisoryInsightsView mlAdvisoryInsights(String tenantContext, String uiTraceId) {
+    String traceId = uiTraceId == null || uiTraceId.isBlank() ? "ml-s14-local-trace" : uiTraceId;
+    return new MlAdvisoryInsightsView(normalizeTenant(tenantContext), "ML_ADVISORY_SERVICE_EVIDENCE_INCOMPLETE", traceId,
+        List.of(new AdvisoryRecommendationInsight("advisory-config-required", "model-version-ref-required",
+            "confidence-score-from-model-output", "Backend explanation is visible for analyst review only.",
+            List.of("VIEW_EXPLANATION", "REQUEST_HUMAN_REVIEW", "EXPORT_AUDIT_EVIDENCE"),
+            List.of("audit-ref-required", "replay-hash-required"), false)),
+        List.of(
+            new ModelVersionGovernanceInsight("model-version-ref-required", "DRIFT_BASELINE_REQUIRED",
+                "ALERT_REVIEW_REQUIRED", List.of("feedback-loop-ref-required"),
+                List.of("evidence-export-ref-required", "manifest-hash-required")),
+            new ModelVersionGovernanceInsight("model-version-unavailable", "ADVISORY_UNAVAILABLE",
+                "NO_ACTIVE_ALERT", List.of(), List.of())),
+        true,
+        "Configured ml-advisory-service evidence is incomplete; the BFF returns non-secret model refs, alert states, and explicit advisory-unavailable status only.",
+        List.of("MlAdvisoryInsightsOpened", "MlAdvisoryGovernanceGroupedByModelVersion"));
+  }
+
   private List<PartnerQuoteSummary> partnerQuoteFallbacks() {
     return List.of(
         new PartnerQuoteSummary("quote-active", "Borrower context available", "ACTIVE",
@@ -871,6 +1317,34 @@ class PricingBffUiFallbackAdapter {
     return List.of(new ComplianceDecisionRationale("decision-explainability-required", "RULE_SOURCE_REQUIRED",
         "Human-readable adverse-action and ranking explanations require configured policy/explainability contracts.",
         "jurisdiction-config-required", List.of("policy", "eligibility"), true, "disclosure-artifact-required"));
+  }
+
+  private List<ComplianceAdvisoryReview> complianceAdvisoryReviewFallbacks() {
+    return List.of(
+        new ComplianceAdvisoryReview("quote-review-config-required", "quote", "quote-id-required",
+            "ADVISORY_BLOCKED_UNTIL_CONFIGURED", List.of("HIGH_COST_THRESHOLD_UNAVAILABLE", "APR_ADVISORY_LEDGER_REQUIRED"),
+            List.of("audit-snapshot-ref-required", "replay-hash-ref-required"), "REGULATORY_APPROVAL_PENDING_CONFIG",
+            List.of("evidence-export-ref-required"), true,
+            List.of("Configured regulatory thresholds are unavailable; no local threshold or APR value is inferred.")),
+        new ComplianceAdvisoryReview("portfolio-review-config-required", "portfolio", "portfolio-id-required",
+            "MONITORING_BLOCKED_UNTIL_CONFIGURED", List.of("FAIR_LENDING_MONITORING_REQUIRED"),
+            List.of("portfolio-audit-snapshot-ref-required"), "REGULATORY_APPROVAL_REQUIRES_UPSTREAM_STATE",
+            List.of("portfolio-evidence-export-ref-required"), true,
+            List.of("Configured compliance-service advisory findings are required before portfolio approval state can be marked ready.")));
+  }
+
+  private List<FairLendingMonitoringDrilldown> fairLendingMonitoringFallbacks() {
+    return List.of(new FairLendingMonitoringDrilldown("fair-lending-monitoring-config-required",
+        List.of("masked-class-label", "geography-bucket-ref", "product-family-ref"), true,
+        "redaction-profile-required", List.of("fair-lending-snapshot-ref-required", "monitoring-export-ref-required"),
+        List.of("Configured fair-lending monitoring dimensions must be supplied by compliance-service.")));
+  }
+
+  private List<String> complianceConfigurationGaps() {
+    return List.of(
+        "Configured regulatory threshold values are unavailable; the UI records this blocked gap instead of embedding plausible constants.",
+        "Configured compliance-service fair-lending dimensions are required before drilldown can infer any grouping.",
+        "Configured regulatory approval state and export refs are required before advisory findings can be closed.");
   }
 
   private List<PrivacyRequestSummary> privacyRequestFallbacks() {
@@ -917,8 +1391,8 @@ class PricingBffUiFallbackAdapter {
             "Configured partner webhook transport is unavailable at the BFF boundary.",
             "CONFIRMED_REQUIRED_FOR_REPLAY", "MASKING_INDICATOR_PRESENT", "CONSENT_INDICATOR_PRESENT"),
         new PartnerWebhookDeliveryAttempt("webhook-lock-alerts", "event-lock-blocked", "/partners/alerts",
-            "DLQ_PENDING", "DLQ_METRICS_CONTRACT_REQUIRED", "2026-06-08T07:10:00Z",
-            "DLQ size and retry aging require configured integration-service metrics.",
+            "EXCEPTION_QUEUE_PENDING", "EXCEPTION_QUEUE_METRICS_REQUIRED", "2026-06-08T07:10:00Z",
+            "Exception queue size and retry aging require configured integration-service metrics.",
             "CONFIRMED_REQUIRED_FOR_REPLAY", "MASKING_INDICATOR_PRESENT", "CONSENT_INDICATOR_PRESENT"));
   }
 
@@ -928,6 +1402,49 @@ class PricingBffUiFallbackAdapter {
             "Auto-emit is enabled in the visible BFF fallback state."),
         new PartnerSafetyToggle("webhook-lock-alerts", "/partners/alerts", true,
             "Auto-emit is paused for this route in the visible BFF fallback state."));
+  }
+
+  private List<PartnerChannelWorkbenchTab> partnerChannelWorkbenchTabs() {
+    return List.of(
+        partnerChannelTab("quote-requests", "Quote requests", "/partners/integrations/quote-requests",
+            "QUOTE_REQUESTS_VISIBLE_WITH_CONTRACT_BLOCKERS", "partner-operations-owner",
+            partnerChannelItem("quote-request-fallback", "Quote request intake setup", "READY_FALLBACK",
+                "manual-review-required", "none", "payload-redacted", List.of("audit:partner-quote-request-required"))),
+        partnerChannelTab("webhook-delivery", "Webhook delivery", "/partners/integrations/webhook-delivery",
+            "WEBHOOK_DELIVERY_VISIBLE_WITH_RETRY_STATE", "integration-platform-owner",
+            partnerChannelItem("webhook-pricing-updates", "Pricing update webhook", "FAILED",
+                "retry-confirmation-required", "none", "payload-redacted", List.of("audit:webhook-delivery-required"))),
+        partnerChannelTab("retries", "Retries", "/partners/integrations/retries", "RETRY_QUEUE_VISIBLE",
+            "integration-platform-owner",
+            partnerChannelItem("retry-webhook-pricing-updates", "Webhook retry queue", "PENDING_CONFIRMATION",
+                "idempotency-confirmation-required", "none", "payload-redacted", List.of("audit:webhook-retry-required"))),
+        partnerChannelTab("dlq", "Exception queue", "/partners/integrations/dlq", "EXCEPTION_QUEUE_VISIBLE_WITH_REASON",
+            "integration-platform-owner",
+            partnerChannelItem("dlq-lock-alerts", "Lock alert exception queue entry", "EXCEPTION_QUEUE_PENDING",
+                "retry-window-contract-required", "EXCEPTION_QUEUE_METRICS_REQUIRED", "payload-redacted",
+                List.of("audit:partner-dlq-required"))),
+        partnerChannelTab("feed-adapters", "Investor delivery connections", "/partners/integrations/feed-adapters",
+            "INVESTOR_DELIVERY_CONNECTIONS_BLOCKED_UNTIL_CONFIGURED", "feed-operations-owner",
+            partnerChannelItem("investor-feed-adapter", "Investor delivery connection", "BLOCKED",
+                "configured-feed-contract-required", "none", "payload-redacted", List.of("audit:feed-adapter-required"))),
+        partnerChannelTab("sftp-adapters", "Partner file delivery", "/partners/integrations/sftp-adapters",
+            "PARTNER_FILE_DELIVERY_BLOCKED_UNTIL_CONFIGURED", "feed-operations-owner",
+            partnerChannelItem("partner-sftp-adapter", "Partner file delivery setup", "BLOCKED",
+                "configured-sftp-contract-required", "none", "payload-redacted", List.of("audit:sftp-adapter-required"))),
+        partnerChannelTab("health", "Health", "/partners/integrations/health", "HEALTH_VISIBLE_WITH_BLOCKED_ACCESS",
+            "integration-platform-owner",
+            partnerChannelItem("service-account-access", "Service account access", "BLOCKED",
+                "capability-grant-required", "none", "credentials-not-rendered", List.of("audit:service-account-access-required"))));
+  }
+
+  private PartnerChannelWorkbenchTab partnerChannelTab(String tabId, String label, String route, String status,
+      String recoveryOwner, PartnerChannelWorkbenchItem item) {
+    return new PartnerChannelWorkbenchTab(tabId, label, route, status, recoveryOwner, List.of(item));
+  }
+
+  private PartnerChannelWorkbenchItem partnerChannelItem(String itemId, String label, String state, String retryState,
+      String dlqReason, String payloadRedactionState, List<String> auditRefs) {
+    return new PartnerChannelWorkbenchItem(itemId, label, state, retryState, dlqReason, payloadRedactionState, auditRefs);
   }
 
   private String normalizeTenant(String tenantContext) {
@@ -1000,6 +1517,36 @@ class PricingBffUiFallbackAdapter {
     return new IntakeValidation(true, "PASSED", "Required borrower intake fields are present.", Map.of());
   }
 
+  private List<String> backendFactRefs(Map<String, Object> intake) {
+    List<String> refs = new java.util.ArrayList<>();
+    List.of("scenarioId", "scenarioVersion", "quoteFilters", "requestedLockPeriods", "effectiveDate", "actorId",
+        "clientContext", "productPreference", "loanPurpose", "propertyState", "occupancyType", "monthlyIncome",
+        "liquidAssets").forEach(field -> {
+          if (!isBlankText(intake, field)) {
+            refs.add("fact:" + field);
+          }
+        });
+    return refs;
+  }
+
+  private List<String> quoteServiceMissingFacts(Map<String, Object> intake) {
+    List<String> missing = new java.util.ArrayList<>();
+    Map<String, String> required = new LinkedHashMap<>();
+    required.put("scenarioId", "Quote-service scenario id is missing; select or create a scenario through configured scenario-service.");
+    required.put("scenarioVersion", "Quote-service scenario version is missing; scenario-service version evidence is required.");
+    required.put("quoteFilters", "Quote-service creation filters are missing or unverified; configured filter schema is required.");
+    required.put("requestedLockPeriods", "Requested lock periods are missing or unverified; configured lock-period catalog is required.");
+    required.put("effectiveDate", "Effective date is missing; no market date is inferred by the BFF.");
+    required.put("actorId", "Actor id is missing; configured identity or tenant-context evidence is required.");
+    required.put("clientContext", "Client context is missing; configured tenant/client context is required.");
+    required.forEach((field, message) -> {
+      if (isBlankText(intake, field)) {
+        missing.add(message);
+      }
+    });
+    return missing;
+  }
+
   private ScenarioIntakeField metadataField(String fieldId, String label, String groupId, String dataType, boolean required,
       String helpText, String sourceRef, String decisionQuality, List<String> validationMessages) {
     return new ScenarioIntakeField(fieldId, label, groupId, dataType, required, helpText, sourceRef, decisionQuality,
@@ -1023,6 +1570,17 @@ class PricingBffUiFallbackAdapter {
 
   private String normalized(Object value) {
     return value == null ? "" : value.toString().trim().toLowerCase(Locale.ROOT);
+  }
+
+  private String normalizedRaw(Object value) {
+    return value == null ? "" : value.toString().trim();
+  }
+
+  private List<String> stringList(Object value) {
+    if (value instanceof List<?> values) {
+      return values.stream().map(this::normalizedRaw).filter(item -> !item.isBlank()).toList();
+    }
+    return List.of();
   }
 
   record UiHealth(String service, String status, boolean ready, String dependencyStatus, String correlationId,
@@ -1059,16 +1617,21 @@ class PricingBffUiFallbackAdapter {
 
   record QuoteRunLaunch(String runId, String status, String nextRoute, IntakeValidation validationSummary, String uiTraceId,
       List<String> events, boolean fallbackMode, String dependencyStatus, String auditPackageId, String replayHashRef,
-      List<ScenarioIntakeValidationIssue> validationIssues) {
+      List<ScenarioIntakeValidationIssue> validationIssues, List<String> backendFactRefs,
+      List<String> missingContractBlockers, ProgressiveQuickQuoteState quickQuoteState) {
     static QuoteRunLaunch blocked(String traceId, IntakeValidation validation) {
       return new QuoteRunLaunch(null, "BLOCKED", null, validation, traceId, List.of("UIFlowOpened"), true,
-          "UPSTREAM_NOT_CALLED", null, null, List.of());
+          "UPSTREAM_NOT_CALLED", null, null, List.of(), List.of(), List.of(), null);
     }
   }
 
   record ScenarioIntakeMetadata(String tenantContext, String dependencyStatus, List<ScenarioIntakeFieldGroup> fieldGroups,
       List<String> decisionControls, List<ScenarioIntakeValidationIssue> validationIssues, String auditPackageId,
-      String replayHashRef, String fallbackReason, String uiTraceId) {}
+      String replayHashRef, String fallbackReason, String uiTraceId, ProgressiveQuickQuoteState quickQuoteState) {}
+
+  record ProgressiveQuickQuoteState(List<String> minimalFirstStepFields, List<String> progressiveSectionOrder,
+      List<String> quoteServiceRequiredFacts, List<String> backendOwnedFactSources, List<String> blockedByContracts,
+      String fallbackReason) {}
 
   record ScenarioIntakeFieldGroup(String groupId, String label, String helpText, List<ScenarioIntakeField> fields) {}
 
@@ -1097,6 +1660,58 @@ class PricingBffUiFallbackAdapter {
   record RedactedWaterfallValue(String value, boolean redacted, String reason) {}
 
   record WaterfallBlocker(String code, String message, String sourceRef) {}
+
+  record QuoteJourneyMapView(String tenantContext, String runId, String status, String dependencyStatus,
+      List<QuoteJourneyNode> nodes, List<String> blockers, List<String> serviceContracts, String uiTraceId,
+      List<String> events, String fallbackReason) {}
+
+  record QuoteJourneyNode(String nodeId, String label, String serviceName, String status, JourneyFreshness freshness,
+      List<String> evidenceRefs, List<String> blockers, String replayHash, List<String> downstreamDependencies,
+      String drilldownRoute, JourneyDrilldownRefs drilldownRefs) {}
+
+  record JourneyFreshness(String status, String evidenceRef, String message) {}
+
+  record JourneyDrilldownRefs(String runId, String scenarioRef, String quoteRef, String lockRef,
+      String correlationRef) {}
+
+  record MarginProfitabilityView(String tenantContext, String dependencyStatus, boolean compensationDetailsVisible,
+      List<MarginEvidenceSection> sections, MarginFloorEvidence floorEvidence, List<String> versionRefs,
+      List<String> auditRefs, String replayHash, String uiTraceId, List<String> events, String fallbackReason) {}
+
+  record MarginEvidenceSection(String sectionId, String label, String sourceRef, String permissionState,
+      List<String> evidenceRefs, List<MarginRedactionEvidence> redactions) {}
+
+  record MarginRedactionEvidence(String fieldLabel, String state, String reason, String auditRef) {}
+
+  record MarginFloorEvidence(String quoteOptionId, String decision, String decisionCode, String floorPolicyVersionRef,
+      String thresholdRef, String exceptionRouteRef, List<String> auditRefs, String displayGuidance) {}
+
+  record AdjustmentEvidenceView(String tenantContext, String dependencyStatus, String status,
+      List<AdjustmentEvidenceRow> adjustments, List<AdjustmentConflictView> conflicts,
+      List<AdjustmentBlockedState> blockers, List<AdjustmentSummaryCard> summaries, List<String> versionRefs,
+      List<String> auditRefs, String replayHash, String uiTraceId, List<String> events, String fallbackReason) {}
+
+  record AdjustmentEvidenceRow(String adjustmentId, String label, String category, String status,
+      List<String> factRefs, String sourceRef, String sourceVersionRef, String summary,
+      List<String> compensationHooks, List<String> conflictIds) {}
+
+  record AdjustmentConflictView(String conflictId, String severity, String reasonCode, String reason,
+      String resolutionOwner, List<String> affectedAdjustmentIds) {}
+
+  record AdjustmentBlockedState(String reasonCode, String message, String sourceRef, String resolutionOwner) {}
+
+  record AdjustmentSummaryCard(String category, String summary, List<String> evidenceRefs) {}
+
+  record ExceptionConcessionWorkbenchView(String tenantContext, String dependencyStatus, String status,
+      List<ExceptionConcessionSection> sections, ManualPriceMutationGuardView manualPriceMutationGuard,
+      List<String> crossServiceRefs, List<String> versionRefs, List<String> auditRefs, List<String> blockers,
+      String replayHash, String exportManifestRef, String uiTraceId, List<String> events, String fallbackReason) {}
+
+  record ExceptionConcessionSection(String sectionId, String label, String status, List<String> backendRefs,
+      List<String> auditRefs, String summary) {}
+
+  record ManualPriceMutationGuardView(boolean commitDisabled, String decision, List<String> reasonCodes,
+      String escalationPath, String auditRef, String replayHash) {}
 
   record OfferComparisonView(String runId, String status, List<OfferSummary> offers, List<String> sortOptions,
       String selectedOfferId, boolean commitBlocked, String fallbackReason, List<String> requiredFacts,
@@ -1162,6 +1777,16 @@ class PricingBffUiFallbackAdapter {
           "Explanation data is available from backend-owned refs; no UI-side pricing rules are inferred.", traceId);
     }
   }
+
+  record QuoteDetailView(String tenantContext, String runId, String offerId, String status, OfferSummary summary,
+      OfferExplanationView explanation, PricingWaterfallView waterfall, List<QuoteDetailPanel> panels,
+      List<QuoteDetailRedaction> redactions, List<String> complianceFlags, List<String> auditRefs, String replayHash,
+      String evidenceHash, String uiTraceId, List<String> events, String fallbackReason) {}
+
+  record QuoteDetailPanel(String panelId, String label, String status, List<String> fields, List<String> backendRefs,
+      List<String> blockers) {}
+
+  record QuoteDetailRedaction(String fieldPath, String state, String reason, String auditRef) {}
 
   record EligibilityModuleView(String runId, String quoteOptionId, String status, List<EligibilityDecisionView> decisions,
       List<EligibilityBlockerView> blockers, List<String> requiredNextFacts, String fallbackReason, String uiTraceId,
@@ -1381,9 +2006,11 @@ class PricingBffUiFallbackAdapter {
 
   record ComplianceEvidenceRegistryView(String tenantContext, String dependencyStatus,
       List<ComplianceEvidenceArtifact> artifacts, List<ComplianceDecisionRationale> decisions,
+      List<ComplianceAdvisoryReview> advisoryReviews,
+      List<FairLendingMonitoringDrilldown> fairLendingMonitoring,
       List<PrivacyRequestSummary> privacyRequests, List<SecurityEventSummary> securityEvents,
-      List<ComplianceAlertSummary> alerts, List<RetentionControlSummary> retentionControls, String uiTraceId,
-      List<String> events, String fallbackReason) {}
+      List<ComplianceAlertSummary> alerts, List<RetentionControlSummary> retentionControls,
+      List<String> configurationGaps, String uiTraceId, List<String> events, String fallbackReason) {}
 
   record ComplianceEvidenceArtifact(String artifactId, String path, String artifactType, String owner,
       String retentionClass, String relatedModule, String version, String hash, String traceId, String policyVersion,
@@ -1392,6 +2019,13 @@ class PricingBffUiFallbackAdapter {
 
   record ComplianceDecisionRationale(String decisionId, String reasonCode, String humanText, String jurisdictionCode,
       List<String> reasonTiers, boolean exportBlocked, String disclosureArtifactRef) {}
+
+  record ComplianceAdvisoryReview(String reviewId, String reviewType, String subjectRef, String status,
+      List<String> reasonCodes, List<String> auditSnapshotRefs, String regulatoryApprovalState, List<String> exportRefs,
+      boolean blockedByConfiguration, List<String> configurationGaps) {}
+
+  record FairLendingMonitoringDrilldown(String drilldownId, List<String> dimensions, boolean redacted,
+      String redactionState, List<String> evidenceRefs, List<String> blockers) {}
 
   record PrivacyRequestSummary(String requestId, String borrowerRef, String requestedScope, String identityStatus,
       String slaState, String consentAuditRef, List<String> blockers) {}
@@ -1454,6 +2088,30 @@ class PricingBffUiFallbackAdapter {
 
   record DesignEvidenceStatus(String status, String blocker, List<String> safeOptions) {}
 
+  record CustomRuleFieldsUiDto(String scenarioId, String tenantContext, String dependencyStatus,
+      String resultStatus, String uiTraceId, List<CustomRuleFieldUiDto> fields,
+      List<String> factQualityOptions, List<String> validationMessages, List<String> metadataVersionRefs,
+      List<CustomRuleUiError> errors, List<String> events) {}
+
+  record CustomRuleFieldUiDto(String fieldRef, String label, String dataType, String sourceService,
+      String versionRef, String factQuality, boolean requiredForRules, List<String> allowedValues,
+      List<String> evidenceRefs) {}
+
+  record CustomRuleEvidenceUiDto(String quoteId, String tenantContext, String dependencyStatus,
+      String resultStatus, String uiTraceId, List<CustomRuleEvidenceUiRule> matchedRules,
+      List<CustomRuleEvidenceUiRule> skippedRules, List<CustomRuleEvidenceUiRule> blockedRules,
+      List<CustomRuleCalculationStepUiDto> calculationSteps, List<String> reasonCodes,
+      List<String> auditRefs, List<String> replayHashRefs, List<CustomRuleUiError> errors,
+      List<String> events) {}
+
+  record CustomRuleEvidenceUiRule(String ruleRef, String versionRef, String outcome, String reasonCode,
+      String sourceService, List<String> factRefs, List<String> auditRefs, List<String> replayHashRefs) {}
+
+  record CustomRuleCalculationStepUiDto(String stepRef, String sourceService, String status,
+      String evidenceRef, String summary) {}
+
+  record CustomRuleUiError(String code, String sourceService, String message) {}
+
   record AuditReplayWorkbenchView(String tenantContext, String dependencyStatus, String uiTraceId,
       List<AuditReplayRecordSummary> records, List<AuditReplayRunSummary> replayRuns,
       AuditReplayExportSummary exportSummary, List<AuditReplayContractRef> contractRefs, List<String> blockers,
@@ -1470,6 +2128,30 @@ class PricingBffUiFallbackAdapter {
       boolean legalHold, boolean downloadEligible, String manifestHash, List<String> blockers) {}
 
   record AuditReplayContractRef(String contractId, String route, String preservedDecision) {}
+
+  record ScenarioAnalysisWorkspaceView(String tenantContext, String runId, String dependencyStatus,
+      List<ScenarioAnalysisDimension> dimensions, List<ScenarioAnalysisVariant> variants,
+      List<ScenarioAnalysisBatchRow> batchGrid, List<ScenarioAnalysisSavedAnalysis> savedAnalyses,
+      List<String> exportRefs, List<String> replayRefs, List<ScenarioAnalysisBlocker> blockers,
+      String fallbackReason, String uiTraceId, List<String> events) {}
+
+  record ScenarioAnalysisDimension(String dimensionId, String label, String value, String sourceRef,
+      List<String> requiredFacts, boolean backendOnly) {}
+
+  record ScenarioAnalysisVariant(String variantId, String label, String status, List<String> dimensionRefs,
+      List<String> factRefs, List<ScenarioAnalysisBlocker> guardrailBlockers, List<String> resultRefs) {}
+
+  record ScenarioAnalysisBatchRow(String rowId, String variantId, String dimensionSummary, String status,
+      String backendResultRef, String guardrailSummary) {}
+
+  record ScenarioAnalysisSavedAnalysis(String analysisId, String name, String versionRef, String savedAt,
+      String exportRef, String replayHash) {}
+
+  record ScenarioAnalysisBlocker(String blockerCode, String severity, String reason, List<String> requiredFacts,
+      String sourceRef) {}
+
+  record ScenarioRecalculationResult(String runId, String tenantContext, String status, String message,
+      List<String> backendResultRefs, List<ScenarioAnalysisBlocker> blockers, List<String> events, String uiTraceId) {}
 
   record TenantPlatformCoverageView(String tenantContext, String dependencyStatus, String uiTraceId,
       TenantContextTrace trace, List<TenantPlatformControl> controls, List<TenantPlatformBlocker> blockers,
@@ -1491,6 +2173,17 @@ class PricingBffUiFallbackAdapter {
       List<DriftAlertSummary> driftAlerts, List<IncidentReviewSummary> incidents,
       List<OverrideLedgerEntry> overrideLedger, PendingConfigReview pendingReview,
       DynamicRuleEvidenceSnapshot dynamicRuleEvidence, List<String> events, String fallbackReason) {}
+
+  record MlAdvisoryInsightsView(String tenantContext, String dependencyStatus, String uiTraceId,
+      List<AdvisoryRecommendationInsight> recommendations,
+      List<ModelVersionGovernanceInsight> modelVersions, boolean advisoryUnavailable,
+      String fallbackReason, List<String> events) {}
+
+  record AdvisoryRecommendationInsight(String recommendationId, String modelVersion, String confidence,
+      String explanation, List<String> allowedActions, List<String> auditRefs, boolean automaticDecisionApplied) {}
+
+  record ModelVersionGovernanceInsight(String modelVersion, String driftStatus, String alertState,
+      List<String> feedbackLoops, List<String> exportEvidenceRefs) {}
 
   record AdminTraceMetadata(String traceId, String artifactId, String policyVersion, String environment,
       String signerMetadata) {}
@@ -1538,6 +2231,19 @@ class PricingBffUiFallbackAdapter {
       String eventWindow, String dlqSizeStatus, String retryWindowStatus, List<PartnerWebhookDeliveryAttempt> deliveryAttempts,
       List<PartnerSafetyToggle> safetyToggles, PartnerWebhookAction replayAction,
       PartnerWebhookAction endpointTestAction, String uiTraceId, List<String> events) {}
+
+  record PartnerChannelWorkbenchView(String partnerId, String tenantContext, String dependencyStatus,
+      List<PartnerChannelWorkbenchTab> tabs, PartnerServiceAccountBlockedState serviceAccount, String fallbackReason,
+      String uiTraceId, List<String> events) {}
+
+  record PartnerChannelWorkbenchTab(String tabId, String label, String route, String status, String recoveryOwner,
+      List<PartnerChannelWorkbenchItem> items) {}
+
+  record PartnerChannelWorkbenchItem(String itemId, String label, String state, String retryState, String dlqReason,
+      String payloadRedactionState, List<String> auditRefs) {}
+
+  record PartnerServiceAccountBlockedState(boolean blocked, String missingCapability, String recoveryOwner,
+      String credentialExposure) {}
 
   record PartnerWebhookDeliveryAttempt(String webhookId, String eventId, String route, String status,
       String rootCauseCode, String lastSuccessfulAt, String failureReason, String idempotencyKeyState,

@@ -1,19 +1,44 @@
 export type BorrowerIntake = {
   borrowerName: string;
+  borrowerRole: string;
+  coBorrowerName: string;
+  coBorrowerRole: string;
   contactEmail: string;
   quoteGoal: string;
   scenarioName: string;
+  scenarioIntent: string;
   channel: string;
   externalLoanId: string;
   sourceSystem: string;
+  scenarioId: string;
+  scenarioVersion: string;
   borrowerCreditStatus: string;
   creditScore: string;
+  creditScoreSource: string;
+  creditReportDate: string;
+  creditReadiness: string;
   loanPurpose: string;
   loanAmount: string;
+  purchasePriceOrValue: string;
+  downPaymentOrEquity: string;
   propertyState: string;
+  propertyCounty: string;
+  propertyZip: string;
+  propertyType: string;
   occupancyType: string;
+  unitCount: string;
   monthlyIncome: string;
+  incomeType: string;
+  monthlyDebt: string;
   liquidAssets: string;
+  reserves: string;
+  productPreference: string;
+  productFamily: string;
+  quoteFilters: string;
+  requestedLockPeriods: string;
+  effectiveDate: string;
+  actorId: string;
+  clientContext: string;
 };
 
 export type ScenarioIntakeField = {
@@ -52,6 +77,16 @@ export type ScenarioIntakeMetadata = {
   replayHashRef: string;
   fallbackReason: string;
   uiTraceId: string;
+  quickQuoteState?: ProgressiveQuickQuoteState;
+};
+
+export type ProgressiveQuickQuoteState = {
+  minimalFirstStepFields: string[];
+  progressiveSectionOrder: string[];
+  quoteServiceRequiredFacts: string[];
+  backendOwnedFactSources: string[];
+  blockedByContracts: string[];
+  fallbackReason: string;
 };
 
 export type IntakeValidation = {
@@ -73,6 +108,9 @@ export type QuoteRunLaunch = {
   auditPackageId: string | null;
   replayHashRef: string | null;
   validationIssues: ScenarioIntakeValidationIssue[];
+  backendFactRefs?: string[];
+  missingContractBlockers?: string[];
+  quickQuoteState?: ProgressiveQuickQuoteState | null;
 };
 
 export type RedactedWaterfallValue = {
@@ -119,6 +157,47 @@ export type PricingWaterfallView = {
   versionGraphHash: string;
   resultHash: string;
   evidenceHash: string;
+  uiTraceId: string;
+  events: string[];
+  fallbackReason: string;
+};
+
+export type JourneyFreshness = {
+  status: string;
+  evidenceRef: string;
+  message: string;
+};
+
+export type JourneyDrilldownRefs = {
+  runId: string;
+  scenarioRef: string;
+  quoteRef: string;
+  lockRef: string;
+  correlationRef: string;
+};
+
+export type QuoteJourneyNode = {
+  nodeId: string;
+  label: string;
+  serviceName: string;
+  status: 'VISIBLE_WITH_REFS' | 'VISIBLE_WITH_BLOCKERS' | 'BLOCKED' | 'UNAVAILABLE' | string;
+  freshness: JourneyFreshness;
+  evidenceRefs: string[];
+  blockers: string[];
+  replayHash: string;
+  downstreamDependencies: string[];
+  drilldownRoute: string;
+  drilldownRefs: JourneyDrilldownRefs;
+};
+
+export type QuoteJourneyMapView = {
+  tenantContext: string;
+  runId: string;
+  status: string;
+  dependencyStatus: string;
+  nodes: QuoteJourneyNode[];
+  blockers: string[];
+  serviceContracts: string[];
   uiTraceId: string;
   events: string[];
   fallbackReason: string;
@@ -182,4 +261,23 @@ export async function fetchPricingWaterfall(
   }
 
   return (await response.json()) as PricingWaterfallView;
+}
+
+export async function fetchQuoteJourneyMap(
+  tenantId: string,
+  runId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<QuoteJourneyMapView> {
+  const response = await fetchImpl(`/api/v1/tenants/${encodeURIComponent(tenantId)}/quote-runs/${encodeURIComponent(runId)}/journey`, {
+    headers: {
+      Accept: 'application/json',
+      'X-Ui-Trace-Id': 'journey-s19-local-trace',
+    },
+  });
+
+  if (response.status >= 500) {
+    throw new Error('Quote journey map is temporarily unavailable.');
+  }
+
+  return (await response.json()) as QuoteJourneyMapView;
 }
