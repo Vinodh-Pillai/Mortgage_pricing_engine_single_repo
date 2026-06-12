@@ -58,7 +58,7 @@ describe('PII-24-S12 quote lock workflow screen', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Confirm Lock$/i }));
 
     expect(confirmLock).toHaveBeenCalledWith(expect.objectContaining({ disclosuresAccepted: true, disclosureScrollComplete: true, signatureName: 'Ada Borrower' }));
-    expect(await screen.findByRole('status', { name: /Lock status banner/i })).toHaveTextContent(/CONFIRMED/);
+    await waitFor(() => expect(screen.getByRole('status', { name: /Lock status banner/i })).toHaveTextContent(/CONFIRMED/));
   });
 
   it('uses the default typed confirm API for confirm and post-lock actions', async () => {

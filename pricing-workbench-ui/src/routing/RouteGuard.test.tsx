@@ -1,15 +1,38 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
-import { ACTIVE_PERSONA_STORAGE_KEY, AuthProvider, useAuth } from '../lib/auth/AuthContext';
+import { AuthProvider, useAuth } from '../lib/auth/AuthContext';
+import type { User } from '../lib/api/auth';
 import { RouteGuard } from './RouteGuard';
+
+const opsUser: User = { id: 'user-ops', email: 'ops@example.com', fullName: 'Ops Lead', role: 'operations_lead' };
+const borrowerUser: User = { id: 'user-borrower', email: 'borrower@example.com', fullName: 'Borrower', role: 'borrower' };
+let sessionUser: User | null;
+
+function jsonResponse(body: unknown, status = 200) {
+  return Promise.resolve(new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }));
+}
+
+function installFetchMock() {
+  vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), 'http://localhost');
+    if (url.pathname === '/api/auth/me') {
+      return sessionUser ? jsonResponse({ user: sessionUser }) : jsonResponse({ error: 'Not authenticated' }, 401);
+    }
+    if (url.pathname === '/api/auth/login' && init?.method === 'POST') {
+      sessionUser = opsUser;
+      return jsonResponse({ user: opsUser });
+    }
+    return jsonResponse({ error: 'Not found' }, 404);
+  }));
+}
 
 function LoginProbe() {
   const location = useLocation();
   const { login } = useAuth();
   const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname ?? 'none';
-  return <button type="button" onClick={() => login('persona-operations-lead')}>login from {from}</button>;
+  return <button type="button" onClick={() => login('ops@example.com', 'Password123!')}>login from {from}</button>;
 }
 
 function renderGuard(initialEntry: string) {
@@ -27,32 +50,37 @@ function renderGuard(initialEntry: string) {
 }
 
 describe('RouteGuard', () => {
+  beforeEach(() => {
+    sessionUser = null;
+    installFetchMock();
+  });
+
   afterEach(() => {
     cleanup();
-    window.localStorage.clear();
+    vi.unstubAllGlobals();
   });
 
-  it('RouteGuardTest.redirectsUnauthenticated', () => {
+  it('RouteGuardTest.redirectsUnauthenticated', async () => {
     renderGuard('/ops/dashboard');
-    expect(screen.getByRole('button', { name: 'login from /ops/dashboard' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'login from /ops/dashboard' })).toBeInTheDocument();
   });
 
-  it('RouteGuardTest.showsDeniedForUnauthorized', () => {
-    window.localStorage.setItem(ACTIVE_PERSONA_STORAGE_KEY, 'persona-borrower');
+  it('RouteGuardTest.showsDeniedForUnauthorized', async () => {
+    sessionUser = borrowerUser;
     renderGuard('/admin/governance');
-    expect(screen.getByRole('alert')).toHaveTextContent('Access denied');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Access denied');
     expect(screen.getByRole('alert')).toHaveTextContent('/admin/governance');
   });
 
-  it('RouteGuardTest.allowsAuthorized', () => {
-    window.localStorage.setItem(ACTIVE_PERSONA_STORAGE_KEY, 'persona-operations-lead');
+  it('RouteGuardTest.allowsAuthorized', async () => {
+    sessionUser = opsUser;
     renderGuard('/ops/dashboard');
-    expect(screen.getByText('ops allowed')).toBeInTheDocument();
+    expect(await screen.findByText('ops allowed')).toBeInTheDocument();
   });
 
-  it('RouteGuardTest.loginCanAuthorizePreservedDestination', () => {
+  it('RouteGuardTest.loginCanAuthorizePreservedDestination', async () => {
     renderGuard('/ops/dashboard');
-    fireEvent.click(screen.getByRole('button', { name: 'login from /ops/dashboard' }));
-    expect(window.localStorage.getItem(ACTIVE_PERSONA_STORAGE_KEY)).toBe('persona-operations-lead');
+    fireEvent.click(await screen.findByRole('button', { name: 'login from /ops/dashboard' }));
+    await waitFor(() => expect(sessionUser).toEqual(opsUser));
   });
 });

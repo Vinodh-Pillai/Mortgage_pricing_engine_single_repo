@@ -35,7 +35,7 @@ describe('PII-24-S13 eligibility explanation screen', () => {
     expect(screen.getByText('MISSING_REQUIRED_FACT')).toBeInTheDocument();
     expect(screen.getAllByText('Income verification package').length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole('button', { name: /Complete in Intake/i }));
-    expect(onNavigate).toHaveBeenCalledWith('/quote/start?step=income&highlight=fact%3Aincome-verification-package');
+    expect(onNavigate).toHaveBeenCalledWith('/pipeline?step=income&highlight=fact%3Aincome-verification-package');
   });
 
   it('renders ineligible backend blockers without deriving eligibility rules locally', () => {

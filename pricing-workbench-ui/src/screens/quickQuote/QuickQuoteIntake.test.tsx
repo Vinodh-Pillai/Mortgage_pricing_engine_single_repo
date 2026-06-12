@@ -1,5 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import QuickQuoteIntake from './QuickQuoteIntake';
 import type { BorrowerIntake, MetadataState } from '../../lib/api/quoteRuns';
@@ -82,6 +83,23 @@ const metadataState: MetadataState = {
   },
 };
 
+function renderQuickQuoteIntake(overrides: Partial<Parameters<typeof QuickQuoteIntake>[0]> = {}) {
+  return render(
+    <MemoryRouter>
+      <QuickQuoteIntake
+        intake={baseIntake}
+        errors={{}}
+        launchState={{ kind: 'idle' }}
+        metadataState={metadataState}
+        onChange={vi.fn()}
+        onRetry={vi.fn()}
+        onSubmit={vi.fn()}
+        {...overrides}
+      />
+    </MemoryRouter>,
+  );
+}
+
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
@@ -91,46 +109,29 @@ describe('PII-24-S09 progressive quick quote intake', () => {
   it('exposes the accepted borrower field flow through accessible progressive intake controls', () => {
     const onChange = vi.fn();
 
-    render(
-      <QuickQuoteIntake
-        intake={baseIntake}
-        errors={{}}
-        launchState={{ kind: 'idle' }}
-        metadataState={metadataState}
-        onChange={onChange}
-        onRetry={vi.fn()}
-        onSubmit={vi.fn()}
-      />,
-    );
+    renderQuickQuoteIntake({ onChange });
 
-    expect(screen.getByRole('heading', { name: /Progressive quick quote intake/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /New prospect intake/i })).toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: /Quote intake progress/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Step 2: Borrower in progress/i })).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: /^Borrower name \*$/i })).toHaveAttribute('aria-invalid', 'false');
-    expect(screen.getByRole('textbox', { name: /Contact email/i })).toHaveAttribute('type', 'email');
+    expect(screen.getByRole('button', { name: /Identity\s*in progress/i })).toHaveAttribute('aria-current', 'step');
+    expect(screen.getByRole('textbox', { name: /^Quote intent$/i })).toHaveAttribute('aria-invalid', 'false');
+    expect(screen.getByRole('textbox', { name: /^Channel$/i })).toHaveAttribute('type', 'text');
 
-    fireEvent.click(screen.getByRole('button', { name: /Step 2: Borrower in progress/i }));
-    expect(screen.getByText(/Active step: Step 2 Borrower/i)).toBeInTheDocument();
-
-    fireEvent.change(screen.getByRole('textbox', { name: /^Borrower name \*$/i }), { target: { value: 'Alex Borrower' } });
-    expect(onChange).toHaveBeenCalledWith('borrowerName', 'Alex Borrower');
+    fireEvent.change(screen.getByRole('textbox', { name: /^Quote intent$/i }), { target: { value: 'Purchase quote' } });
+    expect(onChange).toHaveBeenCalledWith('quoteIntent', 'Purchase quote');
   });
 
   it('keeps connected-service gaps visible without inventing pricing rules', () => {
-    render(
-      <QuickQuoteIntake
-        intake={baseIntake}
-        errors={{ borrowerName: 'Borrower name is required.' }}
-        launchState={{ kind: 'idle' }}
-        metadataState={metadataState}
-        onChange={vi.fn()}
-        onRetry={vi.fn()}
-        onSubmit={vi.fn()}
-      />,
-    );
+    renderQuickQuoteIntake({
+      errors: { quoteIntent: 'Quote intent is required.' },
+      launchState: {
+        kind: 'blocked',
+        validation: { passed: false, status: 'BLOCKED', message: 'Setup needed before connected quote launch.', blockers: { quoteIntent: 'Quote intent is required.' } },
+      },
+    });
 
     expect(screen.getAllByRole('alert')[0]).toHaveTextContent(/Setup needed before connected quote launch/i);
-    expect(screen.getByText('Borrower name is required.')).toHaveAttribute('role', 'alert');
-    expect(screen.getByText(/does not infer rates, thresholds, or eligibility decisions/i)).toBeInTheDocument();
+    expect(screen.getByText('Quote intent is required.')).toHaveAttribute('role', 'alert');
+    expect(screen.getByText(/Capture the borrower and loan facts needed to start a pricing run/i)).toBeInTheDocument();
   });
 });

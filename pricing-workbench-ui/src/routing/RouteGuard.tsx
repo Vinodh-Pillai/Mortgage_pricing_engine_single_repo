@@ -16,12 +16,12 @@ export function AccessDenied({ route }: { route: string }) {
     <section className="panel" role="alert" aria-labelledby="access-denied-heading">
       <p className="eyebrow">Access control</p>
       <h2 id="access-denied-heading">Access denied</h2>
-      <p>Your current synthetic persona is authenticated but does not have permission to view this workbench area.</p>
+      <p>Your authenticated account does not have permission to view this workbench area.</p>
       <dl className="status-grid">
         <dt>Requested route</dt>
         <dd><code>{route}</code></dd>
         <dt>Next step</dt>
-        <dd>Switch to an authorized persona or return to that persona's default route.</dd>
+        <dd>Use an account with the required backend role or return to the pipeline.</dd>
       </dl>
     </section>
   );

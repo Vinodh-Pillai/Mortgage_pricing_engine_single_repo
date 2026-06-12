@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Avatar, Button, Switch, roleColorKeyForLabel, roleColors } from '../design-system';
 import { useTranslation } from '../lib/i18n';
 
@@ -14,10 +14,9 @@ type HeaderProps = {
   onThemeToggle: () => void;
   theme: 'dark' | 'light';
   user: { name: string; role: string; avatar?: string };
-  userAction?: ReactNode;
 };
 
-export function Header({ breadcrumb, drawerOpen, notificationCount, onMenuToggle, onNotificationsToggle, onLogout, onThemeToggle, theme, user, userAction }: HeaderProps) {
+export function Header({ breadcrumb, drawerOpen, notificationCount, onMenuToggle, onNotificationsToggle, onLogout, onThemeToggle, theme, user }: HeaderProps) {
   const { t } = useTranslation('common');
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -98,12 +97,6 @@ export function Header({ breadcrumb, drawerOpen, notificationCount, onMenuToggle
                   <span className="layout-role-badge" style={{ '--layout-role-color': roleColor } as CSSProperties}>{user.role}</span>
                 </div>
               </div>
-              {userAction ? (
-                <div className="layout-user-menu__section" role="none">
-                  <p>Developer auth tools</p>
-                  {userAction}
-                </div>
-              ) : null}
               <button type="button" role="menuitem" className="layout-user-menu__item" onClick={() => { onLogout?.(); setUserMenuOpen(false); }}>{t('logout')}</button>
             </div>
           ) : null}

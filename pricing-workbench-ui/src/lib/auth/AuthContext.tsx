@@ -1,37 +1,40 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { fetchCurrentUser, loginWithPassword, logoutUser, type AuthUser, type BackendUserRole } from '../api/auth';
-import {
-  ACTIVE_PERSONA_STORAGE_KEY,
-  canAccessRoute as personaCanAccessRoute,
-  getPersonaByRole as findPersonaByRole,
-  hasPermission as personaHasPermission,
-  syntheticPersonas,
-  type Permission,
-  type Persona,
-  type PersonaRole,
-} from './personas';
+import { getCurrentUser, login as loginRequest, logout as logoutRequest, type User, type UserRole } from '../api/auth';
+import { canAccessRoute as personaCanAccessRoute, hasPermission as personaHasPermission, permissionsForRoute, type Permission, type Persona, type PersonaRole } from './personas';
 
 export interface AuthEventDetail {
   type: 'login' | 'logout' | 'session-refresh' | 'permission-check' | 'route-access';
-  personaId: string | null;
+  userId: string | null;
   target?: string;
   allowed?: boolean;
 }
 
 export interface AuthContextType {
+  user: User | null;
+  currentUser: User | null;
   currentPersona: Persona | null;
-  currentUser: AuthUser | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   authError: string | null;
-  login: (email: string, password?: string) => Promise<Persona | null>;
+  login: (email: string, password: string) => Promise<User>;
   logout: () => Promise<void>;
-  refreshCurrentUser: () => Promise<Persona | null>;
+  refreshCurrentUser: () => Promise<User | null>;
   hasPermission: (permission: Permission) => boolean;
   canAccessRoute: (route: string) => boolean;
-  availablePersonas: Persona[];
-  getPersonaByRole: (role: PersonaRole) => Persona | undefined;
 }
+
+export const rolePermissionMatrix: Record<UserRole, readonly Permission[]> = {
+  loan_officer: ['quote:create', 'quote:read', 'scenario:create', 'lock:create', 'eligibility:read'],
+  pricing_analyst: ['quote:read', 'pricing:read', 'margin:read', 'scenario:read', 'scenario:what-if'],
+  operations_lead: ['lock:read', 'lock:manage', 'partner:read', 'ops:read', 'rate-feed:read'],
+  governance_reviewer: ['compliance:read', 'audit:read', 'governance:read', 'rules:read'],
+  admin: ['*'],
+  partner_manager: ['partner:read', 'partner:manage', 'quote:read'],
+  compliance_officer: ['compliance:read', 'audit:read', 'privacy:read'],
+  borrower: ['quote:create', 'quote:read', 'offer:compare'],
+};
+
+export const ACTIVE_PERSONA_STORAGE_KEY = 'wcpe:activePersona';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -40,65 +43,64 @@ function emitAuthEvent(detail: AuthEventDetail) {
   window.dispatchEvent(new CustomEvent<AuthEventDetail>('wcpe:auth', { detail }));
 }
 
-const backendToPersonaRole: Record<BackendUserRole, PersonaRole> = {
-  loan_officer: 'loan-officer',
-  pricing_analyst: 'pricing-analyst',
-  operations_lead: 'operations-lead',
-  governance_reviewer: 'governance-reviewer',
-  admin: 'admin',
-  partner_manager: 'partner-manager',
-  compliance_officer: 'compliance-officer',
-  borrower: 'borrower',
-};
+function roleToPersonaRole(role: UserRole): PersonaRole {
+  return role.replace(/_/g, '-') as PersonaRole;
+}
 
-function personaFromUser(user: AuthUser): Persona {
-  const role = backendToPersonaRole[user.role];
-  const basePersona = findPersonaByRole(role);
+function displayNameFor(user: User) {
+  return user.fullName || user.name || user.email;
+}
+
+function initialsFor(name: string) {
+  return name.split(/\s+/).filter(Boolean).map((part) => part[0]).join('').slice(0, 2).toUpperCase() || 'U';
+}
+
+function personaFromUser(user: User): Persona {
+  const name = displayNameFor(user);
   return {
-    ...(basePersona ?? {
-      id: `user-${user.id}`,
-      name: user.name,
-      role,
-      email: user.email,
-      description: 'Authenticated workbench user.',
-      permissions: [],
-      defaultRoute: '/pipeline',
-    }),
     id: user.id,
-    name: user.name,
+    name,
+    role: roleToPersonaRole(user.role),
     email: user.email,
-    role,
-    avatar: basePersona?.avatar ?? user.name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase(),
+    avatar: initialsFor(name),
+    description: 'Authenticated workbench user.',
+    permissions: [...rolePermissionMatrix[user.role]],
+    defaultRoute: '/pipeline',
   };
 }
 
-function backendRoleFromPersona(role: PersonaRole): BackendUserRole {
-  return role.replace(/-/g, '_') as BackendUserRole;
+function roleHasPermission(role: UserRole, permission: Permission): boolean {
+  const permissions = rolePermissionMatrix[role] ?? [];
+  if (permissions.includes('*')) return true;
+  if (permissions.includes(permission)) return true;
+  const [domain] = permission.split(':');
+  return permissions.includes(`${domain}:*` as Permission) || permissions.includes('admin:*');
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
-  const [currentPersona, setCurrentPersona] = useState<Persona | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const applyUser = useCallback((user: AuthUser | null) => {
-    const persona = user ? personaFromUser(user) : null;
-    setCurrentUser(user);
-    setCurrentPersona(persona);
-    return persona;
+  const currentPersona = useMemo(() => (user ? personaFromUser(user) : null), [user]);
+
+  const applyUser = useCallback((nextUser: User | null) => {
+    setUser(nextUser);
+    return nextUser;
   }, []);
 
   const refreshCurrentUser = useCallback(async () => {
     setIsLoading(true);
     try {
-      const response = await fetchCurrentUser();
+      const response = await getCurrentUser();
       setAuthError(null);
-      const persona = applyUser(response.user);
-      emitAuthEvent({ type: 'session-refresh', personaId: persona?.id ?? null, allowed: true });
-      return persona;
+      const nextUser = response.user;
+      applyUser(nextUser);
+      emitAuthEvent({ type: 'session-refresh', userId: nextUser.id, allowed: true });
+      return nextUser;
     } catch {
       applyUser(null);
+      emitAuthEvent({ type: 'session-refresh', userId: null, allowed: false });
       return null;
     } finally {
       setIsLoading(false);
@@ -109,58 +111,64 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void refreshCurrentUser();
   }, [refreshCurrentUser]);
 
-  const login = useCallback(async (email: string, password?: string) => {
-    if (!password && import.meta.env.DEV) {
-      const persona = syntheticPersonas.find((candidate) => candidate.id === email || candidate.email === email);
-      if (persona) {
-        setCurrentUser({ id: persona.id, email: persona.email, name: persona.name, role: backendRoleFromPersona(persona.role) });
-        setCurrentPersona(persona);
-        setAuthError(null);
-        emitAuthEvent({ type: 'login', personaId: persona.id, allowed: true });
-        return persona;
-      }
-    }
+  const login = useCallback(async (email: string, password: string) => {
+    setIsLoading(true);
     try {
-      const response = await loginWithPassword({ email, password: password ?? '' });
-      const persona = applyUser(response.user);
+      await loginRequest(email, password);
+      const response = await getCurrentUser();
+      const nextUser = response.user;
+      applyUser(nextUser);
       setAuthError(null);
-      emitAuthEvent({ type: 'login', personaId: persona?.id ?? null, allowed: true });
-      return persona;
+      emitAuthEvent({ type: 'login', userId: nextUser.id, allowed: true });
+      return nextUser;
     } catch (exception) {
       const message = exception instanceof Error ? exception.message : 'Unable to sign in';
       setAuthError(message);
+      applyUser(null);
+      emitAuthEvent({ type: 'login', userId: null, allowed: false });
       throw exception;
+    } finally {
+      setIsLoading(false);
     }
   }, [applyUser]);
 
   const logout = useCallback(async () => {
-    const personaId = currentPersona?.id ?? null;
+    const userId = user?.id ?? null;
+    setIsLoading(true);
     try {
-      await logoutUser();
+      await logoutRequest();
     } finally {
       applyUser(null);
-      emitAuthEvent({ type: 'logout', personaId, allowed: true });
+      setIsLoading(false);
+      emitAuthEvent({ type: 'logout', userId, allowed: true });
     }
-  }, [applyUser, currentPersona?.id]);
+  }, [applyUser, user?.id]);
 
   const hasPermission = useCallback((permission: Permission) => {
-    const allowed = currentPersona ? personaHasPermission(currentPersona, permission) : false;
-    emitAuthEvent({ type: 'permission-check', personaId: currentPersona?.id ?? null, target: permission, allowed });
+    const allowed = user ? roleHasPermission(user.role, permission) : false;
+    emitAuthEvent({ type: 'permission-check', userId: user?.id ?? null, target: permission, allowed });
     return allowed;
-  }, [currentPersona]);
+  }, [user]);
 
   const canAccessRoute = useCallback((route: string) => {
-    const allowed = currentPersona ? personaCanAccessRoute(currentPersona, route) : false;
-    emitAuthEvent({ type: 'route-access', personaId: currentPersona?.id ?? null, target: route, allowed });
+    let allowed = false;
+    if (user) {
+      const rule = permissionsForRoute(route);
+      if (!rule) allowed = false;
+      else if (rule.permissions.length === 0) allowed = true;
+      else allowed = rule.match === 'all'
+        ? rule.permissions.every((permission) => roleHasPermission(user.role, permission))
+        : rule.permissions.some((permission) => roleHasPermission(user.role, permission));
+    }
+    emitAuthEvent({ type: 'route-access', userId: user?.id ?? null, target: route, allowed });
     return allowed;
-  }, [currentPersona]);
-
-  const getPersonaByRole = useCallback((role: PersonaRole) => findPersonaByRole(role), []);
+  }, [user]);
 
   const value = useMemo<AuthContextType>(() => ({
+    user,
+    currentUser: user,
     currentPersona,
-    currentUser,
-    isAuthenticated: currentPersona !== null,
+    isAuthenticated: user !== null,
     isLoading,
     authError,
     login,
@@ -168,9 +176,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refreshCurrentUser,
     hasPermission,
     canAccessRoute,
-    availablePersonas: syntheticPersonas,
-    getPersonaByRole,
-  }), [authError, canAccessRoute, currentPersona, currentUser, getPersonaByRole, hasPermission, isLoading, login, logout, refreshCurrentUser]);
+  }), [authError, canAccessRoute, currentPersona, hasPermission, isLoading, login, logout, refreshCurrentUser, user]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
@@ -187,4 +193,4 @@ export function useOptionalAuth() {
   return useContext(AuthContext);
 }
 
-export { ACTIVE_PERSONA_STORAGE_KEY };
+export { personaCanAccessRoute, personaHasPermission };

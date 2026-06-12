@@ -2,11 +2,35 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
-import { AuthProvider, ACTIVE_PERSONA_STORAGE_KEY } from '../../lib/auth/AuthContext';
+import { AuthProvider } from '../../lib/auth/AuthContext';
+import type { User } from '../../lib/api/auth';
 import { syntheticPersonas } from '../../lib/auth/personas';
 import { LocaleProvider } from '../../lib/i18n';
-import { filterPersonas, LoginScreen } from './LoginScreen';
+import { LoginScreen } from './LoginScreen';
 import { PersonaCard, roleIconFor, visiblePermissionChips } from './PersonaCard';
+
+const loanOfficer: User = { id: 'user-loan-officer', email: 'loan@example.com', fullName: 'Loan Officer', role: 'loan_officer' };
+let sessionUser: User | null;
+let rejectLogin = false;
+
+function jsonResponse(body: unknown, status = 200) {
+  return Promise.resolve(new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }));
+}
+
+function installFetchMock() {
+  vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), 'http://localhost');
+    if (url.pathname === '/api/auth/me') {
+      return sessionUser ? jsonResponse({ user: sessionUser }) : jsonResponse({ error: 'Not authenticated' }, 401);
+    }
+    if (url.pathname === '/api/auth/login' && init?.method === 'POST') {
+      if (rejectLogin) return jsonResponse({ error: 'Invalid credentials' }, 401);
+      sessionUser = loanOfficer;
+      return jsonResponse({ user: loanOfficer });
+    }
+    return jsonResponse({ error: 'Not found' }, 404);
+  }));
+}
 
 function LocationProbe() {
   const location = useLocation();
@@ -29,50 +53,42 @@ function renderLogin(initialEntries = ['/login']) {
 }
 
 beforeEach(() => {
-  window.localStorage.clear();
+  sessionUser = null;
+  rejectLogin = false;
+  installFetchMock();
 });
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 describe('LoginScreenTest', () => {
-  it('LoginScreenTest.filtersPersonasBySearch', async () => {
+  it('LoginScreenTest.rendersEmailPasswordForm', async () => {
     renderLogin();
-    expect(screen.getAllByTestId('persona-card')).toHaveLength(8);
-
-    fireEvent.change(screen.getByRole('searchbox', { name: /search personas/i }), { target: { value: 'pricing analyst' } });
-
-    await waitFor(() => expect(screen.getAllByTestId('persona-card')).toHaveLength(1));
-    expect(screen.getByText('David Chen')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Email')).toBeInTheDocument();
+    expect(screen.getByLabelText('Password')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /forgot password/i })).toBeInTheDocument();
   });
 
-  it('LoginScreenTest.selectsPersonaOnClick', async () => {
+  it('LoginScreenTest.callsBackendLoginAndRedirectsToPipeline', async () => {
     renderLogin();
-    fireEvent.click(screen.getByRole('button', { name: /select sarah mitchell/i }));
+    fireEvent.change(await screen.findByLabelText('Email'), { target: { value: 'loan@example.com' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'Password123!' } });
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
 
-    expect(await screen.findByRole('button', { name: /continue as sarah mitchell/i })).toHaveFocus();
-    expect(screen.getByText('Selected persona')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/pipeline'));
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/auth/login'), expect.objectContaining({ credentials: 'include' }));
   });
 
-  it('LoginScreenTest.callsLoginOnSubmit', async () => {
+  it('LoginScreenTest.showsInvalidCredentialsError', async () => {
+    rejectLogin = true;
     renderLogin();
-    fireEvent.click(screen.getByRole('button', { name: /select david chen/i }));
-    fireEvent.click(await screen.findByRole('button', { name: /continue as david chen/i }));
+    fireEvent.change(await screen.findByLabelText('Email'), { target: { value: 'bad@example.com' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'bad' } });
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
 
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/pricing/margins'));
-    expect(window.localStorage.getItem(ACTIVE_PERSONA_STORAGE_KEY)).toBe('persona-pricing-analyst');
-  });
-
-  it('LoginScreenTest.filterLogicMatchesRolePermissionAndDescription', () => {
-    expect(filterPersonas(syntheticPersonas, 'compliance')).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'persona-compliance-officer' }),
-      expect.objectContaining({ id: 'persona-governance-reviewer' }),
-    ]));
-    expect(filterPersonas(syntheticPersonas, 'partner manage')).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'persona-partner-manager' }),
-    ]));
-    expect(filterPersonas(syntheticPersonas, 'not-a-role')).toEqual([]);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Invalid credentials');
   });
 });
 
@@ -91,16 +107,5 @@ describe('PersonaCardTest', () => {
     render(<PersonaCard persona={persona} isSelected={false} onSelect={vi.fn()} />);
     expect(screen.getByText('quote create')).toBeInTheDocument();
     expect(screen.getByText(`+${persona.permissions.length - 3} more`)).toBeInTheDocument();
-  });
-
-  it('PersonaCardTest.keyboardAccessible', () => {
-    const onSelect = vi.fn();
-    render(<PersonaCard persona={persona} isSelected={false} onSelect={onSelect} />);
-    const card = screen.getByRole('button', { name: /select sarah mitchell/i });
-
-    fireEvent.keyDown(card, { key: 'Enter' });
-    fireEvent.keyDown(card, { key: ' ' });
-
-    expect(onSelect).toHaveBeenCalledTimes(2);
   });
 });

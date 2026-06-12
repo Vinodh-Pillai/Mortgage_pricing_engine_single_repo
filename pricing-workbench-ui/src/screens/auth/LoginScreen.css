@@ -345,6 +345,24 @@
   justify-self: start;
 }
 
+.login-form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-4);
+}
+
+.login-forgot {
+  color: var(--ds-color-primary);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.login-forgot:hover,
+.login-forgot:focus-visible {
+  text-decoration: underline;
+}
+
 .login-footer {
   display: grid;
   gap: var(--ds-space-2);

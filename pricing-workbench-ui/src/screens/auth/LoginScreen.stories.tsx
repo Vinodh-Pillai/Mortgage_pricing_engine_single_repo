@@ -31,16 +31,16 @@ export function DefaultLightDesktop() {
   return <StoryFrame theme="light"><LoginScreen disableAutoRedirect /></StoryFrame>;
 }
 
-export function FilteredSearchResults() {
-  return <StoryFrame><LoginScreen initialSearchTerm="pricing" disableAutoRedirect /></StoryFrame>;
+export function PrefilledEmail() {
+  return <StoryFrame><LoginScreen initialEmail="pricing.analyst@example.com" disableAutoRedirect /></StoryFrame>;
 }
 
-export function SelectedPersonaConfirmation() {
-  return <StoryFrame><LoginScreen initialSelectedPersonaId="persona-loan-officer" disableAutoRedirect /></StoryFrame>;
+export function PasswordRequired() {
+  return <StoryFrame><LoginScreen initialEmail="loan.officer@example.com" disableAutoRedirect /></StoryFrame>;
 }
 
-export function EmptyState() {
-  return <StoryFrame><LoginScreen initialSearchTerm="no matching persona" disableAutoRedirect /></StoryFrame>;
+export function InvalidCredentialReady() {
+  return <StoryFrame><LoginScreen initialEmail="unknown@example.com" disableAutoRedirect /></StoryFrame>;
 }
 
 export function LoadingState() {

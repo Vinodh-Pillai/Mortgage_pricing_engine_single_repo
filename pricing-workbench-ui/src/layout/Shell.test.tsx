@@ -132,7 +132,7 @@ describe('responsive layout shell', () => {
     expect(window.localStorage.getItem('wcpe:layout-shell:nav-rail-collapsed')).toBe('false');
   });
 
-  it('opens persona menu with role badge and persists theme toggles', () => {
+  it('opens user menu with role badge and persists theme toggles', () => {
     installMatchMedia(false);
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
     const toggle = vi.fn();
@@ -143,7 +143,7 @@ describe('responsive layout shell', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'User menu for Alex Rivera' }));
-    expect(screen.getByRole('menu', { name: 'User menu for Alex Rivera' })).toHaveTextContent('Switch persona (dev)');
+    expect(screen.getByRole('menu', { name: 'User menu for Alex Rivera' })).toHaveTextContent('Logout');
     expect(screen.getAllByText('Pricing analyst').some((element) => element.classList.contains('layout-role-badge'))).toBe(true);
 
     fireEvent.click(screen.getByRole('switch', { name: 'Toggle theme' }));

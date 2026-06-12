@@ -61,7 +61,7 @@ describe('MlAdvisoryInsightsScreen', () => {
     expect(await screen.findByRole('heading', { name: 'ML Advisory Insights' })).toBeInTheDocument();
     expect(screen.getByLabelText('Model version')).toHaveValue('model-v1');
     expect(screen.getAllByText('Advisory unavailable')).toHaveLength(2);
-    expect(screen.getByText('Use manual pricing workflow')).toHaveAttribute('href', '/quote/start');
+    expect(screen.getByText('Use manual pricing workflow')).toHaveAttribute('href', '/pipeline');
 
     const recommendations = screen.getByRole('table', { name: 'ML advisory recommendations' });
     expect(within(recommendations).getByText('rec-high')).toBeInTheDocument();

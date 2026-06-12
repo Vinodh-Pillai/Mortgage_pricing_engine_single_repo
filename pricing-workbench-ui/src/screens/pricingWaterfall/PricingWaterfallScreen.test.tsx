@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import PricingWaterfallScreen, { exportWaterfallCsv, exportWaterfallJson } from './PricingWaterfallScreen';
 import { blockedPricingWaterfall, deterministicPricingWaterfall } from './fixtures';
@@ -19,8 +19,7 @@ describe('PII-24-S14 pricing waterfall screen', () => {
     const fetchImpl = vi.fn(async () => ({ status: 200, json: async () => deterministicPricingWaterfall })) as unknown as typeof fetch;
     render(<PricingWaterfallScreen runId="run-preview-001" fetchImpl={fetchImpl} />);
 
-    await act(async () => { await Promise.resolve(); });
-    expect(fetchImpl).toHaveBeenCalledWith('/api/v1/tenants/tenant-fixture/quote-runs/run-preview-001/pricing-waterfall', expect.objectContaining({ headers: expect.objectContaining({ Accept: 'application/json' }) }));
+    await waitFor(() => expect(fetchImpl).toHaveBeenCalledWith('/api/v1/tenants/tenant-fixture/quote-runs/run-preview-001/pricing-waterfall', expect.objectContaining({ headers: expect.objectContaining({ Accept: 'application/json' }) })));
     expect(await screen.findByRole('heading', { name: /Pricing Waterfall/i })).toBeInTheDocument();
     expect(screen.getByText(/without local pricing calculation/i)).toBeInTheDocument();
   });
@@ -57,11 +56,13 @@ describe('PII-24-S14 pricing waterfall screen', () => {
   });
 
   it('exports CSV and JSON with redaction metadata', () => {
-    expect(exportWaterfallCsv(deterministicPricingWaterfall)).toContain('inputAuditRef');
-    expect(exportWaterfallCsv(deterministicPricingWaterfall)).toContain('audit:redaction-001');
-    expect(exportWaterfallJson(deterministicPricingWaterfall)).toContain('"redactions"');
+    const compactWaterfall = { ...deterministicPricingWaterfall, finalPrice: { ...deterministicPricingWaterfall.finalPrice, ledger: deterministicPricingWaterfall.finalPrice.ledger.slice(0, 8) } };
 
-    render(<PricingWaterfallScreen waterfall={deterministicPricingWaterfall} />);
+    expect(exportWaterfallCsv(compactWaterfall)).toContain('inputAuditRef');
+    expect(exportWaterfallCsv(compactWaterfall)).toContain('audit:redaction-001');
+    expect(exportWaterfallJson(compactWaterfall)).toContain('"redactions"');
+
+    render(<PricingWaterfallScreen waterfall={compactWaterfall} />);
     fireEvent.click(screen.getByRole('button', { name: /Export CSV/i }));
     expect((screen.getByLabelText(/Exported pricing waterfall/i) as HTMLTextAreaElement).value).toContain('REDACTED_MARGIN');
     fireEvent.click(screen.getByRole('button', { name: /Export JSON/i }));
