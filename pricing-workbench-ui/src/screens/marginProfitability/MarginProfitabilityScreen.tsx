@@ -212,7 +212,7 @@ function ApprovalStatus({ approval }: { approval?: MarginApprovalView }) {
         <>
           <dl className="status-grid"><dt>Current version</dt><dd><code>{approval.currentVersionRef}</code></dd><dt>Status</dt><dd>{displayText(approval.status)}</dd></dl>
           <div className="button-row" role="group" aria-label="Approval actions">
-            {['REQUEST_APPROVAL', 'APPROVE', 'REJECT'].map((action) => <button key={action} type="button" disabled={!approval.allowedActions.includes(action)}>{displayText(action)}</button>)}
+            {['REQUEST_APPROVAL', 'APPROVE', 'REJECT'].map((action) => <button key={action} type="button" disabled={!approval.allowedActions.includes(action)}>{approvalActionLabel(action)}</button>)}
           </div>
           <div className="quote-table" role="table" aria-label="Approval chain">
             <div role="row" className="quote-table__row quote-table__row--head"><span role="columnheader">Role</span><span role="columnheader">Actor</span><span role="columnheader">Status</span><span role="columnheader">Timestamp ref</span><span role="columnheader">Audit ref</span></div>
@@ -272,4 +272,11 @@ function safeLocalRoute(route: string) {
 function displayText(value: string | number | boolean | null | undefined) {
   if (value === null || value === undefined || value === '') return 'Not supplied';
   return String(value).replace(/[_-]+/g, ' ');
+}
+
+function approvalActionLabel(action: string) {
+  if (action === 'REQUEST_APPROVAL') return 'Request Approval';
+  if (action === 'APPROVE') return 'Approve';
+  if (action === 'REJECT') return 'Reject';
+  return displayText(action);
 }

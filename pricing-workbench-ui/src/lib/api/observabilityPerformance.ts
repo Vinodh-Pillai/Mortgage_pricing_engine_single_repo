@@ -11,6 +11,7 @@ export type PerformanceBlocker = {
   code: string;
   owner: string;
   message: string;
+  caseId?: string;
 };
 
 export type PerformanceSignalGroup = {
@@ -28,6 +29,7 @@ export type PerformanceImpact = {
   source: string;
   recoveryOwner: string;
   runbookRef: string;
+  severity?: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | string;
 };
 
 export type PerformanceDashboardView = {
@@ -43,14 +45,17 @@ export type PerformanceDashboardView = {
   events: string[];
 };
 
-const performanceHeaders = {
-  Accept: 'application/json',
-  'X-Ui-Trace-Id': 'perf-s09-local-trace',
-  'X-Tenant-Context': 'ui-preview-tenant',
-};
-
-export async function fetchPerformanceDashboard(fetchImpl: typeof fetch = fetch): Promise<PerformanceDashboardView> {
-  const response = await fetchImpl('/api/v1/ops/performance', { headers: performanceHeaders });
+export async function fetchPerformanceDashboard(
+  tenantContext = 'ui-preview-tenant',
+  fetchImpl: typeof fetch = fetch,
+): Promise<PerformanceDashboardView> {
+  const response = await fetchImpl('/api/v1/ops/performance', {
+    headers: {
+      Accept: 'application/json',
+      'X-Ui-Trace-Id': 'perf-s20-local-trace',
+      'X-Tenant-Context': tenantContext,
+    },
+  });
   if (response.status >= 500) throw new Error('Performance dashboard boundary is temporarily unavailable.');
   return (await response.json()) as PerformanceDashboardView;
 }

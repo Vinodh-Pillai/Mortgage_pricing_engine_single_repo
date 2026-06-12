@@ -6,17 +6,82 @@ export type OpsCaseSummary = {
   owner: string;
   status: string;
   contextSummary: string;
+  queue?: string;
+  createdAtRef?: string;
+  updatedAtRef?: string;
+  sourceRefs?: string[];
 };
 
 export type OpsCaseTimelineEvent = {
   eventId: string;
   eventType: string;
   summary: string;
+  timestampRef?: string;
+  actorRef?: string;
+  evidenceRefs?: string[];
+};
+
+export type OpsCaseMetric = {
+  metricId: string;
+  label: string;
+  value: string;
+  sourceRef: string;
+  status?: string;
+};
+
+export type OpsCaseChart = {
+  chartId: string;
+  label: string;
+  segments: { label: string; value: string; sourceRef: string }[];
+};
+
+export type OpsCaseQueueSummary = {
+  queueId: string;
+  label: string;
+  caseCount: string;
+  avgAgeRef: string;
+  slaBreachCountRef: string;
+  oldestCaseRef: string;
+  ownerRef: string;
+  priorityRefs: string[];
+};
+
+export type OpsEscalationSummary = {
+  escalationId: string;
+  caseId: string;
+  escalationLevel: string;
+  escalatedTo: string;
+  escalatedAtRef: string;
+  slaBreachTimeRef: string;
+  reason: string;
+  status: string;
+  auditRefs: string[];
+};
+
+export type OpsCaseEvidencePacket = {
+  packetId: string;
+  packetType: string;
+  sourceRef: string;
+  downloadRef: string;
 };
 
 export type OpsCaseListView = {
   tenantContext: string;
+  dependencyStatus?: string;
+  dashboardMetrics?: OpsCaseMetric[];
+  charts?: OpsCaseChart[];
+  queues?: OpsCaseQueueSummary[];
   cases: OpsCaseSummary[];
+  escalations?: OpsEscalationSummary[];
+  filters?: {
+    queues: string[];
+    priorities: string[];
+    slaStates: string[];
+    owners: string[];
+    statuses: string[];
+  };
+  actionsDisabled?: boolean;
+  fallbackReason?: string;
   uiTraceId: string;
   events: string[];
 };
@@ -25,6 +90,11 @@ export type OpsCaseDetail = OpsCaseSummary & {
   tenantContext: string;
   timeline: OpsCaseTimelineEvent[];
   evidencePacketIds: string[];
+  evidencePackets?: OpsCaseEvidencePacket[];
+  assignmentRefs?: string[];
+  noteRefs?: string[];
+  statusRefs?: string[];
+  escalationRefs?: string[];
   uiTraceId: string;
   events: string[];
 };

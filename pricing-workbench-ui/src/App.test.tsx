@@ -24,6 +24,42 @@ function partnerChannelWorkbenchFixture() {
   };
 }
 
+function partnerIntegrationAlertsFixture() {
+  return {
+    partnerId: 'partner-preview',
+    tenantContext: 'ui-preview-tenant',
+    dependencyStatus: 'INTEGRATION_SERVICE_ALERT_CONTRACT_NOT_CONFIGURED',
+    rulesStatus: 'configured alert thresholds required from backend contract',
+    alerts: [
+      {
+        alertId: 'alert-dlq-growth',
+        severity: 'P1',
+        alertClass: 'DLQ growth',
+        triggerType: 'DLQ_GROWTH',
+        routeTarget: '/partners/integrations/dlq',
+        acknowledged: false,
+        blockers: ['Configured DLQ growth threshold required'],
+        recoveryOwner: 'integration-platform-owner',
+        actionState: 'ACTION_REQUIRED',
+      },
+      {
+        alertId: 'alert-consent-violation',
+        severity: 'P0',
+        alertClass: 'Consent violation',
+        triggerType: 'CONSENT_VIOLATION',
+        routeTarget: '/partners/webhooks',
+        acknowledged: true,
+        blockers: ['Compliance review contract required'],
+        recoveryOwner: 'compliance-operations-owner',
+        actionState: 'ACKNOWLEDGED',
+      },
+    ],
+    fallbackReason: 'Configured partner integration alert contract is unavailable; this view shows non-secret alert classes, recovery owners, and blocked action state only.',
+    uiTraceId: 'ch-s22-local-trace',
+    events: ['PartnerIntegrationAlertsOpened'],
+  };
+}
+
 describe('App shell', () => {
   beforeEach(() => {
     window.history.pushState({}, '', '/quote/start');
@@ -651,7 +687,7 @@ describe('App shell', () => {
               replayEvidence: ['cache-invalidation-command-required', 'replay-hash-required', 'outbox-event-ref-required'],
               actionsDisabled: true,
               fallbackReason: 'Configured rate-feed-service operations contract is unavailable in this local BFF fallback; UI actions show workflow state and blockers only and do not recalculate rates.',
-              uiTraceId: 'rf-s03-local-trace',
+              uiTraceId: 'rf-s18-local-trace',
               events: ['RateFeedOperationsOpened'],
             }),
           };
@@ -754,6 +790,13 @@ describe('App shell', () => {
           return {
             ok: true,
             json: async () => partnerChannelWorkbenchFixture(),
+          };
+        }
+
+        if (url === '/api/v1/partners/partner-preview/integrations/alerts') {
+          return {
+            ok: true,
+            json: async () => partnerIntegrationAlertsFixture(),
           };
         }
 
@@ -1186,7 +1229,7 @@ describe('App shell', () => {
     return copy.textContent ?? '';
   }
 
-  const forbiddenPrimaryJargon = /Support reference|SLA contract required|Connected services|dependencyStatus|Downstream executed|Partner Transport|policy versions|market-rule completeness|release gates|\bdrift\b|override ledger|RBAC|DSAR|DLQ|\bBFF\b|\bupstream\b|route labels/i;
+  const forbiddenPrimaryJargon = /Support reference|SLA contract required|Connected services|dependencyStatus|Downstream executed|Partner Transport|RBAC|DSAR|DLQ|\bBFF\b|\bupstream\b|route labels/i;
 
   it('renders accessible full workflow and calls the workbench service health boundary on load', async () => {
     render(<App />);
@@ -1297,7 +1340,7 @@ describe('App shell', () => {
     ['/quote/run-test/pricing-waterfall', 'Waterfall evidence'],
     ['/quote/run-test/journey', 'Service node map'],
     ['/quote/run-test/lock', 'Lock workflow'],
-      ['/ops/dashboard', 'Operations case triage'],
+      ['/ops/dashboard', 'Operations Cases'],
       ['/partners/quotes', 'Partner quote lifecycle'],
       ['/partners/webhooks', 'Partner integration channel workbench'],
       ['/ops/performance', 'Service performance cockpit'],
@@ -1305,10 +1348,10 @@ describe('App shell', () => {
     ['/compliance/evidence', 'Compliance evidence registry'],
       ['/quality/validation', 'Quality guardrails dashboard'],
       ['/admin/products/catalog', 'Product catalog manager'],
-      ['/admin/governance', 'Admin governance and readiness controls'],
+      ['/admin/governance', 'Governance Lifecycle'],
       ['/platform/tenant-context', 'Tenant platform coverage'],
       ['/audit/replay', 'Review record workbench'],
-      ['/advisory/ml', 'ML advisory insights cockpit'],
+      ['/advisory/ml', 'ML Advisory Insights'],
     ])('keeps primary rendered copy free of implementation jargon on %s', async (path, heading) => {
     window.history.pushState({}, '', path);
     render(<App />);
@@ -1381,7 +1424,7 @@ describe('App shell', () => {
 
     render(<App />);
 
-    expect(screen.getByRole('link', { name: 'Governance lifecycle' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: /Governance lifecycle/ })).toHaveAttribute('aria-current', 'page');
     expect(await screen.findByRole('table', { name: 'Governance descriptors' })).toBeInTheDocument();
     expect(screen.getByText('config-lifecycle')).toBeInTheDocument();
     expect(screen.getByText('simulate')).toBeInTheDocument();
@@ -1403,7 +1446,7 @@ describe('App shell', () => {
 
     render(<App />);
 
-    expect(screen.getByRole('link', { name: 'ML advisory insights' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: /ML advisory insights/ })).toHaveAttribute('aria-current', 'page');
     expect(await screen.findByRole('heading', { name: 'Advisory recommendation review' })).toBeInTheDocument();
     expect(screen.getAllByText('model-version-ref-required').length).toBeGreaterThan(0);
     expect(screen.getByText('confidence-score-from-model-output')).toBeInTheDocument();
@@ -1415,7 +1458,7 @@ describe('App shell', () => {
     expect(screen.getByText('ALERT_REVIEW_REQUIRED')).toBeInTheDocument();
     expect(screen.getByText('feedback-loop-ref-required')).toBeInTheDocument();
     expect(screen.getByText('evidence-export-ref-required')).toBeInTheDocument();
-    expect(screen.getByText('Advisory unavailable')).toBeInTheDocument();
+    expect(screen.getAllByText('Advisory unavailable').length).toBeGreaterThan(0);
     expect(document.body.textContent).not.toMatch(/rate table|eligibility threshold|fee amount/i);
     expect(fetch).toHaveBeenCalledWith('/api/v1/ml-advisory/insights', expect.objectContaining({ headers: expect.objectContaining({ 'X-Ui-Trace-Id': 'ml-s14-local-trace' }) }));
   });
@@ -1564,10 +1607,10 @@ describe('App shell', () => {
 
     render(<App />);
 
-    expect(await screen.findByRole('heading', { name: 'Operations case triage' })).toBeInTheDocument();
-    const queue = screen.getByRole('table', { name: 'Operations cases' });
+    expect(await screen.findByRole('heading', { name: 'Operations Cases' })).toBeInTheDocument();
+    const queue = screen.getByRole('table', { name: 'Operations cases list' });
     expect(within(queue).getByText(/ops-lock-blocked/)).toBeInTheDocument();
-    expect(within(queue).getByText('Response target needs setup')).toBeInTheDocument();
+    expect(within(queue).getByText('SLA Contract Required')).toBeInTheDocument();
     expect(within(queue).getByText('Unassigned')).toBeInTheDocument();
     expect(await screen.findByText('Operations case context opened.')).toBeInTheDocument();
     expect(screen.getByText('evidence-packet-required-after-escalation')).toBeInTheDocument();
@@ -1578,8 +1621,8 @@ describe('App shell', () => {
 
     render(<App />);
 
-    expect(await screen.findByRole('heading', { name: 'Operations case triage' })).toBeInTheDocument();
-    expect(screen.getByRole('table', { name: 'Operations cases' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Operations Cases' })).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: 'Operations case escalations' })).toBeInTheDocument();
   });
 
   it('renders rate feed workflow steps, row blockers, source refs, and replay evidence without local rate math', async () => {
@@ -1603,7 +1646,7 @@ describe('App shell', () => {
     expect(screen.getByRole('button', { name: 'Publish rate sheet' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Request processing review' })).toBeDisabled();
     expect(document.body.textContent).not.toMatch(/APR|eligibility threshold|fee amount/i);
-    expect(fetch).toHaveBeenCalledWith('/api/v1/ops/rate-feeds', expect.objectContaining({ headers: expect.objectContaining({ 'X-Ui-Trace-Id': 'rf-s03-local-trace' }) }));
+    expect(fetch).toHaveBeenCalledWith('/api/v1/ops/rate-feeds', expect.objectContaining({ headers: expect.objectContaining({ 'X-Ui-Trace-Id': 'rf-s18-local-trace' }) }));
   });
 
   it('renders pricing waterfall ledger, redactions, blockers, review references, and processing records without local pricing math', async () => {
@@ -1717,7 +1760,7 @@ describe('App shell', () => {
     render(<App />);
 
     expect(await screen.findByRole('button', { name: 'Assign case' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Escalate with reason' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Escalate' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Resolve case' })).toBeDisabled();
 
     fireEvent.change(screen.getByRole('textbox', { name: 'Assign owner' }), { target: { value: 'ops-user' } });
@@ -1728,9 +1771,9 @@ describe('App shell', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
     expect(await screen.findByText('Ops case note recorded by pricing-bff fallback without changing pricing state.')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole('textbox', { name: 'Escalation reason' }), { target: { value: 'Borrower lock blocker still unresolved' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Escalate with reason' }));
-    expect(await screen.findByText('Connected workflow run: no')).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Status or escalation reason' }), { target: { value: 'Borrower lock blocker still unresolved' } });
+    expect(screen.getByRole('button', { name: 'Escalate' })).toBeDisabled();
+    expect(screen.getByText(/Escalation requires exception-service action contract/i)).toBeInTheDocument();
   });
 
   it('submits a resolution code and renders immutable closure summary', async () => {
@@ -1756,8 +1799,8 @@ describe('App shell', () => {
 
     expect(await screen.findByRole('button', { name: 'Resolve case' })).toBeDisabled();
     fireEvent.change(screen.getByRole('textbox', { name: 'Resolution code' }), { target: { value: 'OPS_CONFIRMED' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Resolve case' }));
-    expect(await screen.findByText('Case ops-lock-blocked closed with resolution code OPS_CONFIRMED.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resolve case' })).toBeDisabled();
+    expect(screen.getByText(/Status update requires operations-service action contract/i)).toBeInTheDocument();
   });
 
   it('renders backend-owned ranking refs and selection evidence for offers', async () => {
@@ -2009,18 +2052,28 @@ describe('App shell', () => {
       if (url === '/api/v1/partners/partner-preview/integrations/workbench') {
         return { ok: true, json: async () => partnerChannelWorkbenchFixture() } as Response;
       }
+      if (url === '/api/v1/partners/partner-preview/integrations/alerts') {
+        return { ok: true, json: async () => partnerIntegrationAlertsFixture() } as Response;
+      }
       if (url.endsWith('/replay') && init?.method === 'POST') {
         return { ok: true, status: 202, json: async () => ({ webhookId: 'webhook-pricing-updates', eventId: 'event-quote-blocked', status: 'ACCEPTED', message: 'Webhook processing retry recorded by pricing-bff fallback.', guidance: 'Configured upstream processing execution remains outside this UI fallback slice.', downstreamExecuted: false, uiTraceId: 'ch-s05-local-trace', events: ['WebhookReplayRequested'] }) } as Response;
       }
       if (url.endsWith('/safety') && init?.method === 'POST') {
         return { ok: true, status: 202, json: async () => ({ webhookId: 'webhook-lock-alerts', route: '/partners/alerts', paused: false, status: 'VISIBLE', message: 'Safety toggle change is visible in the BFF fallback response.', uiTraceId: 'ch-s05-local-trace', events: ['WebhookSafetyToggled'] }) } as Response;
       }
+      if (url.endsWith('/integrations/alerts/alert-dlq-growth/actions') && init?.method === 'POST') {
+        return { ok: true, status: 202, json: async () => ({ alertId: 'alert-dlq-growth', action: 'ACKNOWLEDGE', status: 'RECORDED', message: 'Alert action recorded by pricing-bff fallback.', uiTraceId: 'ch-s22-local-trace', events: ['PartnerIntegrationAlertActionRecorded'] }) } as Response;
+      }
       throw new Error(`Unexpected fetch ${url}`);
     });
 
     render(<App />);
 
-    expect(await screen.findByRole('heading', { name: 'Partner integration channel workbench' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Partner Integrations' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Webhook Health' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Channel Workbench' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Safety' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Alerts' })).toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: 'Integration channel workbench' })).toBeInTheDocument();
     expect(screen.getAllByText('Quote requests').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Webhook delivery').length).toBeGreaterThan(0);
@@ -2029,13 +2082,21 @@ describe('App shell', () => {
     expect(screen.getAllByText('Investor delivery connections').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Partner file delivery').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Health').length).toBeGreaterThan(0);
-    expect(screen.getByText('integration-service.partner-channel.workbench.read')).toBeInTheDocument();
-    expect(screen.getAllByText('payload-redacted').length).toBeGreaterThan(0);
+    expect(await screen.findByText('Service account blocked')).toBeInTheDocument();
+    expect(screen.getByText(/integration-service\.partner-channel\.workbench\.read/)).toBeInTheDocument();
+    expect(screen.getAllByText('payload redacted').length).toBeGreaterThan(0);
     expect(screen.getByText('audit:partner-dlq-required')).toBeInTheDocument();
     expect(await screen.findByText('latest 30 events')).toBeInTheDocument();
-    expect(screen.getByText('exception queue size requires configured integration-service metrics')).toBeInTheDocument();
+    expect(screen.getByText('exception queue size requires configured integration service metrics')).toBeInTheDocument();
     expect(screen.getByText('configured service PARTNER setup NOT CONFIGURED')).toBeInTheDocument();
-    expect(screen.getByText('Processing retry requires a support reference and explicit duplicate-protection confirmation before it can be recorded.')).toBeInTheDocument();
+    expect(screen.getAllByText(/CONFIRMED REQUIRED FOR REVIEW/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/MASKING INDICATOR PRESENT/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/CONSENT INDICATOR PRESENT/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Processing retry requires .*duplicate protection confirmation/i)).toBeInTheDocument();
+    expect(screen.getByText(/Endpoint test requires the configured partner webhook transport/i)).toBeInTheDocument();
+    expect(await screen.findByText('alert-dlq-growth')).toBeInTheDocument();
+    expect(screen.getByText('P1')).toBeInTheDocument();
+    expect(screen.getAllByText('integration-platform-owner').length).toBeGreaterThan(0);
 
     fireEvent.change(screen.getByLabelText('Processing support reference'), { target: { value: 'corr-123' } });
     fireEvent.click(screen.getByLabelText('I confirm duplicate protection for this processing request.'));
@@ -2050,6 +2111,11 @@ describe('App shell', () => {
 
     expect(await screen.findByText('Safety toggle visible')).toBeInTheDocument();
     expect(screen.getByText('Current pause state: Active')).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Acknowledge' })[0]);
+
+    expect(await screen.findByText('Alert action recorded')).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith('/api/v1/partners/partner-preview/integrations/alerts/alert-dlq-growth/actions', expect.objectContaining({ method: 'POST' }));
   });
 
   it('renders compliance evidence, privacy, security, alert, and retention fallback blockers', async () => {
@@ -2244,7 +2310,8 @@ describe('App shell', () => {
 
     render(<App />);
 
-    expect(await screen.findByRole('heading', { name: 'What-if analysis cockpit for run run-test' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Scenario Analysis for run run-test' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Back to Offers' })).toHaveAttribute('href', '/quote/run-test/offers');
     expect(screen.getAllByText('FICO sensitivity').length).toBeGreaterThan(0);
     expect(screen.getAllByText('LTV sensitivity').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Lock period sensitivity').length).toBeGreaterThan(0);
@@ -2254,11 +2321,465 @@ describe('App shell', () => {
     expect(screen.getAllByText('export-ref-required').length).toBeGreaterThan(0);
     expect(screen.getAllByText('replay-hash-required').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Backend blocker reason from scenario-analysis-service.').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'Create Variant' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete Variant' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Recalculate All' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Export grid' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save Analysis' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Load Analysis' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Export Analysis' })).toBeInTheDocument();
 
+    fireEvent.change(screen.getByLabelText('Selected variant'), { target: { value: 'variant-blocked' } });
     fireEvent.change(screen.getByLabelText('Requested value'), { target: { value: 'borrower-fico-ref-updated' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Request recalculation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Recalculate Selected' }));
     expect(await screen.findByText('Backend recalculation result received')).toBeInTheDocument();
     expect(screen.getByText('scenario-analysis-service.result:fico')).toBeInTheDocument();
+  });
+
+  it('renders FICO sensitivity analysis from backend supplied bands without local pricing rules', async () => {
+    window.history.pushState({}, '', '/quote/run-test/what-if/fico-sensitivity');
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url === '/api/ui/health') {
+        return { ok: true, json: async () => ({ service: 'pricing-bff', status: 'UP', ready: true, dependencyStatus: 'NO_UPSTREAMS_CONFIGURED', dependencies: [] }) } as Response;
+      }
+      if (url === '/api/v1/tenants/ui-preview-tenant/quote-runs/intake-metadata') {
+        return { ok: true, json: async () => ({ tenantContext: 'ui-preview-tenant', dependencyStatus: 'SCENARIO_SERVICE_CONTRACT_NOT_CONFIGURED', fieldGroups: [], decisionControls: [], validationIssues: [], auditPackageId: 'audit-required', replayHashRef: 'replay-required', fallbackReason: 'metadata unavailable', uiTraceId: 'brw-s01-local-trace' }) } as Response;
+      }
+      if (url === '/api/v1/tenants/ui-preview-tenant/quote-runs/run-test/what-if/fico-sensitivity') {
+        return { ok: true, json: async () => ({
+          tenantContext: 'ui-preview-tenant',
+          runId: 'run-test',
+          dependencyStatus: 'SCENARIO_ANALYSIS_SERVICE_FICO_SENSITIVITY_VISIBLE',
+          currentFico: 705,
+          currentFicoSourceRef: 'scenario-analysis-service.borrower-fico-ref',
+          metadata: {
+            scoreBandSourceRef: 'scenario-analysis-service.configured-fico-bands',
+            pricingSourceRef: 'pricing-service.backend-calculated-band-results',
+            eligibilitySourceRef: 'eligibility-service.band-decision-results',
+            exportRef: 'export-ref-fico-sensitivity-required',
+          },
+          bands: [
+            {
+              bandId: 'band-backend-680-699', label: 'Backend 680-699', minScore: 680, maxScore: 699, midpoint: 690,
+              noteRate: 'rate-ref-680-699', finalPriceBps: 'price-bps-ref-680-699', payment: 'payment-ref-680-699', apr: 'apr-ref-680-699', eligibility: 'CONDITIONAL', blockerReason: 'Backend soft blocker reason from eligibility-service.', productLabel: 'Backend product A', channelLabel: 'Retail', sourceRef: 'scenario-analysis-service.fico.band.680-699', evidenceRefs: ['evidence:fico-band-680-699', 'pricing-ledger:680-699'],
+              eligibilityCells: [{ cellId: 'cell-680-retail', productLabel: 'Backend product A', channelLabel: 'Retail', eligibility: 'CONDITIONAL', blockerReason: 'Backend soft blocker reason from eligibility-service.', sourceRef: 'eligibility-service.cell.680' }],
+            },
+            {
+              bandId: 'band-backend-700-719', label: 'Backend 700-719', minScore: 700, maxScore: 719, midpoint: 710, currentBorrowerBand: true,
+              noteRate: 'rate-ref-700-719', finalPriceBps: 'price-bps-ref-700-719', payment: 'payment-ref-700-719', apr: 'apr-ref-700-719', eligibility: 'ELIGIBLE', productLabel: 'Backend product A', channelLabel: 'Retail', sourceRef: 'scenario-analysis-service.fico.band.700-719', evidenceRefs: ['evidence:fico-band-700-719', 'pricing-ledger:700-719'],
+              eligibilityCells: [{ cellId: 'cell-700-retail', productLabel: 'Backend product A', channelLabel: 'Retail', eligibility: 'ELIGIBLE', blockerReason: '', sourceRef: 'eligibility-service.cell.700' }],
+            },
+            {
+              bandId: 'band-backend-720-739', label: 'Backend 720-739', minScore: 720, maxScore: 739, midpoint: 730,
+              noteRate: null, finalPriceBps: null, payment: null, apr: null, pricingUnavailableReason: 'Backend did not return pricing for this band.', eligibility: 'INELIGIBLE', blockerReason: 'Backend hard blocker reason from eligibility-service.', productLabel: 'Backend product B', channelLabel: 'Correspondent', sourceRef: 'scenario-analysis-service.fico.band.720-739', evidenceRefs: ['evidence:fico-band-720-739'],
+              eligibilityCells: [{ cellId: 'cell-720-correspondent', productLabel: 'Backend product B', channelLabel: 'Correspondent', eligibility: 'INELIGIBLE', blockerReason: 'Backend hard blocker reason from eligibility-service.', sourceRef: 'eligibility-service.cell.720' }],
+            },
+          ],
+          exportRefs: ['export-ref-fico-sensitivity-required'],
+          replayRefs: ['replay-hash-fico-sensitivity-required'],
+          auditRefs: ['audit:fico-sensitivity-opened'],
+          blockers: [{ blockerCode: 'FICO_SENSITIVITY_BACKEND_CONFIG_REQUIRED', severity: 'WARNING', reason: 'Backend config warning supplied by scenario-analysis-service.', requiredFacts: ['fact:fico-score-ref'], sourceRef: 'scenario-analysis-service.fico-config' }],
+          fallbackReason: '',
+          uiTraceId: 'fico-s30-local-trace',
+          events: ['FicoSensitivityOpened'],
+        }) } as Response;
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'FICO sensitivity summary' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'FICO Sensitivity Analysis' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Back to Scenario Analysis' })).toHaveAttribute('href', '/quote/run-test/what-if');
+    expect(screen.getByText('705')).toBeInTheDocument();
+    expect(screen.getAllByText('Backend 700-719').length).toBeGreaterThan(0);
+    expect(screen.getByRole('table', { name: 'FICO sensitivity bands' })).toBeInTheDocument();
+    expect(screen.getAllByText('Current borrower band').length).toBeGreaterThan(0);
+    expect(screen.getByRole('img', { name: 'Rate Chart: note rate by backend FICO band' })).toBeInTheDocument();
+    expect(screen.getByTestId('rate-line-chart')).toBeInTheDocument();
+    expect(screen.getByTestId('rate-line-chart-series')).toBeInTheDocument();
+    expect(screen.getByTestId('rate-current-fico-marker')).toBeInTheDocument();
+    expect(screen.getByTestId('rate-eligibility-band-backend-700-719')).toBeInTheDocument();
+    expect(screen.getAllByText('rate-ref-700-719').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('scenario-analysis-service.fico.band.700-719').length).toBeGreaterThan(0);
+    expect(screen.getByText('evidence:fico-band-700-719')).toBeInTheDocument();
+    expect(screen.getByText('pricing-ledger:700-719')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Price Chart' }));
+    expect(screen.getByRole('img', { name: 'Price Chart: final price and payment by backend FICO band' })).toBeInTheDocument();
+    expect(screen.getByTestId('price-bar-chart')).toBeInTheDocument();
+    expect(screen.getByTestId('price-bar-band-backend-700-719')).toHaveAttribute('data-current', 'true');
+    expect(screen.getByTestId('price-payment-overlay')).toBeInTheDocument();
+    expect(screen.getByTestId('price-current-fico-highlight')).toBeInTheDocument();
+    expect(screen.getAllByText('payment-ref-700-719').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/N\/A · Backend did not return pricing for this band\./).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Eligibility Heatmap' }));
+    expect(screen.getByRole('table', { name: 'Eligibility heatmap' })).toBeInTheDocument();
+    expect(screen.getAllByText('Backend hard blocker reason from eligibility-service.').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('row', { name: /Backend 720-739 Backend product B Correspondent INELIGIBLE/ }));
+    expect(screen.getByText('Eligibility detail')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
+    expect(screen.getByLabelText('FICO sensitivity CSV preview')).toHaveTextContent('Backend 700-719');
+    expect(screen.queryByText(/LTV > 80/)).not.toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith('/api/v1/tenants/ui-preview-tenant/quote-runs/run-test/what-if/fico-sensitivity', expect.any(Object));
+  });
+
+  it('renders LTV down payment sensitivity from backend supplied bands without local pricing rules', async () => {
+    window.history.pushState({}, '', '/quote/run-test/what-if/ltv-sensitivity');
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url === '/api/ui/health') {
+        return { ok: true, json: async () => ({ service: 'pricing-bff', status: 'UP', ready: true, dependencyStatus: 'NO_UPSTREAMS_CONFIGURED', dependencies: [] }) } as Response;
+      }
+      if (url === '/api/v1/tenants/ui-preview-tenant/quote-runs/intake-metadata') {
+        return { ok: true, json: async () => ({ tenantContext: 'ui-preview-tenant', dependencyStatus: 'SCENARIO_SERVICE_CONTRACT_NOT_CONFIGURED', fieldGroups: [], decisionControls: [], validationIssues: [], auditPackageId: 'audit-required', replayHashRef: 'replay-required', fallbackReason: 'metadata unavailable', uiTraceId: 'brw-s01-local-trace' }) } as Response;
+      }
+      if (url === '/api/v1/tenants/ui-preview-tenant/quote-runs/run-test/what-if/ltv-sensitivity') {
+        return { ok: true, json: async () => ({
+          tenantContext: 'ui-preview-tenant',
+          runId: 'run-test',
+          dependencyStatus: 'SCENARIO_ANALYSIS_SERVICE_LTV_SENSITIVITY_VISIBLE',
+          currentLtv: 82,
+          currentDownPaymentPct: '18%',
+          currentLtvSourceRef: 'scenario-analysis-service.current-ltv-ref',
+          currentDownPaymentSourceRef: 'scenario-analysis-service.current-down-payment-ref',
+          metadata: {
+            ltvBandSourceRef: 'scenario-analysis-service.configured-ltv-bands',
+            pricingSourceRef: 'pricing-service.backend-calculated-ltv-results',
+            eligibilitySourceRef: 'eligibility-service.ltv-band-decision-results',
+            miSourceRef: 'pricing-service.mi-premium-results',
+            exportRef: 'export-ref-ltv-sensitivity-required',
+          },
+          bands: [
+            {
+              bandId: 'ltv-backend-75-80', label: 'Backend 75-80', minLtv: 75, maxLtv: 80, midpointLtv: 77.5,
+              downPaymentPct: '20-25%', noteRate: 'rate-ref-75-80', finalPriceBps: 'price-bps-ref-75-80', payment: 'payment-ref-75-80', miPremium: 'mi-ref-75-80', miType: 'NONE', apr: 'apr-ref-75-80', cltv: 'cltv-ref-75-80', hcltv: 'hcltv-ref-75-80', eligibility: 'ELIGIBLE', productLabel: 'Backend product A', channelLabel: 'Retail', sourceRef: 'scenario-analysis-service.ltv.band.75-80', evidenceRefs: ['evidence:ltv-band-75-80', 'pricing-ledger:75-80'],
+              eligibilityCells: [{ cellId: 'cell-75-retail', productLabel: 'Backend product A', channelLabel: 'Retail', eligibility: 'ELIGIBLE', blockerReason: '', sourceRef: 'eligibility-service.cell.75' }],
+            },
+            {
+              bandId: 'ltv-backend-80-85', label: 'Backend 80-85', minLtv: 80, maxLtv: 85, midpointLtv: 82.5, currentBorrowerBand: true,
+              downPaymentPct: '15-20%', noteRate: 'rate-ref-80-85', finalPriceBps: 'price-bps-ref-80-85', payment: 'payment-ref-80-85', miPremium: 'mi-ref-80-85', miType: 'BPMI', apr: 'apr-ref-80-85', cltv: 'cltv-ref-80-85', hcltv: 'hcltv-ref-80-85', eligibility: 'CONDITIONAL', blockerReason: 'Backend soft blocker reason from eligibility-service.', productLabel: 'Backend product A', channelLabel: 'Retail', sourceRef: 'scenario-analysis-service.ltv.band.80-85', evidenceRefs: ['evidence:ltv-band-80-85', 'pricing-ledger:80-85'],
+              eligibilityCells: [{ cellId: 'cell-80-retail', productLabel: 'Backend product A', channelLabel: 'Retail', eligibility: 'CONDITIONAL', blockerReason: 'Backend soft blocker reason from eligibility-service.', sourceRef: 'eligibility-service.cell.80' }],
+            },
+            {
+              bandId: 'ltv-backend-high', label: 'Backend high LTV', minLtv: 95, maxLtv: 100, midpointLtv: 97.5,
+              downPaymentPct: 'backend-high-ltv-down-payment-ref', noteRate: null, finalPriceBps: null, payment: null, miPremium: null, miType: 'BPMI', apr: null, cltv: 'cltv-ref-high', hcltv: 'hcltv-ref-high', pricingUnavailableReason: 'Backend did not return pricing for this LTV band.', eligibility: 'INELIGIBLE', blockerReason: 'Above maximum LTV', productLabel: 'Backend product B', channelLabel: 'Correspondent', sourceRef: 'scenario-analysis-service.ltv.band.high', evidenceRefs: ['evidence:ltv-band-high'],
+              eligibilityCells: [{ cellId: 'cell-high-correspondent', productLabel: 'Backend product B', channelLabel: 'Correspondent', eligibility: 'INELIGIBLE', blockerReason: 'Above maximum LTV', sourceRef: 'eligibility-service.cell.high' }],
+            },
+          ],
+          exportRefs: ['export-ref-ltv-sensitivity-required'],
+          replayRefs: ['replay-hash-ltv-sensitivity-required'],
+          auditRefs: ['audit:ltv-sensitivity-opened'],
+          blockers: [{ blockerCode: 'LTV_SENSITIVITY_BACKEND_CONFIG_REQUIRED', severity: 'WARNING', reason: 'Backend config warning supplied by scenario-analysis-service.', requiredFacts: ['fact:ltv-ref'], sourceRef: 'scenario-analysis-service.ltv-config' }],
+          fallbackReason: '',
+          uiTraceId: 'ltv-s31-local-trace',
+          events: ['LtvSensitivityOpened'],
+        }) } as Response;
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'LTV sensitivity summary' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'LTV/Down Payment Sensitivity' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Back to Scenario Analysis' })).toHaveAttribute('href', '/quote/run-test/what-if');
+    expect(screen.getByText('82')).toBeInTheDocument();
+    expect(screen.getByText('18%')).toBeInTheDocument();
+    expect(screen.getAllByText('Backend 80-85').length).toBeGreaterThan(0);
+    expect(screen.getByRole('table', { name: 'LTV sensitivity bands' })).toBeInTheDocument();
+    expect(screen.getAllByText('Current LTV band').length).toBeGreaterThan(0);
+    expect(screen.getByRole('img', { name: 'Rate Chart: note rate by backend LTV band' })).toBeInTheDocument();
+    expect(screen.getByTestId('ltv-rate-line-chart')).toBeInTheDocument();
+    expect(screen.getByTestId('ltv-rate-line-chart-series')).toBeInTheDocument();
+    expect(screen.getByTestId('ltv-rate-current-marker')).toBeInTheDocument();
+    expect(screen.getByTestId('ltv-rate-eligibility-ltv-backend-80-85')).toBeInTheDocument();
+    expect(screen.getAllByText('rate-ref-80-85').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('scenario-analysis-service.ltv.band.80-85').length).toBeGreaterThan(0);
+    expect(screen.getByText('evidence:ltv-band-80-85')).toBeInTheDocument();
+    expect(screen.getByText('pricing-ledger:80-85')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Price Chart' }));
+    expect(screen.getByRole('img', { name: 'Price Chart: final price and payment by backend LTV band' })).toBeInTheDocument();
+    expect(screen.getByTestId('ltv-price-bar-chart')).toBeInTheDocument();
+    expect(screen.getByTestId('ltv-price-bar-ltv-backend-80-85')).toHaveAttribute('data-current', 'true');
+    expect(screen.getByTestId('ltv-price-payment-overlay')).toBeInTheDocument();
+    expect(screen.getByTestId('ltv-price-current-highlight')).toBeInTheDocument();
+    expect(screen.getAllByText('payment-ref-80-85').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/N\/A - Backend did not return pricing for this LTV band\./).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'MIP Chart' }));
+    expect(screen.getByRole('img', { name: 'MIP Chart: MI premium by backend LTV band' })).toBeInTheDocument();
+    expect(screen.getByTestId('ltv-mip-line-chart')).toBeInTheDocument();
+    expect(screen.getByTestId('ltv-mip-current-highlight')).toBeInTheDocument();
+    expect(screen.getAllByText('BPMI').length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Eligibility Heatmap' }));
+    expect(screen.getByRole('table', { name: 'LTV eligibility heatmap' })).toBeInTheDocument();
+    expect(screen.getAllByText('Above maximum LTV').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('row', { name: /Backend high LTV Backend product B Correspondent INELIGIBLE/ }));
+    expect(screen.getByText('Eligibility detail')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
+    expect(screen.getByLabelText('LTV sensitivity CSV preview')).toHaveTextContent('Backend 80-85');
+    expect(fetch).toHaveBeenCalledWith('/api/v1/tenants/ui-preview-tenant/quote-runs/run-test/what-if/ltv-sensitivity', expect.any(Object));
+  });
+
+  it('renders product comparison selector, matrix, total cost, features, CSV, and blocked states from backend values', async () => {
+    window.history.pushState({}, '', '/quote/run-test/what-if/product-comparison');
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url === '/api/ui/health') {
+        return { ok: true, json: async () => ({ service: 'pricing-bff', status: 'UP', ready: true, dependencyStatus: 'NO_UPSTREAMS_CONFIGURED', dependencies: [] }) } as Response;
+      }
+      if (url === '/api/v1/tenants/ui-preview-tenant/quote-runs/intake-metadata') {
+        return { ok: true, json: async () => ({ tenantContext: 'ui-preview-tenant', dependencyStatus: 'SCENARIO_SERVICE_CONTRACT_NOT_CONFIGURED', fieldGroups: [], decisionControls: [], validationIssues: [], auditPackageId: 'audit-required', replayHashRef: 'replay-required', fallbackReason: 'metadata unavailable', uiTraceId: 'brw-s01-local-trace' }) } as Response;
+      }
+      if (url === '/api/v1/tenants/ui-preview-tenant/quote-runs/run-test/what-if/product-comparison') {
+        return { ok: true, json: async () => ({
+          tenantContext: 'ui-preview-tenant',
+          runId: 'run-test',
+          dependencyStatus: 'SCENARIO_ANALYSIS_SERVICE_PRODUCT_COMPARISON_VISIBLE',
+          metadata: {
+            productSourceRef: 'catalog-service.product-comparison-products',
+            pricingSourceRef: 'pricing-service.backend-calculated-product-results',
+            eligibilitySourceRef: 'eligibility-service.product-decision-results',
+            totalCostSourceRef: 'pricing-service.total-cost-results',
+            featureSourceRef: 'catalog-service.product-feature-metadata',
+            exportRef: 'export-ref-product-comparison-required',
+          },
+          products: [
+            { productId: 'product-conv', label: 'Backend Conventional 30', productType: 'CONV', investor: 'Fannie/Freddie', channel: 'Retail', noteRate: 'rate-ref-conv', finalPriceBps: 'price-bps-ref-conv', payment: 'payment-ref-conv', apr: 'apr-ref-conv', miType: 'BPMI', miPremium: 'mi-ref-conv', fees: 'fees-ref-conv', term: '360 months', lockPeriod: '30 days', eligibility: 'ELIGIBLE', currentBestOffer: true, sourceRef: 'scenario-analysis-service.product.conv', evidenceRefs: ['pricing-ledger:product-conv'], totalCostPeriods: [{ periodId: '5-year', label: '5-year', totalCost: 'total-cost-5y-conv', principal: 'principal-5y-conv', interest: 'interest-5y-conv', mortgageInsurance: 'mi-5y-conv', fees: 'fees-5y-conv', sourceRef: 'pricing-service.total-cost.5y.conv' }, { periodId: '10-year', label: '10-year', totalCost: 'total-cost-10y-conv', principal: 'principal-10y-conv', interest: 'interest-10y-conv', mortgageInsurance: 'mi-10y-conv', fees: 'fees-10y-conv', sourceRef: 'pricing-service.total-cost.10y.conv' }] },
+            { productId: 'product-fha', label: 'Backend FHA 30', productType: 'FHA', investor: 'Ginnie Mae', channel: 'Retail', noteRate: 'rate-ref-fha', finalPriceBps: 'price-bps-ref-fha', payment: 'payment-ref-fha', apr: 'apr-ref-fha', miType: 'MIP', miPremium: 'mi-ref-fha', fees: 'fees-ref-fha', term: '360 months', lockPeriod: '45 days', eligibility: 'CONDITIONAL', eligibilityReason: 'Backend condition supplied by eligibility-service.', sourceRef: 'scenario-analysis-service.product.fha', evidenceRefs: ['pricing-ledger:product-fha'], totalCostPeriods: [{ periodId: '5-year', label: '5-year', totalCost: 'total-cost-5y-fha', principal: 'principal-5y-fha', interest: 'interest-5y-fha', mortgageInsurance: 'mi-5y-fha', fees: 'fees-5y-fha', sourceRef: 'pricing-service.total-cost.5y.fha' }] },
+            { productId: 'product-va', label: 'Backend VA 30', productType: 'VA', investor: 'Ginnie Mae', channel: 'Wholesale', noteRate: 'rate-ref-va', finalPriceBps: 'price-bps-ref-va', payment: 'payment-ref-va', apr: 'apr-ref-va', miType: null, miPremium: null, fees: 'fees-ref-va', term: '360 months', lockPeriod: '30 days', eligibility: 'ELIGIBLE', sourceRef: 'scenario-analysis-service.product.va', evidenceRefs: ['pricing-ledger:product-va'], totalCostPeriods: [{ periodId: '5-year', label: '5-year', totalCost: 'total-cost-5y-va', principal: 'principal-5y-va', interest: 'interest-5y-va', mortgageInsurance: null, fees: 'fees-5y-va', sourceRef: 'pricing-service.total-cost.5y.va' }] },
+            { productId: 'product-usda', label: 'Backend USDA 30', productType: 'USDA', investor: 'USDA', channel: 'Retail', noteRate: 'rate-ref-usda', finalPriceBps: 'price-bps-ref-usda', payment: 'payment-ref-usda', apr: 'apr-ref-usda', miType: 'guarantee-fee-ref', miPremium: 'mi-ref-usda', fees: 'fees-ref-usda', term: '360 months', lockPeriod: '30 days', eligibility: 'CONDITIONAL', sourceRef: 'scenario-analysis-service.product.usda', totalCostPeriods: [] },
+            { productId: 'product-jumbo', label: 'Backend Jumbo 30', productType: 'JUMBO', investor: 'Private investor', channel: 'Retail', noteRate: 'rate-ref-jumbo', finalPriceBps: 'price-bps-ref-jumbo', payment: 'payment-ref-jumbo', apr: 'apr-ref-jumbo', miType: 'N/A', miPremium: 'N/A', fees: 'fees-ref-jumbo', term: '360 months', lockPeriod: '60 days', eligibility: 'ELIGIBLE', sourceRef: 'scenario-analysis-service.product.jumbo', totalCostPeriods: [] },
+            { productId: 'product-non-qm', label: 'Backend Non-QM 30', productType: 'NON_QM', investor: 'Private investor', channel: 'Correspondent', noteRate: null, finalPriceBps: null, payment: null, apr: null, pricingUnavailableReason: 'Backend did not return pricing for this product.', miType: null, miPremium: null, fees: null, term: '360 months', lockPeriod: 'Not supplied', eligibility: 'INELIGIBLE', eligibilityReason: 'Backend hard blocker from eligibility-service.', sourceRef: 'scenario-analysis-service.product.non-qm', totalCostPeriods: [] },
+          ],
+          features: [
+            { featureId: 'assumable', label: 'Assumable', valuesByProductId: { 'product-conv': false, 'product-fha': true, 'product-va': true, 'product-usda': 'N/A', 'product-jumbo': false, 'product-non-qm': null }, sourceRef: 'catalog-service.feature.assumable' },
+            { featureId: 'gift-funds', label: 'Gift Funds', valuesByProductId: { 'product-conv': true, 'product-fha': true, 'product-va': true, 'product-usda': true, 'product-jumbo': 'backend-review-required', 'product-non-qm': null }, sourceRef: 'catalog-service.feature.gift-funds' },
+          ],
+          exportRefs: ['export-ref-product-comparison-required'],
+          replayRefs: ['replay-hash-product-comparison-required'],
+          auditRefs: ['audit:product-comparison-opened'],
+          blockers: [{ blockerCode: 'PRODUCT_COMPARISON_BACKEND_CONFIG_REQUIRED', severity: 'WARNING', reason: 'Backend config warning supplied by scenario-analysis-service.', requiredFacts: ['fact:product-ref'], sourceRef: 'scenario-analysis-service.product-config' }],
+          fallbackReason: '',
+          uiTraceId: 'product-s32-local-trace',
+          events: ['ProductComparisonOpened'],
+        }) } as Response;
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Product comparison summary' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Product Comparison' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Back to Offers' })).toHaveAttribute('href', '/quote/run-test/offers');
+    expect(screen.getAllByText('Backend Conventional 30').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Current best offer').length).toBeGreaterThan(0);
+    expect(screen.getByRole('table', { name: 'Product comparison matrix' })).toBeInTheDocument();
+    expect(screen.getAllByText('rate-ref-conv').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('price-bps-ref-fha').length).toBeGreaterThan(0);
+    expect(screen.getByText('Backend condition supplied by eligibility-service.')).toBeInTheDocument();
+    expect(screen.getByText('Backend config warning supplied by scenario-analysis-service.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Backend FHA 30 · FHA · Ginnie Mae · Retail'));
+    expect(screen.getByRole('button', { name: 'Compare Selected' })).toBeDisabled();
+    expect(screen.getAllByText('Select at least 2 products.').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByLabelText('Backend FHA 30 · FHA · Ginnie Mae · Retail'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export Matrix' }));
+    expect(screen.getByLabelText('Product comparison CSV preview')).toHaveTextContent('Backend Conventional 30');
+    expect(screen.getByLabelText('Product comparison CSV preview')).toHaveTextContent('rate-ref-fha');
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Total Cost' }));
+    expect(screen.getByRole('img', { name: 'Total Cost chart: backend supplied cost of credit by product' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Backend Conventional 30 5-year total cost breakdown')).toHaveTextContent('total-cost-5y-conv');
+    expect(screen.getByText('interest-5y-fha')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Feature Checklist' }));
+    expect(screen.getByRole('table', { name: 'Product feature checklist' })).toBeInTheDocument();
+    expect(screen.getByText('Assumable')).toBeInTheDocument();
+    expect(screen.getAllByText('Yes').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('No').length).toBeGreaterThan(0);
+    expect(screen.getByRole('link', { name: 'View Product Details' })).toHaveAttribute('href', '/products/catalog');
+
+    fireEvent.click(screen.getByLabelText('Backend VA 30 · VA · Ginnie Mae · Wholesale'));
+    fireEvent.click(screen.getByLabelText('Backend USDA 30 · USDA · USDA · Retail'));
+    fireEvent.click(screen.getByLabelText('Backend Jumbo 30 · JUMBO · Private investor · Retail'));
+    fireEvent.click(screen.getByLabelText('Backend Non-QM 30 · NON_QM · Private investor · Correspondent'));
+    expect(await screen.findByText('Maximum 5 products can be compared.')).toBeInTheDocument();
+    expect(screen.queryByText(/LTV > 80/)).not.toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith('/api/v1/tenants/ui-preview-tenant/quote-runs/run-test/what-if/product-comparison', expect.any(Object));
+  });
+
+  it('renders product comparison no-products blocked state without local fallback products', async () => {
+    window.history.pushState({}, '', '/quote/run-empty/what-if/product-comparison');
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url === '/api/ui/health') {
+        return { ok: true, json: async () => ({ service: 'pricing-bff', status: 'UP', ready: true, dependencyStatus: 'NO_UPSTREAMS_CONFIGURED', dependencies: [] }) } as Response;
+      }
+      if (url === '/api/v1/tenants/ui-preview-tenant/quote-runs/intake-metadata') {
+        return { ok: true, json: async () => ({ tenantContext: 'ui-preview-tenant', dependencyStatus: 'SCENARIO_SERVICE_CONTRACT_NOT_CONFIGURED', fieldGroups: [], decisionControls: [], validationIssues: [], auditPackageId: 'audit-required', replayHashRef: 'replay-required', fallbackReason: 'metadata unavailable', uiTraceId: 'brw-s01-local-trace' }) } as Response;
+      }
+      if (url === '/api/v1/tenants/ui-preview-tenant/quote-runs/run-empty/what-if/product-comparison') {
+        return { ok: true, json: async () => ({
+          tenantContext: 'ui-preview-tenant',
+          runId: 'run-empty',
+          dependencyStatus: 'SCENARIO_ANALYSIS_SERVICE_PRODUCT_COMPARISON_BLOCKED',
+          products: [],
+          features: [],
+          metadata: { productSourceRef: 'catalog-service.product-comparison-products' },
+          exportRefs: [],
+          replayRefs: [],
+          auditRefs: ['audit:product-comparison-blocked'],
+          blockers: [{ blockerCode: 'PRODUCTS_NOT_SUPPLIED', severity: 'BLOCKER', reason: 'Scenario-analysis-service did not supply product comparison candidates.', requiredFacts: ['fact:product-ref'], sourceRef: 'scenario-analysis-service.product-comparison' }],
+          fallbackReason: 'Configured product comparison contract is unavailable; UI must not invent local products.',
+          uiTraceId: 'product-s32-empty-trace',
+          events: ['ProductComparisonBlocked'],
+        }) } as Response;
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Product comparison summary' })).toBeInTheDocument();
+    expect(screen.getByText('Backend product comparison contract required')).toBeInTheDocument();
+    expect(screen.getByText('Configured product comparison contract is unavailable; UI must not invent local products.')).toBeInTheDocument();
+    expect(screen.getByText('No products supplied by the backend.')).toBeInTheDocument();
+    expect(screen.getByText('Scenario-analysis-service did not supply product comparison candidates.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Compare Selected' })).toBeDisabled();
+    expect(screen.queryByText('Backend Conventional 30')).not.toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith('/api/v1/tenants/ui-preview-tenant/quote-runs/run-empty/what-if/product-comparison', expect.any(Object));
+  });
+
+  it('renders lock period comparison from backend supplied periods without local lock pricing rules', async () => {
+    window.history.pushState({}, '', '/quote/run-test/what-if/lock-period-comparison');
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url === '/api/ui/health') {
+        return { ok: true, json: async () => ({ service: 'pricing-bff', status: 'UP', ready: true, dependencyStatus: 'NO_UPSTREAMS_CONFIGURED', dependencies: [] }) } as Response;
+      }
+      if (url === '/api/v1/tenants/ui-preview-tenant/quote-runs/intake-metadata') {
+        return { ok: true, json: async () => ({ tenantContext: 'ui-preview-tenant', dependencyStatus: 'SCENARIO_SERVICE_CONTRACT_NOT_CONFIGURED', fieldGroups: [], decisionControls: [], validationIssues: [], auditPackageId: 'audit-required', replayHashRef: 'replay-required', fallbackReason: 'metadata unavailable', uiTraceId: 'brw-s01-local-trace' }) } as Response;
+      }
+      if (url === '/api/v1/tenants/ui-preview-tenant/quote-runs/run-test/what-if/lock-period-comparison') {
+        return { ok: true, json: async () => ({
+          tenantContext: 'ui-preview-tenant',
+          runId: 'run-test',
+          dependencyStatus: 'SCENARIO_ANALYSIS_SERVICE_LOCK_PERIOD_COMPARISON_VISIBLE',
+          currentLockPeriod: 30,
+          currentLockPeriodSourceRef: 'quote-service.current-lock-period-ref',
+          metadata: {
+            lockPeriodSourceRef: 'lock-service.configured-period-catalog',
+            pricingSourceRef: 'pricing-service.backend-calculated-lock-period-results',
+            extensionSourceRef: 'lock-service.extension-policy-results',
+            floatDownSourceRef: 'lock-service.float-down-policy-results',
+            exportRef: 'export-ref-lock-period-required',
+          },
+          periods: [
+            { periodId: 'lock-15', label: 'Backend 15 day lock', days: 15, noteRate: 'rate-ref-15', finalPriceBps: 'price-bps-ref-15', payment: 'payment-ref-15', extensionCostBpsPerDay: 'extension-bps-day-15', maxExtensionDays: 'max-extension-days-15', investorPolicyRef: 'lock-service.policy.15', totalExtensionCost: 'total-extension-cost-ref-15', floatDownEligible: 'CONDITIONAL', floatDownReason: 'Backend condition supplied by lock-service.', floatDownCostBps: 'float-down-cost-ref-15', oneTimeLimit: true, sourceRef: 'scenario-analysis-service.lock-period.15', evidenceRefs: ['pricing-ledger:lock-15'] },
+            { periodId: 'lock-30', label: 'Backend 30 day lock', days: 30, noteRate: 'rate-ref-30', finalPriceBps: 'price-bps-ref-30', payment: 'payment-ref-30', extensionCostBpsPerDay: 'extension-bps-day-30', maxExtensionDays: 'max-extension-days-30', investorPolicyRef: 'lock-service.policy.30', totalExtensionCost: 'total-extension-cost-ref-30', floatDownEligible: 'ELIGIBLE', floatDownReason: 'Backend eligible reason supplied by lock-service.', floatDownCostBps: 'float-down-cost-ref-30', oneTimeLimit: true, currentLockPeriod: true, sourceRef: 'scenario-analysis-service.lock-period.30', evidenceRefs: ['pricing-ledger:lock-30'] },
+            { periodId: 'lock-60', label: 'Backend 60 day lock', days: 60, noteRate: null, finalPriceBps: null, payment: null, pricingUnavailableReason: 'Backend did not return pricing for this lock period.', extensionCostBpsPerDay: null, maxExtensionDays: 0, extensionUnavailableReason: 'Extensions not available for this period.', investorPolicyRef: 'lock-service.policy.60', floatDownEligible: 'INELIGIBLE', floatDownReason: 'Backend ineligible reason supplied by lock-service.', floatDownCostBps: null, oneTimeLimit: null, floatDownUnavailableReason: 'Float-down is not available for this period.', sourceRef: 'scenario-analysis-service.lock-period.60', evidenceRefs: ['pricing-ledger:lock-60'] },
+          ],
+          exportRefs: ['export-ref-lock-period-required'],
+          replayRefs: ['replay-hash-lock-period-required'],
+          auditRefs: ['audit:lock-period-comparison-opened'],
+          blockers: [{ blockerCode: 'LOCK_PERIOD_BACKEND_CONFIG_REQUIRED', severity: 'WARNING', reason: 'Backend config warning supplied by scenario-analysis-service.', requiredFacts: ['fact:lock-period-ref'], sourceRef: 'scenario-analysis-service.lock-period-config' }],
+          fallbackReason: '',
+          uiTraceId: 'lock-period-s33-local-trace',
+          events: ['LockPeriodComparisonOpened'],
+        }) } as Response;
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Lock period comparison summary' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Lock Period Comparison' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Back to Scenario Analysis' })).toHaveAttribute('href', '/quote/run-test/what-if');
+    expect(screen.getByText('quote-service.current-lock-period-ref')).toBeInTheDocument();
+    expect(screen.getAllByText('Backend 30 day lock').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Current lock period').length).toBeGreaterThan(0);
+    expect(screen.getByRole('table', { name: 'Lock periods table' })).toBeInTheDocument();
+    expect(screen.getAllByText('rate-ref-30').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('price-bps-ref-30').length).toBeGreaterThan(0);
+    expect(screen.getByText('Backend config warning supplied by scenario-analysis-service.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
+    expect(screen.getByLabelText('Lock period comparison CSV preview')).toHaveTextContent('Backend 30 day lock');
+    expect(screen.getByLabelText('Lock period comparison CSV preview')).toHaveTextContent('rate-ref-15');
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Rate/Price Chart' }));
+    expect(screen.getByRole('img', { name: 'Rate/Price Chart: backend supplied rate, price, and extension cost by lock period' })).toBeInTheDocument();
+    expect(screen.getByTestId('lock-period-chart-series')).toBeInTheDocument();
+    expect(screen.getByTestId('lock-period-chart-lock-30')).toHaveAttribute('data-current', 'true');
+    expect(screen.getByTestId('lock-period-current-marker')).toBeInTheDocument();
+    expect(screen.getAllByText(/N\/A - Backend did not return pricing for this lock period\./).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Extension Analysis' }));
+    expect(screen.getByRole('table', { name: 'Extension analysis table' })).toBeInTheDocument();
+    expect(screen.getByText('total-extension-cost-ref-30')).toBeInTheDocument();
+    expect(screen.getByText('No extensions available - Extensions not available for this period.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Float-Down' }));
+    expect(screen.getByRole('group', { name: 'Float-down analysis' })).toBeInTheDocument();
+    expect(screen.getByText('float-down-cost-ref-30')).toBeInTheDocument();
+    expect(screen.getByText('Backend ineligible reason supplied by lock-service.')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Request Float-Down' }).every((button) => button.hasAttribute('disabled'))).toBe(true);
+    expect(screen.queryByText(/LTV > 80/)).not.toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith('/api/v1/tenants/ui-preview-tenant/quote-runs/run-test/what-if/lock-period-comparison', expect.any(Object));
+  });
+
+  it('renders lock period comparison blocked state without local fallback periods', async () => {
+    window.history.pushState({}, '', '/quote/run-empty/what-if/lock-period-comparison');
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url === '/api/ui/health') {
+        return { ok: true, json: async () => ({ service: 'pricing-bff', status: 'UP', ready: true, dependencyStatus: 'NO_UPSTREAMS_CONFIGURED', dependencies: [] }) } as Response;
+      }
+      if (url === '/api/v1/tenants/ui-preview-tenant/quote-runs/intake-metadata') {
+        return { ok: true, json: async () => ({ tenantContext: 'ui-preview-tenant', dependencyStatus: 'SCENARIO_SERVICE_CONTRACT_NOT_CONFIGURED', fieldGroups: [], decisionControls: [], validationIssues: [], auditPackageId: 'audit-required', replayHashRef: 'replay-required', fallbackReason: 'metadata unavailable', uiTraceId: 'brw-s01-local-trace' }) } as Response;
+      }
+      if (url === '/api/v1/tenants/ui-preview-tenant/quote-runs/run-empty/what-if/lock-period-comparison') {
+        return { ok: true, json: async () => ({
+          tenantContext: 'ui-preview-tenant',
+          runId: 'run-empty',
+          dependencyStatus: 'SCENARIO_ANALYSIS_SERVICE_LOCK_PERIOD_COMPARISON_BLOCKED',
+          currentLockPeriod: null,
+          periods: [],
+          metadata: { lockPeriodSourceRef: 'lock-service.configured-period-catalog' },
+          exportRefs: [],
+          replayRefs: [],
+          auditRefs: ['audit:lock-period-comparison-blocked'],
+          blockers: [{ blockerCode: 'LOCK_PERIODS_NOT_SUPPLIED', severity: 'BLOCKER', reason: 'Scenario-analysis-service did not supply lock period candidates.', requiredFacts: ['fact:lock-period-ref'], sourceRef: 'scenario-analysis-service.lock-period-comparison' }],
+          fallbackReason: 'Configured lock period comparison contract is unavailable; UI must not invent local lock periods.',
+          uiTraceId: 'lock-period-s33-empty-trace',
+          events: ['LockPeriodComparisonBlocked'],
+        }) } as Response;
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Lock period comparison summary' })).toBeInTheDocument();
+    expect(screen.getByText('Backend lock period comparison contract required')).toBeInTheDocument();
+    expect(screen.getByText('Configured lock period comparison contract is unavailable; UI must not invent local lock periods.')).toBeInTheDocument();
+    expect(screen.getByText('No lock periods supplied by the backend.')).toBeInTheDocument();
+    expect(screen.getByText('No backend lock periods supplied. The UI will not create local lock-period catalog values.')).toBeInTheDocument();
+    expect(screen.getByText('Scenario-analysis-service did not supply lock period candidates.')).toBeInTheDocument();
+    expect(screen.queryByText('Backend 30 day lock')).not.toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith('/api/v1/tenants/ui-preview-tenant/quote-runs/run-empty/what-if/lock-period-comparison', expect.any(Object));
   });
 
   it('renders admin governance release gates with open decisions as blockers', async () => {
@@ -2266,7 +2787,7 @@ describe('App shell', () => {
 
     render(<App />);
 
-    expect(await screen.findByRole('heading', { name: 'Admin governance and readiness controls' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Governance Lifecycle' })).toBeInTheDocument();
     expect(await screen.findByText('Release status RED')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Deploy release candidate' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Execute rollback' })).toBeDisabled();

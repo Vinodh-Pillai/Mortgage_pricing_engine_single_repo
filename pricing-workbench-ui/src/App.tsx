@@ -45,12 +45,17 @@ import {
 } from './lib/api/partnerQuotes';
 import {
   fetchPartnerChannelWorkbench,
+  fetchPartnerIntegrationAlerts,
   fetchPartnerWebhookHealth,
+  requestPartnerIntegrationAlertAction,
   requestPartnerWebhookEndpointTest,
   requestPartnerWebhookReplay,
   requestPartnerWebhookSafetyToggle,
   type PartnerChannelWorkbenchTab,
   type PartnerChannelWorkbenchView,
+  type PartnerIntegrationAlert,
+  type PartnerIntegrationAlertActionResult,
+  type PartnerIntegrationAlertsView,
   type PartnerSafetyToggleResult,
   type PartnerWebhookActionResult,
   type PartnerWebhookDeliveryAttempt,
@@ -94,12 +99,6 @@ import {
   type IncidentReviewSummary,
 } from './lib/api/adminGovernance';
 import {
-  fetchMlAdvisoryInsights,
-  type AdvisoryRecommendationInsight,
-  type MlAdvisoryInsightsView,
-  type ModelVersionGovernanceInsight,
-} from './lib/api/mlAdvisoryInsights';
-import {
   fetchCustomRuleCalculationEvidence,
   fetchCustomRuleEvidence,
   type CalculationStepEvidence,
@@ -112,28 +111,24 @@ import {
 } from './lib/api/customRules';
 import AdjustmentEvidenceScreen from './screens/adjustmentEvidence/AdjustmentEvidenceScreen';
 import { MarginProfitabilityScreen } from './screens/marginProfitability';
+import ExceptionConcessionsScreen from './screens/exceptionConcessions';
+import { RateFeedOperationsScreen } from './screens/rateFeedOps';
+import { OpsCasesScreen } from './screens/opsCases';
+import { PerformanceDashboardScreen } from './screens/observabilityPerformance';
+import { ComplianceEvidenceScreen } from './screens/complianceEvidence';
+import { partnerIntegrationEvidenceTarget, partnerIntegrationRoutes, partnerIntegrationStateCoverage } from './screens/partnerIntegrations';
+import { ProductCatalogManagerScreen } from './screens/productCatalogManager';
+import { AdminGovernanceScreen } from './screens/adminGovernance';
+import { MlAdvisoryInsightsScreen } from './screens/mlAdvisoryInsights';
+import { ModelVersionGovernanceScreen } from './screens/modelVersionGovernance';
+import { DriftMonitoringScreen } from './screens/driftMonitoring';
 import {
   fetchAuditReplayWorkbench,
   type AuditReplayRecordSummary,
   type AuditReplayRunSummary,
   type AuditReplayWorkbenchView,
 } from './lib/api/auditReplay';
-import {
-  fetchExceptionConcessionWorkbench,
-  type ExceptionConcessionSection,
-  type ExceptionConcessionWorkbenchView,
-} from './lib/api/exceptionConcessions';
-import {
-  fetchScenarioAnalysisWorkspace,
-  recalculateScenarioAnalysis,
-  type ScenarioAnalysisBatchRow,
-  type ScenarioAnalysisBlocker,
-  type ScenarioAnalysisDimension,
-  type ScenarioAnalysisSavedAnalysis,
-  type ScenarioAnalysisVariant,
-  type ScenarioAnalysisWorkspaceView,
-  type ScenarioRecalculationResult,
-} from './lib/api/scenarioAnalysis';
+import { FicoSensitivityScreen, LockPeriodComparisonScreen, LtvSensitivityScreen, ProductComparisonScreen, ScenarioAnalysisWorkspaceScreen } from './screens/scenarioAnalysis';
 import {
   fetchTenantPlatformCoverage,
   type TenantPlatformControl,
@@ -143,8 +138,6 @@ import { fetchUiHealth, type UiHealth } from './lib/api/uiHealth';
 import { createTenantWorkspace, type TenantSetupRequest, type TenantSetupResult } from './lib/api/tenants';
 import {
   createProductCatalogEntry,
-  fetchProductCatalogManager,
-  type ProductCatalogManagerView,
   type ProductSetupRequest,
   type ProductSetupResult,
 } from './lib/api/products';
@@ -257,6 +250,8 @@ export function App() {
   const [complianceActive] = useState(() => compliancePathActive(window.location.pathname));
   const [qualityActive] = useState(() => qualityPathActive(window.location.pathname));
   const [adminActive] = useState(() => adminPathActive(window.location.pathname));
+  const [driftMonitoringActive] = useState(() => driftMonitoringPathActive(window.location.pathname));
+  const [modelVersionGovernanceActive] = useState(() => modelVersionGovernancePathActive(window.location.pathname));
   const [mlAdvisoryActive] = useState(() => mlAdvisoryPathActive(window.location.pathname));
   const [productCatalogManagerActive] = useState(() => productCatalogManagerPathActive(window.location.pathname));
   const [customRulesActive] = useState(() => customRulesPathActive(window.location.pathname));
@@ -437,8 +432,16 @@ export function App() {
 
           {tenantPlatformActive ? (
             <TenantPlatformCoverageSection />
+          ) : scenarioAnalysisActive && activeRunId && ficoSensitivityPathActive(window.location.pathname) ? (
+            <FicoSensitivityScreen runId={activeRunId} tenantContext={tenantBoundaryPlaceholder} />
+          ) : scenarioAnalysisActive && activeRunId && ltvSensitivityPathActive(window.location.pathname) ? (
+            <LtvSensitivityScreen runId={activeRunId} tenantContext={tenantBoundaryPlaceholder} />
+          ) : scenarioAnalysisActive && activeRunId && productComparisonPathActive(window.location.pathname) ? (
+            <ProductComparisonScreen runId={activeRunId} tenantContext={tenantBoundaryPlaceholder} />
+          ) : scenarioAnalysisActive && activeRunId && lockPeriodComparisonPathActive(window.location.pathname) ? (
+            <LockPeriodComparisonScreen runId={activeRunId} tenantContext={tenantBoundaryPlaceholder} />
           ) : scenarioAnalysisActive && activeRunId ? (
-            <ScenarioAnalysisWorkspaceSection runId={activeRunId} />
+            <ScenarioAnalysisWorkspaceScreen runId={activeRunId} tenantContext={tenantBoundaryPlaceholder} />
           ) : exceptionConcessionsActive ? (
             <ExceptionConcessionWorkbenchSection />
           ) : auditReplayActive ? (
@@ -450,21 +453,25 @@ export function App() {
           ) : marginProfitabilityActive ? (
             <MarginProfitabilityScreen tenantContext={tenantBoundaryPlaceholder} />
           ) : performanceActive ? (
-            <PerformanceDashboardSection />
+            <PerformanceDashboardScreen tenantContext={tenantBoundaryPlaceholder} />
           ) : rateFeedOpsActive ? (
-            <RateFeedOperationsSection />
+            <RateFeedOperationsScreen tenantContext={tenantBoundaryPlaceholder} />
           ) : productCatalogManagerActive ? (
-            <ProductCatalogManagerSection />
+            <ProductCatalogManagerScreen tenantContext={tenantBoundaryPlaceholder} />
           ) : adminActive ? (
-            <AdminGovernanceSection />
+            <AdminGovernanceScreen />
+          ) : driftMonitoringActive ? (
+            <DriftMonitoringScreen />
+          ) : modelVersionGovernanceActive ? (
+            <ModelVersionGovernanceScreen />
           ) : mlAdvisoryActive ? (
-            <MlAdvisoryInsightsSection />
+            <MlAdvisoryInsightsScreen />
           ) : qualityActive ? (
             <QualityGuardrailsSection />
           ) : complianceActive ? (
-            <ComplianceEvidenceRegistrySection />
+            <ComplianceEvidenceScreen tenantContext={tenantBoundaryPlaceholder} />
           ) : opsCasesActive ? (
-            <OperationsCaseTriageSection />
+            <OpsCasesScreen tenantContext={tenantBoundaryPlaceholder} />
           ) : partnerTransportActive ? (
             <PartnerTransportReliabilitySection partnerId={partnerBoundaryPlaceholder} />
           ) : partnerQuotesActive ? (
@@ -600,6 +607,11 @@ type PartnerChannelWorkbenchState =
   | { kind: 'loaded'; view: PartnerChannelWorkbenchView }
   | { kind: 'unreachable'; message: string };
 
+type PartnerIntegrationAlertsState =
+  | { kind: 'loading' }
+  | { kind: 'loaded'; view: PartnerIntegrationAlertsView }
+  | { kind: 'unreachable'; message: string };
+
 type OpsCaseState =
   | { kind: 'loading' }
   | { kind: 'loaded'; view: OpsCaseListView }
@@ -636,11 +648,6 @@ type AdminGovernanceState =
   | { kind: 'loaded'; view: AdminGovernanceView }
   | { kind: 'unreachable'; message: string };
 
-type MlAdvisoryInsightsState =
-  | { kind: 'loading' }
-  | { kind: 'loaded'; view: MlAdvisoryInsightsView }
-  | { kind: 'unreachable'; message: string };
-
 type CustomRuleEvidenceState =
   | { kind: 'loading' }
   | { kind: 'loaded'; view: CustomRuleEvidenceView; calculationEvidence: RuleCalculationEvidenceView }
@@ -654,24 +661,9 @@ type AuditReplayWorkbenchState =
   | { kind: 'loaded'; view: AuditReplayWorkbenchView }
   | { kind: 'unreachable'; message: string };
 
-type ExceptionConcessionWorkbenchState =
-  | { kind: 'loading' }
-  | { kind: 'loaded'; view: ExceptionConcessionWorkbenchView }
-  | { kind: 'unreachable'; message: string };
-
 type TenantPlatformCoverageState =
   | { kind: 'loading' }
   | { kind: 'loaded'; view: TenantPlatformCoverageView }
-  | { kind: 'unreachable'; message: string };
-
-type ScenarioAnalysisWorkspaceState =
-  | { kind: 'loading' }
-  | { kind: 'loaded'; view: ScenarioAnalysisWorkspaceView }
-  | { kind: 'unreachable'; message: string };
-
-type ProductCatalogManagerState =
-  | { kind: 'loading' }
-  | { kind: 'loaded'; view: ProductCatalogManagerView }
   | { kind: 'unreachable'; message: string };
 
 function opsPathActive(pathname: string) {
@@ -706,6 +698,14 @@ function mlAdvisoryPathActive(pathname: string) {
   return pathname.startsWith('/advisory/ml');
 }
 
+function modelVersionGovernancePathActive(pathname: string) {
+  return pathname.startsWith('/advisory/ml/governance');
+}
+
+function driftMonitoringPathActive(pathname: string) {
+  return pathname.startsWith('/advisory/ml/drift');
+}
+
 function productCatalogManagerPathActive(pathname: string) {
   return pathname.startsWith('/admin/products/catalog');
 }
@@ -737,97 +737,21 @@ function tenantPlatformPathActive(pathname: string) {
 function scenarioAnalysisPathActive(pathname: string) {
   return /^\/quote\/[^/]+\/what-if/.test(pathname);
 }
-function ProductCatalogManagerSection() {
-  const [catalogState, setCatalogState] = useState<ProductCatalogManagerState>({ kind: 'loading' });
 
-  useEffect(() => {
-    let active = true;
-    fetchProductCatalogManager()
-      .then((view) => {
-        if (active) setCatalogState({ kind: 'loaded', view });
-      })
-      .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'Product catalog manager is unavailable.';
-        if (active) setCatalogState({ kind: 'unreachable', message });
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
+function ficoSensitivityPathActive(pathname: string) {
+  return /^\/quote\/[^/]+\/what-if\/fico-sensitivity\/?$/.test(pathname);
+}
 
-  if (catalogState.kind === 'loading') {
-    return <section className="panel" aria-labelledby="product-catalog-manager-heading"><h2 id="product-catalog-manager-heading">Product catalog manager</h2><p role="status">Loading product catalog manager...</p></section>;
-  }
+function ltvSensitivityPathActive(pathname: string) {
+  return /^\/quote\/[^/]+\/what-if\/ltv-sensitivity\/?$/.test(pathname);
+}
 
-  if (catalogState.kind === 'unreachable') {
-    return (
-      <section className="panel" aria-labelledby="product-catalog-manager-heading">
-        <h2 id="product-catalog-manager-heading">Product catalog manager</h2>
-        <div className="banner banner--blocked" role="alert">{catalogState.message}</div>
-      </section>
-    );
-  }
+function productComparisonPathActive(pathname: string) {
+  return /^\/quote\/[^/]+\/what-if\/product-comparison\/?$/.test(pathname);
+}
 
-  const view = catalogState.view;
-  return (
-    <>
-      <section className="hero hero--admin" aria-labelledby="product-catalog-title">
-        <p className="eyebrow">Catalog cockpit</p>
-        <h2 id="product-catalog-title">Product catalog manager</h2>
-        <p>
-          Review product drafts, domain lists, lifecycle controls, snapshots, events, and review evidence from configured catalog
-          metadata. Publishing stays blocked when catalog contracts are unavailable instead of using UI-side product policy.
-        </p>
-      </section>
-
-      <section className="panel" aria-labelledby="product-catalog-manager-heading">
-        <div className="panel-heading-row">
-          <div>
-            <p className="eyebrow">Configured catalog areas</p>
-            <h2 id="product-catalog-manager-heading">Catalog sections and validation</h2>
-          </div>
-          <DiagnosticsDetails items={[`Workspace ${view.tenantContext}`, `Support reference: ${view.uiTraceId}`]} />
-        </div>
-        <p className="field-help">{businessFacingText(view.fallbackReason)}</p>
-        <div className="module-rail__grid" role="list" aria-label="Product catalog manager sections">
-          {view.areas.map((area) => (
-            <article key={area.areaId} className="module-card" role="listitem">
-              <p className="module-card__route">{businessFacingText(area.status)}</p>
-              <strong className="module-card__title">{area.label}</strong>
-              <p>{businessFacingText(area.guidance)}</p>
-              <dl>
-                <dt>Metadata source</dt>
-                <dd>{businessFacingText(area.sourceRef)}</dd>
-              </dl>
-              <ChipList label={`${area.label} fields`} values={area.fields.map(businessFacingText)} />
-              <ChipList label={`${area.label} validation`} values={area.validationMessages.map(businessFacingText)} />
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="panel" aria-labelledby="catalog-lifecycle-heading">
-        <div className="panel-heading-row">
-          <div>
-            <p className="eyebrow">Lifecycle and evidence</p>
-            <h2 id="catalog-lifecycle-heading">Approval, publish, rollback, snapshots, and review history</h2>
-          </div>
-        </div>
-        <div className="banner banner--blocked" role="alert">
-          <strong>{businessFacingText(view.lifecycle.state)}</strong>
-          <span>{businessFacingText(view.lifecycle.blocker)}</span>
-        </div>
-        <dl className="status-grid">
-          <dt>Actions disabled</dt><dd>{view.lifecycle.actionsDisabled ? 'Yes' : 'No'}</dd>
-          <dt>Setup status</dt><dd>{businessFacingText(view.dependencyStatus)}</dd>
-        </dl>
-        <ChipList label="Lifecycle actions" values={view.lifecycle.actions.map(businessFacingText)} />
-        <ChipList label="Snapshot and event references" values={view.lifecycle.snapshotRefs.map(businessFacingText)} />
-        <ChipList label="Review and processing references" values={view.lifecycle.auditRefs.map(businessFacingText)} />
-        <ChipList label="Catalog manager events" values={view.events.map(businessFacingText)} />
-      </section>
-    </>
-  );
+function lockPeriodComparisonPathActive(pathname: string) {
+  return /^\/quote\/[^/]+\/what-if\/lock-period-comparison\/?$/.test(pathname);
 }
 
 function CustomRuleEvidenceSection() {
@@ -1131,107 +1055,7 @@ function CalculationStepList({ steps }: { steps: CalculationStepEvidence[] }) {
 }
 
 function ExceptionConcessionWorkbenchSection() {
-  const [exceptionState, setExceptionState] = useState<ExceptionConcessionWorkbenchState>({ kind: 'loading' });
-
-  useEffect(() => {
-    let active = true;
-    fetchExceptionConcessionWorkbench(tenantBoundaryPlaceholder)
-      .then((view) => {
-        if (active) setExceptionState({ kind: 'loaded', view });
-      })
-      .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'Exception concession workbench is unavailable.';
-        if (active) setExceptionState({ kind: 'unreachable', message });
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  if (exceptionState.kind === 'loading') {
-    return <section className="panel" aria-labelledby="exception-concession-heading"><h2 id="exception-concession-heading">Exception concession workbench</h2><p role="status">Loading exception concession workbench...</p></section>;
-  }
-
-  if (exceptionState.kind === 'unreachable') {
-    return (
-      <section className="panel" aria-labelledby="exception-concession-heading">
-        <h2 id="exception-concession-heading">Exception concession workbench</h2>
-        <div className="banner banner--blocked" role="alert">{exceptionState.message}</div>
-      </section>
-    );
-  }
-
-  const view = exceptionState.view;
-  return (
-    <>
-      <section className="hero hero--admin" aria-labelledby="exception-concession-title">
-        <p className="eyebrow">Exception service Â· PII-22-S18</p>
-        <h2 id="exception-concession-title">Concession and exception operating cockpit</h2>
-        <p>
-          Review concession requests, eligibility exceptions, authority routing, mutation guard evidence, risk events, history,
-          processing records, and export references in one governed workbench. The UI displays connected service facts only and does not infer pricing policy.
-        </p>
-      </section>
-
-      <section className="panel" aria-labelledby="exception-concession-heading">
-        <div className="panel-heading-row">
-          <div>
-            <p className="eyebrow">Governed exception case</p>
-            <h2 id="exception-concession-heading">Workbench coverage</h2>
-          </div>
-          <DiagnosticsDetails items={[`Support reference: ${view.uiTraceId}`, `Processing record: ${view.replayHash}`, `Export package: ${view.exportManifestRef}`]} />
-        </div>
-        <div className="banner banner--blocked" role="alert">
-          <strong>{businessFacingText(view.status)}</strong>
-          <span>{businessFacingText(view.dependencyStatus)}</span>
-          <span>{businessFacingText(view.fallbackReason)}</span>
-        </div>
-        <div className="offer-list" role="list" aria-label="Exception concession workbench sections">
-          {view.sections.map((section) => <ExceptionConcessionSectionCard key={section.sectionId} section={section} />)}
-        </div>
-      </section>
-
-      <section className="panel" aria-labelledby="manual-mutation-guard-heading">
-        <h2 id="manual-mutation-guard-heading">Manual price mutation guard</h2>
-        <div className="banner banner--blocked" role="alert">
-          <strong>{businessFacingText(view.manualPriceMutationGuard.decision)}</strong>
-          <span>Commit disabled: {view.manualPriceMutationGuard.commitDisabled ? 'yes' : 'no'}</span>
-          <span>Escalation path: {businessFacingText(view.manualPriceMutationGuard.escalationPath)}</span>
-        </div>
-        <button type="button" disabled={view.manualPriceMutationGuard.commitDisabled} aria-describedby="manual-mutation-guard-reasons">Commit manual price mutation</button>
-        <div id="manual-mutation-guard-reasons">
-          <ChipList label="Backend denial reason codes" values={view.manualPriceMutationGuard.reasonCodes.map(businessFacingText)} />
-          <ChipList label="Guard review and processing references" values={[view.manualPriceMutationGuard.auditRef, view.manualPriceMutationGuard.replayHash].map(businessFacingText)} />
-        </div>
-      </section>
-
-      <section className="panel" aria-labelledby="exception-evidence-heading">
-        <h2 id="exception-evidence-heading">Cross-service references, versions, review records, processing records, and export</h2>
-        <ChipList label="Cross-service refs" values={view.crossServiceRefs.map(businessFacingText)} />
-        <ChipList label="Version refs" values={view.versionRefs.map(businessFacingText)} />
-        <ChipList label="Review references" values={view.auditRefs.map(businessFacingText)} />
-        <ChipList label="Workbench blockers" values={view.blockers.map(businessFacingText)} />
-        <ChipList label="Workbench events" values={view.events.map(businessFacingText)} />
-      </section>
-    </>
-  );
-}
-
-function ExceptionConcessionSectionCard({ section }: { section: ExceptionConcessionSection }) {
-  return (
-    <article className="offer-card" role="listitem" aria-label={`${section.label} section`}>
-      <div className="offer-card__header">
-        <div>
-          <h3>{businessFacingText(section.label)}</h3>
-          <p>{businessFacingText(section.sectionId)}</p>
-        </div>
-        <strong>{businessFacingText(section.status)}</strong>
-      </div>
-      <p>{businessFacingText(section.summary)}</p>
-      <ChipList label={`${section.label} backend refs`} values={section.backendRefs.map(businessFacingText)} />
-      <ChipList label={`${section.label} review references`} values={section.auditRefs.map(businessFacingText)} />
-    </article>
-  );
+  return <ExceptionConcessionsScreen tenantContext={tenantBoundaryPlaceholder} />;
 }
 
 function AuditReplayWorkbenchSection() {
@@ -1800,111 +1624,6 @@ function AdminGovernanceSection() {
         </div>
       </section>
     </>
-  );
-}
-
-function MlAdvisoryInsightsSection() {
-  const [insightsState, setInsightsState] = useState<MlAdvisoryInsightsState>({ kind: 'loading' });
-
-  useEffect(() => {
-    let active = true;
-    fetchMlAdvisoryInsights()
-      .then((view) => {
-        if (active) setInsightsState({ kind: 'loaded', view });
-      })
-      .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'ML advisory insights are unavailable.';
-        if (active) setInsightsState({ kind: 'unreachable', message });
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  if (insightsState.kind === 'loading') {
-    return <section className="panel" aria-labelledby="ml-advisory-heading"><h2 id="ml-advisory-heading">ML advisory insights cockpit</h2><p role="status">Loading ML advisory insights...</p></section>;
-  }
-
-  if (insightsState.kind === 'unreachable') {
-    return (
-      <section className="panel" aria-labelledby="ml-advisory-heading">
-        <h2 id="ml-advisory-heading">ML advisory insights cockpit</h2>
-        <div className="banner banner--blocked" role="alert">{insightsState.message}</div>
-      </section>
-    );
-  }
-
-  const view = insightsState.view;
-  return (
-    <>
-      <section className="hero" aria-labelledby="ml-advisory-title">
-        <p className="eyebrow">ML advisory Â· PII-22-S14</p>
-        <h2 id="ml-advisory-title">ML advisory insights cockpit</h2>
-        <p>
-          Inspect model-owned recommendation evidence, governance state, feedback loops, alert status, and export refs without
-          applying automated pricing decisions or inferring mortgage policy.
-        </p>
-      </section>
-
-      <section className="panel" aria-labelledby="ml-advisory-heading">
-        <div className="panel-heading-row">
-          <div>
-            <p className="eyebrow">Recommendation evidence</p>
-            <h2 id="ml-advisory-heading">Advisory recommendation review</h2>
-          </div>
-          <DiagnosticsDetails items={[`Support reference: ${view.uiTraceId}`, `Workspace ${view.tenantContext}`]} />
-        </div>
-        <div className={view.advisoryUnavailable ? 'banner banner--blocked' : 'banner banner--info'} role={view.advisoryUnavailable ? 'alert' : 'status'}>
-          <strong>{view.advisoryUnavailable ? 'Advisory unavailable' : 'Advisory evidence visible'}</strong>
-          <span>{businessFacingText(view.fallbackReason)}</span>
-          <span>Setup status: {serviceReadinessText(view.dependencyStatus)}</span>
-        </div>
-        <div className="quote-table" role="table" aria-label="ML advisory recommendations">
-          <div role="row" className="quote-table__row quote-table__row--head">
-            <span role="columnheader">Recommendation</span>
-            <span role="columnheader">Model version</span>
-            <span role="columnheader">Confidence</span>
-            <span role="columnheader">Explanation and actions</span>
-            <span role="columnheader">Review references</span>
-          </div>
-          {view.recommendations.map((recommendation) => <MlAdvisoryRecommendationRow key={recommendation.recommendationId} recommendation={recommendation} />)}
-        </div>
-      </section>
-
-      <section className="panel" aria-labelledby="ml-governance-heading">
-        <h2 id="ml-governance-heading">Model governance grouped by model version</h2>
-        <div className="module-rail__grid" role="list" aria-label="Model version governance groups">
-          {view.modelVersions.map((modelVersion) => <ModelVersionGovernanceCard key={modelVersion.modelVersion} modelVersion={modelVersion} />)}
-        </div>
-        <ChipList label="ML advisory events" values={view.events.map(businessFacingText)} />
-      </section>
-    </>
-  );
-}
-
-function MlAdvisoryRecommendationRow({ recommendation }: { recommendation: AdvisoryRecommendationInsight }) {
-  return (
-    <div role="row" className="quote-table__row">
-      <span role="cell"><strong>{recommendation.recommendationId}</strong></span>
-      <span role="cell">{recommendation.modelVersion}</span>
-      <span role="cell">{recommendation.confidence}</span>
-      <span role="cell">{recommendation.explanation}<ChipList label={`${recommendation.recommendationId} allowed actions`} values={recommendation.allowedActions} />{recommendation.automaticDecisionApplied ? <strong>Automatic pricing decision applied</strong> : <span className="field-help">No automatic pricing decision applied.</span>}</span>
-      <span role="cell"><ChipList label={`${recommendation.recommendationId} review references`} values={recommendation.auditRefs} /></span>
-    </div>
-  );
-}
-
-function ModelVersionGovernanceCard({ modelVersion }: { modelVersion: ModelVersionGovernanceInsight }) {
-  return (
-    <article className="module-card" role="listitem">
-      <p className="module-card__route">{modelVersion.modelVersion}</p>
-      <strong className="module-card__title">{modelVersion.driftStatus}</strong>
-      <dl>
-        <dt>Alert state</dt><dd>{modelVersion.alertState}</dd>
-      </dl>
-      <ChipList label={`${modelVersion.modelVersion} feedback loops`} values={modelVersion.feedbackLoops} />
-      <ChipList label={`${modelVersion.modelVersion} export evidence`} values={modelVersion.exportEvidenceRefs} />
-    </article>
   );
 }
 
@@ -2493,6 +2212,9 @@ function RateFeedOperationsSection() {
   }
 
   const view = rateFeedState.view;
+  const replayEvidenceRefs = Array.isArray(view.replayEvidence)
+    ? view.replayEvidence
+    : [...view.replayEvidence.versionRefs, ...view.replayEvidence.missingDependencyBlockers];
   return (
     <>
       <section className="hero hero--rate-feed" aria-labelledby="rate-feed-title">
@@ -2552,7 +2274,7 @@ function RateFeedOperationsSection() {
         <button type="button" disabled={view.actionsDisabled} aria-describedby="rate-feed-action-blockers">Publish rate sheet</button>
         <button type="button" className="button-secondary" disabled={view.actionsDisabled}>Request processing review</button>
         <div id="rate-feed-action-blockers">
-          <ChipList label="Processing and cache evidence" values={view.replayEvidence.map(businessFacingText)} />
+          <ChipList label="Processing and cache evidence" values={replayEvidenceRefs.map(businessFacingText)} />
           <ChipList label="Rate feed events" values={view.events.map(businessFacingText)} />
         </div>
       </section>
@@ -2903,6 +2625,7 @@ function PartnerQuoteDetailPanel({ detail, result, onAttemptReprice }: { detail:
 function PartnerTransportReliabilitySection({ partnerId }: { partnerId: string }) {
   const [transportState, setTransportState] = useState<PartnerTransportState>({ kind: 'loading' });
   const [workbenchState, setWorkbenchState] = useState<PartnerChannelWorkbenchState>({ kind: 'loading' });
+  const [alertsState, setAlertsState] = useState<PartnerIntegrationAlertsState>({ kind: 'loading' });
   const [selectedAttempt, setSelectedAttempt] = useState<PartnerWebhookDeliveryAttempt | null>(null);
   const [correlationId, setCorrelationId] = useState('');
   const [idempotencyConfirmed, setIdempotencyConfirmed] = useState(false);
@@ -2910,6 +2633,7 @@ function PartnerTransportReliabilitySection({ partnerId }: { partnerId: string }
   const [replayResult, setReplayResult] = useState<PartnerWebhookActionResult | null>(null);
   const [endpointTestResult, setEndpointTestResult] = useState<PartnerWebhookActionResult | null>(null);
   const [safetyResult, setSafetyResult] = useState<PartnerSafetyToggleResult | null>(null);
+  const [alertActionResult, setAlertActionResult] = useState<PartnerIntegrationAlertActionResult | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -2921,6 +2645,22 @@ function PartnerTransportReliabilitySection({ partnerId }: { partnerId: string }
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : 'Partner integration workbench is unavailable.';
         if (active) setWorkbenchState({ kind: 'unreachable', message });
+      });
+    return () => {
+      active = false;
+    };
+  }, [partnerId]);
+
+  useEffect(() => {
+    let active = true;
+    setAlertsState({ kind: 'loading' });
+    fetchPartnerIntegrationAlerts(partnerId)
+      .then((view) => {
+        if (active) setAlertsState({ kind: 'loaded', view });
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : 'Partner integration alerts require a configured connected service contract.';
+        if (active) setAlertsState({ kind: 'unreachable', message });
       });
     return () => {
       active = false;
@@ -2958,7 +2698,7 @@ function PartnerTransportReliabilitySection({ partnerId }: { partnerId: string }
   }
 
   async function requestEndpointTest() {
-    if (!selectedAttempt) return;
+    if (!selectedAttempt || !view.endpointTestAction.available) return;
     const result = await requestPartnerWebhookEndpointTest(partnerId, selectedAttempt.webhookId);
     setEndpointTestResult(result);
   }
@@ -2967,6 +2707,11 @@ function PartnerTransportReliabilitySection({ partnerId }: { partnerId: string }
     if (!safetyConfirmed) return;
     const result = await requestPartnerWebhookSafetyToggle(partnerId, webhookId, route, !paused, safetyConfirmed);
     setSafetyResult(result);
+  }
+
+  async function recordAlertAction(alert: PartnerIntegrationAlert, action: 'ACKNOWLEDGE' | 'INVESTIGATE' | 'RESOLVE') {
+    const result = await requestPartnerIntegrationAlertAction(partnerId, alert.alertId, action);
+    setAlertActionResult(result);
   }
 
   if (transportState.kind === 'loading') {
@@ -2989,10 +2734,20 @@ function PartnerTransportReliabilitySection({ partnerId }: { partnerId: string }
     <>
       <section className="hero" aria-labelledby="partner-transport-title">
         <p className="eyebrow">Partner Â· integration-service</p>
-        <h2 id="partner-transport-title">Partner integration channel workbench</h2>
+        <h2 id="partner-transport-title">Partner Integrations</h2>
         <p>
           Inspect quote requests, message delivery, retry queues, exception queues, investor delivery connections, partner file delivery, service account access, and health through the approved workbench service only.
         </p>
+        <DiagnosticsDetails items={[`Routes: ${partnerIntegrationRoutes.join(', ')}`, `States: ${partnerIntegrationStateCoverage.join(', ')}`, `Evidence target: ${partnerIntegrationEvidenceTarget}`]} />
+      </section>
+
+      <section className="panel" aria-label="Partner integration tabs">
+        <div className="button-row" role="tablist" aria-label="Partner integration workbench tabs">
+          <span role="tab" aria-selected="true">Webhook Health</span>
+          <span role="tab" aria-selected="false">Channel Workbench</span>
+          <span role="tab" aria-selected="false">Safety</span>
+          <span role="tab" aria-selected="false">Alerts</span>
+        </div>
       </section>
 
       <PartnerChannelWorkbenchPanel state={workbenchState} />
@@ -3015,18 +2770,28 @@ function PartnerTransportReliabilitySection({ partnerId }: { partnerId: string }
 
         <div className="quote-table" role="table" aria-label="Webhook delivery attempts">
           <div role="row" className="quote-table__row quote-table__row--head">
+            <span role="columnheader">Webhook</span>
             <span role="columnheader">Event</span>
+            <span role="columnheader">Route</span>
             <span role="columnheader">Status</span>
-            <span role="columnheader">Reason</span>
+            <span role="columnheader">Root cause</span>
             <span role="columnheader">Last success</span>
+            <span role="columnheader">Idempotency</span>
+            <span role="columnheader">Masking</span>
+            <span role="columnheader">Consent</span>
             <span role="columnheader">Action</span>
           </div>
           {view.deliveryAttempts.map((attempt) => (
             <div key={attempt.eventId} role="row" className={selectedAttempt?.eventId === attempt.eventId ? 'quote-table__row quote-table__row--selected' : 'quote-table__row'}>
+              <span role="cell">{attempt.webhookId}</span>
               <span role="cell">{attempt.eventId}</span>
+              <span role="cell">{attempt.route}</span>
               <span role="cell">{attempt.status}</span>
               <span role="cell">{businessFacingText(attempt.rootCauseCode)}</span>
               <span role="cell">{attempt.lastSuccessfulAt}</span>
+              <span role="cell">{businessFacingText(attempt.idempotencyKeyState)}</span>
+              <span role="cell">{businessFacingText(attempt.maskingIndicator)}</span>
+              <span role="cell">{businessFacingText(attempt.consentIndicator)}</span>
               <span role="cell"><button type="button" onClick={() => setSelectedAttempt(attempt)}>Review controls</button></span>
             </div>
           ))}
@@ -3056,7 +2821,8 @@ function PartnerTransportReliabilitySection({ partnerId }: { partnerId: string }
             </label>
             <button type="button" disabled={replayDisabled} onClick={() => void requestReplay()}>Request processing retry</button>
             {replayDisabled ? <p role="status">{businessFacingText(view.replayAction.disabledReason)}</p> : null}
-            <button type="button" className="button-secondary" onClick={() => void requestEndpointTest()}>Show endpoint test guidance</button>
+            <button type="button" className="button-secondary" disabled={!view.endpointTestAction.available} onClick={() => void requestEndpointTest()}>Show endpoint test guidance</button>
+            {!view.endpointTestAction.available ? <p role="status">{businessFacingText(view.endpointTestAction.disabledReason)}</p> : null}
           </div>
         ) : <p role="status">No webhook events are available.</p>}
         {replayResult ? <TransportResultBanner result={replayResult} acceptedLabel="Webhook processing retry requested" blockedLabel="Webhook processing retry blocked" /> : null}
@@ -3090,8 +2856,93 @@ function PartnerTransportReliabilitySection({ partnerId }: { partnerId: string }
             <span>Current pause state: {safetyResult.paused ? 'Paused' : 'Active'}</span>
           </div>
         ) : null}
+        {workbenchState.kind === 'loaded' ? <ServiceAccountBlockedPanel view={workbenchState.view} /> : null}
       </section>
+
+      <PartnerIntegrationAlertsPanel state={alertsState} actionResult={alertActionResult} onAction={recordAlertAction} />
     </>
+  );
+}
+
+function ServiceAccountBlockedPanel({ view }: { view: PartnerChannelWorkbenchView }) {
+  return (
+    <div className={view.serviceAccount.blocked ? 'banner banner--blocked' : 'banner banner--success'} role={view.serviceAccount.blocked ? 'alert' : 'status'}>
+      <strong>{view.serviceAccount.blocked ? 'Service account blocked' : 'Service account ready'}</strong>
+      <span>Missing capability: {view.serviceAccount.missingCapability}</span>
+      <span>Recovery owner: {view.serviceAccount.recoveryOwner}</span>
+      <span>Credential exposure: {view.serviceAccount.credentialExposure}</span>
+    </div>
+  );
+}
+
+function PartnerIntegrationAlertsPanel({ state, actionResult, onAction }: { state: PartnerIntegrationAlertsState; actionResult: PartnerIntegrationAlertActionResult | null; onAction: (alert: PartnerIntegrationAlert, action: 'ACKNOWLEDGE' | 'INVESTIGATE' | 'RESOLVE') => void }) {
+  if (state.kind === 'loading') {
+    return <section className="panel" aria-labelledby="partner-alerts-heading"><h2 id="partner-alerts-heading">Alerts</h2><p role="status">Loading partner integration alerts...</p></section>;
+  }
+
+  if (state.kind === 'unreachable') {
+    return (
+      <section className="panel" aria-labelledby="partner-alerts-heading">
+        <h2 id="partner-alerts-heading">Alerts</h2>
+        <div className="banner banner--blocked" role="alert">{state.message}</div>
+        <p className="field-help">Backend alert rule thresholds and live alert actions remain blocked until the partner integration alert contract is configured.</p>
+      </section>
+    );
+  }
+
+  const view = state.view;
+  return (
+    <section className="panel" aria-labelledby="partner-alerts-heading">
+      <div className="panel-heading-row">
+        <div>
+          <p className="eyebrow">Partner operations</p>
+          <h2 id="partner-alerts-heading">Alerts</h2>
+        </div>
+        <DiagnosticsDetails items={[`Workspace ${view.tenantContext}`, `Support reference: ${view.uiTraceId}`, `Rules: ${businessFacingText(view.rulesStatus)}`]} />
+      </div>
+      <p className="field-help">{view.fallbackReason}</p>
+      <dl className="status-grid">
+        <dt>Dependency state</dt><dd>{businessFacingText(view.dependencyStatus)}</dd>
+        <dt>Alert rules</dt><dd>{businessFacingText(view.rulesStatus)}</dd>
+      </dl>
+      <div className="quote-table" role="table" aria-label="Partner integration alerts">
+        <div role="row" className="quote-table__row quote-table__row--head">
+          <span role="columnheader">Alert</span>
+          <span role="columnheader">Severity</span>
+          <span role="columnheader">Class</span>
+          <span role="columnheader">Trigger</span>
+          <span role="columnheader">Route</span>
+          <span role="columnheader">Action state</span>
+          <span role="columnheader">Recovery owner</span>
+          <span role="columnheader">Actions</span>
+          <span role="columnheader">Blockers</span>
+        </div>
+        {view.alerts.map((alert) => (
+          <div role="row" className="quote-table__row" key={alert.alertId}>
+            <span role="cell">{alert.alertId}</span>
+            <span role="cell">{alert.severity}</span>
+            <span role="cell">{businessFacingText(alert.alertClass)}</span>
+            <span role="cell">{businessFacingText(alert.triggerType)}</span>
+            <span role="cell">{alert.routeTarget}</span>
+            <span role="cell">{alert.acknowledged ? 'Acknowledged' : businessFacingText(alert.actionState)}</span>
+            <span role="cell">{alert.recoveryOwner}</span>
+            <span role="cell" className="button-row">
+              <button type="button" onClick={() => onAction(alert, 'ACKNOWLEDGE')}>Acknowledge</button>
+              <button type="button" className="button-secondary" onClick={() => onAction(alert, 'INVESTIGATE')}>Investigate</button>
+              <button type="button" className="button-secondary" onClick={() => onAction(alert, 'RESOLVE')}>Resolve</button>
+            </span>
+            <span role="cell"><ChipList label={`${alert.alertId} blockers`} values={alert.blockers.map(businessFacingText)} /></span>
+          </div>
+        ))}
+      </div>
+      {actionResult ? (
+        <div className={actionResult.status === 'RECORDED' ? 'banner banner--success' : 'banner banner--blocked'} role={actionResult.status === 'RECORDED' ? 'status' : 'alert'}>
+          <strong>{actionResult.status === 'RECORDED' ? 'Alert action recorded' : 'Alert action blocked'}</strong>
+          <span>{businessFacingText(actionResult.action)} for {actionResult.alertId}</span>
+          <span>{actionResult.message}</span>
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -3712,232 +3563,6 @@ function WaterfallLedgerTableRow({ row }: { row: WaterfallLedgerRow }) {
 function waterfallValueText(value: { value: string | null; redacted: boolean; reason: string | null }) {
   if (value.redacted) return `Redacted: ${businessFacingText(value.reason)}`;
   return businessFacingText(value.value);
-}
-
-function ScenarioAnalysisWorkspaceSection({ runId }: { runId: string }) {
-  const [workspaceState, setWorkspaceState] = useState<ScenarioAnalysisWorkspaceState>({ kind: 'loading' });
-  const [dimensionId, setDimensionId] = useState('');
-  const [requestedValue, setRequestedValue] = useState('');
-  const [recalculation, setRecalculation] = useState<ScenarioRecalculationResult | null>(null);
-  const [recalculateError, setRecalculateError] = useState('');
-
-  useEffect(() => {
-    let active = true;
-    fetchScenarioAnalysisWorkspace(tenantBoundaryPlaceholder, runId)
-      .then((view) => {
-        if (!active) return;
-        setWorkspaceState({ kind: 'loaded', view });
-        setDimensionId(view.dimensions[0]?.dimensionId ?? '');
-        setRequestedValue(view.dimensions[0]?.value ?? '');
-      })
-      .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'Scenario analysis workspace is unavailable.';
-        if (active) setWorkspaceState({ kind: 'unreachable', message });
-      });
-    return () => {
-      active = false;
-    };
-  }, [runId]);
-
-  async function requestRecalculation() {
-    if (workspaceState.kind !== 'loaded') return;
-    setRecalculateError('');
-    const selectedDimension = workspaceState.view.dimensions.find((dimension) => dimension.dimensionId === dimensionId);
-    const facts = Array.from(new Set([
-      ...(selectedDimension?.requiredFacts ?? []),
-      ...workspaceState.view.variants.flatMap((variant) => variant.factRefs),
-    ]));
-    try {
-      const result = await recalculateScenarioAnalysis(tenantBoundaryPlaceholder, runId, {
-        changedDimensionId: dimensionId,
-        requestedValue,
-        variantFacts: facts,
-      });
-      setRecalculation(result);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Scenario analysis recalculation is unavailable.';
-      setRecalculateError(message);
-    }
-  }
-
-  if (workspaceState.kind === 'loading') {
-    return <section className="panel" aria-labelledby="scenario-analysis-heading"><h2 id="scenario-analysis-heading">Scenario analysis workspace</h2><p role="status">Loading scenario analysis workspace...</p></section>;
-  }
-
-  if (workspaceState.kind === 'unreachable') {
-    return (
-      <section className="panel" aria-labelledby="scenario-analysis-heading">
-        <h2 id="scenario-analysis-heading">Scenario analysis workspace</h2>
-        <div className="banner banner--blocked" role="alert">{workspaceState.message}</div>
-      </section>
-    );
-  }
-
-  const view = workspaceState.view;
-
-  return (
-    <>
-      <section className="hero" aria-labelledby="scenario-analysis-title">
-        <p className="eyebrow">Scenario analysis Â· PII-22-S15</p>
-        <h2 id="scenario-analysis-title">What-if analysis cockpit for run {runId}</h2>
-        <p>
-          Inspect connected variants, sensitivity dimensions, guardrails, batch grids, saved analysis records, export refs,
-          and processing references. The UI sends variant facts back to the BFF and does not calculate pricing locally.
-        </p>
-      </section>
-
-      <section className="panel" aria-labelledby="scenario-analysis-heading">
-        <div className="panel-heading-row">
-          <div>
-            <p className="eyebrow">Workspace</p>
-            <h2 id="scenario-analysis-heading">Dimensions and variant facts</h2>
-          </div>
-          <DiagnosticsDetails items={[`Support reference: ${view.uiTraceId}`, `Dependency: ${view.dependencyStatus}`]} />
-        </div>
-        {view.fallbackReason ? <div className="banner banner--blocked" role="alert"><strong>Backend analysis contract required</strong><span>{businessFacingText(view.fallbackReason)}</span></div> : null}
-        <div className="offer-grid" role="list" aria-label="What-if dimensions">
-          {view.dimensions.map((dimension) => <ScenarioDimensionCard key={dimension.dimensionId} dimension={dimension} />)}
-        </div>
-        <div className="offer-grid" role="list" aria-label="What-if variants">
-          {view.variants.map((variant) => <ScenarioVariantCard key={variant.variantId} variant={variant} />)}
-        </div>
-      </section>
-
-      <section className="panel" aria-labelledby="scenario-recalculate-heading">
-        <h2 id="scenario-recalculate-heading">Request backend recalculation</h2>
-        <p className="field-help">Changing a dimension packages backend fact refs for scenario-analysis-service. No UI or BFF pricing formula runs here.</p>
-        <div className="offer-toolbar" aria-label="Scenario recalculation controls">
-          <label htmlFor="scenario-dimension">Dimension</label>
-          <select id="scenario-dimension" value={dimensionId} onChange={(event) => {
-            const nextDimension = view.dimensions.find((dimension) => dimension.dimensionId === event.target.value);
-            setDimensionId(event.target.value);
-            setRequestedValue(nextDimension?.value ?? '');
-          }}>
-            {view.dimensions.map((dimension) => <option key={dimension.dimensionId} value={dimension.dimensionId}>{dimension.label}</option>)}
-          </select>
-          <label htmlFor="scenario-requested-value">Requested value</label>
-          <input id="scenario-requested-value" value={requestedValue} onChange={(event) => setRequestedValue(event.target.value)} />
-          <button type="button" onClick={() => void requestRecalculation()}>Request recalculation</button>
-        </div>
-        {recalculateError ? <div className="banner banner--blocked" role="alert">{recalculateError}</div> : null}
-        {recalculation ? <ScenarioRecalculationBanner result={recalculation} /> : null}
-      </section>
-
-      <section className="panel" aria-labelledby="scenario-batch-heading">
-        <h2 id="scenario-batch-heading">Batch sensitivity grid</h2>
-        <div className="quote-table" role="table" aria-label="Scenario batch grid">
-          <div role="row" className="quote-table__row quote-table__row--head">
-            <span role="columnheader">Row</span>
-            <span role="columnheader">Variant</span>
-            <span role="columnheader">Dimensions</span>
-            <span role="columnheader">Status</span>
-            <span role="columnheader">Backend result</span>
-            <span role="columnheader">Guardrail</span>
-          </div>
-          {view.batchGrid.map((row) => <ScenarioBatchGridRow key={row.rowId} row={row} />)}
-        </div>
-      </section>
-
-      <section className="panel" aria-labelledby="scenario-evidence-heading">
-        <h2 id="scenario-evidence-heading">Saved analyses, exports, processing records, and guardrails</h2>
-        <div className="offer-grid" role="list" aria-label="Saved what-if analyses">
-          {view.savedAnalyses.map((analysis) => <ScenarioSavedAnalysisCard key={analysis.analysisId} analysis={analysis} />)}
-        </div>
-        <ChipList label="Workspace export refs" values={view.exportRefs.map(businessFacingText)} />
-        <ChipList label="Workspace processing references" values={view.replayRefs.map(businessFacingText)} />
-        <ScenarioBlockerList blockers={view.blockers} label="Scenario guardrail blockers" />
-        <ChipList label="Scenario analysis events" values={view.events.map(businessFacingText)} />
-      </section>
-    </>
-  );
-}
-
-function ScenarioDimensionCard({ dimension }: { dimension: ScenarioAnalysisDimension }) {
-  return (
-    <article className="module-card module-card--light" role="listitem">
-      <p className="module-card__route">{businessFacingText(dimension.dimensionId)}</p>
-      <strong className="module-card__title">{businessFacingText(dimension.label)}</strong>
-      <dl>
-        <dt>Current value</dt><dd>{businessFacingText(dimension.value)}</dd>
-        <dt>Source ref</dt><dd>{businessFacingText(dimension.sourceRef)}</dd>
-        <dt>Backend owned</dt><dd>{dimension.backendOnly ? 'yes' : 'no'}</dd>
-      </dl>
-      <ChipList label={`${dimension.label} required facts`} values={dimension.requiredFacts.map(businessFacingText)} />
-    </article>
-  );
-}
-
-function ScenarioVariantCard({ variant }: { variant: ScenarioAnalysisVariant }) {
-  return (
-    <article className="offer-card" role="listitem" aria-label={`Variant ${variant.variantId}`}>
-      <h3>{businessFacingText(variant.label)}</h3>
-      <dl>
-        <dt>Variant id</dt><dd>{businessFacingText(variant.variantId)}</dd>
-        <dt>Status</dt><dd>{businessFacingText(variant.status)}</dd>
-      </dl>
-      <ChipList label="Dimension refs" values={variant.dimensionRefs.map(businessFacingText)} />
-      <ChipList label="Variant facts" values={variant.factRefs.map(businessFacingText)} />
-      <ChipList label="Backend result refs" values={variant.resultRefs.map(businessFacingText)} />
-      <ScenarioBlockerList blockers={variant.guardrailBlockers} label={`${variant.variantId} guardrail blockers`} />
-    </article>
-  );
-}
-
-function ScenarioBatchGridRow({ row }: { row: ScenarioAnalysisBatchRow }) {
-  return (
-    <div role="row" className="quote-table__row">
-      <span role="cell">{businessFacingText(row.rowId)}</span>
-      <span role="cell">{businessFacingText(row.variantId)}</span>
-      <span role="cell">{businessFacingText(row.dimensionSummary)}</span>
-      <span role="cell">{businessFacingText(row.status)}</span>
-      <span role="cell">{businessFacingText(row.backendResultRef)}</span>
-      <span role="cell">{businessFacingText(row.guardrailSummary)}</span>
-    </div>
-  );
-}
-
-function ScenarioSavedAnalysisCard({ analysis }: { analysis: ScenarioAnalysisSavedAnalysis }) {
-  return (
-    <article className="module-card module-card--light" role="listitem">
-      <p className="module-card__route">{businessFacingText(analysis.analysisId)}</p>
-      <strong className="module-card__title">{businessFacingText(analysis.name)}</strong>
-      <dl>
-        <dt>Version</dt><dd>{businessFacingText(analysis.versionRef)}</dd>
-        <dt>Saved</dt><dd>{businessFacingText(analysis.savedAt)}</dd>
-        <dt>Export ref</dt><dd>{businessFacingText(analysis.exportRef)}</dd>
-        <dt>Processing record</dt><dd>{businessFacingText(analysis.replayHash)}</dd>
-      </dl>
-    </article>
-  );
-}
-
-function ScenarioBlockerList({ blockers, label }: { blockers: ScenarioAnalysisBlocker[]; label: string }) {
-  if (!blockers.length) return null;
-  return (
-    <div className="offer-list" role="list" aria-label={label}>
-      {blockers.map((blocker) => (
-        <article key={`${blocker.blockerCode}-${blocker.sourceRef}`} className="banner banner--blocked" role="listitem">
-          <strong>{businessFacingText(blocker.blockerCode)} Â· {businessFacingText(blocker.severity)}</strong>
-          <span>{businessFacingText(blocker.reason)}</span>
-          <span>Source: {businessFacingText(blocker.sourceRef)}</span>
-          <ChipList label="Required facts" values={blocker.requiredFacts.map(businessFacingText)} />
-        </article>
-      ))}
-    </div>
-  );
-}
-
-function ScenarioRecalculationBanner({ result }: { result: ScenarioRecalculationResult }) {
-  const blocked = result.status === 'BLOCKED' || result.blockers.some((blocker) => blocker.severity.toUpperCase() === 'BLOCKER');
-  return (
-    <div className={blocked ? 'banner banner--blocked' : 'banner banner--success'} role={blocked ? 'alert' : 'status'}>
-      <strong>{blocked ? 'Recalculation blocked by backend guardrails' : 'Backend recalculation result received'}</strong>
-      <span>{businessFacingText(result.message)}</span>
-      <ChipList label="Backend result refs" values={result.backendResultRefs.map(businessFacingText)} />
-      <ScenarioBlockerList blockers={result.blockers} label="Recalculation blockers" />
-      <ChipList label="Recalculation events" values={result.events.map(businessFacingText)} />
-    </div>
-  );
 }
 
 function EligibilityExplanationSection({ runId }: { runId: string }) {

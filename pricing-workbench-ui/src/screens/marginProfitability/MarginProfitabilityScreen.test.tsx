@@ -68,7 +68,7 @@ describe('PII-24-S16 margin profitability screen', () => {
 
   it('exports version refs, audit refs, replay hash, and bounded blocked states', () => {
     render(<MarginProfitabilityScreen evidence={marginProfitabilityFixture} />);
-    expect(screen.getByText('replay-hash-margin-profitability-001')).toBeInTheDocument();
+    expect(screen.getAllByText('replay-hash-margin-profitability-001').length).toBeGreaterThan(0);
     expect(screen.getByText('governance-config:margin-fixture')).toBeInTheDocument();
     expect(screen.getByText('audit:margin-view-001')).toBeInTheDocument();
 

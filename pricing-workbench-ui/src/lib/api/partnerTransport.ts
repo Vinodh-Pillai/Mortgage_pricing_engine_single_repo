@@ -98,6 +98,38 @@ export type PartnerSafetyToggleResult = {
   events: string[];
 };
 
+export type PartnerIntegrationAlert = {
+  alertId: string;
+  severity: string;
+  alertClass: string;
+  triggerType: string;
+  routeTarget: string;
+  acknowledged: boolean;
+  blockers: string[];
+  recoveryOwner: string;
+  actionState: string;
+};
+
+export type PartnerIntegrationAlertsView = {
+  partnerId: string;
+  tenantContext: string;
+  dependencyStatus: string;
+  alerts: PartnerIntegrationAlert[];
+  rulesStatus: string;
+  fallbackReason: string;
+  uiTraceId: string;
+  events: string[];
+};
+
+export type PartnerIntegrationAlertActionResult = {
+  alertId: string;
+  action: 'ACKNOWLEDGE' | 'INVESTIGATE' | 'RESOLVE' | string;
+  status: 'BLOCKED' | 'RECORDED' | string;
+  message: string;
+  uiTraceId: string;
+  events: string[];
+};
+
 const partnerTransportHeaders = {
   Accept: 'application/json',
   'X-Ui-Trace-Id': 'ch-s05-local-trace',
@@ -174,4 +206,32 @@ export async function requestPartnerWebhookSafetyToggle(
     body: JSON.stringify({ route, paused, confirmed }),
   });
   return (await response.json()) as PartnerSafetyToggleResult;
+}
+
+export async function fetchPartnerIntegrationAlerts(
+  partnerId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<PartnerIntegrationAlertsView> {
+  const response = await fetchImpl(`/api/v1/partners/${encodeURIComponent(partnerId)}/integrations/alerts`, {
+    headers: partnerTransportHeaders,
+  });
+  if (response.status >= 500) throw new Error('BFF partner integration alert boundary is temporarily unavailable.');
+  return (await response.json()) as PartnerIntegrationAlertsView;
+}
+
+export async function requestPartnerIntegrationAlertAction(
+  partnerId: string,
+  alertId: string,
+  action: 'ACKNOWLEDGE' | 'INVESTIGATE' | 'RESOLVE' | string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<PartnerIntegrationAlertActionResult> {
+  const response = await fetchImpl(`/api/v1/partners/${encodeURIComponent(partnerId)}/integrations/alerts/${encodeURIComponent(alertId)}/actions`, {
+    method: 'POST',
+    headers: {
+      ...partnerTransportHeaders,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ action }),
+  });
+  return (await response.json()) as PartnerIntegrationAlertActionResult;
 }

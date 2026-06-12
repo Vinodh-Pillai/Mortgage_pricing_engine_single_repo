@@ -1,4 +1,5 @@
 import type { ComponentType } from 'react';
+import { scenarioAnalysisEvidenceTarget, scenarioAnalysisStateCoverage } from '../scenarioAnalysis';
 
 export type WorkbenchScreenModule = {
   id: string;
@@ -121,8 +122,8 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     breadcrumb: 'Scenario Analysis',
     screenPackage: 'screens/scenarioAnalysis',
     dataBoundary: 'lib/api/scenarioAnalysis',
-    stateCoverage: ['load-state', 'dimensions', 'guardrails', 'batch-grid', 'saved-analysis', 'export-replay', 'backend-recalculation'],
-    evidenceTarget: '.local-harness/evidence/PII-22-S15/scenario-analysis-workspace.json',
+    stateCoverage: [...scenarioAnalysisStateCoverage],
+    evidenceTarget: scenarioAnalysisEvidenceTarget,
     match: (pathname) => /^\/quote\/[^/]+\/what-if/.test(pathname),
   },
   {
@@ -166,7 +167,7 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     screenPackage: 'screens/exceptionConcessions',
     dataBoundary: 'lib/api/exceptionConcessions',
     stateCoverage: ['load-state', 'concession-request', 'eligibility-exception', 'authority-matrix', 'manual-price-guard', 'risk-events', 'history-replay-export'],
-    evidenceTarget: '.local-harness/evidence/PII-22-S18/exception-concession-workbench.json',
+    evidenceTarget: '.local-harness/evidence/PII-24-S17/exception-concessions.json',
     match: (pathname) => pathname.startsWith('/exceptions/concessions'),
   },
   {
@@ -188,7 +189,7 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     screenPackage: 'screens/partnerQuotes',
     dataBoundary: 'lib/api/partnerQuotes',
     stateCoverage: ['load-state', 'empty', 'blocked', 'ready'],
-    evidenceTarget: '.local-harness/evidence/PII-22-S21/partner-quotes.json',
+    evidenceTarget: '.local-harness/evidence/PII-24-S21/partner-quotes.json',
     match: (pathname) => pathname.startsWith('/partners/quotes'),
   },
   {
@@ -210,7 +211,7 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     screenPackage: 'screens/rateFeedOps',
     dataBoundary: 'lib/api/rateFeedOps',
     stateCoverage: ['load-state', 'workflow-steps', 'row-blockers', 'replay-evidence'],
-    evidenceTarget: '.local-harness/evidence/PII-22-S03/rate-feed-ops.json',
+    evidenceTarget: '.local-harness/evidence/PII-24-S18/rate-feed-ops.json',
     match: (pathname) => pathname.startsWith('/ops/rate-feeds'),
   },
   {
@@ -221,7 +222,7 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     screenPackage: 'screens/observabilityPerformance',
     dataBoundary: 'lib/api/observabilityPerformance',
     stateCoverage: ['load-state', 'service-groups', 'freshness', 'blocked-evidence', 'recovery-owner'],
-    evidenceTarget: '.local-harness/evidence/PII-22-S09/performance-dashboard.json',
+    evidenceTarget: '.local-harness/evidence/PII-24-S20/performance-dashboard.json',
     match: (pathname) => pathname.startsWith('/ops/performance'),
   },
   {
@@ -232,7 +233,7 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     screenPackage: 'screens/opsCases',
     dataBoundary: 'lib/api/opsCases',
     stateCoverage: ['load-state', 'empty', 'blocked', 'ready'],
-    evidenceTarget: '.local-harness/evidence/PII-22-S21/ops-cases.json',
+    evidenceTarget: '.local-harness/evidence/PII-24-S19/ops-cases.json',
     match: (pathname) => pathname.startsWith('/ops/dashboard') || pathname.startsWith('/ops/queues') || pathname.startsWith('/ops/cases') || pathname.startsWith('/ops/escalations'),
   },
   {
@@ -243,7 +244,7 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     screenPackage: 'screens/complianceEvidence',
     dataBoundary: 'lib/api/complianceEvidence',
     stateCoverage: ['load-state', 'empty', 'blocked', 'ready'],
-    evidenceTarget: '.local-harness/evidence/PII-22-S21/compliance-evidence.json',
+    evidenceTarget: '.local-harness/evidence/PII-24-S28/compliance-evidence-registry.json',
     match: (pathname) => pathname.startsWith('/compliance') || pathname.startsWith('/privacy/requests') || pathname.startsWith('/security/events'),
   },
   {
@@ -276,7 +277,7 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     screenPackage: 'screens/adminGovernance',
     dataBoundary: 'lib/api/adminGovernance',
     stateCoverage: ['load-state', 'descriptors', 'pending-review', 'dynamic-rule-evidence', 'blocked', 'ready'],
-    evidenceTarget: '.local-harness/evidence/PII-22-S11/admin-governance-lifecycle.json',
+    evidenceTarget: '.local-harness/evidence/PII-24-S24/admin-governance-lifecycle.json',
     match: (pathname) => pathname.startsWith('/admin/'),
   },
   {
@@ -313,6 +314,28 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     match: (pathname) => pathname.startsWith('/audit/replay'),
   },
   {
+    id: 'drift-monitoring',
+    label: 'Drift Monitoring',
+    routePattern: '/advisory/ml/drift',
+    breadcrumb: 'Drift Monitoring',
+    screenPackage: 'screens/driftMonitoring',
+    dataBoundary: 'ml-advisory-service drift APIs',
+    stateCoverage: ['load-state', 'blocked', 'ready'],
+    evidenceTarget: '.local-harness/evidence/PII-24-S27/drift-monitoring.json',
+    match: (pathname) => pathname.startsWith('/advisory/ml/drift'),
+  },
+  {
+    id: 'model-version-governance',
+    label: 'Model version governance',
+    routePattern: '/advisory/ml/governance',
+    breadcrumb: 'Model Version Governance',
+    screenPackage: 'screens/modelVersionGovernance',
+    dataBoundary: 'lib/api/modelVersionGovernance',
+    stateCoverage: ['load-state', 'blocked', 'ready'],
+    evidenceTarget: '.local-harness/evidence/PII-24-S26/model-version-governance.json',
+    match: (pathname) => pathname.startsWith('/advisory/ml/governance'),
+  },
+  {
     id: 'ml-advisory-insights',
     label: 'ML advisory insights',
     routePattern: '/advisory/ml',
@@ -320,7 +343,7 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     screenPackage: 'screens/mlAdvisoryInsights',
     dataBoundary: 'lib/api/mlAdvisoryInsights',
     stateCoverage: ['load-state', 'recommendation-evidence', 'model-version-governance', 'advisory-unavailable'],
-    evidenceTarget: '.local-harness/evidence/PII-22-S14/ml-advisory-insights.json',
+    evidenceTarget: '.local-harness/evidence/PII-24-S25/ml-advisory-insights.json',
     match: (pathname) => pathname.startsWith('/advisory/ml'),
   },
   {
