@@ -61,15 +61,16 @@ function registryCopyFor(screen: WorkbenchScreenModule): RegistryCopy {
 
 export const workbenchModules: WorkbenchScreenModule[] = [
   {
-    id: 'shell',
-    label: 'Workbench shell',
-    routePattern: '/quote/start',
-    breadcrumb: 'Start Quote',
-    screenPackage: 'screens/workbenchShell',
-    dataBoundary: 'lib/api/uiHealth',
-    stateCoverage: ['empty', 'load-state', 'blocked', 'ready'],
-    evidenceTarget: '.local-harness/evidence/PII-22-S21/shell-route-registry.json',
-    match: (pathname) => pathname === '/' || pathname.startsWith('/quote/start'),
+    id: 'quote-intake',
+    label: 'Pipeline',
+    routePattern: '/pipeline',
+    breadcrumb: 'Pipeline',
+    screenPackage: 'screens/quoteIntake',
+    dataBoundary: 'scenario-service draft APIs and quote-service launch APIs',
+    stateCoverage: ['loading', 'empty', 'blocked', 'needs-attention', 'ready'],
+    personaVisibility: ['loan-officer', 'borrower', 'pricing-analyst', 'admin'],
+    evidenceTarget: '.local-harness/evidence/PII-25-S05/quote-intake.json',
+    match: (pathname) => pathname === '/' || pathname.startsWith('/pipeline') || pathname.startsWith('/quote/start'),
   },
   {
     id: 'quote-offers',
@@ -259,15 +260,74 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     match: (pathname) => pathname.startsWith('/quality/'),
   },
   {
-    id: 'product-catalog-manager',
-    label: 'Product catalog manager',
+    id: 'tenant-onboarding',
+    label: 'Tenant Onboarding',
+    routePattern: '/tenant/onboarding',
+    breadcrumb: 'Tenant Onboarding',
+    screenPackage: 'screens/tenant',
+    dataBoundary: 'tenant-service tenant onboarding APIs',
+    stateCoverage: ['loading', 'empty', 'blocked', 'needs-attention', 'ready'],
+    personaVisibility: ['admin', 'operations-lead'],
+    dependencyStatus: 'Tenant-service metadata is required for full launch. The screen shows blocked and attention states when refs are unavailable.',
+    adapterStatus: 'Local UI renders progressive sections and evidence refs without inventing tenant values.',
+    evidenceTarget: '.local-harness/evidence/PII-25-S04/tenant-onboarding.json',
+    match: (pathname) => pathname.startsWith('/tenant/onboarding') || pathname.startsWith('/admin/tenants/new'),
+  },
+  {
+    id: 'product-management',
+    label: 'Product Management',
     routePattern: '/admin/products/catalog',
-    breadcrumb: 'Product Catalog Manager',
-    screenPackage: 'screens/productCatalogManager',
-    dataBoundary: 'lib/api/products',
-    stateCoverage: ['load-state', 'blocked', 'lifecycle', 'audit-evidence'],
-    evidenceTarget: '.local-harness/evidence/PII-22-S02/product-catalog-manager.json',
-    match: (pathname) => pathname.startsWith('/admin/products/catalog'),
+    breadcrumb: 'Product Management',
+    screenPackage: 'screens/product',
+    dataBoundary: 'product-service catalog APIs',
+    stateCoverage: ['loading', 'empty', 'blocked', 'needs-attention', 'ready'],
+    personaVisibility: ['admin', 'pricing-analyst', 'loan-officer'],
+    dependencyStatus: 'Product-service catalog and investor eligibility refs govern editable state.',
+    adapterStatus: 'Screen is locally available and keeps pricing rules as backend-owned references.',
+    evidenceTarget: '.local-harness/evidence/PII-25-S04/product-management.json',
+    match: (pathname) => pathname.startsWith('/admin/products/catalog') || pathname.startsWith('/admin/products/new'),
+  },
+  {
+    id: 'rate-sheet-intake',
+    label: 'Rate Sheet Intake',
+    routePattern: '/pricing/rate-sheets',
+    breadcrumb: 'Rate Sheet Intake',
+    screenPackage: 'screens/ratesheet',
+    dataBoundary: 'rate-sheet-service intake APIs',
+    stateCoverage: ['loading', 'empty', 'blocked', 'needs-attention', 'ready'],
+    personaVisibility: ['pricing-analyst', 'admin', 'operations-lead'],
+    dependencyStatus: 'Rate sheet service grid and validation contracts control publish readiness.',
+    adapterStatus: 'Upload, validation, remediation, and publish states are represented with local evidence capture.',
+    evidenceTarget: '.local-harness/evidence/PII-25-S04/rate-sheet-intake.json',
+    match: (pathname) => pathname.startsWith('/pricing/rate-sheets'),
+  },
+  {
+    id: 'pricing-analysis',
+    label: 'Pricing Analysis',
+    routePattern: '/pricing/analysis',
+    breadcrumb: 'Pricing Analysis',
+    screenPackage: 'screens/pricing',
+    dataBoundary: 'pricing-service analysis APIs',
+    stateCoverage: ['loading', 'empty', 'blocked', 'needs-attention', 'ready'],
+    personaVisibility: ['pricing-analyst', 'loan-officer', 'admin'],
+    dependencyStatus: 'Pricing waterfall and margin refs are backend-owned and may block export readiness.',
+    adapterStatus: 'Read-only analysis screen renders evidence refs and comparison surfaces without local pricing decisions.',
+    evidenceTarget: '.local-harness/evidence/PII-25-S04/pricing-analysis.json',
+    match: (pathname) => pathname.startsWith('/pricing/analysis'),
+  },
+  {
+    id: 'lock-management',
+    label: 'Lock Management',
+    routePattern: '/locks',
+    breadcrumb: 'Lock Management',
+    screenPackage: 'screens/locks',
+    dataBoundary: 'lock-service management APIs',
+    stateCoverage: ['loading', 'empty', 'blocked', 'needs-attention', 'ready'],
+    personaVisibility: ['operations-lead', 'loan-officer', 'admin', 'partner-manager'],
+    dependencyStatus: 'Lock-service expiration and investor delivery refs govern blocked and attention states.',
+    adapterStatus: 'Screen renders lock statuses, bulk action controls, and evidence capture without changing backend state.',
+    evidenceTarget: '.local-harness/evidence/PII-25-S04/lock-management.json',
+    match: (pathname) => pathname === '/locks' || pathname.startsWith('/locks/'),
   },
   {
     id: 'admin-governance',
@@ -372,8 +432,8 @@ export function WorkbenchModuleRail({ activeModuleId }: { activeModuleId: string
         <p className="eyebrow">Screen registry</p>
         <h2 id="module-shell-heading">Modular route shell</h2>
         <p>
-          Each workbench behavior now has a visible path, intended users, connected work area, and expected screen states.
-          The registry avoids internal file names and uses plain setup language for screens that need more configuration.
+          Each workbench behavior has a visible path, intended users, and expected screen states.
+          The registry avoids internal file names and keeps operational setup details out of the business navigation view.
         </p>
       </div>
       <div className="module-rail__grid" role="list" aria-label="Workbench screen modules">
@@ -394,10 +454,6 @@ export function WorkbenchModuleRail({ activeModuleId }: { activeModuleId: string
               <dd>{copy.screenArea}</dd>
               <dt>Connected work area</dt>
               <dd>{copy.sourceLabel}</dd>
-              <dt>Setup readiness</dt>
-              <dd>{adapterStatusFor(screen)}</dd>
-              <dt>Setup status</dt>
-              <dd>{dependencyStatusFor(screen)}</dd>
               <dt>Next review step</dt>
               <dd>{copy.evidenceLabel}</dd>
             </dl>

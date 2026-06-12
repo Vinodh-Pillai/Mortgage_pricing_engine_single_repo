@@ -59,7 +59,7 @@ function BlockedState({ module, onNavigate }: { module: EligibilityModuleView; o
     <section className="banner banner--blocked" role="alert" aria-labelledby="eligibility-blocked-heading">
       <h2 id="eligibility-blocked-heading">Eligibility view blocked</h2>
       <p>{module.explanation}</p>
-      <button type="button" onClick={() => onNavigate(`/quote/start?step=review&highlight=${encodeURIComponent(module.requiredNextFacts[0]?.factRef ?? 'eligibility-service')}`)}>Complete Missing Facts</button>
+      <button type="button" onClick={() => onNavigate(`/pipeline?step=review&highlight=${encodeURIComponent(module.requiredNextFacts[0]?.factRef ?? 'eligibility-service')}`)}>Complete Missing Facts</button>
     </section>
   );
 }
@@ -130,7 +130,7 @@ function FactTraceability({ module, onNavigate }: { module: EligibilityModuleVie
                 <dt>Source</dt><dd>{fact.source}</dd>
                 <dt>Rules</dt><dd><InlineRefs refs={fact.linkedRuleRefs} /></dd>
               </dl>
-              <button type="button" onClick={() => onNavigate(`/quote/start?step=${encodeURIComponent(fact.intakeStep ?? 'review')}&highlight=${encodeURIComponent(fact.factRef)}`)}>Open Intake Fact</button>
+              <button type="button" onClick={() => onNavigate(`/pipeline?step=${encodeURIComponent(fact.intakeStep ?? 'review')}&highlight=${encodeURIComponent(fact.factRef)}`)}>Open Intake Fact</button>
             </li>
           ))}
         </ul>
@@ -191,7 +191,7 @@ function RequiredNextFacts({ module, onNavigate }: { module: EligibilityModuleVi
           <li key={fact.factRef} className="evidence-card--blocked">
             <strong>{fact.label}</strong>
             <p>{fact.reason}</p>
-            <button type="button" onClick={() => onNavigate(`/quote/start?step=${encodeURIComponent(fact.intakeStep)}&highlight=${encodeURIComponent(fact.factRef)}`)}>Complete in Intake</button>
+            <button type="button" onClick={() => onNavigate(`/pipeline?step=${encodeURIComponent(fact.intakeStep)}&highlight=${encodeURIComponent(fact.factRef)}`)}>Complete in Intake</button>
           </li>
         ))}
       </ul>

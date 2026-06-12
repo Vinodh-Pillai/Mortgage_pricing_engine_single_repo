@@ -1,5 +1,7 @@
-import { useCallback, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from '../lib/i18n';
+import { useOptionalAuth } from '../lib/auth/AuthContext';
+import { roleLabels } from '../lib/auth/personas';
 import { workbenchModules, type WorkbenchScreenModule } from '../screens/workbenchShell/WorkbenchShell';
 import { ContentArea } from './ContentArea';
 import { Footer } from './Footer';
@@ -26,21 +28,47 @@ export interface ShellProps {
 
 export function Shell({ children, activeModuleId, activeRunId, breadcrumb, modules = workbenchModules, onThemeToggle, theme, user, notifications }: ShellProps) {
   const { t } = useTranslation('common');
+  const auth = useOptionalAuth();
+  const currentUser = auth?.currentPersona ? { name: auth.currentPersona.name, role: roleLabels[auth.currentPersona.role], avatar: auth.currentPersona.avatar } : user;
   const mode = useNavRailMode();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [navCollapsed, setNavCollapsed] = useState(readPersistedNavRailCollapsed);
+  const [navCollapsed, setNavCollapsed] = useState(() => {
+    try {
+      return readPersistedNavRailCollapsed();
+    } catch {
+      return false;
+    }
+  });
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const railCollapsed = mode === 'rail' && navCollapsed;
+
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem('wcpe:layout-theme') !== theme) window.localStorage.setItem('wcpe:layout-theme', theme);
+    } catch {
+      // Storage can be disabled; the shell remains usable.
+    }
+  }, [theme]);
+
+  useEffect(() => {
+    if (mode === 'rail') setDrawerOpen(false);
+  }, [mode]);
 
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
   const toggleCollapsed = useCallback(() => {
     setNavCollapsed((current) => {
-      persistNavRailCollapsed(!current);
-      return !current;
+      const next = !current;
+      try {
+        persistNavRailCollapsed(next);
+      } catch {
+        // Storage can be disabled; keep the in-memory rail state usable.
+      }
+      return next;
     });
   }, []);
 
   return (
-    <div className="layout-shell" data-breakpoint-mode={mode}>
+    <div className={`layout-shell layout-shell--${mode}${railCollapsed ? ' layout-shell--nav-collapsed' : ''}`} data-breakpoint-mode={mode} data-nav-collapsed={railCollapsed ? 'true' : 'false'}>
       <SkipLink />
       <Header
         breadcrumb={breadcrumb}
@@ -48,15 +76,16 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, modul
         notificationCount={notifications.length}
         onMenuToggle={() => setDrawerOpen((current) => !current)}
         onNotificationsToggle={() => setNotificationsOpen((current) => !current)}
+        onLogout={auth?.logout}
         onThemeToggle={onThemeToggle}
         theme={theme}
-        user={user}
+        user={currentUser}
       />
       <div className="layout-frame">
         <NavRail
           activeModuleId={activeModuleId}
           activeRunId={activeRunId}
-          collapsed={navCollapsed}
+          collapsed={railCollapsed}
           drawerOpen={drawerOpen}
           mode={mode}
           modules={modules}

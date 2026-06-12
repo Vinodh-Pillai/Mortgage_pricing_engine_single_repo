@@ -13,7 +13,7 @@ export const quoteEligibilityScreenModule = createScreenModule({
   breadcrumb: 'Eligibility Explanation',
   screenPackage: 'screens/quoteEligibility',
   dataBoundary: 'lib/api/eligibility.fetchEligibilityModuleView',
-  stateCoverage: ['loading', 'empty', 'blocked', 'needs-attention', 'ready', 'eligible', 'ineligible', 'conditional', 'explanation', 'cache-health'],
+  stateCoverage: ['loading', 'empty', 'blocked', 'needs-attention', 'ready', 'eligible', 'ineligible', 'conditional', 'explanation', 'cache-health'] as unknown as import('../contract/ScreenProps').ScreenVisualState[],
   dependencyStatus: 'Consumes eligibility-service and quote-service response shapes when connected runtime is available.',
   adapterStatus: 'Renders backend or deterministic fixture values only; no local eligibility calculations.',
   evidenceTarget: getEvidenceTarget('quote-eligibility', 'PII-24-S13'),

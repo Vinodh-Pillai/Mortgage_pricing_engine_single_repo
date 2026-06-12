@@ -388,3 +388,130 @@ export function getTestScenarios(role: PersonaRole): string[] {
 export function getExpectedPricingBehavior(role: PersonaRole) {
   return personas[role].expectedPricingBehavior;
 }
+
+export type Pii25PersonaRole =
+  | 'loan-officer'
+  | 'pricing-analyst'
+  | 'operations-lead'
+  | 'governance-reviewer'
+  | 'admin'
+  | 'partner-manager'
+  | 'compliance-officer'
+  | 'borrower';
+
+export interface Pii25Persona {
+  id: string;
+  name: string;
+  role: Pii25PersonaRole;
+  roleLabel: string;
+  email: string;
+  defaultRoute: string;
+  authorizedRoutes: string[];
+  unauthorizedRoutes: string[];
+  expectedModules: string[];
+}
+
+export const pii25Personas: Pii25Persona[] = [
+  {
+    id: 'persona-loan-officer',
+    name: 'Sarah Mitchell',
+    role: 'loan-officer',
+    roleLabel: 'Loan officer',
+    email: 'sarah.mitchell@wcpe.demo',
+    defaultRoute: '/quote/start',
+    authorizedRoutes: ['/quote/start', '/locks'],
+    unauthorizedRoutes: ['/tenant/onboarding', '/admin/products/new', '/compliance/evidence'],
+    expectedModules: ['Progressive Quote Intake', 'Lock Management'],
+  },
+  {
+    id: 'persona-pricing-analyst',
+    name: 'David Chen',
+    role: 'pricing-analyst',
+    roleLabel: 'Pricing analyst',
+    email: 'david.chen@wcpe.demo',
+    defaultRoute: '/pricing/margins',
+    authorizedRoutes: ['/pricing/analysis', '/pricing/margins', '/pricing/adjustments', '/pricing/rate-sheets'],
+    unauthorizedRoutes: ['/tenant/onboarding', '/admin/governance', '/locks'],
+    expectedModules: ['Pricing Analysis'],
+  },
+  {
+    id: 'persona-operations-lead',
+    name: 'Maria Rodriguez',
+    role: 'operations-lead',
+    roleLabel: 'Operations lead',
+    email: 'maria.rodriguez@wcpe.demo',
+    defaultRoute: '/ops/dashboard',
+    authorizedRoutes: ['/locks', '/tenant/onboarding', '/pricing/rate-sheets'],
+    unauthorizedRoutes: ['/admin/governance', '/compliance/evidence'],
+    expectedModules: ['Lock Management'],
+  },
+  {
+    id: 'persona-governance-reviewer',
+    name: 'James Thompson',
+    role: 'governance-reviewer',
+    roleLabel: 'Governance reviewer',
+    email: 'james.thompson@wcpe.demo',
+    defaultRoute: '/admin/governance',
+    authorizedRoutes: ['/compliance/evidence'],
+    unauthorizedRoutes: ['/quote/start', '/locks', '/partners/quotes'],
+    expectedModules: [],
+  },
+  {
+    id: 'persona-admin',
+    name: 'Admin User',
+    role: 'admin',
+    roleLabel: 'Admin',
+    email: 'admin@wcpe.demo',
+    defaultRoute: '/admin/governance',
+    authorizedRoutes: ['/quote/start', '/tenant/onboarding', '/admin/products/new', '/pricing/rate-sheets', '/pricing/analysis', '/locks', '/compliance/evidence'],
+    unauthorizedRoutes: [],
+    expectedModules: ['Tenant Onboarding', 'Product Management', 'Rate Sheet Intake', 'Pricing Analysis', 'Lock Management'],
+  },
+  {
+    id: 'persona-partner-manager',
+    name: 'Lisa Park',
+    role: 'partner-manager',
+    roleLabel: 'Partner manager',
+    email: 'lisa.park@wcpe.demo',
+    defaultRoute: '/partners/quotes',
+    authorizedRoutes: ['/locks'],
+    unauthorizedRoutes: ['/tenant/onboarding', '/admin/products/new', '/pricing/analysis'],
+    expectedModules: ['Lock Management'],
+  },
+  {
+    id: 'persona-compliance-officer',
+    name: 'Robert Kim',
+    role: 'compliance-officer',
+    roleLabel: 'Compliance officer',
+    email: 'robert.kim@wcpe.demo',
+    defaultRoute: '/compliance/evidence',
+    authorizedRoutes: ['/compliance/evidence'],
+    unauthorizedRoutes: ['/quote/start', '/locks', '/admin/products/new'],
+    expectedModules: [],
+  },
+  {
+    id: 'persona-borrower',
+    name: 'Alex Johnson',
+    role: 'borrower',
+    roleLabel: 'Borrower',
+    email: 'alex.johnson@borrower.demo',
+    defaultRoute: '/quote/start',
+    authorizedRoutes: ['/quote/start'],
+    unauthorizedRoutes: ['/tenant/onboarding', '/admin/products/new', '/pricing/analysis', '/locks'],
+    expectedModules: ['Progressive Quote Intake'],
+  },
+];
+
+export const pii25Screens = [
+  { name: 'Tenant Onboarding', route: '/tenant/onboarding', requiredText: ['Workspace Setup', 'Identity Configuration', 'Launch Checklist'] },
+  { name: 'Product Management', route: '/admin/products/new', requiredText: ['Product Taxonomy', 'Product Definitions', 'Bulk actions'] },
+  { name: 'Rate Sheet Intake', route: '/pricing/rate-sheets', requiredText: ['Upload/Import', 'Validation Results', 'Publish Workflow'] },
+  { name: 'Pricing Analysis', route: '/pricing/analysis', requiredText: ['Waterfall View', 'Margin Analysis', 'Scenario Comparison'] },
+  { name: 'Lock Management', route: '/locks', requiredText: ['Active Locks', 'Status', 'Bulk Actions'] },
+] as const;
+
+export function getPii25Persona(idOrRole: string): Pii25Persona {
+  const persona = pii25Personas.find((candidate) => candidate.id === idOrRole || candidate.role === idOrRole);
+  if (!persona) throw new Error(`Unknown PII-25 persona ${idOrRole}`);
+  return persona;
+}

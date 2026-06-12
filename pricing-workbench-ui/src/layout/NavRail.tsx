@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, type KeyboardEvent } from 'react';
+import { NavLink } from 'react-router-dom';
 import { Button } from '../design-system';
 import { useTranslation } from '../lib/i18n';
+import { useOptionalAuth } from '../lib/auth/AuthContext';
 import { buildNavigationTree, navigationGroups } from './navigation';
 import type { WorkbenchScreenModule } from '../screens/workbenchShell/WorkbenchShell';
 
@@ -17,9 +19,12 @@ type NavRailProps = {
 
 export function NavRail({ activeModuleId, activeRunId, collapsed, drawerOpen, mode, modules, onCloseDrawer, onToggleCollapsed }: NavRailProps) {
   const { t } = useTranslation('navigation');
+  const auth = useOptionalAuth();
   const navRef = useRef<HTMLElement>(null);
-  const items = useMemo(() => buildNavigationTree(modules, activeRunId), [activeRunId, modules]);
+  const items = useMemo(() => buildNavigationTree(modules, activeRunId, auth?.currentPersona ?? undefined), [activeRunId, auth?.currentPersona, modules]);
   const groups = navigationGroups(items);
+  const isRailCollapsed = mode === 'rail' && collapsed;
+  const navClassName = ['layout-nav', mode === 'drawer' ? 'layout-nav--drawer' : 'layout-nav--rail', isRailCollapsed ? 'layout-nav--collapsed' : 'layout-nav--expanded'].filter(Boolean).join(' ');
 
   useEffect(() => {
     if (mode !== 'drawer' || !drawerOpen) return undefined;
@@ -28,10 +33,6 @@ export function NavRail({ activeModuleId, activeRunId, collapsed, drawerOpen, mo
     firstLink?.focus();
     return () => previousActive?.focus();
   }, [drawerOpen, mode]);
-
-  useEffect(() => {
-    if (mode !== 'drawer' && drawerOpen) onCloseDrawer();
-  }, [drawerOpen, mode, onCloseDrawer]);
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
     const focusable = Array.from(navRef.current?.querySelectorAll<HTMLElement>('a[href], button:not(:disabled)') ?? []);
@@ -62,31 +63,53 @@ export function NavRail({ activeModuleId, activeRunId, collapsed, drawerOpen, mo
     <nav
       id="primary-navigation"
       ref={navRef}
-      className={mode === 'drawer' ? 'layout-nav layout-nav--drawer' : collapsed ? 'layout-nav layout-nav--collapsed' : 'layout-nav'}
+      className={navClassName}
       role={mode === 'drawer' ? 'dialog' : 'navigation'}
       aria-label={mode === 'drawer' ? t('primaryNavigationDrawer') : t('mainNavigation')}
       aria-modal={mode === 'drawer' ? true : undefined}
       onKeyDown={handleKeyDown}
     >
       <div className="layout-nav__header">
-        <h2>{mode === 'drawer' ? t('navigateWorkbench') : t('workspace')}</h2>
-        {mode === 'drawer' ? <Button type="button" variant="ghost" onClick={onCloseDrawer}>{t('common:close')}</Button> : <Button type="button" variant="ghost" onClick={onToggleCollapsed}>{collapsed ? t('expand') : t('collapse')}</Button>}
+        <h2 className="layout-nav__title">{mode === 'drawer' ? t('navigateWorkbench') : t('workspace')}</h2>
+        {mode === 'drawer' ? (
+          <Button type="button" variant="ghost" onClick={onCloseDrawer}>{t('common:close')}</Button>
+        ) : (
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={onToggleCollapsed}
+            aria-expanded={!collapsed}
+            aria-label={collapsed ? t('expand') : t('collapse')}
+            title={collapsed ? t('expand') : t('collapse')}
+          >
+            {collapsed ? '›' : t('collapse')}
+          </Button>
+        )}
       </div>
       {items.length === 0 ? <p role="status">{t('noAccessibleModules')}</p> : null}
-      {groups.map((group) => (
-        <section className="layout-nav__group" key={group} aria-labelledby={`nav-group-${group.toLowerCase()}`}>
-          <h3 id={`nav-group-${group.toLowerCase()}`}>{collapsed && mode === 'rail' ? group.slice(0, 1) : group}</h3>
-          {items.filter((item) => item.group === group).map((item) => (
-            <a key={item.id} className="layout-nav__link" href={item.route} aria-current={item.id === activeModuleId ? 'page' : undefined} title={item.label}>
-              <span>{collapsed && mode === 'rail' ? item.label.slice(0, 1) : item.label}</span>
-              {item.badgeCount ? <span className="layout-badge" aria-label={t('attentionItem', { count: item.badgeCount })}>{item.badgeCount}</span> : null}
-            </a>
-          ))}
-        </section>
-      ))}
-      <a className="layout-nav__link" href="#status-panel">{t('connectionStatus')}</a>
-      <a className="layout-nav__link" href="#notice-panel">{t('notices')}</a>
-      <a className="layout-nav__link" href="#help-panel">{t('common:help')}</a>
+      {groups.map((group) => {
+        const groupId = `nav-group-${group.toLowerCase().replace(/\s+/g, '-')}`;
+        return (
+          <section className="layout-nav__group" key={group} aria-labelledby={groupId}>
+            <h3 id={groupId} aria-label={group}>{isRailCollapsed ? group.slice(0, 1) : group}</h3>
+            {items.filter((item) => item.group === group).map((item) => (
+              <NavLink
+                key={item.id}
+                className={({ isActive }) => `layout-nav__link${isActive || item.id === activeModuleId ? ' layout-nav__link--active' : ''}`}
+                to={item.route}
+                title={item.label}
+                aria-label={item.label}
+                onClick={() => {
+                  if (mode === 'drawer') onCloseDrawer();
+                }}
+              >
+                <span className="layout-nav__link-label" aria-hidden={isRailCollapsed ? true : undefined}>{isRailCollapsed ? item.label.slice(0, 1) : item.label}</span>
+                {item.badgeCount ? <span className="layout-badge" aria-label={t('attentionItem', { count: item.badgeCount })}>{item.badgeCount}</span> : null}
+              </NavLink>
+            ))}
+          </section>
+        );
+      })}
     </nav>
   );
 }

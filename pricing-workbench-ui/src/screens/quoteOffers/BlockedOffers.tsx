@@ -7,7 +7,7 @@ export function BlockedOffers({ reason, requiredFacts = [], backendRefs = [] }: 
       <div className="banner banner--blocked" role="alert">{reason ?? 'The offer comparison response is blocked by missing upstream facts.'}</div>
       <ChipList label="Required facts" values={requiredFacts} />
       <ChipList label="Backend references" values={backendRefs} />
-      <a href="/quote/start">Return to Intake</a>
+      <a href="/pipeline">Return to Intake</a>
     </section>
   );
 }

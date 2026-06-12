@@ -4,13 +4,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ThemeProvider, themeStorageKey, useTheme } from './ThemeProvider';
 
 function ThemeProbe() {
-  const { preference, resolvedTheme, setPreference } = useTheme();
+  const { theme, preference, resolvedTheme, roleAccent, setPreference, setTheme } = useTheme();
   return (
     <div>
+      <output aria-label="theme">{theme}</output>
       <output aria-label="preference">{preference}</output>
       <output aria-label="resolved">{resolvedTheme}</output>
+      <output aria-label="role-accent">{roleAccent?.bg}</output>
       <button type="button" onClick={() => setPreference('light')}>Light</button>
-      <button type="button" onClick={() => setPreference('dark')}>Dark</button>
+      <button type="button" onClick={() => setTheme('dark')}>Dark</button>
     </div>
   );
 }
@@ -40,9 +42,12 @@ describe('ThemeProviderTest', () => {
   });
 
   it('respectsSystemPreference', () => {
-    render(<ThemeProvider><ThemeProbe /></ThemeProvider>);
+    render(<ThemeProvider role="loan-officer"><ThemeProbe /></ThemeProvider>);
     expect(screen.getByLabelText('preference')).toHaveTextContent('system');
+    expect(screen.getByLabelText('theme')).toHaveTextContent('system');
     expect(screen.getByLabelText('resolved')).toHaveTextContent('light');
+    expect(screen.getByLabelText('role-accent')).toHaveTextContent('#2dd4bf');
     expect(document.documentElement.dataset.theme).toBe('light');
+    expect(document.documentElement.dataset.role).toBe('loan-officer');
   });
 });

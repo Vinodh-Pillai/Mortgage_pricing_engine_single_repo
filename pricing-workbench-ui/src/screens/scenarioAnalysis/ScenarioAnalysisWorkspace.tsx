@@ -210,7 +210,7 @@ export function ScenarioAnalysisWorkspaceScreen({ runId, tenantContext }: { runI
           </div>
           <div className="offer-toolbar" aria-label="Guardrail recovery links">
             <a href={`/quote/${encodeURIComponent(runId)}/eligibility`}>View in Eligibility</a>
-            <a href="/quote/start">Complete Required Facts</a>
+            <a href="/pipeline">Complete Required Facts</a>
           </div>
         </div>
         <ScenarioBlockerList blockers={view.blockers} label="Scenario guardrail blockers" />

@@ -1,0 +1,53 @@
+name: PII-25 E2E
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  pii25-e2e:
+    name: Playwright ${{ matrix.browser }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Run PII-25 E2E suite
+        run: npx playwright test tests/e2e/auth/login.test.ts tests/e2e/navigation/navigation.test.ts tests/e2e/quote-intake/quote-intake.test.ts tests/e2e/tenant/tenant-onboarding.test.ts tests/e2e/product/product-management.test.ts tests/e2e/ratesheet/rate-sheet-intake.test.ts tests/e2e/pricing/pricing-analysis.test.ts tests/e2e/locks/lock-management.test.ts tests/e2e/visual tests/e2e/a11y/a11y.test.ts tests/e2e/persona/persona-matrix.test.ts --project=${{ matrix.browser }} --workers=4 --retries=2
+
+      - name: Upload HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pii25-html-report-${{ matrix.browser }}
+          path: tests/results/html-report
+          if-no-files-found: ignore
+
+      - name: Upload traces and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pii25-artifacts-${{ matrix.browser }}
+          path: |
+            tests/results/artifacts
+            test-results
+            playwright-report
+          if-no-files-found: ignore

@@ -38,4 +38,14 @@ export const colors = {
     sequential: ['#eff6ff', '#bfdbfe', '#60a5fa', '#2563eb', '#1e3a8a'],
     diverging: ['#b91c1c', '#fca5a5', '#f8fafc', '#93c5fd', '#1d4ed8'],
   },
+  role: {
+    loanOfficer: '#2dd4bf',
+    pricingAnalyst: '#60a5fa',
+    operationsLead: '#fbbf24',
+    governanceReviewer: '#a78bfa',
+    admin: '#f87171',
+    partnerManager: '#34d399',
+    complianceOfficer: '#fb7185',
+    borrower: '#818cf8',
+  },
 } as const;

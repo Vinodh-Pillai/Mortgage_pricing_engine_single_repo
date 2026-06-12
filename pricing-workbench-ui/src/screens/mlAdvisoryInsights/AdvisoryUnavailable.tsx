@@ -1,6 +1,6 @@
 import { businessFacingText } from './shared';
 
-const manualWorkflowRoute = '/quote/start';
+const manualWorkflowRoute = '/pipeline';
 
 export function AdvisoryUnavailable({ reason, onRetry }: { reason: string; onRetry: () => void }) {
   return (

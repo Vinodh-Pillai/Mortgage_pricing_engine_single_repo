@@ -1,6 +1,22 @@
 spring:
   application:
     name: tenant-context-service
+  datasource:
+    url: ${TENANT_CONTEXT_DB_URL:jdbc:postgresql://localhost:5432/tenant_context}
+    username: ${TENANT_CONTEXT_DB_USERNAME:tenant_context}
+    password: ${TENANT_CONTEXT_DB_PASSWORD}
+  flyway:
+    enabled: ${TENANT_CONTEXT_FLYWAY_ENABLED:true}
+
+auth:
+  jwt:
+    issuer: ${AUTH_JWT_ISSUER:tenant-context-service}
+    secret: ${AUTH_JWT_SECRET}
+    ttl-minutes: ${AUTH_JWT_TTL_MINUTES:60}
+  cookie:
+    name: ${AUTH_COOKIE_NAME:wcpe_auth_token}
+    secure: ${AUTH_COOKIE_SECURE:false}
+    same-site: ${AUTH_COOKIE_SAME_SITE:Lax}
 
 server:
   port: ${SERVER_PORT:8080}

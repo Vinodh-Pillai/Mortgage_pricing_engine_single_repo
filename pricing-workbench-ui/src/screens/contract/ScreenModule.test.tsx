@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { lazy } from 'react';
+import { lazy, type ReactElement } from 'react';
 import { createScreenModule, getEvidenceTarget, type ScreenModuleRegistration } from './ScreenModule';
 import { clearScreenRegistryForTests, getAllScreenModules, registerScreenModule, resolveScreenModule } from './registry';
 import { lazyScreen, preloadOnIntent } from './lazy';
@@ -10,7 +10,7 @@ import type { ScreenProps } from './ScreenProps';
 
 const TestComponent = lazy(async () => ({ default: () => <div>Ready content</div> }));
 
-function BrokenScreen() {
+function BrokenScreen(): ReactElement {
   throw new Error('Screen wrapper render failure');
 }
 

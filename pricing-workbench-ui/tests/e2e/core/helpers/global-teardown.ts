@@ -1,29 +1,14 @@
-import { FullConfig } from '@playwright/test';
-import fs from 'fs';
-import path from 'path';
+import type { FullConfig } from '@playwright/test';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
-async function globalTeardown(config: FullConfig) {
-  console.log('[Global Teardown] Cleaning up E2E test environment...');
-  
-  // Generate drift report if enabled
-  if (process.env.DRIFT_DETECTION === 'true') {
-    await generateDriftReport();
-  }
-
-  // Cleanup test data
-  await cleanupTestData();
-
-  console.log('[Global Teardown] Teardown complete');
-}
-
-async function generateDriftReport(): Promise<void> {
-  console.log('[Global Teardown] Generating drift report...');
-  // Drift report generation would be triggered here
-}
-
-async function cleanupTestData(): Promise<void> {
-  console.log('[Global Teardown] Cleaning up test data...');
-  // Test data cleanup would go here
+async function globalTeardown(_config: FullConfig) {
+  const finishedAt = new Date().toISOString();
+  const contextPath = path.resolve('tests/results/pii25-run-context.json');
+  const current = await fs.readFile(contextPath, 'utf8').catch(() => '{}');
+  const payload = { ...JSON.parse(current), finishedAt };
+  await fs.writeFile(contextPath, JSON.stringify(payload, null, 2));
+  console.log(`[PII-25 E2E] Finished mocked Playwright run at ${finishedAt}`);
 }
 
 export default globalTeardown;

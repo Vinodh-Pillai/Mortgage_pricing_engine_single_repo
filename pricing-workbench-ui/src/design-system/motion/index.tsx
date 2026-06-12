@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react';
+import { motion } from '../tokens';
 
-export const motionNames = ['fade-in', 'slide-up', 'slide-down', 'scale-in', 'shimmer'] as const;
+export const motionNames = Object.values(motion.keyframes);
 export const reducedMotionQuery = '(prefers-reduced-motion: reduce)';
+export const stagger = motion.stagger;
 
 export function AnimatePresence({ children }: { children: ReactNode }) {
   return <>{children}</>;

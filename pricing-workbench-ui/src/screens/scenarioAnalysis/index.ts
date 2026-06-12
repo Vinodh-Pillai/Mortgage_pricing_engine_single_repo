@@ -1,7 +1,3 @@
-export { ScenarioAnalysisWorkspaceScreen } from './ScenarioAnalysisWorkspace';
-export { LockPeriodComparisonScreen, ProductComparisonScreen } from './comparison';
-export { FicoSensitivityScreen, LtvSensitivityScreen } from './sensitivity';
-
 export const scenarioAnalysisRoutes = ['/quote/:runId/what-if', '/quote/:runId/what-if/fico-sensitivity', '/quote/:runId/what-if/ltv-sensitivity', '/quote/:runId/what-if/product-comparison', '/quote/:runId/what-if/lock-period-comparison'];
 export const scenarioAnalysisStateCoverage = [
   'load-state',

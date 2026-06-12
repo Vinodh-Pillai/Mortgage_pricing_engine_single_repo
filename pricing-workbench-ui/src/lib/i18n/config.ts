@@ -1,4 +1,5 @@
 import common from './locales/en-US/common.json';
+import auth from './locales/en-US/auth.json';
 import compliance from './locales/en-US/compliance.json';
 import errors from './locales/en-US/errors.json';
 import forms from './locales/en-US/forms.json';
@@ -11,15 +12,15 @@ export const defaultLocale = 'en-US' as const;
 export const supportedLocales = ['en-US', 'es-US', 'fr-CA'] as const;
 export type SupportedLocale = (typeof supportedLocales)[number];
 
-export const namespaces = ['common', 'navigation', 'errors', 'forms', 'pricing', 'operations', 'governance', 'compliance'] as const;
+export const namespaces = ['common', 'navigation', 'errors', 'forms', 'pricing', 'operations', 'governance', 'compliance', 'auth'] as const;
 export type I18nNamespace = (typeof namespaces)[number];
 
 type Catalog = Record<string, string>;
 
 export const catalogs: Record<SupportedLocale, Record<I18nNamespace, Catalog>> = {
-  'en-US': { common, navigation, errors, forms, pricing, operations, governance, compliance },
-  'es-US': { common, navigation, errors, forms, pricing, operations, governance, compliance },
-  'fr-CA': { common, navigation, errors, forms, pricing, operations, governance, compliance },
+  'en-US': { common, navigation, errors, forms, pricing, operations, governance, compliance, auth },
+  'es-US': { common, navigation, errors, forms, pricing, operations, governance, compliance, auth },
+  'fr-CA': { common, navigation, errors, forms, pricing, operations, governance, compliance, auth },
 };
 
 export function isSupportedLocale(locale: string): locale is SupportedLocale {

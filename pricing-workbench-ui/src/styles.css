@@ -24,6 +24,13 @@ body {
   min-width: 0;
 }
 
+.ds-surface-glass {
+  backdrop-filter: var(--ds-glass-blur);
+  background: var(--ds-glass-background);
+  border: 1px solid var(--ds-glass-border);
+  box-shadow: var(--ds-glass-shadow);
+}
+
 .ds-flex {
   display: flex;
   gap: var(--ds-space-4);
@@ -91,7 +98,15 @@ body {
 .ds-variant-danger {
   background: var(--ds-color-error);
   border-color: var(--ds-color-error);
-  color: #fff;
+  color: var(--ds-role-admin-text);
+}
+
+.ds-variant-glass {
+  backdrop-filter: var(--ds-glass-blur);
+  background: var(--ds-glass-surface);
+  border-color: var(--ds-glass-border);
+  box-shadow: var(--ds-shadow-glass);
+  color: var(--ds-color-text);
 }
 
 .ds-state-hover,
@@ -126,6 +141,15 @@ body {
   width: 100%;
 }
 
+.ds-input--glass,
+.ds-select--glass,
+.ds-textarea--glass {
+  backdrop-filter: var(--ds-glass-blur);
+  background: var(--ds-glass-surface);
+  border-color: var(--ds-glass-border);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 8%);
+}
+
 .ds-textarea {
   min-height: 7rem;
   resize: vertical;
@@ -136,6 +160,11 @@ body {
   accent-color: var(--ds-color-primary);
   min-height: 1rem;
   min-width: 1rem;
+}
+
+.ds-check--glass,
+.ds-radio--glass {
+  filter: drop-shadow(var(--ds-glass-shadow-colored));
 }
 
 .ds-switch {
@@ -162,6 +191,12 @@ body {
 
 .ds-switch--checked {
   background: var(--ds-color-primary);
+}
+
+.ds-switch--glass {
+  backdrop-filter: var(--ds-glass-blur-subtle);
+  background: var(--ds-glass-background-strong);
+  border: 1px solid var(--ds-glass-border);
 }
 
 .ds-switch--checked::after {
@@ -191,6 +226,19 @@ body {
   padding: var(--ds-space-4);
 }
 
+.ds-card--glass {
+  backdrop-filter: var(--ds-glass-blur-strong);
+  background: var(--ds-glass-surface);
+  border-color: var(--ds-glass-border);
+  box-shadow: var(--ds-shadow-glass);
+}
+
+.ds-card--glass:hover {
+  box-shadow: var(--ds-glass-shadow-strong);
+  transform: translateY(calc(var(--ds-space-1) * -1));
+  transition: var(--ds-motion-normal) var(--ds-ease-out);
+}
+
 .ds-table {
   border-collapse: collapse;
   color: var(--ds-color-text);
@@ -203,10 +251,50 @@ body {
   text-align: left;
 }
 
+.ds-table--glass {
+  backdrop-filter: var(--ds-glass-blur);
+  background: var(--ds-glass-background);
+  border: 1px solid var(--ds-glass-border);
+  border-radius: var(--ds-radius-lg);
+  border-collapse: separate;
+  border-spacing: 0;
+  box-shadow: var(--ds-glass-shadow);
+  overflow: hidden;
+}
+
+.ds-table--glass thead,
+.ds-table--glass tr:hover {
+  background: var(--ds-glass-background-strong);
+}
+
 .ds-tabs,
 .ds-tab-list {
   display: flex;
   gap: var(--ds-space-2);
+}
+
+.ds-tabs--glass,
+.ds-tab-list--glass {
+  backdrop-filter: var(--ds-glass-blur-subtle);
+  background: var(--ds-glass-background);
+  border: 1px solid var(--ds-glass-border);
+  border-radius: var(--ds-radius-full);
+  padding: var(--ds-space-1);
+}
+
+.ds-tab-trigger {
+  background: transparent;
+  border: 0;
+  border-radius: var(--ds-radius-full);
+  color: var(--ds-color-text-muted);
+  cursor: pointer;
+  padding: var(--ds-space-2) var(--ds-space-3);
+}
+
+.ds-tab-trigger--active {
+  background: var(--ds-glass-background-strong);
+  box-shadow: var(--ds-glass-shadow-colored);
+  color: var(--ds-color-text);
 }
 
 .ds-tab-panel {
@@ -214,23 +302,67 @@ body {
 }
 
 .ds-modal {
-  background: rgb(0 0 0 / 58%);
+  background: color-mix(in srgb, var(--ds-color-background) 58%, transparent);
   inset: 0;
   padding: 8vh 5vw;
   position: fixed;
   z-index: var(--ds-z-modal);
 }
 
+.ds-modal--glass .ds-modal__panel,
+.ds-drawer--glass,
+.ds-popover--glass,
+.ds-dropdown--glass,
+.ds-tooltip--glass,
+.ds-tab-panel--glass,
+.ds-accordion--glass {
+  backdrop-filter: var(--ds-glass-blur-strong);
+  background: var(--ds-glass-background-strong);
+  border-color: var(--ds-glass-border-strong);
+  box-shadow: var(--ds-glass-shadow-strong);
+}
+
+.ds-modal__panel {
+  animation: slide-up var(--ds-motion-normal) var(--ds-ease-out);
+}
+
+.ds-modal__header,
+.ds-modal__body,
+.ds-modal__footer,
+.ds-drawer__header,
+.ds-drawer__body,
+.ds-drawer__footer {
+  display: grid;
+  gap: var(--ds-space-3);
+  padding-block: var(--ds-space-2);
+}
+
+.ds-modal__footer,
+.ds-drawer__footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .ds-drawer {
   margin-left: auto;
   min-height: 100%;
   max-width: 28rem;
+  animation: slide-left var(--ds-motion-normal) var(--ds-ease-out);
 }
 
 .ds-tooltip {
   font-size: var(--ds-font-size-sm);
   position: relative;
   z-index: var(--ds-z-tooltip);
+}
+
+.ds-tooltip::after {
+  border: var(--ds-space-1) solid transparent;
+  border-top-color: var(--ds-glass-border);
+  content: '';
+  inset-block-end: calc(var(--ds-space-2) * -1);
+  inset-inline-start: var(--ds-space-4);
+  position: absolute;
 }
 
 .ds-popover,
@@ -255,15 +387,62 @@ body {
   width: 2.25rem;
 }
 
+.ds-avatar--sm { height: 1.75rem; width: 1.75rem; }
+.ds-avatar--md { height: 2.25rem; width: 2.25rem; }
+.ds-avatar--lg { height: 3rem; width: 3rem; }
+
+.ds-avatar--glass {
+  backdrop-filter: var(--ds-glass-blur-subtle);
+  background: var(--ds-glass-background);
+}
+
+.ds-avatar--role-badged {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ds-avatar-role-color, var(--ds-color-primary)) 20%, transparent);
+  position: relative;
+}
+
+.ds-avatar__role-badge {
+  background: var(--ds-avatar-role-color, var(--ds-color-primary));
+  border: 2px solid var(--ds-color-background);
+  border-radius: var(--ds-radius-full);
+  bottom: -0.1rem;
+  height: 0.75rem;
+  position: absolute;
+  right: -0.1rem;
+  width: 0.75rem;
+}
+
 .ds-badge,
 .ds-chip {
   gap: var(--ds-space-1);
   padding: 0.25rem 0.6rem;
 }
 
+.ds-badge--dot .ds-badge__dot {
+  background: currentColor;
+  border-radius: var(--ds-radius-full);
+  block-size: var(--ds-space-2);
+  inline-size: var(--ds-space-2);
+}
+
 .ds-chip {
   background: color-mix(in srgb, var(--ds-color-info) 18%, transparent);
   color: var(--ds-color-text);
+}
+
+.ds-chip--glass {
+  backdrop-filter: var(--ds-glass-blur-subtle);
+  background: var(--ds-glass-background);
+  border: 1px solid var(--ds-glass-border);
+  box-shadow: var(--ds-glass-shadow-colored);
+}
+
+.ds-chip__remove {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
 }
 
 .ds-icon {
@@ -281,6 +460,26 @@ body {
   width: 1em;
 }
 
+.ds-progress {
+  background: var(--ds-color-surface-raised);
+  border-radius: var(--ds-radius-full);
+  block-size: var(--ds-space-2);
+  overflow: hidden;
+}
+
+.ds-progress--glass {
+  backdrop-filter: var(--ds-glass-blur-subtle);
+  background: var(--ds-glass-background);
+  border: 1px solid var(--ds-glass-border);
+}
+
+.ds-progress__bar {
+  background: linear-gradient(90deg, var(--ds-color-primary), var(--ds-color-secondary));
+  block-size: 100%;
+  display: block;
+  transition: inline-size var(--ds-motion-normal) var(--ds-ease-out);
+}
+
 @keyframes ds-spin {
   to { transform: rotate(360deg); }
 }
@@ -291,6 +490,136 @@ body {
   background-size: 200% 100%;
   border-radius: var(--ds-radius-md);
   min-height: 1rem;
+}
+
+.ds-skeleton--glass {
+  background: linear-gradient(90deg, var(--ds-glass-background), var(--ds-glass-background-strong), var(--ds-glass-background));
+  background-size: 200% 100%;
+}
+
+.ds-floating-field,
+.ds-field-group {
+  display: grid;
+  gap: var(--ds-space-2);
+}
+
+.ds-floating-field > span,
+.ds-field-group__help {
+  color: var(--ds-color-text-muted);
+  font-size: var(--ds-font-size-sm);
+}
+
+.ds-field-group__error {
+  color: var(--ds-color-error);
+  font-size: var(--ds-font-size-sm);
+}
+
+.ds-section,
+.ds-state-panel {
+  background: var(--ds-color-surface);
+  border: 1px solid var(--ds-color-border);
+  border-radius: var(--ds-radius-xl);
+  box-shadow: var(--ds-shadow-2);
+  color: var(--ds-color-text);
+  display: grid;
+  gap: var(--ds-space-4);
+  padding: var(--ds-space-5);
+}
+
+.ds-section--glass,
+.ds-state-panel--glass {
+  backdrop-filter: var(--ds-glass-blur-strong);
+  background: var(--ds-glass-background);
+  border-color: var(--ds-glass-border);
+  box-shadow: var(--ds-glass-shadow);
+}
+
+.ds-section__header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.ds-state-panel {
+  justify-items: start;
+}
+
+.ds-blocked-state {
+  border-color: var(--ds-color-error);
+}
+
+.ds-needs-attention-state {
+  border-color: var(--ds-color-warning);
+}
+
+.ds-stepper {
+  align-items: center;
+  display: flex;
+  gap: var(--ds-space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ds-stepper--glass {
+  backdrop-filter: var(--ds-glass-blur-subtle);
+  background: var(--ds-glass-background);
+  border: 1px solid var(--ds-glass-border);
+  border-radius: var(--ds-radius-full);
+  box-shadow: var(--ds-glass-shadow-colored);
+  padding: var(--ds-space-2);
+}
+
+.ds-stepper__step {
+  align-items: center;
+  color: var(--ds-color-text-muted);
+  display: inline-flex;
+  gap: var(--ds-space-2);
+}
+
+.ds-stepper__marker {
+  align-items: center;
+  background: var(--ds-color-surface-raised);
+  border: 1px solid var(--ds-color-border);
+  border-radius: var(--ds-radius-full);
+  display: inline-flex;
+  inline-size: 1.75rem;
+  block-size: 1.75rem;
+  justify-content: center;
+}
+
+.ds-stepper__step--complete .ds-stepper__marker,
+.ds-stepper__step--current .ds-stepper__marker {
+  background: var(--ds-color-primary);
+  color: var(--ds-color-background);
+}
+
+.ds-stepper__step--blocked .ds-stepper__marker {
+  background: var(--ds-color-error);
+  color: var(--ds-role-admin-text);
+}
+
+.ds-stepper__connector {
+  background: var(--ds-color-border);
+  block-size: 1px;
+  inline-size: var(--ds-space-8);
+}
+
+.ds-role-badge {
+  align-items: center;
+  background: var(--ds-role-badge-bg);
+  border: 1px solid var(--ds-role-badge-border);
+  border-radius: var(--ds-radius-full);
+  color: var(--ds-role-badge-text);
+  display: inline-flex;
+  font-weight: 800;
+  gap: var(--ds-space-1);
+  padding: var(--ds-space-1) var(--ds-space-3);
+  text-transform: capitalize;
+}
+
+.ds-role-badge__icon {
+  display: inline-flex;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -349,7 +678,7 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
 main:focus-visible {
-  outline: 3px solid #2563eb;
+  outline: 3px solid var(--ds-color-secondary);
   outline-offset: 3px;
 }
 

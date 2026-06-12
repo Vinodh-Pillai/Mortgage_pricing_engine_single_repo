@@ -13,7 +13,7 @@ export const quoteLockScreenModule = createScreenModule({
   breadcrumb: 'Lock Workflow',
   screenPackage: 'screens/quoteLock',
   dataBoundary: 'lib/api/quoteRuns.fetchLockWorkflow',
-  stateCoverage: ['loading', 'load-state', 'empty', 'blocked', 'needs-attention', 'ready', 'confirmed', 'expired', 'extended', 'relocked', 'float-down'],
+  stateCoverage: ['loading', 'load-state', 'empty', 'blocked', 'needs-attention', 'ready', 'confirmed', 'expired', 'extended', 'relocked', 'float-down'] as unknown as import('../contract/ScreenProps').ScreenVisualState[],
   dependencyStatus: 'Consumes backend lock, quote, investor, and compliance boundaries when available.',
   adapterStatus: 'Renders backend or deterministic fixture values only; no local pricing or eligibility decisions.',
   evidenceTarget: getEvidenceTarget('quote-lock', 'PII-24-S12'),

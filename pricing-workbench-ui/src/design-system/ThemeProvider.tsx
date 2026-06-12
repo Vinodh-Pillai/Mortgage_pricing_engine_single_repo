@@ -1,21 +1,27 @@
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from 'react';
+import { roleColors, type RoleColorKey } from './tokens';
 
 export type ThemePreference = 'dark' | 'light' | 'system';
 type ResolvedTheme = 'dark' | 'light';
 
 type ThemeContextValue = {
+  theme: ThemePreference;
   preference: ThemePreference;
   resolvedTheme: ResolvedTheme;
+  role?: RoleColorKey;
+  roleAccent?: (typeof roleColors)[RoleColorKey];
+  setTheme: (preference: ThemePreference) => void;
   setPreference: (preference: ThemePreference) => void;
 };
 
 const storageKey = 'wcpe:design-system-theme';
+const legacyStorageKey = 'wcpe:theme';
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 function readStoredPreference(): ThemePreference {
   if (typeof window === 'undefined') return 'system';
   try {
-    const value = window.localStorage.getItem(storageKey);
+    const value = window.localStorage.getItem(storageKey) ?? window.localStorage.getItem(legacyStorageKey);
     return value === 'dark' || value === 'light' || value === 'system' ? value : 'system';
   } catch {
     return 'system';
@@ -31,7 +37,7 @@ function resolveTheme(preference: ThemePreference): ResolvedTheme {
   return preference === 'system' ? systemTheme() : preference;
 }
 
-export function ThemeProvider({ children, defaultPreference = 'system' }: { children: ReactNode; defaultPreference?: ThemePreference }) {
+export function ThemeProvider({ children, defaultPreference = 'system', role }: { children: ReactNode; defaultPreference?: ThemePreference; role?: RoleColorKey }) {
   const [preference, setPreferenceState] = useState<ThemePreference>(() => readStoredPreference() ?? defaultPreference);
   const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() => resolveTheme(preference));
 
@@ -39,13 +45,19 @@ export function ThemeProvider({ children, defaultPreference = 'system' }: { chil
     setResolvedTheme(resolveTheme(preference));
     if (typeof document !== 'undefined') {
       document.documentElement.dataset.theme = preference === 'system' ? resolveTheme(preference) : preference;
+      if (role) document.documentElement.dataset.role = role;
+      else delete document.documentElement.dataset.role;
+      document.documentElement.style.setProperty('--ds-role-accent-bg', role ? roleColors[role].bg : 'var(--ds-color-primary)');
+      document.documentElement.style.setProperty('--ds-role-accent-text', role ? roleColors[role].text : 'var(--ds-color-background)');
+      document.documentElement.style.setProperty('--ds-role-accent-border', role ? roleColors[role].border : 'var(--ds-color-primary-strong)');
     }
     try {
       window.localStorage.setItem(storageKey, preference);
+      window.localStorage.removeItem(legacyStorageKey);
     } catch {
       // Storage can be disabled; theme remains functional for the current session.
     }
-  }, [preference]);
+  }, [preference, role]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return undefined;
@@ -61,9 +73,17 @@ export function ThemeProvider({ children, defaultPreference = 'system' }: { chil
     return () => media.removeEventListener?.('change', update);
   }, [preference]);
 
-  const value = useMemo<ThemeContextValue>(() => ({ preference, resolvedTheme, setPreference: setPreferenceState }), [preference, resolvedTheme]);
+  const value = useMemo<ThemeContextValue>(() => ({
+    theme: preference,
+    preference,
+    resolvedTheme,
+    role,
+    roleAccent: role ? roleColors[role] : undefined,
+    setTheme: setPreferenceState,
+    setPreference: setPreferenceState,
+  }), [preference, resolvedTheme, role]);
 
-  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
+  return <ThemeContext.Provider value={value}><span data-theme-provider suppressHydrationWarning>{children}</span></ThemeContext.Provider>;
 }
 
 export function useTheme() {

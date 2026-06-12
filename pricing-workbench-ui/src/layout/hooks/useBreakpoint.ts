@@ -14,14 +14,38 @@ export function getBreakpointForWidth(width: number): Breakpoint {
   return 'mobile';
 }
 
+function readCurrentBreakpoint(): Breakpoint {
+  if (typeof window === 'undefined') return getBreakpointForWidth(desktop);
+  return getBreakpointForWidth(window.innerWidth);
+}
+
 export function useBreakpoint() {
-  const [breakpoint, setBreakpoint] = useState<Breakpoint>(() => getBreakpointForWidth(typeof window === 'undefined' ? desktop : window.innerWidth));
+  const [breakpoint, setBreakpoint] = useState<Breakpoint>(readCurrentBreakpoint);
 
   useEffect(() => {
-    const update = () => setBreakpoint(getBreakpointForWidth(window.innerWidth));
+    if (typeof window === 'undefined') return undefined;
+    let animationFrame: number | null = null;
+    const commitBreakpoint = () => {
+      animationFrame = null;
+      setBreakpoint((current) => {
+        const next = readCurrentBreakpoint();
+        return current === next ? current : next;
+      });
+    };
+    const update = () => {
+      if (typeof requestAnimationFrame !== 'function') {
+        commitBreakpoint();
+        return;
+      }
+      if (animationFrame !== null) return;
+      animationFrame = requestAnimationFrame(commitBreakpoint);
+    };
     update();
     window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
+    return () => {
+      if (animationFrame !== null && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(animationFrame);
+      window.removeEventListener('resize', update);
+    };
   }, []);
 
   return breakpoint;

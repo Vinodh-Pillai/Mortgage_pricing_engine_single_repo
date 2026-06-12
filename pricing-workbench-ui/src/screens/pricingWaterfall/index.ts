@@ -13,7 +13,7 @@ export const pricingWaterfallScreenModule = createScreenModule({
   breadcrumb: 'Pricing Waterfall',
   screenPackage: 'screens/pricingWaterfall',
   dataBoundary: 'lib/api/quoteRuns.fetchPricingWaterfall',
-  stateCoverage: ['loading', 'load-state', 'empty', 'blocked', 'needs-attention', 'ready', 'redacted', 'replay-evidence'],
+  stateCoverage: ['loading', 'load-state', 'empty', 'blocked', 'needs-attention', 'ready', 'redacted', 'replay-evidence'] as unknown as import('../contract/ScreenProps').ScreenVisualState[],
   dependencyStatus: 'Consumes pricing-service waterfall evidence plus adjustment, margin, governance, and audit refs when connected runtime is available.',
   adapterStatus: 'Renders backend or deterministic fixture values only; no local pricing calculations.',
   evidenceTarget: getEvidenceTarget('pricing-waterfall', 'PII-24-S14'),

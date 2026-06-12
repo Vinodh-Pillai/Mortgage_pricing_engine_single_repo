@@ -1,4 +1,4 @@
-import { APIRequestContext, request } from '@playwright/test';
+import { APIRequestContext, Page, request } from '@playwright/test';
 import { PersonaRole, personas } from '../personas/personas';
 
 export interface ApiResponse<T = any> {
@@ -320,6 +320,68 @@ export class ApiHelper {
   async healthCheck(): Promise<ApiResponse> {
     return this.get({} as TestContext, '/actuator/health');
   }
+}
+
+export async function mockPii25BackendApis(page: Page): Promise<void> {
+  await page.route('**/api/v1/**', async (route) => route.fulfill({ json: { mocked: true, status: 'READY', records: [] } }));
+  await page.route('**/api/ui/health', async (route) => route.fulfill({ json: { service: 'pricing-workbench-ui', status: 'AVAILABLE', ready: true, dependencyStatus: 'READY', dependencies: [] } }));
+  await page.route('**/api/v1/tenants/*/quote-runs/intake-metadata', async (route) => route.fulfill({ json: pii25IntakeMetadata() }));
+  await page.route('**/api/v1/tenants/*/scenarios', async (route) => route.fulfill({ json: { scenarioId: 'scenario-e2e-pii25', scenarioVersion: 1, status: 'DRAFT_INCOMPLETE' } }));
+  await page.route('**/api/v1/tenants/*/scenarios/scenario-e2e-pii25', async (route) => route.fulfill({ json: pii25DraftScenario() }));
+  await page.route('**/api/v1/tenants/*/scenarios/scenario-e2e-pii25/**', async (route) => route.fulfill({ json: { scenarioId: 'scenario-e2e-pii25', scenarioVersion: 2, status: 'DRAFT_INCOMPLETE' } }));
+  await page.route('**/api/v1/tenants/*/scenarios/scenario-e2e-pii25/**/validate', async (route) => route.fulfill({ json: { passed: true, status: 'PASSED', message: 'Validated by mocked PII-25 scenario service.', blockers: {} } }));
+  await page.route('**/api/v1/tenants/*/quote-runs', async (route) => route.fulfill({ json: { status: 'CREATED', runId: 'e2e-run', nextRoute: '/quote/e2e-run/offers', validationSummary: { passed: true, status: 'PASSED', message: 'Quote run launched from mocked backend.', blockers: {} }, uiTraceId: 'pii25-e2e', events: [{ eventType: 'QUOTE_RUN_CREATED' }], fallbackMode: false, dependencyStatus: 'READY', auditPackageId: 'audit-pii25', replayHashRef: 'replay-pii25', validationIssues: [], missingContractBlockers: [] } }));
+  await page.route('**/api/v1/tenants/*/products/**', async (route) => route.fulfill({ json: { products: [{ id: 'product-alpha', status: 'ready' }], total: 1 } }));
+  await page.route('**/api/v1/products/**', async (route) => route.fulfill({ json: { products: [{ id: 'product-alpha', status: 'ready' }], total: 1 } }));
+  await page.route('**/api/v1/tenants/*/rate-sheets/**', async (route) => route.fulfill({ json: { rateSheets: [{ id: 'rs-001', status: 'ready' }], validation: { passed: true } } }));
+  await page.route('**/api/v1/rate-sheets/**', async (route) => route.fulfill({ json: { rateSheets: [{ id: 'rs-001', status: 'ready' }], validation: { passed: true } } }));
+  await page.route('**/api/v1/tenants/*/pricing/**', async (route) => route.fulfill({ json: { waterfall: [{ label: 'Base selection', value: 'service-owned' }], margins: [], comparisons: [] } }));
+  await page.route('**/api/v1/pricing/**', async (route) => route.fulfill({ json: { waterfall: [{ label: 'Base selection', value: 'service-owned' }], margins: [], comparisons: [] } }));
+  await page.route('**/api/v1/tenants/*/locks/**', async (route) => route.fulfill({ json: { locks: [{ id: 'lock-e2e', status: 'confirmed' }], detail: { id: 'lock-e2e', status: 'confirmed' } } }));
+  await page.route('**/api/v1/locks/**', async (route) => route.fulfill({ json: { locks: [{ id: 'lock-e2e', status: 'confirmed' }], detail: { id: 'lock-e2e', status: 'confirmed' } } }));
+}
+
+function pii25Field(fieldId: string, required = false, dataType: 'text' | 'email' | 'textarea' | 'number' = 'text') {
+  return { fieldId, label: fieldId.replace(/[A-Z]/g, ' $&').replace(/^./, (c) => c.toUpperCase()), groupId: 'pii25', dataType, required, helpText: `${fieldId} mocked help`, sourceRef: 'pii25-e2e-mock', decisionQuality: 'VERIFIED', validationMessages: [] };
+}
+
+function pii25IntakeMetadata() {
+  return {
+    tenantContext: 'ui-preview-tenant',
+    dependencyStatus: 'READY',
+    fieldGroups: [
+      { groupId: 'scenario-identity', label: 'Scenario Identity', helpText: '', fields: [pii25Field('quoteIntent', true), pii25Field('channel', true), pii25Field('scenarioName'), pii25Field('externalLoanId')] },
+      { groupId: 'borrower-credit', label: 'Borrower Credit', helpText: '', fields: [pii25Field('borrowerName', true), pii25Field('contactEmail', true, 'email'), pii25Field('creditScore', false, 'number')] },
+      { groupId: 'loan-structure', label: 'Loan Structure', helpText: '', fields: [pii25Field('loanPurpose', true), pii25Field('loanAmount', false, 'number'), pii25Field('purchasePriceOrValue', false, 'number')] },
+      { groupId: 'property', label: 'Property', helpText: '', fields: [pii25Field('propertyState', true), pii25Field('propertyZip', true), pii25Field('propertyCounty')] },
+      { groupId: 'income-assets', label: 'Income Assets', helpText: '', fields: [pii25Field('monthlyIncome', false, 'number'), pii25Field('monthlyDebt', false, 'number'), pii25Field('liquidAssets', false, 'number')] },
+      { groupId: 'preferences', label: 'Preferences', helpText: '', fields: [pii25Field('productFamily'), pii25Field('productPreference'), pii25Field('effectiveDate')] },
+    ],
+    decisionControls: [],
+    validationIssues: [],
+    auditPackageId: 'audit-pii25',
+    replayHashRef: 'replay-pii25',
+    fallbackReason: '',
+    uiTraceId: 'pii25-e2e',
+    quickQuoteState: { minimalFirstStepFields: ['quoteIntent', 'channel'], progressiveSectionOrder: ['scenario-identity', 'borrower-credit', 'loan-structure', 'property', 'income-assets', 'preferences'], quoteServiceRequiredFacts: ['scenarioId'], backendOwnedFactSources: ['scenario-service', 'quote-service'], blockedByContracts: [], fallbackReason: '' },
+  };
+}
+
+function pii25DraftScenario() {
+  return {
+    scenarioId: 'scenario-e2e-pii25',
+    scenarioVersion: 3,
+    status: 'DRAFT_INCOMPLETE',
+    intake: {
+      quoteIntent: 'Purchase',
+      channel: 'Retail',
+      borrowerName: 'Sarah Borrower',
+      contactEmail: 'sarah.borrower@example.com',
+      loanPurpose: 'Purchase',
+      propertyState: 'CA',
+      propertyZip: '90210',
+    },
+  };
 }
 
 export const apiHelper = new ApiHelper();

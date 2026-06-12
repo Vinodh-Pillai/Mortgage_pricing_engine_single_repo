@@ -264,3 +264,33 @@ export const expectedPricingOutcomes: Record<string, {
     ineligibleProducts: ['CONV', 'VA'],
   },
 };
+
+export const pii25QuoteIntakeFixture = {
+  quoteIntent: 'Purchase',
+  channel: 'Retail',
+  scenarioName: 'PII-25 E2E Prime Purchase',
+  externalLoanId: 'PII25-E2E-001',
+  borrowerName: 'Sarah Borrower',
+  contactEmail: 'sarah.borrower@example.com',
+  creditScore: '780',
+  loanPurpose: 'Purchase',
+  loanAmount: '400000',
+  purchasePriceOrValue: '500000',
+  propertyState: 'CA',
+  propertyZip: '90210',
+  propertyCounty: 'Los Angeles',
+  monthlyIncome: '12500',
+  monthlyDebt: '2800',
+  liquidAssets: '75000',
+  productFamily: 'Conventional',
+  productPreference: 'CONV',
+  effectiveDate: '2024-01-20',
+};
+
+export const pii25FunctionalityFixtures = {
+  tenant: { workspaceName: 'PII-25 Tenant Workspace', contact: 'ops@example.com' },
+  product: { productName: 'PII-25 Purchase Product', channel: 'Retail' },
+  ratesheet: { fileName: 'pii25-rate-sheet.csv', investor: 'Investor mapping A' },
+  pricing: { runId: 'e2e-run', scenario: 'Baseline scenario' },
+  locks: { lockId: 'lock-e2e', borrowerRef: 'Borrower ref B' },
+};

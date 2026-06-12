@@ -1,4 +1,5 @@
-﻿import { type FormEvent, type ReactNode, Suspense, lazy, useEffect, useState } from 'react';
+﻿import { type ReactNode, Suspense, lazy, useEffect, useState } from 'react';
+import { Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 import {
   fetchOfferComparison,
   fetchOfferExplanation,
@@ -12,19 +13,9 @@ import {
 import {
   fetchPricingWaterfall,
   fetchQuoteJourneyMap,
-  fetchScenarioIntakeMetadata,
-  launchQuoteRun,
-  type BorrowerIntake,
-  type IntakeValidation,
-  type LaunchState,
-  type MetadataState,
   type PricingWaterfallView,
-  type ProgressiveQuickQuoteState,
   type QuoteJourneyMapView,
   type QuoteJourneyNode,
-  type QuoteRunLaunch,
-  type ScenarioIntakeField,
-  type ScenarioIntakeMetadata,
   type WaterfallLedgerRow,
 } from './lib/api/quoteRuns';
 import { confirmLock, fetchLockWorkflow, type LockConfirmationResult, type LockWorkflowView } from './lib/api/locks';
@@ -109,476 +100,218 @@ import {
   type RuleCalculationEvidenceView,
   type RuleEvidenceRow,
 } from './lib/api/customRules';
-import AdjustmentEvidenceScreen from './screens/adjustmentEvidence/AdjustmentEvidenceScreen';
-import { MarginProfitabilityScreen } from './screens/marginProfitability';
-import ExceptionConcessionsScreen from './screens/exceptionConcessions';
-import { RateFeedOperationsScreen } from './screens/rateFeedOps';
-import { OpsCasesScreen } from './screens/opsCases';
-import { PerformanceDashboardScreen } from './screens/observabilityPerformance';
-import { ComplianceEvidenceScreen } from './screens/complianceEvidence';
 import { partnerIntegrationEvidenceTarget, partnerIntegrationRoutes, partnerIntegrationStateCoverage } from './screens/partnerIntegrations';
-import { ProductCatalogManagerScreen } from './screens/productCatalogManager';
-import { AdminGovernanceScreen } from './screens/adminGovernance';
-import { MlAdvisoryInsightsScreen } from './screens/mlAdvisoryInsights';
-import { ModelVersionGovernanceScreen } from './screens/modelVersionGovernance';
-import { DriftMonitoringScreen } from './screens/driftMonitoring';
 import {
   fetchAuditReplayWorkbench,
   type AuditReplayRecordSummary,
   type AuditReplayRunSummary,
   type AuditReplayWorkbenchView,
 } from './lib/api/auditReplay';
-import { FicoSensitivityScreen, LockPeriodComparisonScreen, LtvSensitivityScreen, ProductComparisonScreen, ScenarioAnalysisWorkspaceScreen } from './screens/scenarioAnalysis';
 import {
   fetchTenantPlatformCoverage,
   type TenantPlatformControl,
   type TenantPlatformCoverageView,
 } from './lib/api/tenantPlatform';
-import { fetchUiHealth, type UiHealth } from './lib/api/uiHealth';
-import { createTenantWorkspace, type TenantSetupRequest, type TenantSetupResult } from './lib/api/tenants';
-import {
-  createProductCatalogEntry,
-  type ProductSetupRequest,
-  type ProductSetupResult,
-} from './lib/api/products';
-import { resolveWorkbenchModule, WorkbenchModuleRail } from './screens/workbenchShell/WorkbenchShell';
+import { WorkbenchModuleRail } from './screens/workbenchShell/WorkbenchShell';
 import { DiagnosticsDetails } from './components/DiagnosticsDetails';
-import { WorkflowField } from './components/WorkflowField';
-import { WorkflowResultBanner } from './components/WorkflowResultBanner';
 import { ThemeProvider } from './design-system';
 import { Shell } from './layout';
+import { layoutThemeStorageKey } from './layout/Header';
+import { AuthProvider } from './lib/auth/AuthContext';
+import { RouteGuard } from './routing/RouteGuard';
+import { useCurrentRoute } from './routing/hooks';
 
-const QuickQuoteIntake = lazy(() => import('./screens/quickQuote/QuickQuoteIntake'));
+const LoginScreen = lazy(() => import('./screens/auth/LoginScreen').then((module) => ({ default: module.LoginScreen })));
+const QuoteIntakeScreen = lazy(() => import('./screens/quoteIntake/QuoteIntakeScreen').then((module) => ({ default: module.QuoteIntakeScreen })));
+const NotFoundScreen = lazy(() => import('./screens/NotFoundScreen'));
+const AdjustmentEvidenceScreen = lazy(() => import('./screens/adjustmentEvidence/AdjustmentEvidenceScreen'));
+const MarginProfitabilityScreen = lazy(() => import('./screens/marginProfitability').then((module) => ({ default: module.MarginProfitabilityScreen })));
+const ExceptionConcessionsScreen = lazy(() => import('./screens/exceptionConcessions'));
+const RateFeedOperationsScreen = lazy(() => import('./screens/rateFeedOps').then((module) => ({ default: module.RateFeedOperationsScreen })));
+const OpsCasesScreen = lazy(() => import('./screens/opsCases').then((module) => ({ default: module.OpsCasesScreen })));
+const PerformanceDashboardScreen = lazy(() => import('./screens/observabilityPerformance').then((module) => ({ default: module.PerformanceDashboardScreen })));
+const ComplianceEvidenceScreen = lazy(() => import('./screens/complianceEvidence').then((module) => ({ default: module.ComplianceEvidenceScreen })));
+const ProductCatalogManagerScreen = lazy(() => import('./screens/productCatalogManager').then((module) => ({ default: module.ProductCatalogManagerScreen })));
+const AdminGovernanceScreen = lazy(() => import('./screens/adminGovernance').then((module) => ({ default: module.AdminGovernanceScreen })));
+const MlAdvisoryInsightsScreen = lazy(() => import('./screens/mlAdvisoryInsights').then((module) => ({ default: module.MlAdvisoryInsightsScreen })));
+const ModelVersionGovernanceScreen = lazy(() => import('./screens/modelVersionGovernance').then((module) => ({ default: module.ModelVersionGovernanceScreen })));
+const DriftMonitoringScreen = lazy(() => import('./screens/driftMonitoring').then((module) => ({ default: module.DriftMonitoringScreen })));
+const ScenarioAnalysisWorkspaceScreen = lazy(() => import('./screens/scenarioAnalysis/ScenarioAnalysisWorkspace').then((module) => ({ default: module.ScenarioAnalysisWorkspaceScreen })));
+const FicoSensitivityScreen = lazy(() => import('./screens/scenarioAnalysis/sensitivity/FicoSensitivity').then((module) => ({ default: module.FicoSensitivityScreen })));
+const LtvSensitivityScreen = lazy(() => import('./screens/scenarioAnalysis/sensitivity/LtvSensitivity').then((module) => ({ default: module.LtvSensitivityScreen })));
+const ProductComparisonScreen = lazy(() => import('./screens/scenarioAnalysis/comparison/ProductComparison').then((module) => ({ default: module.ProductComparisonScreen })));
+const LockPeriodComparisonScreen = lazy(() => import('./screens/scenarioAnalysis/comparison/LockPeriodComparison').then((module) => ({ default: module.LockPeriodComparisonScreen })));
+const TenantOnboardingScreen = lazy(() => import('./screens/tenant/TenantOnboardingScreen').then((module) => ({ default: module.TenantOnboardingScreen })));
+const ProductManagementScreen = lazy(() => import('./screens/product/ProductManagementScreen').then((module) => ({ default: module.ProductManagementScreen })));
+const RateSheetIntakeScreen = lazy(() => import('./screens/ratesheet/RateSheetIntakeScreen').then((module) => ({ default: module.RateSheetIntakeScreen })));
+const PricingAnalysisScreen = lazy(() => import('./screens/pricing/PricingAnalysisScreen').then((module) => ({ default: module.PricingAnalysisScreen })));
+const LockManagementScreen = lazy(() => import('./screens/locks/LockManagementScreen').then((module) => ({ default: module.LockManagementScreen })));
 
-type HealthState =
-  | { kind: 'loading' }
-  | { kind: 'reachable'; health: UiHealth }
-  | { kind: 'unreachable'; message: string };
-
-const fallbackNotice = 'The guided workbench is available with safe local setup records where external integrations are not configured.';
 const uiTraceId = 'brw-s01-local-trace';
 const tenantBoundaryPlaceholder = 'ui-preview-tenant';
 const partnerBoundaryPlaceholder = 'partner-preview';
 const selectedOfferStoragePrefix = 'wcpe:selectedOfferId:';
 
-const initialIntake: BorrowerIntake = {
-  quoteIntent: '',
-  channel: '',
-  scenarioName: '',
-  externalLoanId: '',
-  sourceSystem: 'PRICING_WORKBENCH',
-  borrowerName: '',
-  borrowerRole: 'PRIMARY',
-  coBorrowerName: '',
-  coBorrowerRole: 'CO_BORROWER',
-  contactEmail: '',
-  creditStatus: 'AVAILABLE',
-  creditScore: '',
-  creditScoreSource: 'TRI_MERGE',
-  creditReportDate: '',
-  creditReadiness: '',
-  loanPurpose: '',
-  loanAmount: '',
-  purchasePriceOrValue: '',
-  downPaymentOrEquity: '',
-  subordinateFinancingAmount: '0',
-  helocDrawnAmount: '0',
-  helocLimitAmount: '0',
-  lienPosition: 'FIRST',
-  termMonths: '360',
-  amortizationType: 'FIXED',
-  requestedLockPeriodDays: '30',
-  propertyState: '',
-  propertyCounty: '',
-  propertyZip: '',
-  propertyType: 'SINGLE_FAMILY',
-  occupancyType: 'PRIMARY_RESIDENCE',
-  unitCount: '1',
-  purchasePrice: '',
-  appraisedValue: '',
-  condoProjectType: '',
-  manufacturedHomeFlag: 'false',
-  monthlyIncome: '',
-  incomeType: 'W2',
-  employmentType: 'SALARIED',
-  monthlyDebt: '',
-  suppliedDti: '',
-  reserveMonths: '',
-  incomeVerificationStatus: 'VERIFIED',
-  assetVerificationStatus: 'VERIFIED',
-  liquidAssets: '',
-  reserves: '',
-  productFamily: '',
-  productPreference: '',
-  quoteFilters: '',
-  effectiveDate: '',
-  actorId: '',
-  clientContext: '',
-};
-
-const initialTenantSetup: TenantSetupRequest = {
-  tenantName: '',
-  operationsContact: '',
-  launchGoal: '',
-};
-
-const initialProductSetup: ProductSetupRequest = {
-  productName: '',
-  productOwner: '',
-  borrowerNeed: '',
-};
+function readInitialLayoutTheme(): 'dark' | 'light' {
+  if (typeof window === 'undefined') return 'dark';
+  try {
+    const stored = window.localStorage.getItem(layoutThemeStorageKey);
+    return stored === 'light' || stored === 'dark' ? stored : 'dark';
+  } catch {
+    return 'dark';
+  }
+}
 
 export function App() {
-  const [healthState, setHealthState] = useState<HealthState>({ kind: 'loading' });
-  const [intake, setIntake] = useState<BorrowerIntake>(initialIntake);
-  const [tenantSetup, setTenantSetup] = useState<TenantSetupRequest>(initialTenantSetup);
-  const [productSetup, setProductSetup] = useState<ProductSetupRequest>(initialProductSetup);
-  const [errors, setErrors] = useState<Partial<Record<keyof BorrowerIntake, string>>>({});
-  const [tenantErrors, setTenantErrors] = useState<Partial<Record<keyof TenantSetupRequest, string>>>({});
-  const [productErrors, setProductErrors] = useState<Partial<Record<keyof ProductSetupRequest, string>>>({});
-  const [launchState, setLaunchState] = useState<LaunchState>({ kind: 'idle' });
-  const [metadataState, setMetadataState] = useState<MetadataState>({ kind: 'loading' });
-  const [tenantResult, setTenantResult] = useState<TenantSetupResult | null>(null);
-  const [productResult, setProductResult] = useState<ProductSetupResult | null>(null);
-  const [activeRunId, setActiveRunId] = useState<string | null>(() => runIdFromPath(window.location.pathname));
-  const [activeScreen, setActiveScreen] = useState<'offers' | 'quoteDetail' | 'lock' | 'status' | 'eligibility' | 'waterfall' | 'journey' | 'whatIf' | null>(() => screenFromPath(window.location.pathname));
-  const [partnerTransportActive] = useState(() => partnerTransportPathActive(window.location.pathname));
-  const [partnerQuotesActive] = useState(() => window.location.pathname.startsWith('/partners/quotes'));
-  const [opsCasesActive] = useState(() => opsPathActive(window.location.pathname));
-  const [performanceActive] = useState(() => performancePathActive(window.location.pathname));
-  const [rateFeedOpsActive] = useState(() => rateFeedOpsPathActive(window.location.pathname));
-  const [complianceActive] = useState(() => compliancePathActive(window.location.pathname));
-  const [qualityActive] = useState(() => qualityPathActive(window.location.pathname));
-  const [adminActive] = useState(() => adminPathActive(window.location.pathname));
-  const [driftMonitoringActive] = useState(() => driftMonitoringPathActive(window.location.pathname));
-  const [modelVersionGovernanceActive] = useState(() => modelVersionGovernancePathActive(window.location.pathname));
-  const [mlAdvisoryActive] = useState(() => mlAdvisoryPathActive(window.location.pathname));
-  const [productCatalogManagerActive] = useState(() => productCatalogManagerPathActive(window.location.pathname));
-  const [customRulesActive] = useState(() => customRulesPathActive(window.location.pathname));
-  const [adjustmentEvidenceActive] = useState(() => adjustmentEvidencePathActive(window.location.pathname));
-  const [marginProfitabilityActive] = useState(() => marginProfitabilityPathActive(window.location.pathname));
-  const [auditReplayActive] = useState(() => auditReplayPathActive(window.location.pathname));
-  const [exceptionConcessionsActive] = useState(() => exceptionConcessionPathActive(window.location.pathname));
-  const [tenantPlatformActive] = useState(() => tenantPlatformPathActive(window.location.pathname));
-  const [scenarioAnalysisActive] = useState(() => scenarioAnalysisPathActive(window.location.pathname));
-  const activeModule = resolveWorkbenchModule(window.location.pathname);
-  const featureRegistryActive = activeModule.id === 'service-modules' && window.location.pathname.startsWith('/service-modules');
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
-
-  useEffect(() => {
-    let active = true;
-
-    fetchUiHealth()
-      .then((health) => {
-        if (active) setHealthState({ kind: 'reachable', health });
-      })
-      .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'Connection status request failed';
-        if (active) setHealthState({ kind: 'unreachable', message });
-      });
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-
-    fetchScenarioIntakeMetadata(tenantBoundaryPlaceholder)
-      .then((metadata) => {
-        if (active) setMetadataState({ kind: 'loaded', metadata });
-      })
-      .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'Scenario intake metadata is unavailable.';
-        if (active) setMetadataState({ kind: 'unreachable', message });
-      });
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  function updateField(field: keyof BorrowerIntake, value: string) {
-    setIntake((current) => ({ ...current, [field]: value }));
-    setErrors((current) => ({ ...current, [field]: undefined }));
-  }
-
-  function updateTenantField(field: keyof TenantSetupRequest, value: string) {
-    setTenantSetup((current) => ({ ...current, [field]: value }));
-    setTenantErrors((current) => ({ ...current, [field]: undefined }));
-  }
-
-  function updateProductField(field: keyof ProductSetupRequest, value: string) {
-    setProductSetup((current) => ({ ...current, [field]: value }));
-    setProductErrors((current) => ({ ...current, [field]: undefined }));
-  }
-
-  function validateTenantSetup(values: TenantSetupRequest): Partial<Record<keyof TenantSetupRequest, string>> {
-    const nextErrors: Partial<Record<keyof TenantSetupRequest, string>> = {};
-    if (!values.tenantName.trim()) nextErrors.tenantName = 'Workspace name is required.';
-    if (!values.operationsContact.trim()) nextErrors.operationsContact = 'Operations contact is required.';
-    if (!values.launchGoal.trim()) nextErrors.launchGoal = 'Launch goal is required.';
-    return nextErrors;
-  }
-
-  function validateProductSetup(values: ProductSetupRequest): Partial<Record<keyof ProductSetupRequest, string>> {
-    const nextErrors: Partial<Record<keyof ProductSetupRequest, string>> = {};
-    if (!values.productName.trim()) nextErrors.productName = 'Product name is required.';
-    if (!values.productOwner.trim()) nextErrors.productOwner = 'Product owner is required.';
-    if (!values.borrowerNeed.trim()) nextErrors.borrowerNeed = 'Borrower need is required.';
-    return nextErrors;
-  }
-
-  function focusFirstInvalid(nextErrors: Partial<Record<keyof BorrowerIntake, string>>) {
-    const firstInvalidField = ['quoteIntent', 'channel', 'borrowerName', 'contactEmail'].find((field) => nextErrors[field as keyof BorrowerIntake]);
-    if (firstInvalidField) document.getElementById(firstInvalidField)?.focus();
-  }
-
-  function validateRequiredFields(values: BorrowerIntake): Partial<Record<keyof BorrowerIntake, string>> {
-    const nextErrors: Partial<Record<keyof BorrowerIntake, string>> = {};
-    const metadataFields = metadataState.kind === 'loaded'
-      ? metadataState.metadata.fieldGroups.flatMap((group) => group.fields)
-      : [];
-    const requiredFields: Pick<ScenarioIntakeField, 'fieldId' | 'label'>[] = [
-      { fieldId: 'quoteIntent', label: 'Quote intent' },
-      { fieldId: 'channel', label: 'Channel' },
-      { fieldId: 'borrowerName', label: 'Borrower name' },
-      { fieldId: 'contactEmail', label: 'Contact email' },
-      ...metadataFields.filter((field) => field.required),
-    ];
-
-    requiredFields.forEach((field) => {
-      if (!values[field.fieldId]?.trim()) nextErrors[field.fieldId] = `${field.label} is required.`;
-    });
-    return nextErrors;
-  }
-
-  async function submitIntake(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const nextErrors = validateRequiredFields(intake);
-    if (Object.keys(nextErrors).length > 0) {
-      setErrors(nextErrors);
-      setLaunchState({
-        kind: 'blocked',
-        validation: {
-          passed: false,
-          status: 'BLOCKED',
-          message: 'Complete the highlighted required fields.',
-          blockers: nextErrors,
-        },
-      });
-      focusFirstInvalid(nextErrors);
-      return;
-    }
-
-    setLaunchState({ kind: 'submitting' });
-    try {
-      const launch = await launchQuoteRun(tenantBoundaryPlaceholder, intake);
-      if (launch.status === 'BLOCKED') {
-        setErrors(launch.validationSummary.blockers);
-        setLaunchState({ kind: 'blocked', validation: launch.validationSummary });
-        focusFirstInvalid(launch.validationSummary.blockers);
-        return;
-      }
-
-      if (launch.nextRoute) {
-        window.history.pushState({ runId: launch.runId, screenId: 'BRW-S02' }, '', launch.nextRoute);
-      }
-      setActiveRunId(launch.runId);
-      setActiveScreen('offers');
-      setLaunchState({ kind: 'created', launch });
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Quick quote setup is unavailable.';
-      setLaunchState({ kind: 'outage', message });
-    }
-  }
-
-  async function submitTenantSetup(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const nextErrors = validateTenantSetup(tenantSetup);
-    if (Object.keys(nextErrors).length > 0) {
-      setTenantErrors(nextErrors);
-      setTenantResult({ tenantId: null, status: 'BLOCKED', message: 'Complete the highlighted workspace fields.', nextStep: 'Finish setup details.', placeholders: [] });
-      return;
-    }
-    setTenantResult(await createTenantWorkspace(tenantSetup));
-  }
-
-  async function submitProductSetup(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const nextErrors = validateProductSetup(productSetup);
-    if (Object.keys(nextErrors).length > 0) {
-      setProductErrors(nextErrors);
-      setProductResult({ productId: null, status: 'BLOCKED', message: 'Complete the highlighted product fields.', nextStep: 'Finish product details.', placeholders: [] });
-      return;
-    }
-    setProductResult(await createProductCatalogEntry(productSetup));
-  }
+  const [theme, setTheme] = useState<'dark' | 'light'>(readInitialLayoutTheme);
+  const currentRoute = useCurrentRoute();
+  const activeModule = currentRoute.module;
+  const activeRunId = currentRoute.params.runId ?? null;
 
   return (
     <ThemeProvider>
-    <Shell
-      activeModuleId={activeModule.id}
-      activeRunId={activeRunId}
-      breadcrumb={activeRunId ? screenLabel(activeScreen) : activeModule.breadcrumb}
-      notifications={healthState.kind === 'unreachable' ? [{ id: 'health', label: healthState.message, attentionRequired: true }] : []}
-      onThemeToggle={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
-      theme={theme}
-      user={{ name: 'Workbench user', role: 'Pricing analyst' }}
-    >
-
-          {!activeRunId && featureRegistryActive ? <WorkbenchModuleRail activeModuleId={activeModule.id} /> : null}
-
-          {tenantPlatformActive ? (
-            <TenantPlatformCoverageSection />
-          ) : scenarioAnalysisActive && activeRunId && ficoSensitivityPathActive(window.location.pathname) ? (
-            <FicoSensitivityScreen runId={activeRunId} tenantContext={tenantBoundaryPlaceholder} />
-          ) : scenarioAnalysisActive && activeRunId && ltvSensitivityPathActive(window.location.pathname) ? (
-            <LtvSensitivityScreen runId={activeRunId} tenantContext={tenantBoundaryPlaceholder} />
-          ) : scenarioAnalysisActive && activeRunId && productComparisonPathActive(window.location.pathname) ? (
-            <ProductComparisonScreen runId={activeRunId} tenantContext={tenantBoundaryPlaceholder} />
-          ) : scenarioAnalysisActive && activeRunId && lockPeriodComparisonPathActive(window.location.pathname) ? (
-            <LockPeriodComparisonScreen runId={activeRunId} tenantContext={tenantBoundaryPlaceholder} />
-          ) : scenarioAnalysisActive && activeRunId ? (
-            <ScenarioAnalysisWorkspaceScreen runId={activeRunId} tenantContext={tenantBoundaryPlaceholder} />
-          ) : exceptionConcessionsActive ? (
-            <ExceptionConcessionWorkbenchSection />
-          ) : auditReplayActive ? (
-            <AuditReplayWorkbenchSection />
-          ) : customRulesActive ? (
-            <CustomRuleEvidenceSection />
-          ) : adjustmentEvidenceActive ? (
-            <AdjustmentEvidenceScreen tenantContext={tenantBoundaryPlaceholder} />
-          ) : marginProfitabilityActive ? (
-            <MarginProfitabilityScreen tenantContext={tenantBoundaryPlaceholder} />
-          ) : performanceActive ? (
-            <PerformanceDashboardScreen tenantContext={tenantBoundaryPlaceholder} />
-          ) : rateFeedOpsActive ? (
-            <RateFeedOperationsScreen tenantContext={tenantBoundaryPlaceholder} />
-          ) : productCatalogManagerActive ? (
-            <ProductCatalogManagerScreen tenantContext={tenantBoundaryPlaceholder} />
-          ) : adminActive ? (
-            <AdminGovernanceScreen />
-          ) : driftMonitoringActive ? (
-            <DriftMonitoringScreen />
-          ) : modelVersionGovernanceActive ? (
-            <ModelVersionGovernanceScreen />
-          ) : mlAdvisoryActive ? (
-            <MlAdvisoryInsightsScreen />
-          ) : qualityActive ? (
-            <QualityGuardrailsSection />
-          ) : complianceActive ? (
-            <ComplianceEvidenceScreen tenantContext={tenantBoundaryPlaceholder} />
-          ) : opsCasesActive ? (
-            <OpsCasesScreen tenantContext={tenantBoundaryPlaceholder} />
-          ) : partnerTransportActive ? (
-            <PartnerTransportReliabilitySection partnerId={partnerBoundaryPlaceholder} />
-          ) : partnerQuotesActive ? (
-            <PartnerQuoteLifecycleSection partnerId={partnerBoundaryPlaceholder} />
-          ) : activeRunId && activeScreen === 'quoteDetail' ? (
-            <QuoteDetailSection runId={activeRunId} offerId={offerIdFromPath(window.location.pathname) ?? 'quote-option-contract-required'} />
-          ) : activeRunId && activeScreen === 'lock' ? (
-            <LockLifecycleSection runId={activeRunId} />
-          ) : activeRunId && activeScreen === 'eligibility' ? (
-            <EligibilityExplanationSection runId={activeRunId} />
-          ) : activeRunId && activeScreen === 'waterfall' ? (
-            <PricingWaterfallSection runId={activeRunId} />
-          ) : activeRunId && activeScreen === 'journey' ? (
-            <QuoteJourneyMapSection runId={activeRunId} />
-          ) : activeRunId ? (
-            <OfferComparisonSection runId={activeRunId} />
-          ) : featureRegistryActive ? (
-            <section className="panel" aria-labelledby="feature-registry-status-heading">
-              <div className="panel-heading-row">
-                <div>
-                  <p className="eyebrow">Dependency status</p>
-                  <h2 id="feature-registry-status-heading">Feature registry dependency status</h2>
-                </div>
-              </div>
-              <p role="status">
-                The feature screen registry is available even when connected service setup is incomplete.
-                Each module card shows its workbench path, intended users, setup status, and expected loading or attention states in plain language.
-              </p>
-            </section>
-          ) : (
-            <>
-              <section className="hero" aria-labelledby="borrower-title">
-                <p className="eyebrow">Guided pricing workflow</p>
-                <h2 id="borrower-title">Start pricing work in one place</h2>
-                <p>
-                  Set up a tenant workspace, prepare product catalog entries, start a quick quote, compare offers, and continue
-                  to lock and operations surfaces without entering rates or policy assumptions in the UI.
-                </p>
-              </section>
-
-              <section id="tenant-setup" className="panel" aria-labelledby="tenant-heading">
-                <div className="panel-heading-row">
-                  <div>
-                    <p className="eyebrow">Workspace setup</p>
-                    <h2 id="tenant-heading">Tenant onboarding</h2>
-                  </div>
-                </div>
-                <p className="field-help">Create a local setup record for a tenant workspace. External identity and tenant integrations remain configuration-owned.</p>
-                <form className="intake-form" onSubmit={submitTenantSetup} noValidate>
-                  <WorkflowField id="tenantName" label="Workspace name" value={tenantSetup.tenantName} error={tenantErrors.tenantName} onChange={(value) => updateTenantField('tenantName', value)} />
-                  <WorkflowField id="operationsContact" label="Operations contact" value={tenantSetup.operationsContact} error={tenantErrors.operationsContact} onChange={(value) => updateTenantField('operationsContact', value)} />
-                  <WorkflowField id="launchGoal" label="Launch goal" value={tenantSetup.launchGoal} error={tenantErrors.launchGoal} onChange={(value) => updateTenantField('launchGoal', value)} multiline />
-                  <button type="submit">Create tenant workspace</button>
-                </form>
-                {tenantResult ? <WorkflowResultBanner result={tenantResult} successLabel="Tenant workspace recorded" blockedLabel="Tenant setup needs attention" /> : null}
-              </section>
-
-              <section id="product-management" className="panel" aria-labelledby="product-heading">
-                <div className="panel-heading-row">
-                  <div>
-                    <p className="eyebrow">Catalog setup</p>
-                    <h2 id="product-heading">Product management</h2>
-                  </div>
-                </div>
-                <p className="field-help">Record product catalog intent without entering mortgage pricing rates, eligibility thresholds, or regulatory values.</p>
-                <form className="intake-form" onSubmit={submitProductSetup} noValidate>
-                  <WorkflowField id="productName" label="Product name" value={productSetup.productName} error={productErrors.productName} onChange={(value) => updateProductField('productName', value)} />
-                  <WorkflowField id="productOwner" label="Product owner" value={productSetup.productOwner} error={productErrors.productOwner} onChange={(value) => updateProductField('productOwner', value)} />
-                  <WorkflowField id="borrowerNeed" label="Borrower need served" value={productSetup.borrowerNeed} error={productErrors.borrowerNeed} onChange={(value) => updateProductField('borrowerNeed', value)} multiline />
-                  <button type="submit">Add product draft</button>
-                </form>
-                {productResult ? <WorkflowResultBanner result={productResult} successLabel="Product draft recorded" blockedLabel="Product setup needs attention" /> : null}
-              </section>
-
-              <Suspense fallback={<div className="panel quick-quote-module" aria-labelledby="intake-heading"><div className="panel-heading-row"><div><p className="eyebrow">Guided quick quote</p><h2 id="intake-heading">Progressive quick quote intake</h2></div></div><p role="status">Loading quick quote module...</p></div>}>
-                <QuickQuoteIntake
-                  intake={intake}
-                  errors={errors}
-                  launchState={launchState}
-                  metadataState={metadataState}
-                  onChange={updateField}
-                  onRetry={() => setLaunchState({ kind: 'idle' })}
-                  onSubmit={submitIntake}
-                />
-              </Suspense>
-            </>
-          )}
-
-          <section id="status-panel" className="panel" aria-labelledby="status-heading" tabIndex={-1}>
-            <h2 id="status-heading">Connection status</h2>
-            <HealthPanel state={healthState} />
-          </section>
-
-          <section id="notice-panel" className="panel" aria-labelledby="notice-heading">
-            <h2 id="notice-heading">Notices</h2>
-            <p role="status">{fallbackNotice}</p>
-          </section>
-
-          <section id="help-panel" className="panel" aria-labelledby="help-heading">
-            <h2 id="help-heading">Help</h2>
-            <button type="button" onClick={() => document.getElementById('status-panel')?.focus()}>
-              Return focus to status
-            </button>
-          </section>
-    </Shell>
+      <AuthProvider>
+        <Shell
+          activeModuleId={activeModule.id}
+          activeRunId={activeRunId}
+          breadcrumb={activeModule.breadcrumb}
+          notifications={[]}
+          onThemeToggle={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
+          theme={theme}
+          user={{ name: 'Workbench user', role: 'Pricing analyst' }}
+        >
+          <Suspense fallback={<section className="panel"><p role="status">Loading route...</p></section>}>
+            <RouteGuard>
+            <Routes>
+              <Route path="/" element={<Navigate to="/pipeline" replace />} />
+              <Route path="/login" element={<LoginScreen />} />
+              <Route path="/pipeline" element={<QuoteIntakeScreen tenantId={tenantBoundaryPlaceholder} />} />
+              <Route path="/quote/start" element={<Navigate to="/pipeline" replace />} />
+              <Route path="/quote/:runId">
+                <Route path="offers" element={<QuoteOffersRoute />} />
+                <Route path="offers/:optionId" element={<QuoteDetailRoute />} />
+                <Route path="pricing-waterfall" element={<PricingWaterfallRoute />} />
+                <Route path="journey" element={<QuoteJourneyRoute />} />
+                <Route path="what-if" element={<ScenarioAnalysisRoute />} />
+                <Route path="what-if/fico-sensitivity" element={<FicoSensitivityRoute />} />
+                <Route path="what-if/ltv-sensitivity" element={<LtvSensitivityRoute />} />
+                <Route path="what-if/product-comparison" element={<ProductComparisonRoute />} />
+                <Route path="what-if/lock-period-comparison" element={<LockPeriodComparisonRoute />} />
+                <Route path="lock" element={<QuoteLockRoute />} />
+                <Route path="status" element={<QuoteLockRoute />} />
+                <Route path="eligibility" element={<EligibilityRoute />} />
+                <Route path="*" element={<NotFoundRoute />} />
+              </Route>
+              <Route path="/pricing/adjustments" element={<AdjustmentEvidenceScreen tenantContext={tenantBoundaryPlaceholder} />} />
+              <Route path="/pricing/margins" element={<MarginProfitabilityScreen tenantContext={tenantBoundaryPlaceholder} />} />
+              <Route path="/exceptions/concessions" element={<ExceptionConcessionWorkbenchSection />} />
+              <Route path="/partners/quotes/*" element={<PartnerQuoteLifecycleSection partnerId={partnerBoundaryPlaceholder} />} />
+              <Route path="/partners/integrations/*" element={<PartnerTransportReliabilitySection partnerId={partnerBoundaryPlaceholder} />} />
+              <Route path="/partners/webhooks/*" element={<PartnerTransportReliabilitySection partnerId={partnerBoundaryPlaceholder} />} />
+              <Route path="/partners/admin/safety/*" element={<PartnerTransportReliabilitySection partnerId={partnerBoundaryPlaceholder} />} />
+              <Route path="/partners/alerts/*" element={<PartnerTransportReliabilitySection partnerId={partnerBoundaryPlaceholder} />} />
+              <Route path="/ops/rate-feeds" element={<RateFeedOperationsScreen tenantContext={tenantBoundaryPlaceholder} />} />
+              <Route path="/ops/performance" element={<PerformanceDashboardScreen tenantContext={tenantBoundaryPlaceholder} />} />
+              <Route path="/ops/dashboard" element={<OpsCasesScreen tenantContext={tenantBoundaryPlaceholder} />} />
+              <Route path="/ops/cases/:caseId" element={<OperationsCaseTriageSection />} />
+              <Route path="/compliance/evidence" element={<ComplianceEvidenceScreen tenantContext={tenantBoundaryPlaceholder} />} />
+              <Route path="/quality/validation" element={<QualityGuardrailsSection />} />
+              <Route path="/tenant/onboarding" element={<TenantOnboardingScreen />} />
+              <Route path="/admin/tenants/new" element={<TenantOnboardingScreen />} />
+              <Route path="/admin/products/catalog" element={<ProductManagementScreen />} />
+              <Route path="/admin/products/new" element={<ProductManagementScreen />} />
+              <Route path="/pricing/rate-sheets" element={<RateSheetIntakeScreen />} />
+              <Route path="/pricing/rate-sheets/new" element={<RateSheetIntakeScreen />} />
+              <Route path="/pricing/rate-sheets/:id" element={<RateSheetIntakeScreen />} />
+              <Route path="/pricing/analysis" element={<PricingAnalysisScreen />} />
+              <Route path="/pricing/analysis/:runId" element={<PricingAnalysisScreen />} />
+              <Route path="/locks" element={<LockManagementScreen />} />
+              <Route path="/locks/:lockId" element={<LockManagementScreen />} />
+              <Route path="/admin/governance" element={<AdminGovernanceScreen />} />
+              <Route path="/custom-rules" element={<CustomRuleEvidenceSection />} />
+              <Route path="/platform/tenant-context" element={<TenantPlatformCoverageSection />} />
+              <Route path="/audit/replay" element={<AuditReplayWorkbenchSection />} />
+              <Route path="/advisory/ml/drift" element={<DriftMonitoringScreen />} />
+              <Route path="/advisory/ml/governance" element={<ModelVersionGovernanceScreen />} />
+              <Route path="/advisory/ml" element={<MlAdvisoryInsightsScreen />} />
+              <Route path="/service-modules" element={<FeatureRegistryRoute />} />
+              <Route path="*" element={<NotFoundRoute />} />
+            </Routes>
+            </RouteGuard>
+          </Suspense>
+        </Shell>
+      </AuthProvider>
     </ThemeProvider>
   );
+}
+
+function requiredRouteParam(value: string | undefined, fallback: string) {
+  return value ? decodeURIComponent(value) : fallback;
+}
+
+function QuoteOffersRoute() {
+  const { runId } = useParams();
+  return <OfferComparisonSection runId={requiredRouteParam(runId, 'quote-run-required')} />;
+}
+
+function QuoteDetailRoute() {
+  const { runId, optionId } = useParams();
+  return <QuoteDetailSection runId={requiredRouteParam(runId, 'quote-run-required')} offerId={requiredRouteParam(optionId, 'quote-option-contract-required')} />;
+}
+
+function QuoteLockRoute() {
+  const { runId } = useParams();
+  return <LockLifecycleSection runId={requiredRouteParam(runId, 'quote-run-required')} />;
+}
+
+function EligibilityRoute() {
+  const { runId } = useParams();
+  return <EligibilityExplanationSection runId={requiredRouteParam(runId, 'quote-run-required')} />;
+}
+
+function PricingWaterfallRoute() {
+  const { runId } = useParams();
+  return <PricingWaterfallSection runId={requiredRouteParam(runId, 'quote-run-required')} />;
+}
+
+function QuoteJourneyRoute() {
+  const { runId } = useParams();
+  return <QuoteJourneyMapSection runId={requiredRouteParam(runId, 'quote-run-required')} />;
+}
+
+function ScenarioAnalysisRoute() {
+  const { runId } = useParams();
+  return <ScenarioAnalysisWorkspaceScreen runId={requiredRouteParam(runId, 'quote-run-required')} tenantContext={tenantBoundaryPlaceholder} />;
+}
+
+function FicoSensitivityRoute() {
+  const { runId } = useParams();
+  return <FicoSensitivityScreen runId={requiredRouteParam(runId, 'quote-run-required')} tenantContext={tenantBoundaryPlaceholder} />;
+}
+
+function LtvSensitivityRoute() {
+  const { runId } = useParams();
+  return <LtvSensitivityScreen runId={requiredRouteParam(runId, 'quote-run-required')} tenantContext={tenantBoundaryPlaceholder} />;
+}
+
+function ProductComparisonRoute() {
+  const { runId } = useParams();
+  return <ProductComparisonScreen runId={requiredRouteParam(runId, 'quote-run-required')} tenantContext={tenantBoundaryPlaceholder} />;
+}
+
+function LockPeriodComparisonRoute() {
+  const { runId } = useParams();
+  return <LockPeriodComparisonScreen runId={requiredRouteParam(runId, 'quote-run-required')} tenantContext={tenantBoundaryPlaceholder} />;
+}
+
+function FeatureRegistryRoute() {
+  return (
+    <WorkbenchModuleRail activeModuleId="service-modules" />
+  );
+}
+
+function NotFoundRoute() {
+  return <NotFoundScreen tenantId={tenantBoundaryPlaceholder} uiTraceId="pii-25-s01-not-found" onEvidenceCapture={() => undefined} />;
 }
 
 type LockState =
@@ -665,94 +398,6 @@ type TenantPlatformCoverageState =
   | { kind: 'loading' }
   | { kind: 'loaded'; view: TenantPlatformCoverageView }
   | { kind: 'unreachable'; message: string };
-
-function opsPathActive(pathname: string) {
-  return pathname.startsWith('/ops/dashboard') || pathname.startsWith('/ops/queues') || pathname.startsWith('/ops/cases') || pathname.startsWith('/ops/escalations');
-}
-
-function rateFeedOpsPathActive(pathname: string) {
-  return pathname.startsWith('/ops/rate-feeds');
-}
-
-function performancePathActive(pathname: string) {
-  return pathname.startsWith('/ops/performance');
-}
-
-function partnerTransportPathActive(pathname: string) {
-  return pathname.startsWith('/partners/integrations') || pathname.startsWith('/partners/webhooks') || pathname.startsWith('/partners/admin/safety') || pathname.startsWith('/partners/alerts');
-}
-
-function compliancePathActive(pathname: string) {
-  return pathname.startsWith('/compliance') || pathname.startsWith('/privacy/requests') || pathname.startsWith('/security/events');
-}
-
-function qualityPathActive(pathname: string) {
-  return pathname.startsWith('/quality/');
-}
-
-function adminPathActive(pathname: string) {
-  return pathname.startsWith('/admin/');
-}
-
-function mlAdvisoryPathActive(pathname: string) {
-  return pathname.startsWith('/advisory/ml');
-}
-
-function modelVersionGovernancePathActive(pathname: string) {
-  return pathname.startsWith('/advisory/ml/governance');
-}
-
-function driftMonitoringPathActive(pathname: string) {
-  return pathname.startsWith('/advisory/ml/drift');
-}
-
-function productCatalogManagerPathActive(pathname: string) {
-  return pathname.startsWith('/admin/products/catalog');
-}
-
-function customRulesPathActive(pathname: string) {
-  return pathname === '/custom-rules' || pathname.startsWith('/custom-rules/');
-}
-
-function marginProfitabilityPathActive(pathname: string) {
-  return pathname.startsWith('/pricing/margins');
-}
-
-function adjustmentEvidencePathActive(pathname: string) {
-  return pathname.startsWith('/pricing/adjustments');
-}
-
-function auditReplayPathActive(pathname: string) {
-  return pathname.startsWith('/audit/replay');
-}
-
-function exceptionConcessionPathActive(pathname: string) {
-  return pathname.startsWith('/exceptions/concessions');
-}
-
-function tenantPlatformPathActive(pathname: string) {
-  return pathname.startsWith('/platform/tenant-context');
-}
-
-function scenarioAnalysisPathActive(pathname: string) {
-  return /^\/quote\/[^/]+\/what-if/.test(pathname);
-}
-
-function ficoSensitivityPathActive(pathname: string) {
-  return /^\/quote\/[^/]+\/what-if\/fico-sensitivity\/?$/.test(pathname);
-}
-
-function ltvSensitivityPathActive(pathname: string) {
-  return /^\/quote\/[^/]+\/what-if\/ltv-sensitivity\/?$/.test(pathname);
-}
-
-function productComparisonPathActive(pathname: string) {
-  return /^\/quote\/[^/]+\/what-if\/product-comparison\/?$/.test(pathname);
-}
-
-function lockPeriodComparisonPathActive(pathname: string) {
-  return /^\/quote\/[^/]+\/what-if\/lock-period-comparison\/?$/.test(pathname);
-}
 
 function CustomRuleEvidenceSection() {
   const [ruleState, setRuleState] = useState<CustomRuleEvidenceState>({ kind: 'loading' });
@@ -2024,14 +1669,20 @@ function ComplianceEvidenceRegistrySection() {
 }
 
 function OperationsCaseTriageSection() {
+  const { caseId } = useParams();
+  const navigate = useNavigate();
   const [caseState, setCaseState] = useState<OpsCaseState>({ kind: 'loading' });
-  const [selectedCaseId, setSelectedCaseId] = useState<string | null>(caseIdFromOpsPath(window.location.pathname));
+  const [selectedCaseId, setSelectedCaseId] = useState<string | null>(() => caseId ? decodeURIComponent(caseId) : null);
   const [detailState, setDetailState] = useState<OpsCaseDetailState>({ kind: 'idle' });
   const [owner, setOwner] = useState('');
   const [note, setNote] = useState('');
   const [escalationReason, setEscalationReason] = useState('');
   const [resolutionCode, setResolutionCode] = useState('');
   const [actionResult, setActionResult] = useState<OpsCaseActionResult | null>(null);
+
+  useEffect(() => {
+    if (caseId) setSelectedCaseId(decodeURIComponent(caseId));
+  }, [caseId]);
 
   useEffect(() => {
     let active = true;
@@ -2072,7 +1723,7 @@ function OperationsCaseTriageSection() {
   }, [selectedCaseId]);
 
   function selectCase(caseId: string) {
-    window.history.pushState({ caseId, screenId: 'OPS-S02' }, '', `/ops/cases/${encodeURIComponent(caseId)}`);
+    navigate(`/ops/cases/${encodeURIComponent(caseId)}`, { state: { caseId, screenId: 'OPS-S02' } });
     setSelectedCaseId(caseId);
   }
 
@@ -3030,6 +2681,7 @@ function TransportResultBanner({ result, acceptedLabel, blockedLabel }: { result
 }
 
 function LockLifecycleSection({ runId }: { runId: string }) {
+  const navigate = useNavigate();
   const selectedOfferId = sessionStorage.getItem(`${selectedOfferStoragePrefix}${runId}`);
   const [lockState, setLockState] = useState<LockState>({ kind: 'loading' });
   const [disclosuresAccepted, setDisclosuresAccepted] = useState(false);
@@ -3058,7 +2710,7 @@ function LockLifecycleSection({ runId }: { runId: string }) {
       const result = await confirmLock(tenantBoundaryPlaceholder, runId, selectedOfferId, disclosuresAccepted);
       setConfirmation(result);
       if (result.status === 'CONFIRMED' && result.statusRoute) {
-        window.history.pushState({ runId, selectedOfferId, screenId: 'BRW-S05' }, '', result.statusRoute);
+        navigate(result.statusRoute, { state: { runId, selectedOfferId, screenId: 'BRW-S05' } });
       }
     } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Lock confirmation is unavailable.';
@@ -3261,43 +2913,6 @@ function LockAuditGroups({ groups }: { groups: NonNullable<LockWorkflowView['aud
           <ChipList label={`${group.eventId} evidence refs`} values={group.evidenceRefs.map(businessFacingText)} />
         </article>
       ))}
-    </div>
-  );
-}
-
-function LaunchBanner({ state, onRetry }: { state: LaunchState; onRetry: () => void }) {
-  if (state.kind === 'idle') {
-    return <p className="banner banner--info">Required fields are marked with an asterisk. Missing data keeps you on /quote/start.</p>;
-  }
-
-  if (state.kind === 'submitting') {
-    return <p className="banner banner--info" role="status">Submitting borrower details...</p>;
-  }
-
-  if (state.kind === 'blocked') {
-    return (
-      <div className="banner banner--blocked" role="alert" aria-live="assertive">
-        <strong>{state.validation.message}</strong>
-        <span>Progression is blocked until the required intake fields are complete.</span>
-      </div>
-    );
-  }
-
-  if (state.kind === 'outage') {
-    return (
-      <div className="banner banner--blocked" role="alert" aria-live="assertive">
-        <strong>Service outage fallback</strong>
-        <span>{businessFacingText(state.message)} Retry when the workbench service is reachable.</span>
-        <DiagnosticsDetails items={[`Support reference: ${uiTraceId}`]} />
-        <button type="button" onClick={onRetry}>Retry intake</button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="banner banner--success" role="status">
-      <strong>Run created</strong>
-      <span>Run id {state.launch.runId} is ready for BRW-S02 offers at {state.launch.nextRoute}.</span>
     </div>
   );
 }
@@ -3673,6 +3288,7 @@ function EligibilityDecisionCard({ decision }: { decision: EligibilityDecisionVi
 }
 
 function OfferComparisonSection({ runId }: { runId: string }) {
+  const navigate = useNavigate();
   const [offerState, setOfferState] = useState<OfferState>({ kind: 'loading' });
   const [sortKey, setSortKey] = useState('payment');
   const [confidenceFilter, setConfidenceFilter] = useState('');
@@ -3722,7 +3338,7 @@ function OfferComparisonSection({ runId }: { runId: string }) {
     );
     if (result.status === 'SELECTED' && result.selectedOfferId && result.nextRoute) {
       sessionStorage.setItem(`${selectedOfferStoragePrefix}${runId}`, result.selectedOfferId);
-      window.history.pushState({ runId, selectedOfferId: result.selectedOfferId, screenId: 'BRW-S04' }, '', result.nextRoute);
+      navigate(result.nextRoute, { state: { runId, selectedOfferId: result.selectedOfferId, screenId: 'BRW-S04' } });
       setSelectionMessage(`Offer ${result.selectedOfferId} selected for lock workflow with ${valueText(result.lockEligibilityRef)} and ${valueText(result.snapshotRef)}.`);
       return;
     }
@@ -4017,62 +3633,3 @@ function valueText(value: string | number | null | undefined) {
   if (value === null || value === undefined || value === '') return 'Not provided';
   return String(value);
 }
-
-function runIdFromPath(pathname: string) {
-  const match = pathname.match(/^\/quote\/([^/]+)\/(offers|lock|status|eligibility|pricing-waterfall|journey|what-if)/);
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
-function offerIdFromPath(pathname: string) {
-  const match = pathname.match(/^\/quote\/[^/]+\/offers\/([^/]+)/);
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
-function screenFromPath(pathname: string): 'offers' | 'quoteDetail' | 'lock' | 'status' | 'eligibility' | 'waterfall' | 'journey' | 'whatIf' | null {
-  const match = pathname.match(/^\/quote\/[^/]+\/(offers|lock|status|eligibility|pricing-waterfall|journey|what-if)(?:\/[^/]+)?/);
-  if (!match) return null;
-  if (match[1] === 'offers' && offerIdFromPath(pathname)) return 'quoteDetail';
-  if (match[1] === 'what-if') return 'whatIf';
-  if (match[1] === 'journey') return 'journey';
-  return match[1] === 'pricing-waterfall' ? 'waterfall' : (match[1] as 'offers' | 'lock' | 'status' | 'eligibility');
-}
-
-function screenLabel(screen: 'offers' | 'quoteDetail' | 'lock' | 'status' | 'eligibility' | 'waterfall' | 'journey' | 'whatIf' | null) {
-  if (screen === 'quoteDetail') return 'Quote Detail';
-  if (screen === 'whatIf') return 'Scenario Analysis';
-  if (screen === 'waterfall') return 'Pricing Waterfall';
-  if (screen === 'journey') return 'Quote Journey Map';
-  if (screen === 'eligibility') return 'Eligibility Explanation';
-  if (screen === 'lock') return 'Lock Terms';
-  if (screen === 'status') return 'Lock Status';
-  return 'Compare Offers';
-}
-
-function caseIdFromOpsPath(pathname: string) {
-  const match = pathname.match(/^\/ops\/cases\/([^/]+)/);
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
-function HealthPanel({ state }: { state: HealthState }) {
-  if (state.kind === 'loading') {
-    return <p role="status">Checking connection...</p>;
-  }
-
-  if (state.kind === 'unreachable') {
-    return (
-      <div role="status" className="status-card status-card--offline">
-        <strong>Workbench service unreachable</strong>
-        <span>{state.message}</span>
-      </div>
-    );
-  }
-
-  return (
-    <div role="status" className="status-card status-card--online">
-      <strong>Workbench service reachable</strong>
-      <span>{state.health.ready ? 'Ready for local workflow checks' : 'Service is not ready'}</span>
-      <span>Setup status: {serviceReadinessText(state.health.dependencyStatus)}</span>
-    </div>
-  );
-}
-

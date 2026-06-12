@@ -11,7 +11,6 @@ export * from '../api/complianceEvidence';
 export * from '../api/customRules';
 export * from '../api/eligibility';
 export * from '../api/exceptionConcessions';
-export * from '../api/locks';
 export * from '../api/marginProfitability';
 export * from '../api/mlAdvisoryInsights';
 export * from '../api/observabilityPerformance';

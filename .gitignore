@@ -9,7 +9,9 @@ build/
 **/.agent-runtime/
 worker-outbox/
 **/worker-outbox/
-
+**/dist/
+**/baselines/*
+**/*.png
 # IDE/editor files
 .idea/
 .vscode/
@@ -26,3 +28,6 @@ Thumbs.db
 *.tmp
 *.temp
 rate-feed-service/evidence/pii-04-implementation-receipt.md
+**/tests/results/
+**/dist/assets/
+**/.local-harness/
