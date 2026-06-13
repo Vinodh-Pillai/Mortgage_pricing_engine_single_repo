@@ -1,13 +1,13 @@
 package com.wcpe.quote;
 
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class InMemoryQuoteJobRepository implements QuoteJobRepository {
-    private final Map<String, QuoteJob> byId = new LinkedHashMap<>();
-    private final Map<String, QuoteJob> byIdempotencyKey = new LinkedHashMap<>();
+    private final Map<String, QuoteJob> byId = new ConcurrentHashMap<>();
+    private final Map<String, QuoteJob> byIdempotencyKey = new ConcurrentHashMap<>();
 
     @Override
     public Optional<QuoteJob> findById(UUID tenantId, UUID jobId) {

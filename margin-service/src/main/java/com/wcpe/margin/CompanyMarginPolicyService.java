@@ -1,5 +1,13 @@
 package com.wcpe.margin;
 
+import com.wcpe.margin.srp.SrpCalculationService;
+import com.wcpe.margin.srp.SrpInputs;
+import com.wcpe.margin.srp.SrpResult;
+import com.wcpe.margin.srp.SrpRule;
+import com.wcpe.margin.overlay.OverlayInputs;
+import com.wcpe.margin.overlay.OverlayPolicyType;
+import com.wcpe.margin.overlay.OverlayRule;
+import com.wcpe.margin.overlay.OverlayRuleRepository;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -18,16 +26,31 @@ public final class CompanyMarginPolicyService {
   public static final String COMPANY_POLICY_TYPE = "COMPANY";
   public static final String CHANNEL_POLICY_TYPE = "CHANNEL";
   public static final String BRANCH_OVERLAY_POLICY_TYPE = "BRANCH_OVERLAY";
+  public static final String SRP_POLICY_TYPE = "SRP";
+  public static final String OVERLAY_POLICY_TYPE = "SECONDARY_MARKET_OVERLAY";
   public static final String SENSITIVE_MARGIN_PERMISSION = "pricing.margin.view_sensitive";
   public final AtomicInteger marginVisibilityRedactionTotal = new AtomicInteger();
   private final Clock clock;
+  private final SrpCalculationService srpCalculationService;
+  private final OverlayRuleRepository overlayRuleRepository;
   private final Map<PolicyKey, MarginPolicy> policies = new HashMap<>();
   private final Map<String, CommandReceipt> idempotencyReceipts = new HashMap<>();
   private final List<MarginPolicyPublishedEvent> outbox = new ArrayList<>();
   private final List<AuditRecord> auditRecords = new ArrayList<>();
 
   public CompanyMarginPolicyService(Clock clock) {
+    this(clock, new SrpCalculationService());
+  }
+
+  public CompanyMarginPolicyService(Clock clock, SrpCalculationService srpCalculationService) {
+    this(clock, srpCalculationService, OverlayRuleRepository.empty());
+  }
+
+  public CompanyMarginPolicyService(Clock clock, SrpCalculationService srpCalculationService,
+      OverlayRuleRepository overlayRuleRepository) {
     this.clock = Objects.requireNonNull(clock, "clock is required");
+    this.srpCalculationService = Objects.requireNonNull(srpCalculationService, "srpCalculationService is required");
+    this.overlayRuleRepository = Objects.requireNonNull(overlayRuleRepository, "overlayRuleRepository is required");
   }
 
   public CommandReceipt createDraft(CreatePolicyCommand command) {
@@ -70,6 +93,14 @@ public final class CompanyMarginPolicyService {
 
   public CommandReceipt createBranchOverlayDraft(CreatePolicyCommand command) {
     return createDraft(command.withPolicyType(BRANCH_OVERLAY_POLICY_TYPE));
+  }
+
+  public CommandReceipt createSrpDraft(CreatePolicyCommand command) {
+    return createDraft(command.withPolicyType(SRP_POLICY_TYPE));
+  }
+
+  public CommandReceipt createOverlayDraft(CreatePolicyCommand command) {
+    return createDraft(command.withPolicyType(OVERLAY_POLICY_TYPE));
   }
 
   public SimulationResult simulate(String tenantId, String policyId, ConfigResolver configResolver, BigDecimal priceBeforeMargin) {
@@ -122,6 +153,43 @@ public final class CompanyMarginPolicyService {
       throw new MarginPolicyException("BRANCH_OVERLAY_LIMIT_EXCEEDED");
     }
     return new SimulationResult(policyId, version.versionId(), step.priceAfterMargin(), List.of(step));
+  }
+
+  public SimulationResult simulateSrp(String tenantId, String policyId, ConfigResolver configResolver,
+      BigDecimal priceAfterChannelMargin, SrpInputs inputs) {
+    Objects.requireNonNull(inputs, "inputs are required");
+    MarginPolicy policy = findById(tenantId, policyId);
+    if (!SRP_POLICY_TYPE.equals(policy.policyType())) {
+      throw new MarginPolicyException("SRP_NOT_CONFIGURED");
+    }
+    MarginPolicyVersion version = policy.currentVersion();
+    SrpRule rule = selectSrpRule(version, inputs.scope(), configResolver);
+    SrpResult result = srpCalculationService.calculate(rule, inputs);
+    BigDecimal priceAfterSrp = priceAfterChannelMargin.subtract(result.srpPoints()).setScale(rule.roundingScale(), RoundingMode.HALF_UP);
+    MarginCalculationStep step = new MarginCalculationStep("SRP", version.versionId(), priceAfterChannelMargin,
+        priceAfterSrp, result.srpPoints(), result.reasonCode(), replayHash(rule, result, priceAfterChannelMargin, priceAfterSrp, inputs.loanAmount()));
+    return new SimulationResult(policyId, version.versionId(), priceAfterSrp, List.of(step));
+  }
+
+  public SimulationResult simulateOverlay(String tenantId, String policyId, ConfigResolver configResolver,
+      BigDecimal priceBeforeOverlay, OverlayInputs inputs) {
+    Objects.requireNonNull(inputs, "inputs are required");
+    Objects.requireNonNull(configResolver, "configResolver is required");
+    if (!tenantId.equals(inputs.tenantId().toString())) {
+      throw new MarginPolicyException("TENANT_ACCESS_DENIED");
+    }
+    MarginPolicy policy = findById(tenantId, policyId);
+    List<OverlayRule> overlays = overlayRuleRepository.findApplicable(inputs).stream()
+        .filter(rule -> rule.type().waterfallPosition() == OverlayPolicyType.WaterfallPosition.MARGIN_COMPONENT)
+        .toList();
+    List<MarginCalculationStep> steps = new ArrayList<>();
+    BigDecimal runningPrice = priceBeforeOverlay;
+    for (OverlayRule overlay : overlays) {
+      MarginCalculationStep step = calculateOverlay(overlay, runningPrice, policy.currentVersion().versionId());
+      steps.add(step);
+      runningPrice = step.priceAfterMargin();
+    }
+    return new SimulationResult(policyId, policy.currentVersion().versionId(), runningPrice, steps);
   }
 
   public SimulationResult applyVisibility(String viewerPermission, SimulationResult result) {
@@ -235,6 +303,18 @@ public final class CompanyMarginPolicyService {
         rule.reasonCode(), replayHash(rule, priceBeforeMargin, priceAfterMargin));
   }
 
+  private MarginCalculationStep calculateOverlay(OverlayRule overlay, BigDecimal priceBeforeOverlay,
+      String sourceVersionId) {
+    BigDecimal points = overlay.boundedAdjustmentPoints();
+    BigDecimal priceAfterOverlay = switch (overlay.type().waterfallPosition()) {
+      case LLPA_ADJUSTMENT -> priceBeforeOverlay.add(points);
+      case MARGIN_COMPONENT -> priceBeforeOverlay.subtract(points);
+    };
+    priceAfterOverlay = priceAfterOverlay.setScale(3, RoundingMode.HALF_UP);
+    return new MarginCalculationStep(overlay.type().waterfallPosition().name(), sourceVersionId, priceBeforeOverlay,
+        priceAfterOverlay, points, overlay.reasonCode(), replayHash(overlay, priceBeforeOverlay, priceAfterOverlay));
+  }
+
   private MarginRule selectChannelRule(MarginPolicyVersion version, MarginScope quoteScope) {
     Objects.requireNonNull(quoteScope, "quoteScope is required");
     List<MarginRule> matches = version.rules().stream()
@@ -278,6 +358,29 @@ public final class CompanyMarginPolicyService {
       throw new MarginPolicyException("BRANCH_OVERLAY_AMBIGUOUS");
     }
     return best;
+  }
+
+  private SrpRule selectSrpRule(MarginPolicyVersion version, MarginScope quoteScope, ConfigResolver configResolver) {
+    Objects.requireNonNull(quoteScope, "quoteScope is required");
+    List<MarginRule> matches = version.rules().stream()
+        .filter(rule -> rule.scope().matches(quoteScope))
+        .sorted(Comparator.comparingInt((MarginRule rule) -> specificity(rule.scope())).reversed()
+            .thenComparingInt(MarginRule::priority))
+        .toList();
+    if (matches.isEmpty()) {
+      throw new MarginPolicyException("SRP_NOT_CONFIGURED");
+    }
+    MarginRule best = matches.get(0);
+    long ambiguous = matches.stream()
+        .filter(rule -> specificity(rule.scope()) == specificity(best.scope()))
+        .filter(rule -> rule.priority() == best.priority())
+        .count();
+    if (ambiguous > 1) {
+      throw new MarginPolicyException("SRP_POLICY_OVERLAP");
+    }
+    return new SrpRule(best.priority(), best.scope().investorGroup(), best.scope().channel(), best.scope().productFamily(),
+        resolveRequired(configResolver, best.amountRef()), resolveRequired(configResolver, best.minRef()),
+        resolveRequired(configResolver, best.maxRef()), best.roundingScale(), best.reasonCode(), best.scope());
   }
 
   private static int branchSpecificity(MarginScope scope, BranchOverlayContext context) {
@@ -326,6 +429,10 @@ public final class CompanyMarginPolicyService {
           throw new MarginPolicyException("BRANCH_OVERLAY_SCOPE_REQUIRED");
         }
         requireText(rule.scope().sourceHierarchyVersionId(), "sourceHierarchyVersionId");
+      }
+      if (SRP_POLICY_TYPE.equals(policyType) && ("*".equals(rule.scope().investorGroup())
+          || "*".equals(rule.scope().channel()) || "*".equals(rule.scope().productFamily()))) {
+        throw new MarginPolicyException("SRP_SCOPE_REQUIRED");
       }
     }
   }
@@ -391,6 +498,16 @@ public final class CompanyMarginPolicyService {
 
   private static String replayHash(MarginRule rule, BigDecimal before, BigDecimal after) {
     return Integer.toHexString(Objects.hash(rule.amountRef(), rule.minRef(), rule.maxRef(), before.stripTrailingZeros(), after.stripTrailingZeros()));
+  }
+
+  private static String replayHash(SrpRule rule, SrpResult result, BigDecimal before, BigDecimal after, BigDecimal loanAmount) {
+    return Integer.toHexString(Objects.hash(rule.reasonCode(), result.srpBps().stripTrailingZeros(),
+        loanAmount.stripTrailingZeros(), before.stripTrailingZeros(), after.stripTrailingZeros()));
+  }
+
+  private static String replayHash(OverlayRule rule, BigDecimal before, BigDecimal after) {
+    return Integer.toHexString(Objects.hash(rule.ruleId(), rule.type(), rule.boundedAdjustmentBps().stripTrailingZeros(),
+        before.stripTrailingZeros(), after.stripTrailingZeros()));
   }
 
   private record PolicyKey(String tenantId, String name) {}

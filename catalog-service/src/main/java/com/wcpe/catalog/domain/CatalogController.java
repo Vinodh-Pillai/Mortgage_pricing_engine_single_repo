@@ -215,6 +215,24 @@ class CatalogController {
     return new InvestorListResponse(domainRepository.listInvestors(tenantId, status), domainRepository.listInvestors(tenantId, status).size());
   }
 
+  @PostMapping("/investors")
+  InvestorResponse upsertInvestor(@PathVariable UUID tenantId, @RequestBody InvestorUpsertRequest request, HttpServletRequest http) {
+    String roles = http.getHeader("X-Roles"); authorizationService.authorize("WRITE_CATALOG", roles);
+    return domainRepository.upsertInvestor(tenantId, request);
+  }
+
+  @GetMapping("/investors/{investorId}/eligibility")
+  InvestorEligibilityMatrixResponse investorEligibility(@PathVariable UUID tenantId, @PathVariable UUID investorId, HttpServletRequest http) {
+    String roles = http.getHeader("X-Roles"); authorizationService.authorize("READ_CATALOG", roles);
+    return new InvestorEligibilityMatrixResponse(investorId, domainRepository.investorEligibility(tenantId, investorId));
+  }
+
+  @PostMapping("/investors/{investorId}/eligibility")
+  InvestorEligibilityMatrixResponse upsertInvestorEligibility(@PathVariable UUID tenantId, @PathVariable UUID investorId, @RequestBody InvestorEligibilityMatrixRequest request, HttpServletRequest http) {
+    String roles = http.getHeader("X-Roles"); authorizationService.authorize("WRITE_CATALOG", roles);
+    return domainRepository.upsertInvestorEligibility(tenantId, investorId, request);
+  }
+
   @GetMapping("/products")
   ProductListResponse listProductsDomain(@PathVariable UUID tenantId, @RequestParam(required = false) String status, HttpServletRequest http) {
     String roles = http.getHeader("X-Roles"); authorizationService.authorize("READ_CATALOG", roles);

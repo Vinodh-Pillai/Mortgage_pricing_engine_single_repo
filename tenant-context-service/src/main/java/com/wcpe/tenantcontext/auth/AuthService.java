@@ -1,6 +1,7 @@
 package com.wcpe.tenantcontext.auth;
 
 import java.util.Locale;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -13,6 +14,7 @@ public class AuthService {
   private final JwtService jwtService;
   private final PasswordEncoder passwordEncoder;
 
+  @Autowired
   public AuthService(AuthUserRepository users, JwtService jwtService) {
     this(users, jwtService, new BCryptPasswordEncoder());
   }

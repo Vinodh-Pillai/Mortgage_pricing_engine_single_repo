@@ -14,14 +14,39 @@ import java.util.stream.IntStream;
 public class BestExecutionRanker {
     private final CriterionEvaluator criterionEvaluator = new CriterionEvaluator();
     private final TieBreakerEvaluator tieBreakerEvaluator = new TieBreakerEvaluator();
+    private final EligibilityFilter eligibilityFilter;
+
+    public BestExecutionRanker() {
+        this(EligibilityFilter.allowAll());
+    }
+
+    public BestExecutionRanker(EligibilityFilter eligibilityFilter) {
+        this.eligibilityFilter = eligibilityFilter == null ? EligibilityFilter.allowAll() : eligibilityFilter;
+    }
 
     public List<QuoteOption> rank(List<QuoteCandidate> candidates, RankingPolicy policy, Instant expiresAt) {
+        return rankWithEligibility(candidates, policy, expiresAt).rankedOptions();
+    }
+
+    public BestExecutionRankingResult rankWithEligibility(List<QuoteCandidate> candidates, RankingPolicy policy, Instant expiresAt) {
         RankingPolicyRef ref = policy.policyRef();
         if (ref == null || ref.criteria().isEmpty()) {
             throw new QuoteCreateException("NO_ACTIVE_RANKING_POLICY", "Ranking policy must provide explicit criteria");
         }
 
-        List<ScoredCandidate> scored = candidates.stream()
+        Map<String, EligibilityDecision> ineligible = new LinkedHashMap<>();
+        List<QuoteCandidate> eligibleCandidates = candidates.stream()
+            .filter(candidate -> {
+                EligibilityDecision decision = eligibilityFilter.evaluate(candidate);
+                if (!decision.eligible()) {
+                    ineligible.put(candidate.candidateId(), decision);
+                    return false;
+                }
+                return true;
+            })
+            .toList();
+
+        List<ScoredCandidate> scored = eligibleCandidates.stream()
             .map(candidate -> score(candidate, ref))
             .collect(Collectors.toList());
 
@@ -47,9 +72,10 @@ public class BestExecutionRanker {
             .thenComparing(sc -> sc.candidate().candidateId()));
 
         // Assign ranks and build options
-        return IntStream.range(0, resolved.size())
+        List<QuoteOption> options = IntStream.range(0, resolved.size())
             .mapToObj(i -> toOption(resolved.get(i), i + 1, policy, expiresAt))
             .toList();
+        return new BestExecutionRankingResult(options, Map.copyOf(ineligible));
     }
 
     private ScoredCandidate score(QuoteCandidate candidate, RankingPolicyRef policyRef) {
@@ -114,7 +140,8 @@ public class BestExecutionRanker {
             sc.candidate().adjustmentBps(),
             sc.candidate().marginBps(),
             finalPrice,
-            sc.candidate().upstreamRefs()
+            sc.candidate().upstreamRefs(),
+            sc.candidate().adjustmentResult() == null ? List.of() : sc.candidate().adjustmentResult().adjustments()
         );
 
         return new QuoteOption(

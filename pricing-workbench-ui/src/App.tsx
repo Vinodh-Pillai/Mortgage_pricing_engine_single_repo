@@ -128,9 +128,11 @@ const AdjustmentEvidenceScreen = lazy(() => import('./screens/adjustmentEvidence
 const MarginProfitabilityScreen = lazy(() => import('./screens/marginProfitability').then((module) => ({ default: module.MarginProfitabilityScreen })));
 const ExceptionConcessionsScreen = lazy(() => import('./screens/exceptionConcessions'));
 const RateFeedOperationsScreen = lazy(() => import('./screens/rateFeedOps').then((module) => ({ default: module.RateFeedOperationsScreen })));
+const RateFeedPipelineScreen = lazy(() => import('./screens/rateFeedPipeline').then((module) => ({ default: module.RateFeedPipelineScreen })));
 const OpsCasesScreen = lazy(() => import('./screens/opsCases').then((module) => ({ default: module.OpsCasesScreen })));
 const PerformanceDashboardScreen = lazy(() => import('./screens/observabilityPerformance').then((module) => ({ default: module.PerformanceDashboardScreen })));
 const ComplianceEvidenceScreen = lazy(() => import('./screens/complianceEvidence').then((module) => ({ default: module.ComplianceEvidenceScreen })));
+const FairLendingDashboard = lazy(() => import('./screens/fairLending').then((module) => ({ default: module.FairLendingDashboard })));
 const ProductCatalogManagerScreen = lazy(() => import('./screens/productCatalogManager').then((module) => ({ default: module.ProductCatalogManagerScreen })));
 const AdminGovernanceScreen = lazy(() => import('./screens/adminGovernance').then((module) => ({ default: module.AdminGovernanceScreen })));
 const MlAdvisoryInsightsScreen = lazy(() => import('./screens/mlAdvisoryInsights').then((module) => ({ default: module.MlAdvisoryInsightsScreen })));
@@ -211,10 +213,12 @@ export function App() {
               <Route path="/partners/admin/safety/*" element={<PartnerTransportReliabilitySection partnerId={partnerBoundaryPlaceholder} />} />
               <Route path="/partners/alerts/*" element={<PartnerTransportReliabilitySection partnerId={partnerBoundaryPlaceholder} />} />
               <Route path="/ops/rate-feeds" element={<RateFeedOperationsScreen tenantContext={tenantBoundaryPlaceholder} />} />
+              <Route path="/admin/ratefeed/pipeline" element={<RateFeedPipelineScreen tenantId={tenantBoundaryPlaceholder} />} />
               <Route path="/ops/performance" element={<PerformanceDashboardScreen tenantContext={tenantBoundaryPlaceholder} />} />
               <Route path="/ops/dashboard" element={<OpsCasesScreen tenantContext={tenantBoundaryPlaceholder} />} />
               <Route path="/ops/cases/:caseId" element={<OperationsCaseTriageSection />} />
               <Route path="/compliance/evidence" element={<ComplianceEvidenceScreen tenantContext={tenantBoundaryPlaceholder} />} />
+              <Route path="/compliance/fair-lending" element={<FairLendingDashboard tenantId="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" />} />
               <Route path="/quality/validation" element={<QualityGuardrailsSection />} />
               <Route path="/tenant/onboarding" element={<TenantOnboardingScreen />} />
               <Route path="/admin/tenants/new" element={<TenantOnboardingScreen />} />

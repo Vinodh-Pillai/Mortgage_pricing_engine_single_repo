@@ -1,161 +1,102 @@
 package com.wcpe.adjustment;
 
-import static org.assertj.core.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
 
-import java.util.*;
+import com.wcpe.adjustment.AdjustmentRuleBook.AdjustmentCondition;
+import com.wcpe.adjustment.AdjustmentRuleBook.AdjustmentOutput;
+import com.wcpe.adjustment.AdjustmentRuleBook.AdjustmentOutputType;
+import com.wcpe.adjustment.AdjustmentRuleBook.AdjustmentRule;
+import com.wcpe.adjustment.AdjustmentRuleBook.ConditionOperator;
+import com.wcpe.adjustment.AdjustmentRuleBook.EffectiveWindow;
+import com.wcpe.adjustment.AdjustmentRuleBook.PricingPrecisionPolicy;
+import com.wcpe.adjustment.AdjustmentRuleBook.RuleBookSelector;
+import com.wcpe.adjustment.AdjustmentRuleBook.RuleBookStatus;
+import com.wcpe.adjustment.RuleBookResolver.InMemoryRuleBookRepository;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class AdjustmentServiceTest {
-
-    AdjustmentService service = new AdjustmentService();
-
-    @Test
-    void mockBasePriceDecisionMapsToExplicitAdjustmentLinesAndDerivedTotal() {
-        BasePriceDecisionStub baseDecision = new BasePriceDecisionStub(
-            "SCN-ADJ-001",
-            "BP-001",
-            "fixed-rate-30yr",
-            300000.0,
-            "USD",
-            "mock"
-        );
-
-        List<AdjustmentFactor> factors = List.of(
-            new AdjustmentFactor("risk-adjustment", 1500.0, "mock risk fixture"),
-            new AdjustmentFactor("low-doc-fee", 750.0, "mock low-doc fixture"),
-            new AdjustmentFactor("credit-enhancement", -500.0, "mock credit enhancement")
-        );
-
-        AdjustmentCalculationRequest request = new AdjustmentCalculationRequest(
-            baseDecision,
-            Map.of("ltvBand", "mock-high", "creditBand", "mock-good"),
-            factors,
-            "mock-pii-06"
-        );
-
-        AdjustmentCalculationResult result = service.calculate(request);
-
-        assertThat(result.scenarioId()).isEqualTo("SCN-ADJ-001");
-        assertThat(result.basePriceId()).isEqualTo("BP-001");
-        assertThat(result.adjustments()).hasSize(3);
-        assertThat(result.adjustments().get(0).factorKey()).isEqualTo("risk-adjustment");
-        assertThat(result.adjustments().get(0).amount()).isEqualTo(1500.0);
-        assertThat(result.adjustments().get(0).source()).isEqualTo("mock");
-        assertThat(result.adjustments().get(1).factorKey()).isEqualTo("low-doc-fee");
-        assertThat(result.adjustments().get(2).factorKey()).isEqualTo("credit-enhancement");
-        assertThat(result.totalAdjustment()).isEqualTo(1750.0);
-        assertThat(result.referenceDataVersion()).isEqualTo("mock-pii-06");
-        assertThat(result.calculationMode()).isEqualTo("mock");
-    }
+    private static final UUID TENANT_ID = UUID.fromString("10000000-0000-0000-0000-000000000027");
+    private static final RuleBookSelector SELECTOR = new RuleBookSelector("CONVENTIONAL", "FNMA", "RETAIL");
+    private static final Instant QUOTE_DATE = Instant.parse("2026-06-12T00:00:00Z");
 
     @Test
-    void emptyFactorsProducesZeroTotal() {
-        BasePriceDecisionStub baseDecision = new BasePriceDecisionStub(
-            "SCN-ADJ-002",
-            "BP-002",
-            "arm-5yr",
-            200000.0,
-            "USD",
-            "mock"
-        );
+    void calculateExecutesResolvedRuleBookInsteadOfMockFactors() {
+        AdjustmentRuleBook book = publishedBook(List.of(rule("00000000-0000-0000-0000-000000000101", 1,
+            "ficoBandKey", ConditionOperator.RANGE_CLOSED, List.of("740", "759"), AdjustmentOutputType.POINTS_DELTA, "-0.125000", "LLPA-FICO")));
+        AdjustmentService service = new AdjustmentService(new RuleBookResolver(new InMemoryRuleBookRepository(List.of(book))));
 
-        AdjustmentCalculationRequest request = new AdjustmentCalculationRequest(
-            baseDecision,
-            Map.of(),
-            List.of(),
-            "mock-pii-06"
-        );
+        AdjustmentCalculationResult result = service.calculate(request(Map.of("ficoBandKey", 745)));
 
-        AdjustmentCalculationResult result = service.calculate(request);
-
-        assertThat(result.adjustments()).isEmpty();
-        assertThat(result.totalAdjustment()).isZero();
-        assertThat(result.calculationMode()).isEqualTo("mock");
-    }
-
-    @Test
-    void singleFactorTotalEqualsFactorAmount() {
-        BasePriceDecisionStub baseDecision = new BasePriceDecisionStub(
-            "SCN-ADJ-003",
-            "BP-003",
-            "fixed-rate-15yr",
-            150000.0,
-            "USD",
-            "mock"
-        );
-
-        List<AdjustmentFactor> factors = List.of(
-            new AdjustmentFactor("conforming-limit-adj", 200.0, "mock conforming limit")
-        );
-
-        AdjustmentCalculationRequest request = new AdjustmentCalculationRequest(
-            baseDecision,
-            Map.of(),
-            factors,
-            null
-        );
-
-        AdjustmentCalculationResult result = service.calculate(request);
-
+        assertThat(result.calculationMode()).isEqualTo("real-rule-book");
         assertThat(result.adjustments()).hasSize(1);
-        assertThat(result.totalAdjustment()).isEqualTo(200.0);
-        assertThat(result.referenceDataVersion()).isEqualTo("mock-pii-06");
+        assertThat(result.adjustments().get(0).factorKey()).isEqualTo("LLPA-FICO");
+        assertThat(result.adjustments().get(0).amount()).isEqualTo(-0.125000d);
+        assertThat(result.adjustments().get(0).source()).isEqualTo("rulebook-2026.06.v3");
+        assertThat(result.totalAdjustment()).isEqualTo(-0.125000d);
+        assertThat(result.referenceDataVersion()).isEqualTo("rulebook-2026.06.v3");
+        assertThat(result.auditRefs()).singleElement().asString().contains("rulebook-2026.06.v3").contains("rule:");
+        assertThat(result.blocked()).isFalse();
     }
 
     @Test
-    void negativeFactorsReduceTotalCorrectly() {
-        BasePriceDecisionStub baseDecision = new BasePriceDecisionStub(
-            "SCN-ADJ-004",
-            "BP-004",
-            "fixed-rate-30yr",
-            400000.0,
-            "USD",
-            "mock"
-        );
+    void noPublishedRuleBookReturnsBlockingResult() {
+        AdjustmentService service = new AdjustmentService(new RuleBookResolver(new InMemoryRuleBookRepository(List.of())));
 
-        List<AdjustmentFactor> factors = List.of(
-            new AdjustmentFactor("risk-penalty", 1000.0, "mock risk penalty"),
-            new AdjustmentFactor("lpa-offset", -1200.0, "mock LPA offset")
-        );
+        AdjustmentCalculationResult result = service.calculate(request(Map.of("ficoBandKey", 745)));
 
-        AdjustmentCalculationRequest request = new AdjustmentCalculationRequest(
-            baseDecision,
+        assertThat(result.blocked()).isTrue();
+        assertThat(result.adjustments()).singleElement().extracting(AdjustmentLine::factorKey).isEqualTo("NO_RULE_BOOK_RESOLVED");
+        assertThat(result.calculationMode()).isEqualTo("real-rule-book");
+    }
+
+    @Test
+    void quoteToAdjustmentToWaterfallHasItemizedReasonCodesAndStableHash() {
+        AdjustmentRuleBook book = publishedBook(List.of(
+            rule("00000000-0000-0000-0000-000000000102", 1, "ficoBandKey", ConditionOperator.RANGE_CLOSED, List.of("740", "759"), AdjustmentOutputType.POINTS_DELTA, "-0.125000", "LLPA-FICO"),
+            rule("00000000-0000-0000-0000-000000000103", 2, "ltv", ConditionOperator.RANGE_CLOSED, List.of("80.01", "85.00"), AdjustmentOutputType.POINTS_DELTA, "0.250000", "LLPA-LTV")
+        ));
+        AdjustmentService service = new AdjustmentService(new RuleBookResolver(new InMemoryRuleBookRepository(List.of(book))));
+
+        AdjustmentCalculationRequest request = request(Map.of("ficoBandKey", 745, "ltv", new BigDecimal("82.5")));
+        AdjustmentCalculationResult first = service.calculate(request);
+        AdjustmentCalculationResult second = service.calculate(request);
+
+        assertThat(first.adjustments()).extracting(AdjustmentLine::factorKey).containsExactly("LLPA-FICO", "LLPA-LTV");
+        assertThat(first.totalAdjustment()).isEqualTo(0.125000d);
+        assertThat(first.resultHash()).isEqualTo(second.resultHash());
+    }
+
+    private static AdjustmentCalculationRequest request(Map<String, Object> facts) {
+        return new AdjustmentCalculationRequest(
+            new BasePriceDecisionStub("SCN-ADJ-027", "BP-027", "fixed-rate-30yr", 450000.0, "USD", "pricing-service"),
             Map.of(),
-            factors,
-            "mock-pii-06"
+            List.of(new AdjustmentFactor("ignored-mock-factor", 999.0, "must not be used")),
+            "rulebook-2026.06.v3",
+            TENANT_ID,
+            SELECTOR,
+            QUOTE_DATE,
+            facts
         );
-
-        AdjustmentCalculationResult result = service.calculate(request);
-
-        assertThat(result.totalAdjustment()).isEqualTo(-200.0);
     }
 
-    @Test
-    void invalidSourceThrows() {
-        assertThatThrownBy(() -> new BasePriceDecisionStub(
-            "SCN", "BP", "basis", 100.0, "USD", "production"
-        ))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("mock");
+    private static AdjustmentRuleBook publishedBook(List<AdjustmentRule> rules) {
+        return new AdjustmentRuleBook(TENANT_ID, UUID.fromString("20000000-0000-0000-0000-000000000027"), "llpa-real-engine",
+            "rulebook-2026.06.v3", RuleBookStatus.PUBLISHED, SELECTOR,
+            new EffectiveWindow(Instant.parse("2026-01-01T00:00:00Z"), null),
+            new PricingPrecisionPolicy(6, 4, 2, RoundingMode.HALF_UP), rules, "author", "approver",
+            Instant.parse("2026-06-01T00:00:00Z"), null);
     }
 
-    @Test
-    void calculationIsDeterministic() {
-        BasePriceDecisionStub baseDecision = new BasePriceDecisionStub(
-            "SCN-ADJ-005", "BP-005", "fixed-rate-30yr", 250000.0, "USD", "mock"
-        );
-        List<AdjustmentFactor> factors = List.of(
-            new AdjustmentFactor("mock-factor-a", 100.0, "reason-a")
-        );
-        AdjustmentCalculationRequest request = new AdjustmentCalculationRequest(
-            baseDecision, Map.of(), factors, "mock-pii-06"
-        );
-
-        AdjustmentCalculationResult r1 = service.calculate(request);
-        AdjustmentCalculationResult r2 = service.calculate(request);
-
-        assertThat(r2.totalAdjustment()).isEqualTo(r1.totalAdjustment());
-        assertThat(r2.scenarioId()).isEqualTo(r1.scenarioId());
-        assertThat(r2.adjustments()).isEqualTo(r1.adjustments());
+    private static AdjustmentRule rule(String id, int priority, String dimension, ConditionOperator operator, List<String> values,
+                                       AdjustmentOutputType type, String amount, String reason) {
+        return new AdjustmentRule(UUID.fromString(id), priority,
+            List.of(new AdjustmentCondition(dimension, operator, values)),
+            new AdjustmentOutput(type, new BigDecimal(amount), null), reason, null, true, "source-ref:" + reason);
     }
 }

@@ -14,3 +14,20 @@ management:
     web:
       exposure:
         include: health,info,prometheus
+
+pricing:
+  parallel:
+    max-candidates: 50
+    timeout-per-candidate: 2s
+    minimum-successful-results: 3
+    executor:
+      type: virtual-threads
+      max-threads: 32
+  circuit-breaker:
+    failure-rate-threshold: 50
+    wait-duration-in-open-state: 30s
+    sliding-window-size: 100
+    minimum-number-of-calls: 10
+  bulkhead:
+    max-concurrent-calls: 32
+    max-wait-duration: 5s

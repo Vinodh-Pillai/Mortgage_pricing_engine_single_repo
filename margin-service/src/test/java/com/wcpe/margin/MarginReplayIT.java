@@ -30,7 +30,7 @@ class MarginReplayIT {
         MarginReplayTestFixtures.fullStackManifest().manifestId(),
         MarginReplayTestFixtures.fullStackManifest().policyVersionRefs(),
         MarginReplayTestFixtures.fullStackSteps("company-margin-hash", "channel-margin-hash",
-            "branch-overlay-changed-hash", "lo-comp-hash", "broker-comp-hash", "profitability-floor-hash"),
+            "srp-hash", "branch-overlay-changed-hash", "lo-comp-hash", "broker-comp-hash", "profitability-floor-hash"),
         MarginReplayTestFixtures.fullStackManifest().eventsObserved(),
         MarginReplayTestFixtures.fullStackManifest().runEnvironment());
 

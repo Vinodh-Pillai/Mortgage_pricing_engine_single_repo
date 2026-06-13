@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
@@ -53,6 +54,8 @@ public final class PricingWaterfallApi {
                 base == null ? null : base.gridVersionId(),
                 finalPrice == null ? null : finalPrice.finalPriceId(),
                 resultHash, versionHash, replayHash, blockers);
+        List<PricingOutcomeRecordedEvent> pricingOutcomeEvents = finalPrice == null ? List.of() : List.of(PricingOutcomeRecordedEvent.fromWaterfall(
+                tenantId, evidence.runId(), base, finalPrice, evidence.outcomeContext(), evidenceHash, headers.correlationId()));
 
         return new PricingWaterfallView(
                 tenantId,
@@ -76,6 +79,7 @@ public final class PricingWaterfallApi {
                 versionHash,
                 replayHash,
                 evidenceHash,
+                pricingOutcomeEvents,
                 canSeeRestricted,
                 headers.correlationId());
     }
@@ -132,7 +136,12 @@ public final class PricingWaterfallApi {
     }
 
     public record WaterfallEvidence(String runId, BaseRateSelectionResponse baseSelection, FinalPriceResponse finalPrice,
-            MissingPriceHandlingResponse missingPrice, PricingReplayResponse replay) {
+            MissingPriceHandlingResponse missingPrice, PricingReplayResponse replay, PricingOutcomeContext outcomeContext) {
+        public WaterfallEvidence(String runId, BaseRateSelectionResponse baseSelection, FinalPriceResponse finalPrice,
+                MissingPriceHandlingResponse missingPrice, PricingReplayResponse replay) {
+            this(runId, baseSelection, finalPrice, missingPrice, replay, null);
+        }
+
         public WaterfallEvidence {
             requireText(runId, "run_id is required");
         }
@@ -143,7 +152,7 @@ public final class PricingWaterfallApi {
             RedactedValue roundedFinalPrice, List<WaterfallLedgerRow> ledger, List<String> adjustmentRefs,
             List<String> marginAndBoundaryRefs, List<String> versionRefs, List<WaterfallBlocker> blockers,
             String finalPriceAuditRef, String missingPriceAuditRef, String replayEvidenceRef, String resultHash,
-            String versionGraphHash, String replayHash, String evidenceHash, boolean restrictedValuesVisible,
+            String versionGraphHash, String replayHash, String evidenceHash, List<PricingOutcomeRecordedEvent> pricingOutcomeEvents, boolean restrictedValuesVisible,
             String correlationId) {
         public PricingWaterfallView {
             ledger = ledger == null ? List.of() : List.copyOf(ledger);
@@ -151,6 +160,63 @@ public final class PricingWaterfallApi {
             marginAndBoundaryRefs = marginAndBoundaryRefs == null ? List.of() : List.copyOf(marginAndBoundaryRefs);
             versionRefs = versionRefs == null ? List.of() : List.copyOf(versionRefs);
             blockers = blockers == null ? List.of() : List.copyOf(blockers);
+            pricingOutcomeEvents = pricingOutcomeEvents == null ? List.of() : List.copyOf(pricingOutcomeEvents);
+        }
+    }
+
+    public record PricingOutcomeRecordedEvent(String eventType, String tenantId, String runId, UUID outcomeId,
+            UUID quoteId, UUID scenarioId, String applicantRace, String applicantEthnicity, String applicantSex,
+            Integer applicantAge, Integer fico, BigDecimal ltv, BigDecimal dti, BigDecimal loanAmount,
+            String loanPurpose, String propertyType, String occupancyType, String state, String channel,
+            String productFamily, String investor, BigDecimal noteRate, BigDecimal price, Integer totalLlpaBps,
+            Integer marginBps, Integer lockPeriodDays, String evidenceHash, String correlationId, Instant pricingDate) {
+        static PricingOutcomeRecordedEvent fromWaterfall(String tenantId, String runId, BaseRateSelectionResponse base,
+                FinalPriceResponse finalPrice, PricingOutcomeContext context, String evidenceHash, String correlationId) {
+            PricingOutcomeContext ctx = context == null ? PricingOutcomeContext.empty() : context;
+            return new PricingOutcomeRecordedEvent(
+                    "PricingOutcomeRecorded.v1",
+                    tenantId,
+                    runId,
+                    finalPrice.finalPriceId(),
+                    ctx.quoteId(),
+                    ctx.scenarioId(),
+                    defaultText(ctx.applicantRace()),
+                    defaultText(ctx.applicantEthnicity()),
+                    defaultText(ctx.applicantSex()),
+                    ctx.applicantAge(),
+                    ctx.fico(),
+                    ctx.ltv(),
+                    ctx.dti(),
+                    ctx.loanAmount(),
+                    ctx.loanPurpose(),
+                    ctx.propertyType(),
+                    ctx.occupancyType(),
+                    ctx.state(),
+                    ctx.channel(),
+                    ctx.productFamily(),
+                    ctx.investor(),
+                    base == null ? finalPrice.selectedNoteRate() : base.selectedNoteRate(),
+                    finalPrice.roundedFinalPrice(),
+                    finalPrice.adjustments().stream().map(adjustment -> adjustment.amount().movePointRight(2).intValue()).reduce(0, Integer::sum),
+                    ctx.marginBps(),
+                    finalPrice.lockPeriodDays(),
+                    evidenceHash,
+                    correlationId,
+                    Instant.now());
+        }
+    }
+
+    private static String defaultText(String value) {
+        return value == null || value.isBlank() ? "NA" : value.trim().toUpperCase().replace('-', '_');
+    }
+
+    public record PricingOutcomeContext(UUID quoteId, UUID scenarioId, String applicantRace, String applicantEthnicity,
+            String applicantSex, Integer applicantAge, Integer fico, BigDecimal ltv, BigDecimal dti, BigDecimal loanAmount,
+            String loanPurpose, String propertyType, String occupancyType, String state, String channel, String productFamily,
+            String investor, Integer marginBps) {
+        static PricingOutcomeContext empty() {
+            return new PricingOutcomeContext(null, null, "NA", "NA", "NA", null, null, null, null, null,
+                    null, null, null, null, null, null, null, null);
         }
     }
 

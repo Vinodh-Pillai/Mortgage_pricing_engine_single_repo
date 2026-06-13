@@ -30,6 +30,7 @@ public final class MarginReplayService {
       "ADJUSTMENTS_OVERLAYS",
       "COMPANY_MARGIN",
       "CHANNEL_MARGIN",
+      "SRP",
       "BRANCH_OVERLAY",
       "LO_COMPENSATION",
       "BROKER_COMPENSATION",

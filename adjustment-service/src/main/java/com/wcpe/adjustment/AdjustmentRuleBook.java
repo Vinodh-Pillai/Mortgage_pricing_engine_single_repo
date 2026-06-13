@@ -31,31 +31,43 @@ public record AdjustmentRuleBook(
     String createdBy,
     String approvedBy,
     Instant publishedAt,
-    String contentHash
+    String contentHash,
+    BigDecimal maxTotalPointsDelta,
+    BigDecimal minTotalPointsDelta
 ) {
     public static final Set<String> SUPPORTED_CONDITION_DIMENSIONS = Set.of(
-        "productFamily",
-        "productType",
-        "investor",
-        "channel",
-        "loanPurpose",
-        "ficoBandKey",
-        "ltvBandKey",
-        "cltvBandKey",
-        "hcltvBandKey",
-        "occupancy",
-        "propertyType",
-        "units",
-        "state",
-        "county",
-        "loanAmountBand",
-        "cashOutFlag",
-        "subordinateFinancingFlag",
-        "firstTimeHomebuyerFlag",
-        "compensationPlanCode",
-        "feeCategory",
-        "quoteDate"
+        "productFamily", "productType", "productCode", "investor", "channel", "loanPurpose",
+        "refinancePurpose", "occupancy", "propertyType", "units", "state", "county",
+        "countyFips", "zipCode", "msa", "ficoBandKey", "representativeFico", "ltvBandKey",
+        "ltv", "cltvBandKey", "cltv", "hcltvBandKey", "hcltv", "dtiBandKey", "dti",
+        "loanAmountBand", "loanAmount", "lienPosition", "amortizationType", "loanTermMonths",
+        "fixedPeriodMonths", "interestOnlyFlag", "cashOutFlag", "subordinateFinancingFlag",
+        "firstTimeHomebuyerFlag", "selfEmployedFlag", "nonOccupantCoBorrowerFlag", "giftFundsFlag",
+        "escrowWaiverFlag", "manufacturedHomeFlag", "condoProjectType", "highBalanceFlag",
+        "conformingBalanceFlag", "purchasePriceBand", "appraisedValueBand", "compensationPlanCode",
+        "feeCategory", "lockPeriodDays", "commitmentType", "ausRecommendation", "documentationType",
+        "mortgageInsuranceType", "impoundsFlag", "borrowerCount", "citizenshipStatus", "propertyUsage",
+        "quoteDate", "referenceDataVersion"
     );
+
+    public AdjustmentRuleBook(
+        UUID tenantId,
+        UUID ruleBookId,
+        String businessKey,
+        String version,
+        RuleBookStatus status,
+        RuleBookSelector selector,
+        EffectiveWindow effectiveWindow,
+        PricingPrecisionPolicy precisionPolicy,
+        List<AdjustmentRule> rules,
+        String createdBy,
+        String approvedBy,
+        Instant publishedAt,
+        String contentHash
+    ) {
+        this(tenantId, ruleBookId, businessKey, version, status, selector, effectiveWindow, precisionPolicy,
+            rules, createdBy, approvedBy, publishedAt, contentHash, null, null);
+    }
 
     public AdjustmentRuleBook {
         Objects.requireNonNull(tenantId, "tenantId is required");
@@ -73,7 +85,7 @@ public record AdjustmentRuleBook(
             Objects.requireNonNull(publishedAt, "published rule book requires publishedAt");
         }
         contentHash = contentHash == null || contentHash.isBlank()
-            ? hashOf(tenantId, ruleBookId, businessKey, version, status, selector, effectiveWindow, rules)
+            ? hashOf(tenantId, ruleBookId, businessKey, version, status, selector, effectiveWindow, rules, maxTotalPointsDelta, minTotalPointsDelta)
             : contentHash;
     }
 
@@ -99,7 +111,9 @@ public record AdjustmentRuleBook(
             createdBy,
             approver,
             Objects.requireNonNull(when, "publishedAt is required"),
-            null
+            null,
+            maxTotalPointsDelta,
+            minTotalPointsDelta
         );
         RuleBookResolutionService.assertNoPublishedOverlap(published, existingRuleBooks == null ? List.of() : existingRuleBooks);
         return published;
@@ -122,7 +136,9 @@ public record AdjustmentRuleBook(
             createdBy,
             approvedBy,
             publishedAt,
-            null
+            null,
+            maxTotalPointsDelta,
+            minTotalPointsDelta
         );
     }
 
@@ -295,14 +311,32 @@ public record AdjustmentRuleBook(
         String reasonCode,
         String exclusivityGroup,
         boolean enabled,
-        String sourceRef
+        String sourceRef,
+        BigDecimal minOutput,
+        BigDecimal maxOutput
     ) {
+        public AdjustmentRule(
+            UUID ruleId,
+            int priority,
+            List<AdjustmentCondition> conditions,
+            AdjustmentOutput output,
+            String reasonCode,
+            String exclusivityGroup,
+            boolean enabled,
+            String sourceRef
+        ) {
+            this(ruleId, priority, conditions, output, reasonCode, exclusivityGroup, enabled, sourceRef, null, null);
+        }
+
         public AdjustmentRule {
             Objects.requireNonNull(ruleId, "ruleId is required");
             conditions = List.copyOf(conditions == null ? List.of() : conditions);
             Objects.requireNonNull(output, "output is required");
             requireText(reasonCode, "reasonCode is required");
             requireText(sourceRef, "sourceRef is required");
+            if (minOutput != null && maxOutput != null && minOutput.compareTo(maxOutput) > 0) {
+                throw new IllegalArgumentException("rule minOutput cannot exceed maxOutput");
+            }
         }
 
         List<String> validate(PricingPrecisionPolicy policy) {

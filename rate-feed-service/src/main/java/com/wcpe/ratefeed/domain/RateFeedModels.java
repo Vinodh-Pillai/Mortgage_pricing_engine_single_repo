@@ -630,6 +630,70 @@ public final class RateFeedModels {
     Instant verifiedAt
   ) {}
 
+  // ── PII-32-S01: Rate feed → adjustment rule-book pipeline records ─────────
+
+  public record LlpaMappingConfig(
+    String investor,
+    String productFamily,
+    String channel,
+    String outputType,
+    Instant effectiveAt,
+    String versionLabel,
+    String sourceSystem
+  ) {}
+
+  public record MapToRuleBookRequest(
+    UUID tenantId,
+    String csvContent,
+    LlpaMappingConfig mappingConfig
+  ) {}
+
+  public record RuleBookConditionResponse(String dimension, String operator, List<String> configuredValues) {}
+  public record RuleBookOutputResponse(String type, BigDecimal configuredAmount) {}
+  public record RuleBookRuleResponse(UUID ruleId, int priority, List<RuleBookConditionResponse> conditions, RuleBookOutputResponse output, String reasonCode, String exclusivityGroup, boolean enabled, String sourceRef) {}
+  public record RuleBookSelectorResponse(String productFamily, String investor, String channel) {}
+  public record RuleBookEffectiveWindowResponse(Instant start, Instant end) {}
+  public record RuleBookPrecisionPolicyResponse(int pointsScale, int bpsScale, int moneyScale, String roundingMode) {}
+  public record PipelineMappingWarning(int rowNumber, String code, String message) {}
+
+  public record MapToRuleBookResponse(
+    UUID sheetId,
+    UUID ruleBookId,
+    String businessKey,
+    String version,
+    String status,
+    RuleBookSelectorResponse selector,
+    RuleBookEffectiveWindowResponse effectiveWindow,
+    RuleBookPrecisionPolicyResponse precisionPolicy,
+    int sourceRowCount,
+    int ruleCount,
+    String gridHash,
+    List<PipelineMappingWarning> warnings,
+    List<RuleBookRuleResponse> rules,
+    Map<String, String> links,
+    String resultHash
+  ) {}
+
+  public record PipelineGovernanceStage(String stage, String status, Instant at, String actorRef, String evidenceRef) {}
+  public record PipelineSampleSimulation(String factsSummary, String expectedAdjustment, String actualAdjustment, String status) {}
+  public record PipelineStatusRow(
+    UUID sheetId,
+    UUID ruleBookId,
+    String rateSheet,
+    String investor,
+    String status,
+    int ruleCount,
+    String lastAction,
+    String gridHash,
+    int sourceRowCount,
+    int warningCount,
+    List<String> dimensionsUsed,
+    List<PipelineGovernanceStage> governanceHistory,
+    PipelineSampleSimulation sampleSimulation
+  ) {}
+
+  public record PipelineStatusResponse(List<PipelineStatusRow> pipelines, int count, Instant generatedAt) {}
+
   // ── Exception class ─────────────────────────────────────────────────────────
 
   public static final class RateFeedException extends RuntimeException {

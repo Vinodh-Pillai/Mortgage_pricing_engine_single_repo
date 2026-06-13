@@ -20,4 +20,11 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,metrics
+ratefeed:
+  cache:
+    l1-maximum-size: 10000
+    l1-ttl: 5m
+    l2-ttl: 1h
+    redis-key-prefix: rate:v1
+    warmup-enabled: true

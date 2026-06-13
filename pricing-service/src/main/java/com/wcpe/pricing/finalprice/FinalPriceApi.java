@@ -18,6 +18,7 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
@@ -40,6 +41,7 @@ public final class FinalPriceApi {
     private final ScenarioFactsPort scenarioFactsPort;
     private final PricingConfigurationPort configurationPort;
     private final RoundingPolicyApi roundingPolicyApi;
+    private final AdjustmentCalculationPort adjustmentCalculationPort;
 
     public FinalPriceApi(
             FinalPriceRepository repository,
@@ -47,11 +49,23 @@ public final class FinalPriceApi {
             ScenarioFactsPort scenarioFactsPort,
             PricingConfigurationPort configurationPort,
             RoundingPolicyApi roundingPolicyApi) {
+        this(repository, selectionPort, scenarioFactsPort, configurationPort, roundingPolicyApi,
+                new ConfigurationAdjustmentCalculationPort());
+    }
+
+    public FinalPriceApi(
+            FinalPriceRepository repository,
+            BaseRateSelectionPort selectionPort,
+            ScenarioFactsPort scenarioFactsPort,
+            PricingConfigurationPort configurationPort,
+            RoundingPolicyApi roundingPolicyApi,
+            AdjustmentCalculationPort adjustmentCalculationPort) {
         this.repository = Objects.requireNonNull(repository);
         this.selectionPort = Objects.requireNonNull(selectionPort);
         this.scenarioFactsPort = Objects.requireNonNull(scenarioFactsPort);
         this.configurationPort = Objects.requireNonNull(configurationPort);
         this.roundingPolicyApi = Objects.requireNonNull(roundingPolicyApi);
+        this.adjustmentCalculationPort = Objects.requireNonNull(adjustmentCalculationPort);
     }
 
     public FinalPriceResponse calculate(String tenantId, FinalPriceHeaders headers, FinalPriceRequest request) {
@@ -92,7 +106,19 @@ public final class FinalPriceApi {
         ledger.add(new FinalPriceLedgerEntry(1, "BASE_PRICE", basePrice, "START", subtotal,
                 selection.gridVersionRef(), "BASE_RATE_SELECTED", null));
 
-        List<AdjustmentResult> adjustments = applyAdjustments(configuration, facts, selection.lockPeriodDays(), ledger, subtotal);
+        AdjustmentCalculationRequest adjustmentRequest = buildAdjustmentCalculationRequest(tenantId, request, selection, facts, configuration);
+        AdjustmentCalculationResult adjustmentCalculation = adjustmentCalculationPort instanceof ConfigurationAdjustmentCalculationPort adapter
+                ? adapter.calculate(adjustmentRequest, configuration, facts, selection.lockPeriodDays())
+                : adjustmentCalculationPort.calculate(adjustmentRequest);
+        if (adjustmentCalculation == null) {
+            throw new FinalPriceException(FinalPriceErrorCode.ADJUSTMENT_CONFIG_MISSING,
+                    "adjustment-service did not return a calculation result");
+        }
+        if (adjustmentCalculation.blocked()) {
+            throw new FinalPriceException(FinalPriceErrorCode.ADJUSTMENT_CONFIG_MISSING,
+                    "adjustment-service blocked calculation: " + adjustmentCalculation.resultHash());
+        }
+        List<AdjustmentResult> adjustments = applyAdjustmentLines(adjustmentCalculation, ledger, subtotal);
         if (!adjustments.isEmpty()) {
             subtotal = adjustments.get(adjustments.size() - 1).outputValue();
         }
@@ -115,7 +141,7 @@ public final class FinalPriceApi {
 
         VersionGraph versionGraph = configuration.versionGraph(selection.gridVersionRef(), rounding.policyVersionId());
         String resultHash = stableHash("final-price", tenantId, request.selectionId(), request.scenarioHash(),
-                roundedFinalPrice, versionGraph.hash(), adjustments, capFloorResults, ledger);
+                roundedFinalPrice, versionGraph.hash(), adjustmentCalculation.resultHash(), adjustments, capFloorResults, ledger);
         String cacheKey = "pricing:final-price:%s:%s:%s:%s".formatted(
                 tenantId, request.scenarioHash(), request.selectionId(), versionGraph.hash());
         FinalPriceResponse response = new FinalPriceResponse(
@@ -161,12 +187,73 @@ public final class FinalPriceApi {
         return result.response();
     }
 
-    private List<AdjustmentResult> applyAdjustments(
-            PricingConfigurationSnapshot configuration,
+    private static AdjustmentCalculationRequest buildAdjustmentCalculationRequest(
+            String tenantId,
+            FinalPriceRequest request,
+            SelectedBaseRate selection,
             ScenarioFacts facts,
-            int lockPeriodDays,
+            PricingConfigurationSnapshot configuration) {
+        Map<String, Object> loanFacts = new LinkedHashMap<>(facts.facts());
+        loanFacts.putIfAbsent("lockPeriodDays", selection.lockPeriodDays());
+        BasePriceDecisionStub baseDecision = new BasePriceDecisionStub(
+                request.scenarioId(), selection.selectionId().toString(), String.valueOf(selection.selectedNoteRate()),
+                selection.basePrice().doubleValue(), "PRICE_POINTS", "pricing-service");
+        RuleBookSelector selector = new RuleBookSelector(configuration.productCode(), configuration.investorCode(), configuration.channelCode());
+        return new AdjustmentCalculationRequest(
+                baseDecision,
+                facts.facts(),
+                List.of(),
+                String.join(",", request.pricingConfigVersionRefs()),
+                tenantUuid(tenantId),
+                selector,
+                request.asOf(),
+                loanFacts);
+    }
+
+    private static List<AdjustmentResult> applyAdjustmentLines(
+            AdjustmentCalculationResult calculation,
             List<FinalPriceLedgerEntry> ledger,
             BigDecimal startingSubtotal) {
+        BigDecimal running = startingSubtotal;
+        List<AdjustmentResult> results = new ArrayList<>();
+        for (AdjustmentLine line : calculation.adjustments()) {
+            BigDecimal input = running;
+            BigDecimal amount = intermediateScale(BigDecimal.valueOf(line.amount()));
+            running = running.add(amount).setScale(INTERMEDIATE_SCALE, RoundingMode.UNNECESSARY);
+            String ruleId = firstNonBlank(line.ruleId(), line.factorKey(), line.sourceRef());
+            String versionRef = firstNonBlank(line.sourceRef(), line.source(), calculation.referenceDataVersion());
+            String reasonCode = firstNonBlank(line.reason(), line.factorKey(), "ADJUSTMENT_LINE");
+            AdjustmentResult result = new AdjustmentResult(ruleId, versionRef, reasonCode, amount, input, running,
+                    firstNonBlank(line.outputType(), "POINTS_DELTA"), line.warnings());
+            results.add(result);
+            ledger.add(new FinalPriceLedgerEntry(ledger.size() + 1, "ADJUSTMENT", input,
+                    amount.signum() < 0 ? "SUB" : "ADD", running,
+                    versionRef + ":" + ruleId, reasonCode, null));
+        }
+        return results;
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return "";
+    }
+
+    private static UUID tenantUuid(String tenantId) {
+        try {
+            return UUID.fromString(tenantId);
+        } catch (IllegalArgumentException ex) {
+            return UUID.nameUUIDFromBytes(tenantId.getBytes(StandardCharsets.UTF_8));
+        }
+    }
+
+    private static List<AdjustmentLine> configuredAdjustmentLines(
+            PricingConfigurationSnapshot configuration,
+            ScenarioFacts facts,
+            int lockPeriodDays) {
         List<AdjustmentRule> applicable = configuration.adjustmentRules().stream()
                 .filter(rule -> rule.appliesTo(facts, lockPeriodDays))
                 .sorted(Comparator.comparing(AdjustmentRule::precedence).thenComparing(AdjustmentRule::ruleId))
@@ -180,16 +267,11 @@ public final class FinalPriceApi {
             }
         }
 
-        BigDecimal running = startingSubtotal;
-        List<AdjustmentResult> results = new ArrayList<>();
+        List<AdjustmentLine> results = new ArrayList<>();
         for (AdjustmentRule rule : applicable) {
-            BigDecimal input = running;
-            running = running.add(intermediateScale(rule.amount())).setScale(INTERMEDIATE_SCALE, RoundingMode.UNNECESSARY);
-            AdjustmentResult result = new AdjustmentResult(rule.ruleId(), rule.versionRef(), rule.reasonCode(),
-                    intermediateScale(rule.amount()), input, running);
-            results.add(result);
-            ledger.add(new FinalPriceLedgerEntry(ledger.size() + 1, "ADJUSTMENT", input, "ADD", running,
-                    rule.versionRef() + ":" + rule.ruleId(), rule.reasonCode(), null));
+            results.add(new AdjustmentLine(rule.ruleId(), rule.amount().doubleValue(), rule.reasonCode(),
+                    rule.versionRef(), "POINTS_DELTA", rule.ruleId(), rule.versionRef(), true,
+                    rule.reasonCode(), rule.versionRef() + ":" + rule.ruleId(), List.of()));
         }
         return results;
     }
@@ -385,11 +467,118 @@ public final class FinalPriceApi {
             String reasonCode,
             BigDecimal amount,
             BigDecimal inputValue,
-            BigDecimal outputValue) {
+            BigDecimal outputValue,
+            String outputType,
+            List<String> conditions) {
+        public AdjustmentResult(String ruleId, String versionRef, String reasonCode, BigDecimal amount,
+                BigDecimal inputValue, BigDecimal outputValue) {
+            this(ruleId, versionRef, reasonCode, amount, inputValue, outputValue, "POINTS_DELTA", List.of());
+        }
+
         public AdjustmentResult {
             amount = intermediateScale(amount);
             inputValue = intermediateScale(inputValue);
             outputValue = intermediateScale(outputValue);
+            outputType = outputType == null || outputType.isBlank() ? "POINTS_DELTA" : outputType;
+            conditions = conditions == null ? List.of() : List.copyOf(conditions);
+        }
+    }
+
+    public record BasePriceDecisionStub(
+            String scenarioId,
+            String basePriceId,
+            String baseRateBasis,
+            double basePriceAmount,
+            String currency,
+            String source) {
+    }
+
+    public record RuleBookSelector(String productFamily, String investor, String channel) {
+    }
+
+    public record AdjustmentFactor(String factorKey, double amount, String reason) {
+    }
+
+    public record AdjustmentCalculationRequest(
+            BasePriceDecisionStub basePriceDecision,
+            Map<String, String> loanAttributes,
+            List<AdjustmentFactor> adjustmentFactors,
+            String referenceDataVersion,
+            UUID tenantId,
+            RuleBookSelector selector,
+            Instant quoteDate,
+            Map<String, Object> loanFacts) {
+        public AdjustmentCalculationRequest {
+            loanAttributes = loanAttributes == null ? Map.of() : Map.copyOf(loanAttributes);
+            adjustmentFactors = adjustmentFactors == null ? List.of() : List.copyOf(adjustmentFactors);
+            loanFacts = loanFacts == null ? Map.of() : Map.copyOf(loanFacts);
+        }
+    }
+
+    public record AdjustmentLine(
+            String factorKey,
+            double amount,
+            String reason,
+            String source,
+            String outputType,
+            String ruleId,
+            String sourceRef,
+            boolean applied,
+            String label,
+            String auditRef,
+            List<String> warnings) {
+        public AdjustmentLine {
+            warnings = warnings == null ? List.of() : List.copyOf(warnings);
+        }
+    }
+
+    public record AdjustmentCalculationResult(
+            String scenarioId,
+            String basePriceId,
+            List<AdjustmentLine> adjustments,
+            double totalAdjustment,
+            String referenceDataVersion,
+            String calculationMode,
+            List<String> auditRefs,
+            String resultHash,
+            Map<String, Object> totalsByType,
+            boolean blocked) {
+        public AdjustmentCalculationResult {
+            adjustments = adjustments == null ? List.of() : List.copyOf(adjustments);
+            auditRefs = auditRefs == null ? List.of() : List.copyOf(auditRefs);
+            totalsByType = totalsByType == null ? Map.of() : Map.copyOf(totalsByType);
+        }
+    }
+
+    public interface AdjustmentCalculationPort {
+        AdjustmentCalculationResult calculate(AdjustmentCalculationRequest request);
+    }
+
+    private static final class ConfigurationAdjustmentCalculationPort implements AdjustmentCalculationPort {
+        @Override
+        public AdjustmentCalculationResult calculate(AdjustmentCalculationRequest request) {
+            throw new FinalPriceException(FinalPriceErrorCode.ADJUSTMENT_CONFIG_MISSING,
+                    "configuration-backed adjustment adapter requires FinalPriceApi context");
+        }
+
+        AdjustmentCalculationResult calculate(AdjustmentCalculationRequest request,
+                PricingConfigurationSnapshot configuration, ScenarioFacts facts, int lockPeriodDays) {
+            List<AdjustmentLine> lines = configuredAdjustmentLines(configuration, facts, lockPeriodDays);
+            BigDecimal total = lines.stream()
+                    .map(line -> BigDecimal.valueOf(line.amount()))
+                    .reduce(BigDecimal.ZERO, BigDecimal::add)
+                    .setScale(INTERMEDIATE_SCALE, RoundingMode.HALF_UP);
+            return new AdjustmentCalculationResult(
+                    request.basePriceDecision().scenarioId(),
+                    request.basePriceDecision().basePriceId(),
+                    lines,
+                    total.doubleValue(),
+                    request.referenceDataVersion(),
+                    "configuration-adapter",
+                    lines.stream().map(AdjustmentLine::auditRef).toList(),
+                    stableHash("configuration-adjustments", request.referenceDataVersion(), lines),
+                    Map.of("POINTS_DELTA", total),
+                    false);
         }
     }
 

@@ -1,13 +1,13 @@
 package com.wcpe.quote;
 
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class InMemoryQuoteRepository implements QuoteRepository {
-    private final Map<String, Quote> byId = new LinkedHashMap<>();
-    private final Map<String, Quote> byIdempotencyKey = new LinkedHashMap<>();
+    private final Map<String, Quote> byId = new ConcurrentHashMap<>();
+    private final Map<String, Quote> byIdempotencyKey = new ConcurrentHashMap<>();
 
     @Override
     public Optional<Quote> findByIdempotencyKey(UUID tenantId, String idempotencyKey) {

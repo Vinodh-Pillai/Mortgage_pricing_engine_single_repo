@@ -38,9 +38,11 @@ export const routeComponentLoaders: Record<string, () => Promise<{ default: Comp
   'partner-quotes': () => import('../screens/partnerQuotes/PartnerQuotesLayout'),
   'partner-transport': () => import('../screens/NotFoundScreen'),
   'rate-feed-ops': () => import('../screens/rateFeedOps').then((module) => ({ default: module.RateFeedOperationsScreen })),
+  'rate-feed-pipeline': () => import('../screens/rateFeedPipeline').then((module) => ({ default: module.RateFeedPipelineScreen })),
   'performance-dashboard': () => import('../screens/observabilityPerformance').then((module) => ({ default: module.PerformanceDashboardScreen })),
   'ops-cases': () => import('../screens/opsCases').then((module) => ({ default: module.OpsCasesScreen })),
   'compliance-evidence': () => import('../screens/complianceEvidence').then((module) => ({ default: module.ComplianceEvidenceScreen })),
+  'fair-lending-dashboard': () => import('../screens/fairLending').then((module) => ({ default: module.FairLendingDashboard })),
   'quality-dashboard': () => import('../screens/NotFoundScreen'),
   'tenant-onboarding': () => import('../screens/tenant/TenantOnboardingScreen').then((module) => ({ default: module.TenantOnboardingScreen })),
   'product-catalog-manager': () => import('../screens/productCatalogManager').then((module) => ({ default: module.ProductCatalogManagerScreen })),
@@ -76,6 +78,7 @@ const scenarioModule = workbenchModules.find((module) => module.id === 'scenario
 const tenantOnboardingModule = workbenchModules.find((module) => module.id === 'tenant-onboarding');
 const productManagementModule = workbenchModules.find((module) => module.id === 'product-management');
 const rateSheetModule = workbenchModules.find((module) => module.id === 'rate-sheet-intake');
+const rateFeedPipelineModule = workbenchModules.find((module) => module.id === 'rate-feed-pipeline');
 const pricingAnalysisModule = workbenchModules.find((module) => module.id === 'pricing-analysis');
 const lockManagementModule = workbenchModules.find((module) => module.id === 'lock-management');
 
@@ -93,6 +96,7 @@ const functionalityChildRoutes: WorkbenchRouteDefinition[] = [
     { ...definitionForModule(rateSheetModule), id: 'rate-sheet-intake-new', path: '/pricing/rate-sheets/new', label: 'New Rate Sheet', breadcrumb: 'New Rate Sheet', lazyComponent: lazyScreen(routeComponentLoaders['rate-sheet-intake']) },
     { ...definitionForModule(rateSheetModule), id: 'rate-sheet-intake-detail', path: '/pricing/rate-sheets/:id', label: 'Rate Sheet Detail', breadcrumb: 'Rate Sheet Detail', lazyComponent: lazyScreen(routeComponentLoaders['rate-sheet-intake']) },
   ] : []),
+  ...(rateFeedPipelineModule ? [{ ...definitionForModule(rateFeedPipelineModule), id: 'rate-feed-pipeline-admin', path: '/admin/ratefeed/pipeline', label: 'Rate feed pipeline', breadcrumb: 'Rate Feed Pipeline', lazyComponent: lazyScreen(routeComponentLoaders['rate-feed-pipeline']) }] : []),
   ...(pricingAnalysisModule ? [{ ...definitionForModule(pricingAnalysisModule), id: 'pricing-analysis-run', path: '/pricing/analysis/:runId', label: 'Pricing Analysis Run', breadcrumb: 'Pricing Analysis Run', lazyComponent: lazyScreen(routeComponentLoaders['pricing-analysis']) }] : []),
   ...(lockManagementModule ? [{ ...definitionForModule(lockManagementModule), id: 'lock-management-detail', path: '/locks/:lockId', label: 'Lock Detail', breadcrumb: 'Lock Detail', lazyComponent: lazyScreen(routeComponentLoaders['lock-management']) }] : []),
 ];

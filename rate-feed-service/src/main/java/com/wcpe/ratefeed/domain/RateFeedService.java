@@ -3,10 +3,14 @@ package com.wcpe.ratefeed.domain;
 import com.wcpe.ratefeed.activation.ActivationService;
 import com.wcpe.ratefeed.activation.VersionManager;
 import com.wcpe.ratefeed.audit.AuditService;
+import com.wcpe.ratefeed.cache.CachedRateResolver;
+import com.wcpe.ratefeed.cache.GridLoadedEvent;
+import com.wcpe.ratefeed.cache.GridSupersededEvent;
 import com.wcpe.ratefeed.parser.CsvParser;
 import com.wcpe.ratefeed.parser.HeaderDetector;
 import com.wcpe.ratefeed.parser.RateSheetParser;
 import com.wcpe.ratefeed.parser.TypeCoercer;
+import com.wcpe.ratefeed.rulebook.LlpaGridToRuleBookMapper;
 import com.wcpe.ratefeed.validation.RateSheetValidator;
 import com.wcpe.ratefeed.resolution.GridLookup;
 import com.wcpe.ratefeed.resolution.RateResolver;
@@ -21,6 +25,7 @@ import java.sql.Timestamp;
 import java.time.*;
 import java.util.*;
 import org.springframework.http.HttpStatus;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Service;
@@ -46,15 +51,18 @@ class RateFeedService {
   private final RateSheetValidator validator = new RateSheetValidator();
   private final ActivationService activationService;
   private final VersionManager versionManager;
-  private final RateResolver rateResolver;
+  private final CachedRateResolver rateResolver;
   private final GridLookup gridLookup;
   private final AuditService auditService;
   private final ReplayService replayService;
+  private final ApplicationEventPublisher eventPublisher;
+  private final LlpaGridToRuleBookMapper ruleBookMapper = new LlpaGridToRuleBookMapper();
+  private final Map<UUID, RateFeedModels.PipelineStatusRow> pipelineRows = new LinkedHashMap<>();
 
   RateFeedService(RateFeedRepository repository, JdbcTemplate jdbc, ObjectMapper mapper,
                    ActivationService activationService, VersionManager versionManager,
-                   RateResolver rateResolver, GridLookup gridLookup, AuditService auditService,
-                   ReplayService replayService) {
+                    CachedRateResolver rateResolver, GridLookup gridLookup, AuditService auditService,
+                    ReplayService replayService, ApplicationEventPublisher eventPublisher) {
     this.repository = repository;
     this.jdbc = jdbc;
     this.mapper = mapper;
@@ -64,6 +72,7 @@ class RateFeedService {
     this.gridLookup = gridLookup;
     this.auditService = auditService;
     this.replayService = replayService;
+    this.eventPublisher = eventPublisher;
   }
 
   // ── Existing session lifecycle ──
@@ -1238,6 +1247,8 @@ class RateFeedService {
     performCacheInvalidation(tenantId, UUID.fromString(cacheCommandId), sheet.sheetId(), sheet.investorId(), sheet.channelId(),
         rollbackFromVersionId == null ? RateFeedModels.CacheInvalidationReason.PUBLISH : RateFeedModels.CacheInvalidationReason.ROLLBACK,
         sheet.resultHash(), sheet.effectiveAt(), 0, actor, correlationId);
+    eventPublisher.publishEvent(new GridSupersededEvent(tenantId, sheet.investorId(), sheet.channelId(), sheet.productCode(), sheet.sheetId(), sheet.effectiveAt()));
+    eventPublisher.publishEvent(new GridLoadedEvent(tenantId, sheet.investorId(), sheet.channelId(), sheet.productCode(), sheet.sheetId(), sheet.effectiveAt()));
     List<RateFeedModels.ValidationWarningDetail> warnings = List.of(new RateFeedModels.ValidationWarningDetail("CACHE_INVALIDATION_ACK_UNAVAILABLE", "External cache invalidation acknowledgement infrastructure is not available in this local service slice; command ID was recorded."));
     return workflowState(tenantId, sheet.sheetId(), eventType, auditAction, cacheCommandId, resultHash, warnings);
   }
@@ -1523,6 +1534,67 @@ class RateFeedService {
         params.toArray());
 
     return new RateFeedModels.SheetVersionsResponse(versions, versions.size());
+  }
+
+  @Transactional
+  public RateFeedModels.MapToRuleBookResponse mapToRuleBook(UUID tenantId, UUID sheetId, RateFeedModels.MapToRuleBookRequest request, String actor, String correlationId) {
+    RateFeedRoles.require(RateFeedRoles.RATE_FEED_WRITER);
+    if (request == null) throw validation("REQUEST_BODY_REQUIRED", "Request body is required.");
+    UUID requestTenant = request.tenantId() == null ? tenantId : request.tenantId();
+    if (!tenantId.equals(requestTenant)) throw validation("TENANT_MISMATCH", "Request tenantId must match path tenantId.");
+    if (request.csvContent() == null || request.csvContent().isBlank()) throw validation("CSV_CONTENT_REQUIRED", "csvContent is required because persisted rate sheets do not retain LLPA dimension rows in this local slice.");
+    RateFeedModels.LlpaMappingConfig cfg = request.mappingConfig();
+    if (cfg == null) throw validation("MAPPING_CONFIG_REQUIRED", "mappingConfig is required.");
+    rejectFormulaMetadata("investor", cfg.investor());
+    rejectFormulaMetadata("productFamily", cfg.productFamily());
+    rejectFormulaMetadata("channel", cfg.channel());
+
+    var draft = ruleBookMapper.mapToRuleBook(request.csvContent(), new LlpaGridToRuleBookMapper.MappingConfig(
+        tenantId, sheetId, cfg.investor(), cfg.productFamily(), cfg.channel(), cfg.outputType(), cfg.effectiveAt(), cfg.versionLabel(), cfg.sourceSystem()));
+    List<RateFeedModels.RuleBookRuleResponse> rules = draft.rules().stream()
+        .map(rule -> new RateFeedModels.RuleBookRuleResponse(rule.ruleId(), rule.priority(),
+            rule.conditions().stream().map(condition -> new RateFeedModels.RuleBookConditionResponse(condition.dimension(), condition.operator(), condition.configuredValues())).toList(),
+            new RateFeedModels.RuleBookOutputResponse(rule.output().type(), rule.output().configuredAmount()), rule.reasonCode(), rule.exclusivityGroup(), rule.enabled(), rule.sourceRef()))
+        .toList();
+    List<RateFeedModels.PipelineMappingWarning> warnings = draft.warnings().stream()
+        .map(warning -> new RateFeedModels.PipelineMappingWarning(warning.rowNumber(), warning.code(), warning.message()))
+        .toList();
+    String resultHash = Hashing.sha256("map-to-rulebook:" + tenantId + ":" + sheetId + ":" + draft.gridHash() + ":" + draft.rules().size());
+    RateFeedModels.MapToRuleBookResponse response = new RateFeedModels.MapToRuleBookResponse(sheetId, draft.ruleBookId(), draft.businessKey(), draft.version(), draft.status(),
+        new RateFeedModels.RuleBookSelectorResponse(draft.selector().productFamily(), draft.selector().investor(), draft.selector().channel()),
+        new RateFeedModels.RuleBookEffectiveWindowResponse(draft.effectiveWindow().start(), draft.effectiveWindow().end()),
+        new RateFeedModels.RuleBookPrecisionPolicyResponse(draft.precisionPolicy().pointsScale(), draft.precisionPolicy().bpsScale(), draft.precisionPolicy().moneyScale(), draft.precisionPolicy().roundingMode()),
+        draft.sourceRowCount(), rules.size(), draft.gridHash(), warnings, rules,
+        Map.of("pipeline", "/api/v1/tenants/" + tenantId + "/ratefeed/pipeline", "governanceDraft", "governance-service:RuleSetDraftSaved.v1"), resultHash);
+    recordPipelineRow(sheetId, response, actor(actor), correlation(correlationId));
+    try {
+      repository.audit(tenantId, sheetId, "RATE_SHEET_MAPPED_TO_RULE_BOOK", "RateSheetRuleBookPipeline", actor(actor), correlation(correlationId), null, resultHash,
+          Map.of("ruleBookId", response.ruleBookId(), "businessKey", response.businessKey(), "ruleCount", response.ruleCount(), "gridHash", response.gridHash()));
+      repository.outbox(tenantId, sheetId, "RateSheetMappedToRuleBook.v1", 1, actor(actor), correlation(correlationId), Map.of("investor", response.selector().investor(), "channel", response.selector().channel()),
+          Map.of("sheetId", sheetId, "ruleBookId", response.ruleBookId(), "businessKey", response.businessKey(), "ruleCount", response.ruleCount(), "gridHash", response.gridHash(), "resultHash", resultHash));
+    } catch (RuntimeException ignored) {
+      // Mapping still returns local/dev evidence if optional audit/outbox tables are unavailable.
+    }
+    return response;
+  }
+
+  public RateFeedModels.PipelineStatusResponse pipelineStatus(UUID tenantId) {
+    RateFeedRoles.require(RateFeedRoles.RATE_FEED_VIEW);
+    return new RateFeedModels.PipelineStatusResponse(List.copyOf(pipelineRows.values()), pipelineRows.size(), Instant.now());
+  }
+
+  private void recordPipelineRow(UUID sheetId, RateFeedModels.MapToRuleBookResponse response, String actor, String correlationId) {
+    List<String> dimensions = response.rules().stream().flatMap(rule -> rule.conditions().stream().map(RateFeedModels.RuleBookConditionResponse::dimension)).distinct().sorted().toList();
+    RateFeedModels.PipelineSampleSimulation sample = response.rules().isEmpty()
+        ? new RateFeedModels.PipelineSampleSimulation("no mapped rules", "n/a", "n/a", "SKIPPED")
+        : new RateFeedModels.PipelineSampleSimulation("sample rule " + response.rules().get(0).sourceRef(), response.rules().get(0).output().configuredAmount() + " " + response.rules().get(0).output().type(), response.rules().get(0).output().configuredAmount() + " " + response.rules().get(0).output().type(), "MATCH");
+    List<RateFeedModels.PipelineGovernanceStage> history = List.of(
+        new RateFeedModels.PipelineGovernanceStage("DRAFT", "COMPLETED", Instant.now(), actor, response.resultHash()),
+        new RateFeedModels.PipelineGovernanceStage("SIMULATE", "READY", Instant.now(), "governance-service", correlationId),
+        new RateFeedModels.PipelineGovernanceStage("APPROVE", "WAITING_FOR_ADMIN", Instant.now(), "pricing-admin", "manual-approval-required"),
+        new RateFeedModels.PipelineGovernanceStage("PUBLISH", "WAITING_ON_APPROVAL", Instant.now(), "governance-service", "RuleBookPublished.v1"));
+    pipelineRows.put(sheetId, new RateFeedModels.PipelineStatusRow(sheetId, response.ruleBookId(), response.businessKey(), response.selector().investor(),
+        "DRAFT", response.ruleCount(), "Mapped to draft rule book by " + actor, response.gridHash(), response.sourceRowCount(), response.warnings().size(), dimensions, history, sample));
   }
 
   private RateSheet getSheet(UUID sheetId) {

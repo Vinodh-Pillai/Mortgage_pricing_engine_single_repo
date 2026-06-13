@@ -1,7 +1,7 @@
 package com.wcpe.adjustment;
 
 /**
- * Temporary mock-backed BasePriceDecision stub for PII-06.
+ * Lightweight BasePriceDecision reference used by the adjustment-service slice.
  * Does not encode real pricing rates, LLPA grids, regulatory thresholds, or production constants.
  */
 public record BasePriceDecisionStub(
@@ -13,8 +13,8 @@ public record BasePriceDecisionStub(
     String source
 ) {
     public BasePriceDecisionStub {
-        if (source == null || !source.equals("mock")) {
-            throw new IllegalArgumentException("BasePriceDecisionStub source must be \"mock\"");
+        if (source == null || source.isBlank()) {
+            throw new IllegalArgumentException("BasePriceDecisionStub source is required");
         }
     }
 }

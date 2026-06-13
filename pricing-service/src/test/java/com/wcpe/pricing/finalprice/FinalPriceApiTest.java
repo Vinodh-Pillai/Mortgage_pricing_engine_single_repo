@@ -226,6 +226,48 @@ class FinalPriceApiTest {
     }
 
     @Test
+    void adjustmentLinesToLedger() {
+        FinalPriceApi realAdjustmentApi = new FinalPriceApi(
+                repository,
+                (tenantId, selectionId) -> TENANT.equals(tenantId) && SELECTION_ID.equals(selectionId)
+                        ? Optional.of(selection) : Optional.empty(),
+                (tenantId, scenarioId, scenarioHash) -> TENANT.equals(tenantId) && facts.scenarioId().equals(scenarioId)
+                        && facts.scenarioHash().equals(scenarioHash) ? Optional.of(facts) : Optional.empty(),
+                (tenantId, versionRefs, asOf) -> TENANT.equals(tenantId)
+                        && versionRefs.stream().anyMatch(configuration.versionRefs()::contains)
+                        ? Optional.of(configuration) : Optional.empty(),
+                roundingPolicyApi,
+                request -> new FinalPriceApi.AdjustmentCalculationResult(
+                        request.basePriceDecision().scenarioId(),
+                        request.basePriceDecision().basePriceId(),
+                        List.of(
+                                new FinalPriceApi.AdjustmentLine("LLPA-FICO", 0.25000000, "FICO_720_739", "adjustment-service",
+                                        "POINTS_DELTA", "rule-fico", "rulebook-v1", true, "FICO 720-739", "audit:rule-fico", List.of("representativeFico=725")),
+                                new FinalPriceApi.AdjustmentLine("LLPA-CASHOUT", -0.12500000, "CASH_OUT_REFI", "adjustment-service",
+                                        "POINTS_DELTA", "rule-cashout", "rulebook-v1", true, "Cash-out refi", "audit:rule-cashout", List.of("cashOutFlag=true"))),
+                        0.12500000,
+                        "rulebook-v1",
+                        "real-rule-book",
+                        List.of("audit:rule-fico", "audit:rule-cashout"),
+                        "adjustment-hash-1",
+                        Map.of("POINTS_DELTA", new BigDecimal("0.12500000")),
+                        false));
+
+        FinalPriceResponse response = realAdjustmentApi.calculate(TENANT, writeHeaders("idem-real-adjustments"), request(false));
+
+        List<FinalPriceApi.FinalPriceLedgerEntry> adjustmentSteps = response.ledger().stream()
+                .filter(entry -> "ADJUSTMENT".equals(entry.step()))
+                .toList();
+        assertEquals(2, adjustmentSteps.size());
+        assertEquals(new BigDecimal("100.00000000"), adjustmentSteps.get(0).inputValue());
+        assertEquals(new BigDecimal("100.25000000"), adjustmentSteps.get(0).outputValue());
+        assertEquals("FICO_720_739", adjustmentSteps.get(0).reasonCode());
+        assertEquals("SUB", adjustmentSteps.get(1).operation());
+        assertEquals(new BigDecimal("100.12500000"), adjustmentSteps.get(1).outputValue());
+        assertEquals(List.of("representativeFico=725"), response.adjustments().get(0).conditions());
+    }
+
+    @Test
     void PriceCapFloorEvaluator_warnActionFailsClosedUntilConfigured() {
         configuration = new PricingConfigurationSnapshot(TENANT, List.of("adjustment-version-1", "cap-floor-version-warn"), null, null, null,
                 "BASE", "FINAL_PRICE", List.of(),

@@ -74,6 +74,9 @@ public final class LockConfirmationApi {
       record.investorConfirmationRef(),
       record.confirmedAt(),
       record.expiresAt(),
+      record.expirationBusinessDays(),
+      record.calendarConfigHash(),
+      record.expirationBreakdown(),
       record.replayRef(),
       record.correlationId()
     );
@@ -115,6 +118,12 @@ public final class LockConfirmationApi {
     String correlationId,
     String lockNumber,
     String investorConfirmationRef,
+    int lockPeriodBusinessDays,
+    Instant lockCreatedAt,
+    Instant lockExpiresAt,
+    LockModels.CalendarConfigSummary calendarConfig,
+    BusinessDayCalculator.ExpirationBreakdown expirationBreakdown,
+    String calendarConfigHash,
     String eventType
   ) {
     static ConfirmationResponse from(LockModels.LockConfirmationResponse response) {
@@ -129,6 +138,12 @@ public final class LockConfirmationApi {
         response.correlationId(),
         response.lockNumber(),
         response.investorConfirmationRef(),
+        response.lockPeriodBusinessDays(),
+        response.lockCreatedAt(),
+        response.lockExpiresAt(),
+        response.calendarConfig(),
+        response.expirationBreakdown(),
+        response.calendarConfigHash(),
         response.outboxEventType()
       );
     }
@@ -143,6 +158,9 @@ public final class LockConfirmationApi {
     String investorConfirmationRef,
     Instant confirmedAt,
     Instant expiresAt,
+    int expirationBusinessDays,
+    String calendarConfigHash,
+    BusinessDayCalculator.ExpirationBreakdown expirationBreakdown,
     String replayRef,
     String correlationId
   ) {}

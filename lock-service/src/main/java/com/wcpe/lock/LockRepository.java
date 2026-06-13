@@ -206,7 +206,9 @@ final class LockRepository {
       expirationSchedulesByTenantAndLock.put(
         confirmation.tenantId() + ":" + confirmation.lockId(),
         new LockModels.LockExpirationSchedule(
-          confirmation.tenantId(), confirmation.lockId(), confirmation.expiresAt(), null, lockRecord.lockPolicyVersionId(), null
+          confirmation.tenantId(), confirmation.lockId(), confirmation.expiresAt(), confirmation.expirationBusinessDays(),
+          confirmation.expirationCalculatedAt(), confirmation.calendarConfigHash(), confirmation.expirationBreakdown(),
+          null, lockRecord.lockPolicyVersionId(), null
         )
       );
     }
@@ -269,7 +271,8 @@ final class LockRepository {
         expirationSchedulesByTenantAndLock.put(
           extension.tenantId() + ":" + extension.lockId(),
           new LockModels.LockExpirationSchedule(
-            extension.tenantId(), extension.lockId(), extension.requestedExpiresAt(), null, extension.policyVersionId(), null
+            extension.tenantId(), extension.lockId(), extension.requestedExpiresAt(), response.requestedDays(),
+            extension.confirmedAt(), response.calendarConfigHash(), response.expirationBreakdown(), null, extension.policyVersionId(), null
           )
         );
       }

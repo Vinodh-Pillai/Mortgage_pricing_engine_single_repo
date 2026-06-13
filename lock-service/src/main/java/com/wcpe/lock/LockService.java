@@ -15,6 +15,7 @@ import java.util.UUID;
 
 public final class LockService {
   private final LockRepository repository;
+  private final BusinessDayCalculator businessDayCalculator;
   private long lockRequestTotal;
   private long lockRequestRejectedTotal;
   private long lockApprovalTotal;
@@ -48,11 +49,16 @@ public final class LockService {
   private final Map<String, String> extensionFeeConfigRefsByReason = new LinkedHashMap<>();
 
   public LockService() {
-    this(new LockRepository());
+    this(new LockRepository(), new BusinessDayCalculator(TenantCalendarClient.configuredLocalDefault()));
   }
 
   LockService(LockRepository repository) {
+    this(repository, new BusinessDayCalculator(TenantCalendarClient.configuredLocalDefault()));
+  }
+
+  LockService(LockRepository repository, BusinessDayCalculator businessDayCalculator) {
     this.repository = repository;
+    this.businessDayCalculator = businessDayCalculator;
   }
 
   public LockModels.LockRequestResponse requestLock(LockModels.LockRequestCommand command) {
@@ -121,6 +127,17 @@ public final class LockService {
   public LockModels.RateLockRecord getLock(UUID tenantId, String lockId) {
     return repository.find(tenantId, lockId)
       .orElseThrow(() -> new LockServiceException("NOT_FOUND", "Lock was not found for tenant"));
+  }
+
+  public LockModels.LockDetailResponse getLockDetail(UUID tenantId, String lockId) {
+    LockModels.RateLockRecord lock = getLock(tenantId, lockId);
+    LockModels.LockExpirationSchedule schedule = repository.findExpirationSchedule(tenantId, lockId).orElse(null);
+    return new LockModels.LockDetailResponse(
+      lock.tenantId(), lock.lockId(), lock.status(), lock.version(), lock.createdAt(), lock.expiresAt(),
+      schedule == null ? 0 : schedule.expirationBusinessDays(),
+      schedule == null ? "" : LockModels.normalized(schedule.calendarConfigHash()),
+      schedule == null ? null : schedule.expirationBreakdown()
+    );
   }
 
   public LockModels.RateLockRecord transition(UUID tenantId, String lockId, LockModels.RateLockStatus nextStatus) {
@@ -313,21 +330,31 @@ public final class LockService {
     String confirmationId = stableId(command.tenantId(), command.lockId(), command.idempotencyKey());
     String auditRef = "AUDIT-LOCK-CONFIRMATION-" + confirmationId;
     String replayRef = "REPLAY-LOCK-CONFIRMATION-" + confirmationHash.substring(0, 16);
+    BusinessDayCalculator.ExpirationCalculation expiration = expirationForConfirmation(command);
+    Instant calculatedExpiresAt = expiration == null ? command.expiresAt() : expiration.expiresAt();
+    int expirationBusinessDays = expiration == null ? command.lockPeriodDays() : expiration.breakdown().businessDaysAdded();
+    String calendarConfigHash = expiration == null ? "" : expiration.calendarConfigHash();
+    BusinessDayCalculator.ExpirationBreakdown expirationBreakdown = expiration == null ? null : expiration.breakdown();
+    LockModels.CalendarConfigSummary calendarConfig = expiration == null
+      ? null
+      : new LockModels.CalendarConfigSummary(expiration.timezone(), expiration.workingHoursSummary(), expiration.holidaysCount());
     LockModels.RateLockRecord updated = new LockModels.RateLockRecord(
       current.tenantId(), current.lockId(), current.requestId(), current.quoteId(), current.loanId(),
-      current.scenarioHash(), nextStatus, current.version() + 1, current.createdAt(), command.confirmedAt(), command.expiresAt(),
+      current.scenarioHash(), nextStatus, current.version() + 1, current.createdAt(), command.confirmedAt(), calculatedExpiresAt,
       current.idempotencyKey(), command.correlationId(), command.requestedPolicyVersionId(), current.requestHash(),
       auditRef, replayRef, confirmationEventType(nextStatus)
     );
     LockModels.LockConfirmationRecord confirmation = new LockModels.LockConfirmationRecord(
       command.tenantId(), confirmationId, command.lockId(), command.confirmationType(), command.lockNumber(),
       command.investorId(), command.investorConfirmationRef(), nextStatus, updated.version(), command.confirmedAt(),
-      command.expiresAt(), confirmationHash, command.idempotencyKey(), command.correlationId(), replayRef
+      calculatedExpiresAt, expirationBusinessDays, command.confirmedAt(), calendarConfigHash, expirationBreakdown,
+      confirmationHash, command.idempotencyKey(), command.correlationId(), replayRef
     );
     LockModels.LockConfirmationResponse response = new LockModels.LockConfirmationResponse(
       command.tenantId(), command.lockId(), confirmationId, current.status(), nextStatus, updated.version(),
       command.lockNumber(), command.investorConfirmationRef(), confirmationSummary(nextStatus), List.of(),
-      auditRef, replayRef, command.correlationId(), confirmationEventType(nextStatus), confirmationHash
+      auditRef, replayRef, command.correlationId(), confirmationEventType(nextStatus), expirationBusinessDays,
+      command.confirmedAt(), calculatedExpiresAt, calendarConfig, expirationBreakdown, calendarConfigHash, confirmationHash
     );
     LockModels.LockEvent event = new LockModels.LockEvent(
       confirmationEventType(nextStatus), "1", command.tenantId() + ":" + command.lockId(), command.tenantId(),
@@ -339,6 +366,8 @@ public final class LockService {
         "lockNumber", command.lockNumber(),
         "investorId", LockModels.normalized(command.investorId()),
         "investorConfirmationRef", LockModels.normalized(command.investorConfirmationRef()),
+        "expirationBusinessDays", String.valueOf(expirationBusinessDays),
+        "calendarConfigHash", calendarConfigHash,
         "confirmedTermsHash", confirmationHash,
         "sourceRefs", String.valueOf(Objects.hashCode(command.sourceRefs()))
       )
@@ -375,14 +404,17 @@ public final class LockService {
   public LockModels.LockExtensionPreviewResponse previewExtension(LockModels.LockExtensionPreviewCommand command) {
     validateExtensionPreviewRequired(command);
     LockModels.RateLockRecord current = getLock(command.tenantId(), command.lockId());
-    validateExtensionEligibility(current, command.expectedVersion(), command.requestedDays(), command.requestedExpiresAt(), command.costSnapshot());
+    Instant requestedExpiresAt = calendarEnabled(command.sourceRefs())
+      ? businessDayCalculator.calculateExpiration(command.tenantId(), current.expiresAt(), command.requestedDays()).expiresAt()
+      : command.requestedExpiresAt();
+    validateExtensionEligibility(current, command.expectedVersion(), command.requestedDays(), requestedExpiresAt, command.costSnapshot());
     validateExtensionPolicy(
       command.permissionGranted(), command.extensionPolicyResolved(), command.compliancePermitsAmendedTerms(), command.investorSupportsExtension(),
       "LOCK_EXTENSION_REQUEST"
     );
     String resultHash = hash(command);
     return new LockModels.LockExtensionPreviewResponse(
-      command.tenantId(), command.lockId(), command.requestedDays(), command.requestedExpiresAt(), command.costSnapshot(),
+      command.tenantId(), command.lockId(), command.requestedDays(), requestedExpiresAt, command.costSnapshot(),
       List.of("Extension preview calculated from provided tenant/investor policy snapshot"), command.correlationId(), resultHash
     );
   }
@@ -394,7 +426,11 @@ public final class LockService {
       .ifPresent(response -> { throw new ExtensionIdempotencyReplay(response); });
 
     LockModels.RateLockRecord current = getLock(command.tenantId(), command.lockId());
-    validateExtensionEligibility(current, command.expectedVersion(), command.requestedDays(), command.requestedExpiresAt(), command.costSnapshot());
+    BusinessDayCalculator.ExpirationCalculation extensionExpiration = calendarEnabled(command.sourceRefs())
+      ? businessDayCalculator.calculateExpiration(command.tenantId(), current.expiresAt(), command.requestedDays())
+      : null;
+    Instant requestedExpiresAt = extensionExpiration == null ? command.requestedExpiresAt() : extensionExpiration.expiresAt();
+    validateExtensionEligibility(current, command.expectedVersion(), command.requestedDays(), requestedExpiresAt, command.costSnapshot());
     validateExtensionPolicy(
       command.permissionGranted(), command.extensionPolicyResolved(), command.compliancePermitsAmendedTerms(), command.investorSupportsExtension(),
       "LOCK_EXTENSION_REQUEST"
@@ -412,12 +448,12 @@ public final class LockService {
     );
     LockModels.LockExtensionRecord extension = new LockModels.LockExtensionRecord(
       command.tenantId(), extensionId, command.lockId(), LockModels.LockExtensionStatus.REQUESTED, updated.version(),
-      command.requestedDays(), current.expiresAt(), command.requestedExpiresAt(), LockModels.upper(command.reasonCode()), command.actorId(), null,
+      command.requestedDays(), current.expiresAt(), requestedExpiresAt, LockModels.upper(command.reasonCode()), command.actorId(), null,
       command.requestedAt(), null, null, command.costSnapshot().policyVersionId(), costSnapshotHash(command.costSnapshot()),
       command.idempotencyKey(), command.correlationId(), replayRef
     );
     LockModels.LockExtensionResponse response = extensionResponse(
-      updated, extension, command.costSnapshot(), "Lock extension requested using tenant/investor policy configuration", List.of(), auditRef,
+      updated, extension, command.costSnapshot(), extensionExpiration, "Lock extension requested using tenant/investor policy configuration", List.of(), auditRef,
       replayRef, command.correlationId(), "lock.extension_requested.v1", resultHash
     );
     repository.saveExtensionRequest(
@@ -484,7 +520,8 @@ public final class LockService {
       extension.policyVersionId(), extension.costSnapshotHash(), extension.idempotencyKey(), command.correlationId(), replayRef
     );
     LockModels.LockExtensionResponse response = extensionResponse(
-      updated, updatedExtension, extensionCostFromRecord(updatedExtension), approve ? "Lock extension approved using configured policy" : "Lock extension rejected using configured reason codes",
+      updated, updatedExtension, extensionCostFromRecord(updatedExtension), null,
+      approve ? "Lock extension approved using configured policy" : "Lock extension rejected using configured reason codes",
       List.of(), auditRef, replayRef, command.correlationId(), eventType, resultHash
     );
     repository.saveExtensionUpdate(
@@ -531,7 +568,8 @@ public final class LockService {
       extension.costSnapshotHash(), extension.idempotencyKey(), command.correlationId(), replayRef
     );
     LockModels.LockExtensionResponse response = extensionResponse(
-      updated, updatedExtension, extensionCostFromRecord(updatedExtension), "Investor extension confirmation accepted and expiration amended", List.of(),
+      updated, updatedExtension, extensionCostFromRecord(updatedExtension), null,
+      "Investor extension confirmation accepted and expiration amended", List.of(),
       auditRef, replayRef, command.correlationId(), "lock.extension_confirmed.v1", resultHash
     );
     repository.saveExtensionUpdate(
@@ -579,7 +617,8 @@ public final class LockService {
       extension.idempotencyKey(), command.correlationId(), replayRef
     );
     LockModels.LockExtensionResponse response = extensionResponse(
-      updated, updatedExtension, extensionCostFromRecord(updatedExtension), "Lock extension request cancelled using configured reason codes", List.of(),
+      updated, updatedExtension, extensionCostFromRecord(updatedExtension), null,
+      "Lock extension request cancelled using configured reason codes", List.of(),
       auditRef, replayRef, command.correlationId(), "lock.extension_cancelled.v1", resultHash
     );
     repository.saveExtensionUpdate(
@@ -1747,6 +1786,7 @@ public final class LockService {
     LockModels.RateLockRecord lockRecord,
     LockModels.LockExtensionRecord extension,
     LockModels.ExtensionCostSnapshot costSnapshot,
+    BusinessDayCalculator.ExpirationCalculation expirationCalculation,
     String summary,
     List<String> validationMessages,
     String auditRef,
@@ -1757,8 +1797,10 @@ public final class LockService {
   ) {
     return new LockModels.LockExtensionResponse(
       extension.tenantId(), extension.lockId(), extension.extensionId(), extension.status(), lockRecord.status(), lockRecord.version(),
-      lockRecord.expiresAt(), extension.requestedDays(), extension.requestedExpiresAt(), costSnapshot, summary, validationMessages,
-      auditRef, replayRef, correlationId, eventType, resultHash
+      lockRecord.expiresAt(), extension.requestedDays(), extension.requestedExpiresAt(), costSnapshot,
+      expirationCalculation == null ? null : expirationCalculation.breakdown(),
+      expirationCalculation == null ? "" : expirationCalculation.calendarConfigHash(),
+      summary, validationMessages, auditRef, replayRef, correlationId, eventType, resultHash
     );
   }
 
@@ -2222,6 +2264,20 @@ public final class LockService {
     }
   }
 
+  private BusinessDayCalculator.ExpirationCalculation expirationForConfirmation(LockModels.LockConfirmationCommand command) {
+    if (!calendarEnabled(command.sourceRefs())) {
+      return null;
+    }
+    return businessDayCalculator.calculateExpiration(command.tenantId(), command.confirmedAt(), command.lockPeriodDays());
+  }
+
+  private static boolean calendarEnabled(Map<String, String> sourceRefs) {
+    if (sourceRefs == null) {
+      return false;
+    }
+    return sourceRefs.containsKey("tenantCalendarConfig") || sourceRefs.containsKey("calendarConfig") || sourceRefs.containsKey("tenantCalendarConfigHash");
+  }
+
   private static void validateExpirationRunRequired(LockModels.LockExpirationRunCommand command) {
     if (command == null) {
       throw new LockServiceException("VALIDATION_FAILED", "command is required");
@@ -2262,6 +2318,7 @@ public final class LockService {
     );
     LockModels.LockExpirationSchedule schedule = new LockModels.LockExpirationSchedule(
       command.tenantId(), current.lockId(), confirmation.expiresAt(),
+      confirmation.expirationBusinessDays(), confirmation.expirationCalculatedAt(), confirmation.calendarConfigHash(), confirmation.expirationBreakdown(),
       nextStatus == LockModels.RateLockStatus.EXPIRING_SOON ? null : confirmation.expiresAt().minusSeconds(command.warningThresholdSeconds()),
       command.policyVersionId(), command.evaluatedAt()
     );

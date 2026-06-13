@@ -1,14 +1,22 @@
 package com.wcpe.quote;
 
+import com.wcpe.quote.parallel.ParallelPricingOrchestrator;
+import com.wcpe.quote.parallel.PricingBatchResult;
+
 import java.time.Clock;
 import java.time.Instant;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class QuoteApplicationService {
     private final QuoteRepository repository;
@@ -17,13 +25,14 @@ public class QuoteApplicationService {
     private final QuoteDependencies dependencies;
     private final QuoteCache cache;
     private final BestExecutionRanker ranker;
+    private final ParallelPricingOrchestrator parallelPricingOrchestrator;
     private final QuotePresentationModelBuilder presentationModelBuilder = new QuotePresentationModelBuilder();
     private final Clock clock;
-    private final List<OutboxEvent> outboxEvents = new ArrayList<>();
-    private final List<AuditEntry> auditEntries = new ArrayList<>();
-    private final Map<String, QuoteComparisonExport> comparisonExportsByIdempotencyKey = new LinkedHashMap<>();
-    private final Map<String, QuoteSelection> selectionsByIdempotencyKey = new LinkedHashMap<>();
-    private final Map<String, QuoteSelection> activeSelectionsByQuote = new LinkedHashMap<>();
+    private final Queue<OutboxEvent> outboxEvents = new ConcurrentLinkedQueue<>();
+    private final Queue<AuditEntry> auditEntries = new ConcurrentLinkedQueue<>();
+    private final Map<String, QuoteComparisonExport> comparisonExportsByIdempotencyKey = new ConcurrentHashMap<>();
+    private final Map<String, QuoteSelection> selectionsByIdempotencyKey = new ConcurrentHashMap<>();
+    private final Map<String, QuoteSelection> activeSelectionsByQuote = new ConcurrentHashMap<>();
 
     public QuoteApplicationService(
         QuoteRepository repository,
@@ -44,6 +53,19 @@ public class QuoteApplicationService {
         BestExecutionRanker ranker,
         Clock clock
     ) {
+        this(repository, jobRepository, snapshotRepository, dependencies, cache, ranker, clock, new ParallelPricingOrchestrator());
+    }
+
+    public QuoteApplicationService(
+        QuoteRepository repository,
+        QuoteJobRepository jobRepository,
+        QuoteSnapshotRepository snapshotRepository,
+        QuoteDependencies dependencies,
+        QuoteCache cache,
+        BestExecutionRanker ranker,
+        Clock clock,
+        ParallelPricingOrchestrator parallelPricingOrchestrator
+    ) {
         this.repository = repository;
         this.jobRepository = jobRepository;
         this.snapshotRepository = snapshotRepository;
@@ -51,6 +73,7 @@ public class QuoteApplicationService {
         this.cache = cache;
         this.ranker = ranker;
         this.clock = clock;
+        this.parallelPricingOrchestrator = parallelPricingOrchestrator == null ? new ParallelPricingOrchestrator() : parallelPricingOrchestrator;
     }
 
     public QuoteApplicationService(
@@ -614,8 +637,14 @@ public class QuoteApplicationService {
             .orElseThrow(() -> new QuoteCreateException("NO_ACTIVE_RANKING_POLICY", "Missing effective-dated ranking policy"));
         Instant now = clock.instant();
         Instant expiresAt = now.plus(policy.quoteTtl());
-        List<QuoteOption> options = ranker.rank(dependencies.candidatesFor(request), policy, expiresAt);
-        QuoteStatus status = options.isEmpty() ? QuoteStatus.NO_OPTIONS : QuoteStatus.READY;
+        List<QuoteCandidate> candidates = dependencies.candidatesFor(request);
+        List<QuoteCandidate> authorizedCandidates = dependencies.authorizedCandidatesFor(request, candidates);
+        if (!candidates.isEmpty() && authorizedCandidates.isEmpty()) {
+            throw new QuoteCreateException("NO_AUTHORIZED_PRODUCTS_FOR_TENANT", "No authorized products are available for tenant");
+        }
+        PricingBatchResult pricingResult = priceCandidates(request, authorizedCandidates);
+        List<QuoteOption> options = ranker.rank(pricingResult.successful(), policy, expiresAt);
+        QuoteStatus status = quoteStatusFor(options, pricingResult, authorizedCandidates.size());
         QuoteInputVersionSet versionSet = new QuoteInputVersionSet(
             request.scenarioVersion(),
             dependencies.eligibilityVersion(),
@@ -649,6 +678,74 @@ public class QuoteApplicationService {
         cache.put(quote);
         recordAuditAndEvents(quote, snapshot);
         return quote;
+    }
+
+    private PricingBatchResult priceCandidates(QuoteCreateRequest request, List<QuoteCandidate> candidates) {
+        AdjustmentCalculationPort adjustmentPort = dependencies.adjustmentCalculationPort();
+        if (adjustmentPort == null) {
+            return new PricingBatchResult(candidates, List.of(), java.time.Duration.ZERO, candidates.size(), parallelPricingOrchestrator.settings().minimumSuccessfulResults());
+        }
+        return parallelPricingOrchestrator.priceCandidatesParallel(candidates, candidate -> priceSingleCandidate(request, candidate, adjustmentPort));
+    }
+
+    private QuoteCandidate priceSingleCandidate(QuoteCreateRequest request, QuoteCandidate candidate, AdjustmentCalculationPort adjustmentPort) {
+        AdjustmentCalculationResult result = adjustmentPort.calculate(buildAdjustmentRequest(request, candidate));
+        if (result == null) {
+            return candidate;
+        }
+        if (result.blocked()) {
+            throw new QuoteCreateException("MISSING_PRICE", "Adjustment calculation blocked for candidate " + candidate.candidateId());
+        }
+        BigDecimal calculatedAdjustmentBps = BigDecimal.valueOf(result.totalAdjustment())
+            .movePointRight(2)
+            .setScale(4, RoundingMode.HALF_UP);
+        return candidate.withAdjustmentResult(result, calculatedAdjustmentBps);
+    }
+
+    private QuoteStatus quoteStatusFor(List<QuoteOption> options, PricingBatchResult pricingResult, int candidateCount) {
+        if (options.isEmpty()) {
+            return pricingResult.allFailed() ? QuoteStatus.FAILED : QuoteStatus.NO_OPTIONS;
+        }
+        int minimum = parallelPricingOrchestrator.settings().minimumSuccessfulResults();
+        if (candidateCount >= minimum && !pricingResult.hasMinimumResults()) {
+            return QuoteStatus.FAILED;
+        }
+        return QuoteStatus.READY;
+    }
+
+    private AdjustmentCalculationRequest buildAdjustmentRequest(QuoteCreateRequest request, QuoteCandidate candidate) {
+        Map<String, Object> facts = new LinkedHashMap<>();
+        facts.putAll(request.clientContext());
+        facts.put("candidateId", candidate.candidateId());
+        facts.put("productFamily", candidate.productId());
+        facts.put("investor", candidate.investorId());
+        facts.put("channel", candidate.channel());
+        facts.put("lockPeriodDays", candidate.lockPeriodDays());
+        facts.put("noteRatePercent", candidate.noteRatePercent());
+        facts.put("basePriceBps", candidate.basePriceBps());
+        facts.put("scenarioVersion", request.scenarioVersion());
+        BasePriceDecisionStub baseDecision = new BasePriceDecisionStub(
+            request.scenarioId().toString(), candidate.candidateId(), candidate.productId(),
+            candidate.basePriceBps().movePointLeft(2).doubleValue(), request.presentationCurrency(), "quote-service");
+        return new AdjustmentCalculationRequest(
+            baseDecision,
+            stringAttributes(facts),
+            List.of(),
+            dependencies.adjustmentVersion(),
+            request.tenantId(),
+            new RuleBookSelector(candidate.productId(), candidate.investorId(), candidate.channel()),
+            request.effectiveDate().atStartOfDay(java.time.ZoneOffset.UTC).toInstant(),
+            facts);
+    }
+
+    private static Map<String, String> stringAttributes(Map<String, Object> facts) {
+        Map<String, String> attributes = new LinkedHashMap<>();
+        facts.forEach((key, value) -> {
+            if (value != null) {
+                attributes.put(key, String.valueOf(value));
+            }
+        });
+        return attributes;
     }
 
     private Quote sameRequestOrConflict(Quote existing, QuoteCreateRequest request) {

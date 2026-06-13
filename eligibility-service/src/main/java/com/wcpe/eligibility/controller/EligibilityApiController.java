@@ -12,6 +12,10 @@ import com.wcpe.eligibility.domain.models.FicoLtvEvaluationResult;
 import com.wcpe.eligibility.domain.models.FicoLtvMatrixEvaluationRequest;
 import com.wcpe.eligibility.domain.models.InvestorOverlayEvaluationRequest;
 import com.wcpe.eligibility.domain.models.InvestorOverlayEvaluationResult;
+import com.wcpe.eligibility.domain.models.InvestorEligibilityBatchEvaluationRequest;
+import com.wcpe.eligibility.domain.models.InvestorEligibilityBatchEvaluationResult;
+import com.wcpe.eligibility.domain.models.InvestorEligibilityEvaluationRequest;
+import com.wcpe.eligibility.domain.models.InvestorEligibilityResult;
 import com.wcpe.eligibility.domain.models.LoanLimitEvaluationRequest;
 import com.wcpe.eligibility.domain.models.LoanLimitEvaluationResult;
 import com.wcpe.eligibility.domain.models.OccupancyPurposeEvaluationRequest;
@@ -25,6 +29,7 @@ import com.wcpe.eligibility.cache.EligibilityCacheService;
 import com.wcpe.eligibility.service.EligibilityExplanationService;
 import com.wcpe.eligibility.service.FicoLtvMatrixService;
 import com.wcpe.eligibility.service.InvestorOverlayRuleService;
+import com.wcpe.eligibility.service.InvestorEligibilityEvaluationService;
 import com.wcpe.eligibility.service.LoanLimitEvaluationService;
 import com.wcpe.eligibility.service.OccupancyPurposeRuleService;
 import com.wcpe.eligibility.service.PropertyTypeRuleService;
@@ -56,6 +61,7 @@ public class EligibilityApiController {
     private final EligibilityExplanationService eligibilityExplanationService;
     private final QuoteSubmissionApplicationService quoteSubmissionApplicationService;
     private final LoanLimitEvaluationService loanLimitEvaluationService;
+    private final InvestorEligibilityEvaluationService investorEligibilityEvaluationService;
 
     public EligibilityApiController(EligibilityApplicationService service, JdbcTemplate jdbcTemplate, ObjectMapper objectMapper,
                                            FicoLtvMatrixService ficoLtvMatrixService,
@@ -75,9 +81,9 @@ public class EligibilityApiController {
                                            PropertyTypeRuleService propertyTypeRuleService,
                                             InvestorOverlayRuleService investorOverlayRuleService,
                                             EligibilityCacheService eligibilityCacheService,
-                                            EligibilityExplanationService eligibilityExplanationService,
-                                            QuoteSubmissionApplicationService quoteSubmissionApplicationService,
-                                            LoanLimitEvaluationService loanLimitEvaluationService) {
+                                              EligibilityExplanationService eligibilityExplanationService,
+                                              QuoteSubmissionApplicationService quoteSubmissionApplicationService,
+                                             LoanLimitEvaluationService loanLimitEvaluationService) {
         this.service = service;
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
@@ -89,6 +95,21 @@ public class EligibilityApiController {
         this.eligibilityExplanationService = eligibilityExplanationService;
         this.quoteSubmissionApplicationService = quoteSubmissionApplicationService;
         this.loanLimitEvaluationService = loanLimitEvaluationService;
+        this.investorEligibilityEvaluationService = new InvestorEligibilityEvaluationService();
+    }
+
+    @PostMapping("/eligibility/evaluate")
+    ResponseEntity<InvestorEligibilityResult> evaluateInvestorEligibility(
+            @PathVariable UUID tenantId,
+            @RequestBody InvestorEligibilityEvaluationRequest request) {
+        return ResponseEntity.ok(investorEligibilityEvaluationService.evaluate(request));
+    }
+
+    @PostMapping("/eligibility/batch-evaluate")
+    ResponseEntity<InvestorEligibilityBatchEvaluationResult> batchEvaluateInvestorEligibility(
+            @PathVariable UUID tenantId,
+            @RequestBody InvestorEligibilityBatchEvaluationRequest request) {
+        return ResponseEntity.ok(investorEligibilityEvaluationService.batchEvaluate(request));
     }
 
     @PostMapping("/conventional-eligibility-core")

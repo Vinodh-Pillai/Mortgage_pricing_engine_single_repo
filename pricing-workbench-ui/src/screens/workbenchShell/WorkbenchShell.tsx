@@ -1,4 +1,5 @@
 import type { ComponentType } from 'react';
+import { fairLendingScreenModule } from '../fairLending';
 import { scenarioAnalysisEvidenceTarget, scenarioAnalysisStateCoverage } from '../scenarioAnalysis';
 
 export type WorkbenchScreenModule = {
@@ -237,6 +238,7 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     evidenceTarget: '.local-harness/evidence/PII-24-S19/ops-cases.json',
     match: (pathname) => pathname.startsWith('/ops/dashboard') || pathname.startsWith('/ops/queues') || pathname.startsWith('/ops/cases') || pathname.startsWith('/ops/escalations'),
   },
+  fairLendingScreenModule,
   {
     id: 'compliance-evidence',
     label: 'Compliance evidence',
@@ -246,7 +248,7 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     dataBoundary: 'lib/api/complianceEvidence',
     stateCoverage: ['load-state', 'empty', 'blocked', 'ready'],
     evidenceTarget: '.local-harness/evidence/PII-24-S28/compliance-evidence-registry.json',
-    match: (pathname) => pathname.startsWith('/compliance') || pathname.startsWith('/privacy/requests') || pathname.startsWith('/security/events'),
+    match: (pathname) => (pathname.startsWith('/compliance') && !pathname.startsWith('/compliance/fair-lending')) || pathname.startsWith('/privacy/requests') || pathname.startsWith('/security/events'),
   },
   {
     id: 'quality-dashboard',
@@ -300,6 +302,20 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     adapterStatus: 'Upload, validation, remediation, and publish states are represented with local evidence capture.',
     evidenceTarget: '.local-harness/evidence/PII-25-S04/rate-sheet-intake.json',
     match: (pathname) => pathname.startsWith('/pricing/rate-sheets'),
+  },
+  {
+    id: 'rate-feed-pipeline',
+    label: 'Rate Feed Rule Book Pipeline',
+    routePattern: '/admin/ratefeed/pipeline',
+    breadcrumb: 'Rate Feed Pipeline',
+    screenPackage: 'screens/rateFeedPipeline',
+    dataBoundary: 'lib/api/rateFeedPipeline',
+    stateCoverage: ['loading', 'blocked', 'pipeline-table', 'governance-history', 'sample-simulation'],
+    personaVisibility: ['admin', 'pricing-analyst', 'operations-lead'],
+    dependencyStatus: 'Rate-feed, governance, and adjustment service events control publish and cache-invalidation state.',
+    adapterStatus: 'The monitor shows local fallback data when the pipeline API is unavailable and uses backend rows when connected.',
+    evidenceTarget: '.local-harness/evidence/PII-32-S01/pipeline-monitor.json',
+    match: (pathname) => pathname.startsWith('/admin/ratefeed/pipeline'),
   },
   {
     id: 'pricing-analysis',

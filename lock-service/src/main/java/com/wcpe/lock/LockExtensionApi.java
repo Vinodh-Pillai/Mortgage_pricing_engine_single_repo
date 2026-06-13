@@ -210,6 +210,8 @@ public final class LockExtensionApi {
     Instant expiresAt,
     int requestedDays,
     Instant requestedExpiresAt,
+    BusinessDayCalculator.ExpirationBreakdown expirationBreakdown,
+    String calendarConfigHash,
     String resultSummary,
     List<String> validationMessages,
     String auditRef,
@@ -220,8 +222,8 @@ public final class LockExtensionApi {
     static ExtensionResponse from(LockModels.LockExtensionResponse response) {
       return new ExtensionResponse(
         response.extensionId(), response.lockId(), response.extensionStatus().name(), response.status().name(), response.version(),
-        response.expiresAt(), response.requestedDays(), response.requestedExpiresAt(), response.resultSummary(),
-        response.validationMessages(), response.auditRef(), response.replayRef(), response.correlationId(), response.outboxEventType()
+        response.expiresAt(), response.requestedDays(), response.requestedExpiresAt(), response.expirationBreakdown(), response.calendarConfigHash(),
+        response.resultSummary(), response.validationMessages(), response.auditRef(), response.replayRef(), response.correlationId(), response.outboxEventType()
       );
     }
   }

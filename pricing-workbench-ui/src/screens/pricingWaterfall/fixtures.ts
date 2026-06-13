@@ -1,6 +1,7 @@
 import type { PricingWaterfallView, WaterfallLedgerRow } from '../../lib/api/quoteRuns';
 
 const sections = ['Base Rate', 'Adjustments', 'Margins', 'Rounding'] as const;
+const adjustmentReasonCodes = ['FICO_720_739', 'LTV_80_85', 'CASH_OUT_REFI'] as const;
 
 export const deterministicPricingWaterfall: PricingWaterfallView = {
   tenantContext: 'tenant-fixture',
@@ -54,20 +55,21 @@ function buildLedgerRows(count: number): WaterfallLedgerRow[] {
   return Array.from({ length: count }, (_, index) => {
     const ordinal = index + 1;
     const section = sections[index % sections.length];
+    const adjustmentReasonCode = adjustmentReasonCodes[index % adjustmentReasonCodes.length];
     const redacted = ordinal === 7 || ordinal === 118;
     return {
       ordinal,
       section,
-      step: `${section} step ${ordinal}`,
+      step: section === 'Adjustments' ? `Adjustment ${adjustmentReasonCode} step ${ordinal}` : `${section} step ${ordinal}`,
       inputValue: redacted ? { value: null, redacted: true, reason: 'MARGIN_CONFIDENTIAL', auditRef: 'audit:redaction-001' } : { value: `backend-input-${ordinal}`, redacted: false, reason: null },
       operation: `BACKEND_${section.toUpperCase().replace(/\s+/g, '_')}`,
       outputValue: redacted ? { value: null, redacted: true, reason: 'MARGIN_CONFIDENTIAL', auditRef: 'audit:redaction-001' } : { value: `backend-output-${ordinal}`, redacted: false, reason: null },
       configRef: section === 'Margins' ? 'margin-service:branch-margin-001' : section === 'Adjustments' ? 'adjustment-service:adj-001' : 'pricing-service:grid-config-001',
-      reasonCode: redacted ? 'REDACTED_MARGIN' : section.toUpperCase().replace(/\s+/g, '_'),
+      reasonCode: redacted ? 'REDACTED_MARGIN' : section === 'Adjustments' ? adjustmentReasonCode : section.toUpperCase().replace(/\s+/g, '_'),
       roundingMode: section === 'Rounding' ? 'nearest-eighth-from-backend' : null,
-      inputDetails: [`Backend input ref ${ordinal}`, `No local pricing calculation for row ${ordinal}`],
+      inputDetails: section === 'Adjustments' ? [`Backend input ref ${ordinal}`, `Reason code ${adjustmentReasonCode}`, `Conditions supplied by adjustment-service for row ${ordinal}`] : [`Backend input ref ${ordinal}`, `No local pricing calculation for row ${ordinal}`],
       outputDetails: [`Backend output ref ${ordinal}`],
-      adjustmentRefs: section === 'Adjustments' ? ['adjustment-service:adj-001'] : [],
+      adjustmentRefs: section === 'Adjustments' ? [`adjustment-service:${adjustmentReasonCode.toLowerCase()}`] : [],
       marginRefs: section === 'Margins' ? ['margin-service:branch-margin-001'] : [],
     };
   });

@@ -24,6 +24,7 @@ import com.wcpe.pricing.missingprice.MissingPriceHandlingApi.MissingPriceErrorRe
 import com.wcpe.pricing.missingprice.MissingPriceHandlingApi.MissingPriceHandlingResponse;
 import com.wcpe.pricing.missingprice.MissingPriceHandlingApi.MissingPriceIncidentStatus;
 import com.wcpe.pricing.waterfall.PricingWaterfallApi.PricingWaterfallView;
+import com.wcpe.pricing.waterfall.PricingWaterfallApi.PricingOutcomeContext;
 import com.wcpe.pricing.waterfall.PricingWaterfallApi.WaterfallEvidence;
 import com.wcpe.pricing.waterfall.PricingWaterfallApi.WaterfallHeaders;
 
@@ -52,7 +53,29 @@ class PricingWaterfallApiTest {
         assertEquals("result-hash-1", view.resultHash());
         assertEquals("version-hash-1", view.versionGraphHash());
         assertNotNull(view.evidenceHash());
+        assertEquals(1, view.pricingOutcomeEvents().size());
+        assertEquals("PricingOutcomeRecorded.v1", view.pricingOutcomeEvents().get(0).eventType());
+        assertEquals(FINAL_PRICE_ID, view.pricingOutcomeEvents().get(0).outcomeId());
+        assertEquals(new BigDecimal("6.12500"), view.pricingOutcomeEvents().get(0).noteRate());
         assertTrue(view.blockers().isEmpty());
+    }
+
+    @Test
+    void pricingOutcomeEventCarriesProtectedClassProxiesAndControls() {
+        PricingOutcomeContext context = new PricingOutcomeContext(UUID.fromString("44444444-4444-4444-4444-444444444444"),
+                UUID.fromString("55555555-5555-5555-5555-555555555555"), "Black", "non-hispanic", "Female", 43,
+                720, new BigDecimal("79.50"), new BigDecimal("34.25"), new BigDecimal("325000.00"), "purchase",
+                "sfr", "primary", "CA", "retail", "conventional", "investor_a", 125);
+
+        PricingWaterfallView view = api.assemble(TENANT, headers(PricingWaterfallApi.RESTRICTED_VALUE_PERMISSION),
+                new WaterfallEvidence("run-test", baseSelection(), finalPrice(), null, null, context));
+
+        assertEquals("BLACK", view.pricingOutcomeEvents().get(0).applicantRace());
+        assertEquals("NON_HISPANIC", view.pricingOutcomeEvents().get(0).applicantEthnicity());
+        assertEquals("FEMALE", view.pricingOutcomeEvents().get(0).applicantSex());
+        assertEquals(720, view.pricingOutcomeEvents().get(0).fico());
+        assertEquals(new BigDecimal("79.50"), view.pricingOutcomeEvents().get(0).ltv());
+        assertEquals(125, view.pricingOutcomeEvents().get(0).marginBps());
     }
 
     @Test

@@ -287,6 +287,19 @@ class RateFeedController {
     return withAuthorizedHeaders(headers(http), RateFeedRoles.RATE_FEED_VIEW, () -> ResponseEntity.ok(service.listSheets(tenantId, investorId, channelId, status)));
   }
 
+  @PostMapping("/rate-sheets/{sheetId}/map-to-rulebook")
+  ResponseEntity<RateFeedModels.MapToRuleBookResponse> mapToRuleBook(@PathVariable UUID tenantId, @PathVariable UUID sheetId,
+      @RequestBody RateFeedModels.MapToRuleBookRequest request, HttpServletRequest http) {
+    Headers h = headers(http);
+    return withAuthorizedHeaders(h, RateFeedRoles.RATE_FEED_WRITER,
+        () -> ResponseEntity.status(HttpStatus.CREATED).body(service.mapToRuleBook(tenantId, sheetId, request, h.actorId(), h.correlationId())));
+  }
+
+  @GetMapping("/ratefeed/pipeline")
+  ResponseEntity<RateFeedModels.PipelineStatusResponse> pipelineStatus(@PathVariable UUID tenantId, HttpServletRequest http) {
+    return withAuthorizedHeaders(headers(http), RateFeedRoles.RATE_FEED_VIEW, () -> ResponseEntity.ok(service.pipelineStatus(tenantId)));
+  }
+
   // ── Hardening: Version list endpoint ──
 
   @GetMapping("/rate-sheets/versions")

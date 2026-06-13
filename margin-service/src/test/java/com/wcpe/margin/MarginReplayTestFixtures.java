@@ -19,17 +19,18 @@ final class MarginReplayTestFixtures {
 
   static VersionManifest fullStackManifest() {
     List<WaterfallStep> steps = fullStackSteps("company-margin-hash", "channel-margin-hash",
-        "branch-overlay-hash", "lo-comp-hash", "broker-comp-hash", "profitability-floor-hash");
+        "srp-hash", "branch-overlay-hash", "lo-comp-hash", "broker-comp-hash", "profitability-floor-hash");
     return new VersionManifest("manifest-margin-comp-full-stack",
         Map.of(
             "COMPANY", "company-policy:company-v1:cfg-company-v1",
             "CHANNEL", "channel-policy:channel-v1:cfg-channel-v1",
+            "SRP", "srp-policy:srp-v1:cfg-srp-v1",
             "BRANCH_OVERLAY", "branch-policy:branch-v1:cfg-branch-v1",
             "LO", "lo-plan:lo-v1:cfg-lo-v1",
             "BROKER", "broker-plan:broker-v1:cfg-broker-v1",
             "PROFITABILITY_FLOOR", "profitability-policy:floor-v1:cfg-floor-v1"),
         steps,
-        List.of("MarginPolicyPublished.v1", "CompPlanPublished.v1", "DecisionReplayed.v1"),
+        List.of("MarginPolicyPublished.v1", "SrpPolicyPublished.v1", "CompPlanPublished.v1", "DecisionReplayed.v1"),
         Map.of("ci", "local-harness", "seed", "PII-07-S10-governed-symbolic-fixture"));
   }
 
@@ -48,13 +49,14 @@ final class MarginReplayTestFixtures {
         manifest, "corr-replay");
   }
 
-  static List<WaterfallStep> fullStackSteps(String companyHash, String channelHash, String branchHash,
+  static List<WaterfallStep> fullStackSteps(String companyHash, String channelHash, String srpHash, String branchHash,
       String loHash, String brokerHash, String floorHash) {
     return List.of(
         step("BASE_PRICING", "rate-v1", "base-price-ref", "rate-price-conversion", "HALF_UP", "PUBLIC", "BASE", "base-hash", false),
         step("ADJUSTMENTS_OVERLAYS", "adjustment-v1", "adjustment-ref", "adjustment-conversion", "HALF_UP", "PUBLIC", "ADJ", "adjustment-hash", false),
         step("COMPANY_MARGIN", "company-v1", "company-margin-ref", "points-conversion", "HALF_UP", "SENSITIVE", "COMPANY_MARGIN", companyHash, true),
         step("CHANNEL_MARGIN", "channel-v1", "channel-margin-ref", "points-conversion", "HALF_UP", "SENSITIVE", "CHANNEL_MARGIN", channelHash, true),
+        step("SRP", "srp-v1", "srp-spread-bps-ref", "bps-to-points", "HALF_UP", "SENSITIVE", "SRP-FNMA-RETAIL", srpHash, true),
         step("BRANCH_OVERLAY", "branch-v1", "branch-overlay-ref", "points-conversion", "HALF_UP", "SENSITIVE", "BRANCH_OVERLAY", branchHash, true),
         step("LO_COMPENSATION", "lo-v1", "lo-comp-ref", "bps-to-points", "HALF_UP", "SENSITIVE", "LO_COMP", loHash, true),
         step("BROKER_COMPENSATION", "broker-v1", "broker-comp-ref", "bps-to-points", "HALF_UP", "SENSITIVE", "BROKER_COMP", brokerHash, true),

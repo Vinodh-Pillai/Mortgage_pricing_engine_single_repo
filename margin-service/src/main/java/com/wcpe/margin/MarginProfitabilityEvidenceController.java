@@ -22,6 +22,8 @@ public class MarginProfitabilityEvidenceController {
                 List.of("company-policy-version-ref-required", "company-margin-audit-ref-required"), List.of()),
             section("channel-margin", "Channel margin", "margin-service channel margin policy", true,
                 List.of("channel-policy-version-ref-required", "channel-margin-audit-ref-required"), List.of()),
+            section("srp", "Servicing Release Premium", "margin-service SRP policy", true,
+                List.of("srp-policy-version-ref-required", "srp-audit-ref-required"), List.of()),
             section("branch-overlay", "Branch overlay", "margin-service branch hierarchy overlay", true,
                 List.of("branch-overlay-version-ref-required", "branch-scope-audit-ref-required"), List.of()),
             section("lo-compensation", "LO compensation", "margin-service LO compensation plan", canViewCompensation,

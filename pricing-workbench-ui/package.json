@@ -20,6 +20,7 @@
     "test:design-system": "vitest run --environment jsdom src/design-system",
     "test:screens": "vitest run --environment jsdom src/screens/shared/PageStateWrapper.test.tsx src/screens/FunctionalityScreens.test.tsx src/routing/routes.test.tsx src/layout/navigation-auth.test.ts",
     "test:quote-intake": "vitest run --environment jsdom src/screens/quoteIntake",
+    "test:ratefeed-pipeline": "vitest run --environment jsdom src/screens/rateFeedPipeline src/lib/api/rateFeedPipeline.ts",
     "test:compliance-evidence": "vitest run --environment jsdom src/screens/complianceEvidence/ComplianceEvidenceScreen.test.tsx",
     "lint:design-tokens": "vitest run --environment jsdom src/design-system/tokens.test.ts",
     "e2e": "playwright test",

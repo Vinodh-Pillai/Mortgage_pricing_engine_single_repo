@@ -1,0 +1,98 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: wcpe-dev
+  labels:
+    app.kubernetes.io/part-of: world-class-pricing-engine
+    environment: dev
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pricing-bff-config
+  namespace: wcpe-dev
+data:
+  SPRING_DATASOURCE_URL: jdbc:postgresql://wcpe-postgres.wcpe-dev.svc.cluster.local:5432/wcpe
+  SPRING_DATASOURCE_USERNAME: wcpe
+  SPRING_DATASOURCE_PASSWORD: local-dev-password
+  SPRING_PROFILES_ACTIVE: dev
+  SERVER_PORT: "8080"
+  MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: "true"
+  MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info,prometheus
+  WCPE_SYNTHETIC_ONLY: "true"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pricing-bff
+  namespace: wcpe-dev
+  labels:
+    app: pricing-bff
+    app.kubernetes.io/part-of: world-class-pricing-engine
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pricing-bff
+  template:
+    metadata:
+      labels:
+        app: pricing-bff
+        app.kubernetes.io/part-of: world-class-pricing-engine
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: pricing-bff
+          image: pricing-bff:0.1.0-local
+          imagePullPolicy: Never
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: pricing-bff-config
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 40
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: 750m
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pricing-bff
+  namespace: wcpe-dev
+spec:
+  type: ClusterIP
+  selector:
+    app: pricing-bff
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

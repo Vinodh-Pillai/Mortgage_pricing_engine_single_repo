@@ -489,6 +489,10 @@ public final class LockModels {
     int lockVersion,
     Instant confirmedAt,
     Instant expiresAt,
+    int expirationBusinessDays,
+    Instant expirationCalculatedAt,
+    String calendarConfigHash,
+    BusinessDayCalculator.ExpirationBreakdown expirationBreakdown,
     String confirmedTermsHash,
     String idempotencyKey,
     String correlationId,
@@ -510,7 +514,19 @@ public final class LockModels {
     String replayRef,
     String correlationId,
     String outboxEventType,
+    int lockPeriodBusinessDays,
+    Instant lockCreatedAt,
+    Instant lockExpiresAt,
+    CalendarConfigSummary calendarConfig,
+    BusinessDayCalculator.ExpirationBreakdown expirationBreakdown,
+    String calendarConfigHash,
     String confirmedTermsHash
+  ) {}
+
+  public record CalendarConfigSummary(
+    String timezone,
+    String workingHours,
+    int holidaysCount
   ) {}
 
   public record ExtensionCostSnapshot(
@@ -654,6 +670,8 @@ public final class LockModels {
     int requestedDays,
     Instant requestedExpiresAt,
     ExtensionCostSnapshot costSnapshot,
+    BusinessDayCalculator.ExpirationBreakdown expirationBreakdown,
+    String calendarConfigHash,
     String resultSummary,
     List<String> validationMessages,
     String auditRef,
@@ -847,9 +865,25 @@ public final class LockModels {
     UUID tenantId,
     String lockId,
     Instant expiresAt,
+    int expirationBusinessDays,
+    Instant expirationCalculatedAt,
+    String calendarConfigHash,
+    BusinessDayCalculator.ExpirationBreakdown expirationBreakdown,
     Instant nextWarningAt,
     String policyVersionId,
     Instant lastEvaluatedAt
+  ) {}
+
+  public record LockDetailResponse(
+    UUID tenantId,
+    String lockId,
+    RateLockStatus status,
+    int version,
+    Instant createdAt,
+    Instant expiresAt,
+    int expirationBusinessDays,
+    String calendarConfigHash,
+    BusinessDayCalculator.ExpirationBreakdown expirationBreakdown
   ) {}
 
   public record LockExpirationRunRecord(

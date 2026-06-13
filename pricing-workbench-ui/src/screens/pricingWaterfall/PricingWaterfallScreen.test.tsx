@@ -55,6 +55,17 @@ describe('PII-24-S14 pricing waterfall screen', () => {
     expect(screen.queryByText('Backend input ref 7')).not.toBeInTheDocument();
   });
 
+  it('displays itemized adjustment reason codes and service conditions', () => {
+    render(<PricingWaterfallScreen waterfall={deterministicPricingWaterfall} />);
+
+    const ledger = screen.getByRole('table', { name: /Pricing waterfall ledger/i });
+    expect(within(ledger).getByText('Adjustment LTV_80_85 step 2')).toBeInTheDocument();
+    expect(within(ledger).getAllByText(/FICO_720_739|LTV_80_85|CASH_OUT_REFI/).length).toBeGreaterThan(1);
+
+    fireEvent.click(screen.getByRole('button', { name: '2' }));
+    expect(screen.getByText('Conditions supplied by adjustment-service for row 2')).toBeInTheDocument();
+  });
+
   it('exports CSV and JSON with redaction metadata', () => {
     const compactWaterfall = { ...deterministicPricingWaterfall, finalPrice: { ...deterministicPricingWaterfall.finalPrice, ledger: deterministicPricingWaterfall.finalPrice.ledger.slice(0, 8) } };
 

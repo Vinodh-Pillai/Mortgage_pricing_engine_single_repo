@@ -1,13 +1,13 @@
 package com.wcpe.quote;
 
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class InMemoryQuoteCache implements QuoteCache {
-    private final Map<String, Quote> values = new LinkedHashMap<>();
-    private boolean available = true;
+    private final Map<String, Quote> values = new ConcurrentHashMap<>();
+    private volatile boolean available = true;
 
     @Override
     public Optional<Quote> get(UUID tenantId, UUID quoteId, int version) {
