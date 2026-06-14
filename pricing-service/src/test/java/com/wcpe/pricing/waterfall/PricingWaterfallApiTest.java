@@ -20,6 +20,18 @@ import com.wcpe.pricing.baserate.BaseRateSelectionApi.LedgerEntry;
 import com.wcpe.pricing.finalprice.FinalPriceApi.FinalPriceLedgerEntry;
 import com.wcpe.pricing.finalprice.FinalPriceApi.FinalPriceResponse;
 import com.wcpe.pricing.finalprice.FinalPriceApi.VersionGraph;
+import com.wcpe.pricing.government.GovernmentPricingApi.GovernmentFeeFrequency;
+import com.wcpe.pricing.government.GovernmentPricingApi.GovernmentFeeLineItem;
+import com.wcpe.pricing.government.GovernmentPricingApi.GovernmentPriceOption;
+import com.wcpe.pricing.government.GovernmentPricingApi.GovernmentProductCatalog;
+import com.wcpe.pricing.government.GovernmentPricingApi.GovernmentProductType;
+import com.wcpe.pricing.government.GovernmentPricingApi.LoanLimit;
+import com.wcpe.pricing.homeequity.HomeEquityPricingApi.HomeEquityIndexCode;
+import com.wcpe.pricing.homeequity.HomeEquityPricingApi.HomeEquityPriceResponse;
+import com.wcpe.pricing.homeequity.HomeEquityPricingApi.HomeEquityProductType;
+import com.wcpe.pricing.homeequity.HomeEquityPricingApi.HomeEquityWaterfallLine;
+import com.wcpe.pricing.mi.MiPricingApi.MiPremiumType;
+import com.wcpe.pricing.mi.MiPricingApi.MiPriceOption;
 import com.wcpe.pricing.missingprice.MissingPriceHandlingApi.MissingPriceErrorResponse;
 import com.wcpe.pricing.missingprice.MissingPriceHandlingApi.MissingPriceHandlingResponse;
 import com.wcpe.pricing.missingprice.MissingPriceHandlingApi.MissingPriceIncidentStatus;
@@ -76,6 +88,43 @@ class PricingWaterfallApiTest {
         assertEquals(720, view.pricingOutcomeEvents().get(0).fico());
         assertEquals(new BigDecimal("79.50"), view.pricingOutcomeEvents().get(0).ltv());
         assertEquals(125, view.pricingOutcomeEvents().get(0).marginBps());
+    }
+
+    @Test
+    void waterfallIncludesMortgageInsuranceLineItemsAndReplayEvidence() {
+        PricingWaterfallView view = api.assemble(TENANT, headers(PricingWaterfallApi.RESTRICTED_VALUE_PERMISSION),
+                new WaterfallEvidence("run-test", baseSelection(), finalPriceWithMi(), null, null));
+
+        assertEquals(1, view.miLineItems().size());
+        assertEquals("MGIC", view.miLineItems().get(0).carrier());
+        assertEquals("BPMI_MONTHLY", view.miLineItems().get(0).premiumType());
+        assertEquals(new BigDecimal("153.33"), view.miLineItems().get(0).monthlyPremium());
+        assertEquals("mi-version-mgic", view.miLineItems().get(0).versionRef());
+        assertEquals("mi-replay-hash-1", view.miLineItems().get(0).replayHash());
+    }
+
+    @Test
+    void waterfallIncludesGovernmentPricingLineItemsAndReplayEvidence() {
+        PricingWaterfallView view = api.assemble(TENANT, headers(PricingWaterfallApi.RESTRICTED_VALUE_PERMISSION),
+                new WaterfallEvidence("run-test", baseSelection(), finalPriceWithGovernment(), null, null));
+
+        assertEquals(2, view.governmentLineItems().size());
+        assertEquals("FHA", view.governmentLineItems().get(0).productType());
+        assertEquals("FHA_UPFRONT_MIP", view.governmentLineItems().get(0).feeType());
+        assertEquals(new BigDecimal("7000.00"), view.governmentLineItems().get(0).amount());
+        assertEquals("gov-fee-replay-1", view.governmentLineItems().get(0).replayHash());
+    }
+
+    @Test
+    void waterfallIncludesHomeEquityPricingEvidence() {
+        PricingWaterfallView view = api.assemble(TENANT, headers(PricingWaterfallApi.RESTRICTED_VALUE_PERMISSION),
+                new WaterfallEvidence("run-test", baseSelection(), finalPrice(), null, null, null, homeEquityPrice()));
+
+        assertEquals("READY", view.status());
+        assertEquals(2, view.homeEquityLineItems().size());
+        assertEquals("INDEX_RATE", view.homeEquityLineItems().get(0).step());
+        assertEquals("prime-feed:v1", view.homeEquityLineItems().get(0).configRef());
+        assertEquals("DRAW_PAYMENT", view.homeEquityLineItems().get(1).step());
     }
 
     @Test
@@ -136,5 +185,67 @@ class PricingWaterfallApiTest {
                                 java.math.RoundingMode.HALF_UP)),
                 new VersionGraph(List.of("grid-version-1", "rounding-version-1"), "version-hash-1"),
                 "result-hash-1", "pricing:final-price:tenant-a:scenario-hash-1");
+    }
+
+    private static FinalPriceResponse finalPriceWithMi() {
+        return new FinalPriceResponse(FINAL_PRICE_ID, new BigDecimal("6.12500"), 30, new BigDecimal("100.00000"),
+                List.of(), new BigDecimal("100.00000000"), List.of(), List.of(new MiPriceOption(
+                        "MGIC", MiPremiumType.BPMI_MONTHLY, 25, new BigDecimal("0.46"), null,
+                        new BigDecimal("0.00000000"), new BigDecimal("153.33"), BigDecimal.ZERO,
+                        new BigDecimal("153.3300"), "mgic:row-1", "mi-version-mgic", "mi-replay-hash-1", 1,
+                        List.of("ltv=90.00", "fico=740"))), new BigDecimal("100.12500"),
+                List.of(
+                        new FinalPriceLedgerEntry(1, "BASE_PRICE", new BigDecimal("100.00000000"), "START",
+                                new BigDecimal("100.00000000"), "grid-version-1", "BASE_RATE_SELECTED", null),
+                        new FinalPriceLedgerEntry(2, "MORTGAGE_INSURANCE", new BigDecimal("100.00000000"), "INCLUDE",
+                                new BigDecimal("100.00000000"), "mi-version-mgic:mgic:row-1", "MI_MGIC_BPMI_MONTHLY", null),
+                        new FinalPriceLedgerEntry(3, "ROUND_FINAL_PRICE", new BigDecimal("100.00000000"), "ROUND",
+                                new BigDecimal("100.12500000"), "rounding-version-1:round-final", "ROUND_FINAL_PRICE",
+                                java.math.RoundingMode.HALF_UP)),
+                new VersionGraph(List.of("grid-version-1", "rounding-version-1", "mi-version-mgic"), "version-hash-mi"),
+                "result-hash-mi", "pricing:final-price:tenant-a:scenario-hash-1");
+    }
+
+    private static FinalPriceResponse finalPriceWithGovernment() {
+        GovernmentPriceOption government = new GovernmentPriceOption(
+                new GovernmentProductCatalog(GovernmentProductType.FHA, "FHA-30", "GOV-INVESTOR", "RETAIL", 10,
+                        "catalog:fha"),
+                List.of(
+                        new GovernmentFeeLineItem("FHA_UPFRONT_MIP", new BigDecimal("7000.00"),
+                                new BigDecimal("1.75000000"), GovernmentFeeFrequency.UPFRONT,
+                                "hud:mip:2026", "fha-mip-v1", "gov-fee-replay-1", List.of("countyFips=06037")),
+                        new GovernmentFeeLineItem("FHA_ANNUAL_MIP", new BigDecimal("2650.00"),
+                                new BigDecimal("0.66250000"), GovernmentFeeFrequency.ANNUAL,
+                                "hud:mip:2026", "fha-mip-v1", "gov-fee-replay-2", List.of("countyFips=06037"))),
+                new LoanLimit(new BigDecimal("524225.00"), "hud:2026:06037", "fha-limit-v1"),
+                null, null, "gov-fha-v1", "gov-option-replay", List.of("productType=FHA"));
+        return new FinalPriceResponse(FINAL_PRICE_ID, new BigDecimal("6.12500"), 30, new BigDecimal("100.00000"),
+                List.of(), new BigDecimal("100.00000000"), List.of(), List.of(), List.of(government),
+                new BigDecimal("100.12500"),
+                List.of(
+                        new FinalPriceLedgerEntry(1, "BASE_PRICE", new BigDecimal("100.00000000"), "START",
+                                new BigDecimal("100.00000000"), "grid-version-1", "BASE_RATE_SELECTED", null),
+                        new FinalPriceLedgerEntry(2, "GOVERNMENT_FEE", new BigDecimal("100.00000000"), "INCLUDE",
+                                new BigDecimal("100.00000000"), "fha-mip-v1:hud:mip:2026", "FHA_UPFRONT_MIP", null),
+                        new FinalPriceLedgerEntry(3, "ROUND_FINAL_PRICE", new BigDecimal("100.00000000"), "ROUND",
+                                new BigDecimal("100.12500000"), "rounding-version-1:round-final", "ROUND_FINAL_PRICE",
+                                java.math.RoundingMode.HALF_UP)),
+                new VersionGraph(List.of("grid-version-1", "rounding-version-1", "gov-fha-v1"), "version-hash-gov"),
+                "result-hash-gov", "pricing:final-price:tenant-a:scenario-hash-1");
+    }
+
+    private static HomeEquityPriceResponse homeEquityPrice() {
+        return new HomeEquityPriceResponse(UUID.fromString("66666666-6666-6666-6666-666666666666"), TENANT,
+                "scenario-heloc-1", HomeEquityProductType.HELOC, "PRICED", HomeEquityIndexCode.PRIME,
+                new BigDecimal("8.50000"), 125, 200, new BigDecimal("80.00000"), new BigDecimal("10.50000"),
+                new BigDecimal("10.50000"), new BigDecimal("12.50000"), new BigDecimal("16.50000"),
+                new BigDecimal("525.00"), new BigDecimal("1349.17"), List.of(), List.of(),
+                List.of(
+                        new HomeEquityWaterfallLine("INDEX_RATE", BigDecimal.ZERO, new BigDecimal("8.50000"),
+                                "prime-feed:v1", "PRIME"),
+                        new HomeEquityWaterfallLine("DRAW_PAYMENT", new BigDecimal("60000.00"),
+                                new BigDecimal("525.00"), "home-equity-config:v1:drawPeriodMonths=120",
+                                "INTEREST_ONLY_DRAW_PERIOD")),
+                List.of("home-equity-config:v1", "rate-index:v1"), "heloc-result-hash", "corr-heloc-1");
     }
 }

@@ -12,6 +12,15 @@ import com.wcpe.pricing.finalprice.FinalPriceApi.InMemoryFinalPriceRepository;
 import com.wcpe.pricing.finalprice.FinalPriceApi.PricingConfigurationSnapshot;
 import com.wcpe.pricing.finalprice.FinalPriceApi.ScenarioFacts;
 import com.wcpe.pricing.finalprice.FinalPriceApi.SelectedBaseRate;
+import com.wcpe.pricing.government.GovernmentPricingApi.FhaMipTable;
+import com.wcpe.pricing.government.GovernmentPricingApi.GovernmentProductCatalog;
+import com.wcpe.pricing.government.GovernmentPricingApi.GovernmentProductConfiguration;
+import com.wcpe.pricing.government.GovernmentPricingApi.GovernmentProductType;
+import com.wcpe.pricing.government.GovernmentPricingApi.LoanLimit;
+import com.wcpe.pricing.mi.MiPricingApi.MiPremiumType;
+import com.wcpe.pricing.mi.MiPricingApi.MiProgram;
+import com.wcpe.pricing.mi.MiPricingApi.MiRateCard;
+import com.wcpe.pricing.mi.MiPricingApi.MiRateRow;
 import com.wcpe.pricing.rounding.api.RoundingPolicyApi;
 import com.wcpe.pricing.rounding.api.RoundingPolicyApi.CreateRoundingPolicyRequest;
 import com.wcpe.pricing.rounding.api.RoundingPolicyApi.InMemoryRoundingPolicyRepository;
@@ -268,6 +277,92 @@ class FinalPriceApiTest {
     }
 
     @Test
+    void mortgageInsuranceFactorParticipatesInFinalPriceAndLedger() {
+        facts = new ScenarioFacts(TENANT, "scenario-1", "scenario-hash-1", Map.of(
+                "occupancy", "PRIMARY",
+                "loanType", "CONVENTIONAL",
+                "ltv", "90.00",
+                "fico", "740",
+                "loanAmount", "400000.00",
+                "miCoveragePercent", "25"));
+        configuration = new PricingConfigurationSnapshot(
+                TENANT,
+                List.of("adjustment-version-1", "mi-version-radian"),
+                null,
+                null,
+                null,
+                "BASE",
+                "FINAL_PRICE",
+                List.of(),
+                List.of(),
+                List.of(new MiRateCard("card-radian", "Radian", "mi-version-radian", List.of(new MiRateRow(
+                        "row-lpmi", new BigDecimal("85.01"), new BigDecimal("95.00"), 700, 759,
+                        new BigDecimal("1.00"), new BigDecimal("726200.00"), 25, MiPremiumType.LPMI,
+                        null, null, new BigDecimal("0.37500000"), "radian:lpmi:row-1")))),
+                List.of(new MiProgram("Radian", MiPremiumType.LPMI)),
+                true);
+
+        FinalPriceResponse response = api.calculate(TENANT, writeHeaders("idem-mi-lpmi"), request(false));
+
+        assertEquals(new BigDecimal("100.37500"), response.roundedFinalPrice());
+        assertEquals(1, response.mortgageInsurance().size());
+        assertEquals("Radian", response.mortgageInsurance().get(0).carrier());
+        assertEquals(new BigDecimal("0.37500000"), response.mortgageInsurance().get(0).priceAdjustment());
+        assertTrue(response.ledger().stream().anyMatch(entry -> "MORTGAGE_INSURANCE".equals(entry.step())
+                && "MI_Radian_LPMI".equals(entry.reasonCode())));
+        assertTrue(response.versionGraph().refs().contains("mi-version-radian"));
+    }
+
+    @Test
+    void governmentProductPricingParticipatesInFinalPriceLedgerAndVersionGraph() {
+        facts = new ScenarioFacts(TENANT, "scenario-1", "scenario-hash-1", Map.of(
+                "occupancy", "PRIMARY",
+                "loanType", "FHA",
+                "loanAmount", "400000.00",
+                "countyFips", "06037",
+                "state", "CA"));
+        configuration = new PricingConfigurationSnapshot(
+                TENANT,
+                List.of("adjustment-version-1", "gov-fha-v1"),
+                null,
+                null,
+                null,
+                "BASE",
+                "FINAL_PRICE",
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(fhaGovernmentConfig()),
+                false);
+
+        FinalPriceResponse response = api.calculate(TENANT, writeHeaders("idem-government-fha"), request(false));
+
+        assertEquals(1, response.governmentPricing().size());
+        assertEquals(GovernmentProductType.FHA, response.governmentPricing().get(0).catalog().productType());
+        assertTrue(response.ledger().stream().anyMatch(entry -> "GOVERNMENT_FEE".equals(entry.step())
+                && "FHA_UPFRONT_MIP".equals(entry.reasonCode())));
+        assertTrue(response.versionGraph().refs().contains("gov-fha-v1"));
+    }
+
+    @Test
+    void governmentPricingFailsClosedWhenConfigurationMissing() {
+        facts = new ScenarioFacts(TENANT, "scenario-1", "scenario-hash-1", Map.of(
+                "occupancy", "PRIMARY",
+                "loanType", "FHA",
+                "loanAmount", "400000.00",
+                "countyFips", "06037",
+                "state", "CA"));
+        configuration = new PricingConfigurationSnapshot(TENANT, List.of("adjustment-version-1"), null, null,
+                null, "BASE", "FINAL_PRICE", List.of(), List.of());
+
+        FinalPriceException exception = assertThrows(FinalPriceException.class,
+                () -> api.calculate(TENANT, writeHeaders("idem-government-missing"), request(false)));
+
+        assertEquals(FinalPriceErrorCode.GOVERNMENT_CONFIG_MISSING, exception.code());
+    }
+
+    @Test
     void PriceCapFloorEvaluator_warnActionFailsClosedUntilConfigured() {
         configuration = new PricingConfigurationSnapshot(TENANT, List.of("adjustment-version-1", "cap-floor-version-warn"), null, null, null,
                 "BASE", "FINAL_PRICE", List.of(),
@@ -287,6 +382,22 @@ class FinalPriceApiTest {
 
     private static FinalPriceHeaders writeHeaders(String idempotencyKey) {
         return new FinalPriceHeaders(Set.of(FinalPriceApi.FINAL_PRICE_WRITE_PERMISSION), "actor-1", "corr-1", idempotencyKey);
+    }
+
+    private static GovernmentProductConfiguration fhaGovernmentConfig() {
+        return new GovernmentProductConfiguration(
+                new GovernmentProductCatalog(GovernmentProductType.FHA, "FHA-30", "GOV-INVESTOR", "RETAIL", 10,
+                        "catalog:fha"),
+                "gov-fha-v1",
+                true,
+                Map.of("06037", new LoanLimit(new BigDecimal("524225.00"), "hud:2026:06037", "fha-limit-v1")),
+                new FhaMipTable(new BigDecimal("1.75000000"), new BigDecimal("0.66250000"),
+                        "hud:mip:2026", "fha-mip-v1"),
+                List.of(),
+                null,
+                null,
+                Map.of(),
+                Set.of());
     }
 
     private RoundingPolicyVersion createValidateAndPublishRoundingPolicy(String ruleId) {

@@ -21,6 +21,16 @@
     "test:screens": "vitest run --environment jsdom src/screens/shared/PageStateWrapper.test.tsx src/screens/FunctionalityScreens.test.tsx src/routing/routes.test.tsx src/layout/navigation-auth.test.ts",
     "test:quote-intake": "vitest run --environment jsdom src/screens/quoteIntake",
     "test:ratefeed-pipeline": "vitest run --environment jsdom src/screens/rateFeedPipeline src/lib/api/rateFeedPipeline.ts",
+    "test:tenant-admin": "vitest run --environment jsdom src/screens/tenantAdmin/TenantAdminScreen.test.tsx",
+    "test:tenant-home": "vitest run --environment jsdom src/screens/tenantHome src/lib/api/tenantHome.ts src/routing/routes.test.tsx",
+    "test:product-admin": "vitest run --environment jsdom src/screens/productAdmin",
+    "test:ui-pii54": "vitest run --environment jsdom src/screens/tenantHome src/screens/tenantAdmin src/screens/productAdmin src/screens/uiValidation",
+    "test:coverage": "vitest run --environment jsdom --coverage src/screens/tenantHome src/screens/tenantAdmin src/screens/productAdmin src/screens/uiValidation",
+    "storybook:build": "storybook build --output-dir storybook-static",
+    "test:visual": "playwright test tests/e2e/pii54/pii54-workbench.spec.ts --project=chromium",
+    "test:e2e": "playwright test tests/e2e/pii54/pii54-workbench.spec.ts --project=chromium",
+    "test:a11y": "playwright test tests/e2e/a11y/pii54-screens.a11y.test.ts --project=chromium",
+    "lighthouse:ci": "node tests/performance/pii54-lighthouse-budget.mjs",
     "test:compliance-evidence": "vitest run --environment jsdom src/screens/complianceEvidence/ComplianceEvidenceScreen.test.tsx",
     "lint:design-tokens": "vitest run --environment jsdom src/design-system/tokens.test.ts",
     "e2e": "playwright test",
@@ -41,7 +51,8 @@
     "e2e:screens": "playwright test tests/e2e/screens/functionality-pages.test.ts",
     "e2e:full": "npm run e2e -- --workers=4",
     "e2e:ci": "npm run e2e -- --workers=2 --retries=2",
-    "test:all": "npm run test && npm run e2e"
+    "test:all": "npm run test && npm run e2e",
+    "test:all-ui": "npm run test:ui-pii54 && npm run lighthouse:ci"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.80.7",
@@ -56,11 +67,14 @@
   "devDependencies": {
     "@axe-core/playwright": "^4.11.3",
     "@playwright/test": "^1.47.0",
+    "@storybook/addon-a11y": "^10.4.4",
+    "@storybook/react-vite": "^10.4.4",
     "@testing-library/jest-dom": "latest",
     "@testing-library/react": "latest",
     "@types/node": "^25.9.3",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "@vitest/coverage-v8": "^4.1.8",
     "axe-core": "^4.12.1",
     "axios": "^1.7.0",
     "dotenv": "^16.4.0",
@@ -68,6 +82,7 @@
     "pixelmatch": "^5.3.0",
     "playwright": "^1.47.0",
     "pngjs": "^7.0.0",
+    "storybook": "^10.4.4",
     "vitest": "latest"
   }
 }

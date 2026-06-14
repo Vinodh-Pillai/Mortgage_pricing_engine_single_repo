@@ -118,12 +118,28 @@ class QuoteApiTest {
     void invalidScenarioFailsClosedBeforeScenarioEligibilityOrQuoteWrites() throws IOException {
         QuoteCreateRequest invalid = new QuoteCreateRequest(
                 "tenant-a", "borrower-1", "SYNTH_FICO_STANDARD", 500000, 400000,
-                "TX", "75001", "SINGLE_FAMILY", 1, "PRIMARY", "FHA", "PURCHASE", "RETAIL", 30);
+                "TX", "75001", "SINGLE_FAMILY", 1, "PRIMARY", "NON_QM", "PURCHASE", "RETAIL", 30);
 
         assertThrows(QuoteValidationException.class,
                 () -> api.createQuote("tenant-a", authorizedHeaders("corr-007"), invalid));
 
         assertNoAdapterOrRepositoryWrites();
+    }
+
+    @Test
+    void governmentProductCatalogCandidatesParticipateInQuoteLaunch() {
+        QuoteCreateRequest fhaRequest = new QuoteCreateRequest(
+                "tenant-a", "borrower-1", "SYNTH_FICO_STANDARD", 500000, 400000,
+                "TX", "75001", "SINGLE_FAMILY", 1, "PRIMARY", "FHA", "PURCHASE", "RETAIL", 30);
+
+        QuoteResponse response = api.createQuote("tenant-a", authorizedHeaders("corr-gov"), fhaRequest);
+
+        assertEquals(List.of("FHA-30", "FHA-STREAMLINE"), response.options().stream()
+                .map(QuoteApi.QuoteOption::productCode)
+                .toList());
+        assertEquals(1, scenarioAdapter.calls.get());
+        assertEquals(1, catalogAdapter.governmentCalls.get());
+        assertEquals(2, eligibilityAdapter.calls.get());
     }
 
     @Test
@@ -221,6 +237,7 @@ class QuoteApiTest {
 
     private static final class CountingCatalogAdapter implements QuoteApi.CatalogCandidateAdapter {
         private final AtomicInteger calls = new AtomicInteger();
+        private final AtomicInteger governmentCalls = new AtomicInteger();
 
         @Override
         public List<CatalogCandidate> activeConventionalCandidates(String tenantId, String channel) {
@@ -228,6 +245,14 @@ class QuoteApiTest {
             return List.of(
                     new CatalogCandidate("PRODUCT-Z", "INVESTOR-B", channel, 20),
                     new CatalogCandidate("PRODUCT-A", "INVESTOR-A", channel, 10));
+        }
+
+        @Override
+        public List<CatalogCandidate> activeGovernmentCandidates(String tenantId, String channel, String loanType) {
+            governmentCalls.incrementAndGet();
+            return List.of(
+                    new CatalogCandidate(loanType + "-STREAMLINE", "GOV-INVESTOR", channel, 20),
+                    new CatalogCandidate(loanType + "-30", "GOV-INVESTOR", channel, 10));
         }
     }
 

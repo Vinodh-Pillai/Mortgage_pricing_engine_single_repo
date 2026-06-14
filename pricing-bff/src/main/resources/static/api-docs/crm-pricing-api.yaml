@@ -1,0 +1,226 @@
+openapi: 3.1.0
+info:
+  title: LoanWeft CRM Pricing API
+  version: v1
+  description: CRM-safe Non-QM pricing API contracts for Salesforce and HubSpot integrations.
+servers:
+  - url: /api/v1/tenants/{tenantId}/integrations/crm
+security:
+  - bearerAuth: []
+  - apiKeyAuth: []
+paths:
+  /pricing-requests:
+    post:
+      operationId: createCrmPricingRequest
+      summary: Create a Non-QM CRM pricing request from CRM lead facts.
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/CrmSystem'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CrmPricingRequest' }
+      responses:
+        '202':
+          description: Pricing request accepted with quick-pricer gaps or quote-service refs.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CrmPricingResponse' }
+  /salesforce/pricing-requests:
+    post:
+      operationId: createSalesforcePricingRequest
+      summary: Salesforce-specific alias for CRM pricing request creation.
+      responses:
+        '202': { description: Accepted }
+  /hubspot/pricing-requests:
+    post:
+      operationId: createHubSpotPricingRequest
+      summary: HubSpot-specific alias for CRM pricing request creation.
+      responses:
+        '202': { description: Accepted }
+  /pricing-requests/{requestId}:
+    get:
+      operationId: getCrmPricingRequest
+      summary: Return CRM pricing status, quote summary, missing facts, blockers, and replay refs.
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/RequestIdPath'
+      responses:
+        '200':
+          description: CRM pricing status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CrmPricingResponse' }
+  /pricing-requests/{requestId}/continue:
+    post:
+      operationId: continueCrmPricingRequest
+      summary: Promote a full-enough CRM pricing request to pipeline intake.
+      responses:
+        '200':
+          description: Promotion result.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PipelinePromotionResponse' }
+  /pricing-requests/{requestId}/push:
+    post:
+      operationId: pushCrmPricingUpdate
+      summary: Push the current real-time pricing update to registered CRM webhooks.
+      responses:
+        '200': { description: Webhook delivery receipts. }
+  /dashboard:
+    get:
+      operationId: crmLoanOfficerDashboard
+      summary: Return a loan-officer dashboard projection for Non-QM CRM pricing requests.
+      responses:
+        '200':
+          description: Dashboard projection.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CrmDashboardResponse' }
+  /pricing-requests/{requestId}/scenarios:
+    post:
+      operationId: saveCrmPricingScenario
+      summary: Save a CRM pricing scenario with replay references.
+      responses:
+        '200': { description: Saved scenario. }
+  /scenarios/{scenarioId}/share:
+    post:
+      operationId: shareCrmPricingScenario
+      summary: Create a tenant-scoped share reference for a saved CRM pricing scenario.
+      responses:
+        '200': { description: Share reference. }
+  /webhooks:
+    post:
+      operationId: registerCrmWebhook
+      summary: Register Salesforce or HubSpot webhooks for CRM pricing updates.
+      responses:
+        '201':
+          description: Registered webhook.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CrmWebhookRegistrationResponse' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  parameters:
+    TenantId:
+      name: tenantId
+      in: path
+      required: true
+      schema: { type: string }
+    RequestId:
+      name: X-Request-ID
+      in: header
+      required: true
+      schema: { type: string, minLength: 1 }
+    CorrelationId:
+      name: X-Correlation-ID
+      in: header
+      required: false
+      schema: { type: string }
+    CrmSystem:
+      name: X-CRM-System
+      in: header
+      required: true
+      schema:
+        type: string
+        enum: [SALESFORCE, HUBSPOT]
+    RequestIdPath:
+      name: requestId
+      in: path
+      required: true
+      schema: { type: string }
+  schemas:
+    CrmPricingRequest:
+      type: object
+      properties:
+        requestId: { type: string }
+        externalLeadId: { type: string }
+        sourceSystem: { type: string, enum: [SALESFORCE, HUBSPOT] }
+        sourceRefs: { type: object, additionalProperties: { type: string } }
+        leadFacts:
+          type: object
+          description: Supports Optimal Blue, Polly, and LoanPASS aliases when they overlap CRM lead facts.
+          additionalProperties: true
+        loanOfficerId: { type: string }
+        callbackUrl: { type: string, format: uri }
+    CrmPricingResponse:
+      type: object
+      required: [requestId, tenantId, sourceSystem, status, quoteSummary, missingFacts, eligibilityBlockers, unsupportedFields, replayRefs, sourceRefs, statusUrl]
+      properties:
+        requestId: { type: string }
+        tenantId: { type: string }
+        sourceSystem: { type: string, enum: [SALESFORCE, HUBSPOT] }
+        externalLeadId: { type: string }
+        status: { type: string, enum: [NEEDS_FACTS, QUOTE_JOB_QUEUED, NOT_FOUND] }
+        quoteSummary: { type: object, additionalProperties: true }
+        missingFacts:
+          type: array
+          items: { $ref: '#/components/schemas/MissingFact' }
+        eligibilityBlockers:
+          type: array
+          items: { $ref: '#/components/schemas/EligibilityBlocker' }
+        unsupportedFields:
+          type: array
+          items: { $ref: '#/components/schemas/UnsupportedField' }
+        replayRefs: { type: object, additionalProperties: { type: string } }
+        sourceRefs: { type: object, additionalProperties: { type: string } }
+        statusUrl: { type: string }
+        quoteJobId: { type: string }
+        correlationId: { type: string }
+    MissingFact:
+      type: object
+      properties:
+        field: { type: string }
+        reason: { type: string }
+        acceptedAliases:
+          type: array
+          items: { type: string }
+    EligibilityBlocker:
+      type: object
+      properties:
+        code: { type: string }
+        message: { type: string }
+        source: { type: string }
+    UnsupportedField:
+      type: object
+      properties:
+        field: { type: string }
+        reason: { type: string }
+    PipelinePromotionResponse:
+      type: object
+      properties:
+        requestId: { type: string }
+        status: { type: string, enum: [PROMOTED, BLOCKED] }
+        pipelineRef: { type: string }
+    CrmDashboardResponse:
+      type: object
+      properties:
+        tenantId: { type: string }
+        sourceSystem: { type: string }
+        pricingRequests:
+          type: array
+          items: { $ref: '#/components/schemas/CrmPricingResponse' }
+        nonQmPricingSummary: { type: object, additionalProperties: true }
+    CrmWebhookRegistrationResponse:
+      type: object
+      properties:
+        webhookId: { type: string }
+        tenantId: { type: string }
+        sourceSystem: { type: string }
+        url: { type: string }
+        events:
+          type: array
+          items:
+            type: string
+            enum: [crm.pricing.updated]
+        status: { type: string }

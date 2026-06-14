@@ -19,6 +19,7 @@ const lazyScreen = (loader: () => Promise<{ default: ComponentType<any> }>) => l
 
 export const routeComponentLoaders: Record<string, () => Promise<{ default: ComponentType<any> }>> = {
   login: () => import('../screens/auth/LoginScreen').then((module) => ({ default: module.LoginScreen })),
+  'tenant-home': () => import('../screens/tenantHome').then((module) => ({ default: module.TenantHomeScreen })),
   shell: () => import('../screens/quoteIntake/QuoteIntakeScreen').then((module) => ({ default: module.QuoteIntakeScreen })),
   'quote-intake': () => import('../screens/quoteIntake/QuoteIntakeScreen').then((module) => ({ default: module.QuoteIntakeScreen })),
   'quote-offers': () => import('../screens/quoteOffers/QuoteOffersScreen'),
@@ -45,7 +46,9 @@ export const routeComponentLoaders: Record<string, () => Promise<{ default: Comp
   'fair-lending-dashboard': () => import('../screens/fairLending').then((module) => ({ default: module.FairLendingDashboard })),
   'quality-dashboard': () => import('../screens/NotFoundScreen'),
   'tenant-onboarding': () => import('../screens/tenant/TenantOnboardingScreen').then((module) => ({ default: module.TenantOnboardingScreen })),
+  'tenant-admin': () => import('../screens/tenantAdmin').then((module) => ({ default: module.TenantAdminScreen })),
   'product-catalog-manager': () => import('../screens/productCatalogManager').then((module) => ({ default: module.ProductCatalogManagerScreen })),
+  'product-admin': () => import('../screens/productAdmin').then((module) => ({ default: module.ProductAdminScreen })),
   'product-management': () => import('../screens/product/ProductManagementScreen').then((module) => ({ default: module.ProductManagementScreen })),
   'rate-sheet-intake': () => import('../screens/ratesheet/RateSheetIntakeScreen').then((module) => ({ default: module.RateSheetIntakeScreen })),
   'pricing-analysis': () => import('../screens/pricing/PricingAnalysisScreen').then((module) => ({ default: module.PricingAnalysisScreen })),
@@ -91,7 +94,10 @@ const scenarioChildRoutes: WorkbenchRouteDefinition[] = scenarioModule ? [
 
 const functionalityChildRoutes: WorkbenchRouteDefinition[] = [
   ...(tenantOnboardingModule ? [{ ...definitionForModule(tenantOnboardingModule), id: 'tenant-onboarding-admin-new', path: '/admin/tenants/new', label: 'New Tenant', breadcrumb: 'New Tenant', lazyComponent: lazyScreen(routeComponentLoaders['tenant-onboarding']) }] : []),
-  ...(productManagementModule ? [{ ...definitionForModule(productManagementModule), id: 'product-management-new', path: '/admin/products/new', label: 'New Product', breadcrumb: 'New Product', lazyComponent: lazyScreen(routeComponentLoaders['product-management']) }] : []),
+  ...(productManagementModule ? [
+    { ...definitionForModule(productManagementModule), id: 'product-management-detail', path: '/admin/products/catalog/:productCode', label: 'Product Detail', breadcrumb: 'Product Detail', lazyComponent: lazyScreen(routeComponentLoaders['product-management']) },
+    { ...definitionForModule(productManagementModule), id: 'product-management-new', path: '/admin/products/new', label: 'New Product', breadcrumb: 'New Product', lazyComponent: lazyScreen(routeComponentLoaders['product-management']) },
+  ] : []),
   ...(rateSheetModule ? [
     { ...definitionForModule(rateSheetModule), id: 'rate-sheet-intake-new', path: '/pricing/rate-sheets/new', label: 'New Rate Sheet', breadcrumb: 'New Rate Sheet', lazyComponent: lazyScreen(routeComponentLoaders['rate-sheet-intake']) },
     { ...definitionForModule(rateSheetModule), id: 'rate-sheet-intake-detail', path: '/pricing/rate-sheets/:id', label: 'Rate Sheet Detail', breadcrumb: 'Rate Sheet Detail', lazyComponent: lazyScreen(routeComponentLoaders['rate-sheet-intake']) },

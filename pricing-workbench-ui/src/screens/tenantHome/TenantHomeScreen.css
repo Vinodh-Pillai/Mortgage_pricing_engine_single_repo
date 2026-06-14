@@ -1,0 +1,126 @@
+.tenant-home-shell {
+  display: grid;
+  gap: 1rem;
+}
+
+.tenant-home-layout {
+  align-items: start;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(17rem, 0.3fr) minmax(0, 0.7fr);
+}
+
+.tenant-home-filters,
+.product-filter-panel,
+.tenant-context-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.tenant-home-filters {
+  position: sticky;
+  top: 1rem;
+}
+
+.tenant-avatar {
+  align-items: center;
+  background: linear-gradient(135deg, #244c9f, #0ea5e9);
+  border-radius: 999px;
+  color: #fff;
+  display: inline-flex;
+  font-weight: 800;
+  height: 3rem;
+  justify-content: center;
+  width: 3rem;
+}
+
+.tenant-filter-group {
+  border: 1px solid #d7dce8;
+  border-radius: 0.75rem;
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0.75rem;
+}
+
+.tenant-filter-group legend {
+  font-weight: 800;
+  padding: 0 0.35rem;
+}
+
+.tenant-product-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+}
+
+.tenant-product-card {
+  background: rgb(248 251 255 / 94%);
+  border: 1px solid #d7dce8;
+  border-radius: 1rem;
+  box-shadow: 0 14px 38px rgb(15 23 42 / 10%);
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+}
+
+.tenant-product-card h3,
+.tenant-product-card dl {
+  margin: 0;
+}
+
+.tenant-product-card dl {
+  display: grid;
+  gap: 0.35rem 0.75rem;
+  grid-template-columns: max-content 1fr;
+}
+
+.tenant-product-card dd {
+  margin: 0;
+}
+
+.button-row,
+.tenant-pagination {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.tenant-pagination {
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.functionality-badge {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.82rem;
+  font-weight: 800;
+  padding: 0.3rem 0.6rem;
+}
+
+.functionality-badge--ready {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.functionality-badge--needs-attention {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.functionality-badge--blocked {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+@media (max-width: 860px) {
+  .tenant-home-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .tenant-home-filters {
+    position: static;
+  }
+}

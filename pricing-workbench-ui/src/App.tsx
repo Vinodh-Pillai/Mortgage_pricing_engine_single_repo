@@ -134,6 +134,7 @@ const PerformanceDashboardScreen = lazy(() => import('./screens/observabilityPer
 const ComplianceEvidenceScreen = lazy(() => import('./screens/complianceEvidence').then((module) => ({ default: module.ComplianceEvidenceScreen })));
 const FairLendingDashboard = lazy(() => import('./screens/fairLending').then((module) => ({ default: module.FairLendingDashboard })));
 const ProductCatalogManagerScreen = lazy(() => import('./screens/productCatalogManager').then((module) => ({ default: module.ProductCatalogManagerScreen })));
+const ProductAdminScreen = lazy(() => import('./screens/productAdmin').then((module) => ({ default: module.ProductAdminScreen })));
 const AdminGovernanceScreen = lazy(() => import('./screens/adminGovernance').then((module) => ({ default: module.AdminGovernanceScreen })));
 const MlAdvisoryInsightsScreen = lazy(() => import('./screens/mlAdvisoryInsights').then((module) => ({ default: module.MlAdvisoryInsightsScreen })));
 const ModelVersionGovernanceScreen = lazy(() => import('./screens/modelVersionGovernance').then((module) => ({ default: module.ModelVersionGovernanceScreen })));
@@ -144,6 +145,8 @@ const LtvSensitivityScreen = lazy(() => import('./screens/scenarioAnalysis/sensi
 const ProductComparisonScreen = lazy(() => import('./screens/scenarioAnalysis/comparison/ProductComparison').then((module) => ({ default: module.ProductComparisonScreen })));
 const LockPeriodComparisonScreen = lazy(() => import('./screens/scenarioAnalysis/comparison/LockPeriodComparison').then((module) => ({ default: module.LockPeriodComparisonScreen })));
 const TenantOnboardingScreen = lazy(() => import('./screens/tenant/TenantOnboardingScreen').then((module) => ({ default: module.TenantOnboardingScreen })));
+const TenantHomeScreen = lazy(() => import('./screens/tenantHome').then((module) => ({ default: module.TenantHomeScreen })));
+const TenantAdminScreen = lazy(() => import('./screens/tenantAdmin').then((module) => ({ default: module.TenantAdminScreen })));
 const ProductManagementScreen = lazy(() => import('./screens/product/ProductManagementScreen').then((module) => ({ default: module.ProductManagementScreen })));
 const RateSheetIntakeScreen = lazy(() => import('./screens/ratesheet/RateSheetIntakeScreen').then((module) => ({ default: module.RateSheetIntakeScreen })));
 const PricingAnalysisScreen = lazy(() => import('./screens/pricing/PricingAnalysisScreen').then((module) => ({ default: module.PricingAnalysisScreen })));
@@ -185,8 +188,9 @@ export function App() {
           <Suspense fallback={<section className="panel"><p role="status">Loading route...</p></section>}>
             <RouteGuard>
             <Routes>
-              <Route path="/" element={<Navigate to="/pipeline" replace />} />
+              <Route path="/" element={<Navigate to="/home" replace />} />
               <Route path="/login" element={<LoginScreen />} />
+              <Route path="/home" element={<TenantHomeScreen userId="local-tenant-user" />} />
               <Route path="/pipeline" element={<QuoteIntakeScreen tenantId={tenantBoundaryPlaceholder} />} />
               <Route path="/quote/start" element={<Navigate to="/pipeline" replace />} />
               <Route path="/quote/:runId">
@@ -221,8 +225,11 @@ export function App() {
               <Route path="/compliance/fair-lending" element={<FairLendingDashboard tenantId="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" />} />
               <Route path="/quality/validation" element={<QualityGuardrailsSection />} />
               <Route path="/tenant/onboarding" element={<TenantOnboardingScreen />} />
+              <Route path="/admin/tenants" element={<TenantAdminScreen />} />
               <Route path="/admin/tenants/new" element={<TenantOnboardingScreen />} />
+              <Route path="/admin/products" element={<ProductAdminScreen />} />
               <Route path="/admin/products/catalog" element={<ProductManagementScreen />} />
+              <Route path="/admin/products/catalog/:productCode" element={<ProductManagementScreen />} />
               <Route path="/admin/products/new" element={<ProductManagementScreen />} />
               <Route path="/pricing/rate-sheets" element={<RateSheetIntakeScreen />} />
               <Route path="/pricing/rate-sheets/new" element={<RateSheetIntakeScreen />} />

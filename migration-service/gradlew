@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+if command -v gradle >/dev/null 2>&1; then
+  exec gradle "$@"
+fi
+echo "Gradle is not installed or not on PATH. Install Gradle 8.10.2 or generate a full wrapper with gradle wrapper --gradle-version 8.10.2." >&2
+exit 1

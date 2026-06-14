@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "story_id": "PII-54-S01",
+  "routes": ["/home", "/admin/tenants", "/admin/products"],
+  "budgets": {
+    "performance_score_minimum": 0.9,
+    "accessibility_score_minimum": 0.9,
+    "best_practices_score_minimum": 0.9,
+    "largest_contentful_paint_ms_maximum": 2500,
+    "cumulative_layout_shift_maximum": 0.1,
+    "total_blocking_time_ms_maximum": 300
+  },
+  "blocked_gap": "This budget is a local deterministic artifact. Browser-based Lighthouse CI execution requires a runnable UI server and LHCI package installation."
+}

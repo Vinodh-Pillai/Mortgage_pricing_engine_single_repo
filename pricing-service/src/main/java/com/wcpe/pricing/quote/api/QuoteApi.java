@@ -42,7 +42,7 @@ public final class QuoteApi {
         validateCreateRequest(tenantId, headers, request);
 
         ScenarioReference scenario = scenarioAdapter.createScenario(tenantId, request);
-        List<CatalogCandidate> candidates = new ArrayList<>(catalogCandidateAdapter.activeConventionalCandidates(tenantId, request.channel()));
+        List<CatalogCandidate> candidates = new ArrayList<>(catalogCandidateAdapter.activeCandidates(tenantId, request.channel(), request.loanType()));
         candidates.sort(candidateComparator());
 
         List<QuoteOption> options = new ArrayList<>();
@@ -128,8 +128,8 @@ public final class QuoteApi {
         if (request.units() < 1) {
             throw new QuoteValidationException("units must be positive");
         }
-        if (!"CONVENTIONAL".equals(request.loanType())) {
-            throw new QuoteValidationException("only conventional loans are supported for REQ-001");
+        if (!supportedLoanType(request.loanType())) {
+            throw new QuoteValidationException("only conventional and configured government loans are supported");
         }
         if (!"PURCHASE".equals(request.loanPurpose())) {
             throw new QuoteValidationException("only purchase scenarios are supported for REQ-001");
@@ -150,6 +150,10 @@ public final class QuoteApi {
         if (value <= 0) {
             throw new QuoteValidationException(message);
         }
+    }
+
+    private static boolean supportedLoanType(String loanType) {
+        return Set.of("CONVENTIONAL", "FHA", "VA", "USDA").contains(loanType);
     }
 
     public record QuoteHeaders(Set<String> roles, String actorId, String correlationId, String idempotencyKey) {
@@ -247,7 +251,18 @@ public final class QuoteApi {
     }
 
     public interface CatalogCandidateAdapter {
+        default List<CatalogCandidate> activeCandidates(String tenantId, String channel, String loanType) {
+            if ("CONVENTIONAL".equals(loanType)) {
+                return activeConventionalCandidates(tenantId, channel);
+            }
+            return activeGovernmentCandidates(tenantId, channel, loanType);
+        }
+
         List<CatalogCandidate> activeConventionalCandidates(String tenantId, String channel);
+
+        default List<CatalogCandidate> activeGovernmentCandidates(String tenantId, String channel, String loanType) {
+            return List.of();
+        }
     }
 
     public interface EligibilityEvaluationAdapter {

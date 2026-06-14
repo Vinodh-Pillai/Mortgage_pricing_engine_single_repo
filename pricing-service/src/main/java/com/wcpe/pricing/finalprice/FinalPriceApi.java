@@ -7,6 +7,21 @@ import com.wcpe.pricing.rounding.api.RoundingPolicyApi.RoundingHeaders;
 import com.wcpe.pricing.rounding.api.RoundingPolicyApi.RoundingPolicyConflictException;
 import com.wcpe.pricing.rounding.api.RoundingPolicyApi.RoundingPolicyNotSatisfiedException;
 import com.wcpe.pricing.rounding.api.RoundingPolicyApi.RoundingPolicyResolution;
+import com.wcpe.pricing.mi.MiPricingApi;
+import com.wcpe.pricing.mi.MiPricingApi.MiPriceOption;
+import com.wcpe.pricing.mi.MiPricingApi.MiPriceRequest;
+import com.wcpe.pricing.mi.MiPricingApi.MiPriceResponse;
+import com.wcpe.pricing.mi.MiPricingApi.MiPricingHeaders;
+import com.wcpe.pricing.mi.MiPricingApi.MiProgram;
+import com.wcpe.pricing.mi.MiPricingApi.MiRateCard;
+import com.wcpe.pricing.government.GovernmentPricingApi;
+import com.wcpe.pricing.government.GovernmentPricingApi.GovernmentFeeLineItem;
+import com.wcpe.pricing.government.GovernmentPricingApi.GovernmentPriceOption;
+import com.wcpe.pricing.government.GovernmentPricingApi.GovernmentPriceRequest;
+import com.wcpe.pricing.government.GovernmentPricingApi.GovernmentPriceResponse;
+import com.wcpe.pricing.government.GovernmentPricingApi.GovernmentPricingHeaders;
+import com.wcpe.pricing.government.GovernmentPricingApi.GovernmentProductConfiguration;
+import com.wcpe.pricing.government.GovernmentPricingApi.GovernmentProductType;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -42,6 +57,8 @@ public final class FinalPriceApi {
     private final PricingConfigurationPort configurationPort;
     private final RoundingPolicyApi roundingPolicyApi;
     private final AdjustmentCalculationPort adjustmentCalculationPort;
+    private final MiPricingApi miPricingApi;
+    private final GovernmentPricingApi governmentPricingApi;
 
     public FinalPriceApi(
             FinalPriceRepository repository,
@@ -50,7 +67,7 @@ public final class FinalPriceApi {
             PricingConfigurationPort configurationPort,
             RoundingPolicyApi roundingPolicyApi) {
         this(repository, selectionPort, scenarioFactsPort, configurationPort, roundingPolicyApi,
-                new ConfigurationAdjustmentCalculationPort());
+                new ConfigurationAdjustmentCalculationPort(), new MiPricingApi(), new GovernmentPricingApi());
     }
 
     public FinalPriceApi(
@@ -60,12 +77,39 @@ public final class FinalPriceApi {
             PricingConfigurationPort configurationPort,
             RoundingPolicyApi roundingPolicyApi,
             AdjustmentCalculationPort adjustmentCalculationPort) {
+        this(repository, selectionPort, scenarioFactsPort, configurationPort, roundingPolicyApi,
+                adjustmentCalculationPort, new MiPricingApi(), new GovernmentPricingApi());
+    }
+
+    public FinalPriceApi(
+            FinalPriceRepository repository,
+            BaseRateSelectionPort selectionPort,
+            ScenarioFactsPort scenarioFactsPort,
+            PricingConfigurationPort configurationPort,
+            RoundingPolicyApi roundingPolicyApi,
+            AdjustmentCalculationPort adjustmentCalculationPort,
+            MiPricingApi miPricingApi) {
+        this(repository, selectionPort, scenarioFactsPort, configurationPort, roundingPolicyApi,
+                adjustmentCalculationPort, miPricingApi, new GovernmentPricingApi());
+    }
+
+    public FinalPriceApi(
+            FinalPriceRepository repository,
+            BaseRateSelectionPort selectionPort,
+            ScenarioFactsPort scenarioFactsPort,
+            PricingConfigurationPort configurationPort,
+            RoundingPolicyApi roundingPolicyApi,
+            AdjustmentCalculationPort adjustmentCalculationPort,
+            MiPricingApi miPricingApi,
+            GovernmentPricingApi governmentPricingApi) {
         this.repository = Objects.requireNonNull(repository);
         this.selectionPort = Objects.requireNonNull(selectionPort);
         this.scenarioFactsPort = Objects.requireNonNull(scenarioFactsPort);
         this.configurationPort = Objects.requireNonNull(configurationPort);
         this.roundingPolicyApi = Objects.requireNonNull(roundingPolicyApi);
         this.adjustmentCalculationPort = Objects.requireNonNull(adjustmentCalculationPort);
+        this.miPricingApi = Objects.requireNonNull(miPricingApi);
+        this.governmentPricingApi = Objects.requireNonNull(governmentPricingApi);
     }
 
     public FinalPriceResponse calculate(String tenantId, FinalPriceHeaders headers, FinalPriceRequest request) {
@@ -123,6 +167,16 @@ public final class FinalPriceApi {
             subtotal = adjustments.get(adjustments.size() - 1).outputValue();
         }
 
+        MortgageInsuranceApplication mortgageInsuranceApplication = applyMortgageInsurance(
+                tenantId, headers, configuration, facts, ledger, subtotal);
+        subtotal = mortgageInsuranceApplication.subtotal();
+        List<MiPriceOption> mortgageInsurance = mortgageInsuranceApplication.options();
+
+        GovernmentPricingApplication governmentPricingApplication = applyGovernmentPricing(
+                tenantId, headers, configuration, facts, ledger, subtotal);
+        subtotal = governmentPricingApplication.subtotal();
+        List<GovernmentPriceOption> governmentPricing = governmentPricingApplication.options();
+
         List<CapFloorResult> capFloorResults = applyCapsFloors(configuration, ledger, subtotal);
         if (!capFloorResults.isEmpty()) {
             subtotal = capFloorResults.get(capFloorResults.size() - 1).outputValue();
@@ -139,9 +193,13 @@ public final class FinalPriceApi {
                 "ROUND", roundedFinalPrice, rounding.policyVersionId() + ":" + rounding.ruleId(),
                 roundedValue.reasonCode(), roundedValue.roundingMode()));
 
-        VersionGraph versionGraph = configuration.versionGraph(selection.gridVersionRef(), rounding.policyVersionId());
+        List<String> insuranceAndGovernmentRefs = new ArrayList<>(mortgageInsurance.stream().map(MiPriceOption::versionRef).toList());
+        insuranceAndGovernmentRefs.addAll(governmentPricing.stream().map(GovernmentPriceOption::versionRef).toList());
+        VersionGraph versionGraph = configuration.versionGraph(selection.gridVersionRef(), rounding.policyVersionId(),
+                insuranceAndGovernmentRefs);
         String resultHash = stableHash("final-price", tenantId, request.selectionId(), request.scenarioHash(),
-                roundedFinalPrice, versionGraph.hash(), adjustmentCalculation.resultHash(), adjustments, capFloorResults, ledger);
+                roundedFinalPrice, versionGraph.hash(), adjustmentCalculation.resultHash(), adjustments, mortgageInsurance,
+                governmentPricing, capFloorResults, ledger);
         String cacheKey = "pricing:final-price:%s:%s:%s:%s".formatted(
                 tenantId, request.scenarioHash(), request.selectionId(), versionGraph.hash());
         FinalPriceResponse response = new FinalPriceResponse(
@@ -152,6 +210,8 @@ public final class FinalPriceApi {
                 List.copyOf(adjustments),
                 subtotal.setScale(INTERMEDIATE_SCALE, RoundingMode.UNNECESSARY),
                 List.copyOf(capFloorResults),
+                List.copyOf(mortgageInsurance),
+                List.copyOf(governmentPricing),
                 roundedFinalPrice,
                 List.copyOf(ledger),
                 versionGraph,
@@ -311,6 +371,147 @@ public final class FinalPriceApi {
         return results;
     }
 
+    private MortgageInsuranceApplication applyMortgageInsurance(
+            String tenantId,
+            FinalPriceHeaders headers,
+            PricingConfigurationSnapshot configuration,
+            ScenarioFacts facts,
+            List<FinalPriceLedgerEntry> ledger,
+            BigDecimal subtotal) {
+        if (configuration.miRateCards().isEmpty() && configuration.miPrograms().isEmpty()
+                && !configuration.mortgageInsuranceRequired()) {
+            return new MortgageInsuranceApplication(List.of(), subtotal);
+        }
+        String loanType = firstFact(facts, "loanType", "loan_type");
+        BigDecimal ltv = decimalFact(facts, "ltv", "loanToValue", "loan_to_value");
+        Integer fico = integerFact(facts, "fico", "representativeFico", "representative_fico");
+        BigDecimal loanAmount = decimalFact(facts, "loanAmount", "loan_amount");
+        Integer coveragePercent = integerFact(facts, "miCoveragePercent", "coveragePercent", "coverage_percent");
+        if (loanType == null || ltv == null || fico == null || loanAmount == null || coveragePercent == null) {
+            if (configuration.mortgageInsuranceRequired()) {
+                throw new FinalPriceException(FinalPriceErrorCode.MI_PRICING_BLOCKED,
+                        "mortgage insurance pricing facts are required when MI is configured as required");
+            }
+            return new MortgageInsuranceApplication(List.of(), subtotal);
+        }
+        MiPriceResponse response = miPricingApi.price(tenantId,
+                new MiPricingHeaders(Set.of(MiPricingApi.MI_PRICE_PERMISSION), headers.actorId(), headers.correlationId()),
+                new MiPriceRequest(loanType, ltv, fico, loanAmount, coveragePercent,
+                        configuration.miPrograms(), configuration.miRateCards()));
+        if (!response.blockers().isEmpty()) {
+            throw new FinalPriceException(FinalPriceErrorCode.MI_PRICING_BLOCKED,
+                    response.blockers().get(0).code() + ": " + response.blockers().get(0).message());
+        }
+        MiPriceOption selected = response.selectedOption();
+        if (selected == null) {
+            return new MortgageInsuranceApplication(List.of(), subtotal);
+        }
+        BigDecimal input = subtotal;
+        BigDecimal output = subtotal.add(selected.priceAdjustment()).setScale(INTERMEDIATE_SCALE, RoundingMode.HALF_UP);
+        String operation = selected.priceAdjustment().signum() == 0 ? "INCLUDE" : selected.priceAdjustment().signum() < 0 ? "SUB" : "ADD";
+        ledger.add(new FinalPriceLedgerEntry(ledger.size() + 1, "MORTGAGE_INSURANCE", input, operation, output,
+                selected.versionRef() + ":" + selected.sourceRef(), "MI_" + selected.carrier() + "_" + selected.premiumType(), null));
+        return new MortgageInsuranceApplication(List.of(selected), output);
+    }
+
+    private GovernmentPricingApplication applyGovernmentPricing(
+            String tenantId,
+            FinalPriceHeaders headers,
+            PricingConfigurationSnapshot configuration,
+            ScenarioFacts facts,
+            List<FinalPriceLedgerEntry> ledger,
+            BigDecimal subtotal) {
+        GovernmentProductType productType = governmentProductType(facts, configuration);
+        if (productType == null && configuration.governmentProductConfigurations().isEmpty()) {
+            return new GovernmentPricingApplication(List.of(), subtotal);
+        }
+        if (productType == null) {
+            return new GovernmentPricingApplication(List.of(), subtotal);
+        }
+        if (configuration.governmentProductConfigurations().isEmpty()) {
+            throw new FinalPriceException(FinalPriceErrorCode.GOVERNMENT_CONFIG_MISSING,
+                    "government fee, loan-limit, and eligibility configuration is required for " + productType);
+        }
+
+        BigDecimal loanAmount = decimalFact(facts, "loanAmount", "loan_amount");
+        String countyFips = firstFact(facts, "countyFips", "county_fips");
+        String state = firstFact(facts, "propertyState", "state");
+        if (loanAmount == null || countyFips == null || state == null) {
+            throw new FinalPriceException(FinalPriceErrorCode.GOVERNMENT_CONFIG_MISSING,
+                    "government pricing requires loanAmount, countyFips, and state facts");
+        }
+
+        GovernmentPriceResponse response = governmentPricingApi.price(tenantId,
+                new GovernmentPricingHeaders(Set.of(GovernmentPricingApi.GOVERNMENT_PRICE_PERMISSION),
+                        headers.actorId(), headers.correlationId()),
+                new GovernmentPriceRequest(productType, loanAmount, countyFips, state,
+                        decimalFact(facts, "householdIncome", "household_income"),
+                        firstFact(facts, "propertyEligibilityRef", "property_eligibility_ref"),
+                        booleanFact(facts, "vaFundingFeeExempt", "va_funding_fee_exempt"),
+                        booleanFact(facts, "vaFirstUse", "va_first_use"),
+                        decimalFactOrZero(facts, "downPaymentPercent", "down_payment_percent"),
+                        decimalFactOrZero(facts, "vaEntitlementUsed", "va_entitlement_used"),
+                        configuration.governmentProductConfigurations()));
+        if (!response.blockers().isEmpty()) {
+            throw new FinalPriceException(FinalPriceErrorCode.GOVERNMENT_CONFIG_MISSING,
+                    response.blockers().get(0).code() + ": " + response.blockers().get(0).message());
+        }
+        GovernmentPriceOption selected = response.selectedOption();
+        if (selected == null) {
+            return new GovernmentPricingApplication(List.of(), subtotal);
+        }
+        for (GovernmentFeeLineItem lineItem : selected.lineItems()) {
+            ledger.add(new FinalPriceLedgerEntry(ledger.size() + 1, "GOVERNMENT_FEE", subtotal,
+                    "INCLUDE", subtotal, lineItem.versionRef() + ":" + lineItem.sourceRef(),
+                    lineItem.feeType(), null));
+        }
+        return new GovernmentPricingApplication(List.of(selected), subtotal);
+    }
+
+    private static GovernmentProductType governmentProductType(ScenarioFacts facts, PricingConfigurationSnapshot configuration) {
+        String raw = firstNonBlank(firstFact(facts, "loanType", "loan_type", "productType", "product_type"),
+                configuration.productCode());
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        return switch (raw.trim().toUpperCase()) {
+            case "FHA", "FHA_FIXED", "FHA_ARM" -> GovernmentProductType.FHA;
+            case "VA", "VA_FIXED", "VA_ARM" -> GovernmentProductType.VA;
+            case "USDA", "USDA_RURAL", "USDA_FIXED" -> GovernmentProductType.USDA;
+            default -> null;
+        };
+    }
+
+    private static String firstFact(ScenarioFacts facts, String... keys) {
+        for (String key : keys) {
+            String value = facts.value(key);
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private static BigDecimal decimalFact(ScenarioFacts facts, String... keys) {
+        String value = firstFact(facts, keys);
+        return value == null ? null : new BigDecimal(value);
+    }
+
+    private static Integer integerFact(ScenarioFacts facts, String... keys) {
+        String value = firstFact(facts, keys);
+        return value == null ? null : Integer.valueOf(value);
+    }
+
+    private static BigDecimal decimalFactOrZero(ScenarioFacts facts, String... keys) {
+        BigDecimal value = decimalFact(facts, keys);
+        return value == null ? BigDecimal.ZERO : value;
+    }
+
+    private static boolean booleanFact(ScenarioFacts facts, String... keys) {
+        String value = firstFact(facts, keys);
+        return value != null && Boolean.parseBoolean(value);
+    }
+
     private RoundingPolicyResolution resolveRounding(
             String tenantId,
             FinalPriceHeaders headers,
@@ -415,7 +616,9 @@ public final class FinalPriceApi {
         PRICE_BOUNDARY_CONFLICT,
         ROUNDING_POLICY_MISSING,
         SCENARIO_FACT_MISSING,
-        IDEMPOTENCY_CONFLICT
+        IDEMPOTENCY_CONFLICT,
+        MI_PRICING_BLOCKED,
+        GOVERNMENT_CONFIG_MISSING
     }
 
     public record FinalPriceHeaders(Set<String> permissions, String actorId, String correlationId, String idempotencyKey) {
@@ -445,11 +648,30 @@ public final class FinalPriceApi {
             List<AdjustmentResult> adjustments,
             BigDecimal subtotal,
             List<CapFloorResult> capFloorResults,
+            List<MiPriceOption> mortgageInsurance,
+            List<GovernmentPriceOption> governmentPricing,
             BigDecimal roundedFinalPrice,
             List<FinalPriceLedgerEntry> ledger,
             VersionGraph versionGraph,
             String resultHash,
             String cacheKey) {
+        public FinalPriceResponse(UUID finalPriceId, BigDecimal selectedNoteRate, int lockPeriodDays,
+                BigDecimal basePrice, List<AdjustmentResult> adjustments, BigDecimal subtotal,
+                List<CapFloorResult> capFloorResults, BigDecimal roundedFinalPrice,
+                List<FinalPriceLedgerEntry> ledger, VersionGraph versionGraph, String resultHash, String cacheKey) {
+            this(finalPriceId, selectedNoteRate, lockPeriodDays, basePrice, adjustments, subtotal,
+                    capFloorResults, List.of(), List.of(), roundedFinalPrice, ledger, versionGraph, resultHash, cacheKey);
+        }
+
+        public FinalPriceResponse(UUID finalPriceId, BigDecimal selectedNoteRate, int lockPeriodDays,
+                BigDecimal basePrice, List<AdjustmentResult> adjustments, BigDecimal subtotal,
+                List<CapFloorResult> capFloorResults, List<MiPriceOption> mortgageInsurance,
+                BigDecimal roundedFinalPrice, List<FinalPriceLedgerEntry> ledger, VersionGraph versionGraph,
+                String resultHash, String cacheKey) {
+            this(finalPriceId, selectedNoteRate, lockPeriodDays, basePrice, adjustments, subtotal,
+                    capFloorResults, mortgageInsurance, List.of(), roundedFinalPrice, ledger, versionGraph, resultHash, cacheKey);
+        }
+
         public FinalPriceResponse {
             selectedNoteRate = selectedNoteRate == null ? null : selectedNoteRate.setScale(PERSISTED_PRICE_SCALE, RoundingMode.HALF_UP);
             basePrice = priceScale(basePrice);
@@ -457,7 +679,23 @@ public final class FinalPriceApi {
             roundedFinalPrice = priceScale(roundedFinalPrice);
             adjustments = adjustments == null ? List.of() : List.copyOf(adjustments);
             capFloorResults = capFloorResults == null ? List.of() : List.copyOf(capFloorResults);
+            mortgageInsurance = mortgageInsurance == null ? List.of() : List.copyOf(mortgageInsurance);
+            governmentPricing = governmentPricing == null ? List.of() : List.copyOf(governmentPricing);
             ledger = ledger == null ? List.of() : List.copyOf(ledger);
+        }
+    }
+
+    private record MortgageInsuranceApplication(List<MiPriceOption> options, BigDecimal subtotal) {
+        private MortgageInsuranceApplication {
+            options = options == null ? List.of() : List.copyOf(options);
+            subtotal = intermediateScale(subtotal);
+        }
+    }
+
+    private record GovernmentPricingApplication(List<GovernmentPriceOption> options, BigDecimal subtotal) {
+        private GovernmentPricingApplication {
+            options = options == null ? List.of() : List.copyOf(options);
+            subtotal = intermediateScale(subtotal);
         }
     }
 
@@ -709,6 +947,10 @@ public final class FinalPriceApi {
             String roundingOutputContext,
             List<AdjustmentRule> adjustmentRules,
             List<CapFloorRule> capFloorRules,
+            List<MiRateCard> miRateCards,
+            List<MiProgram> miPrograms,
+            List<GovernmentProductConfiguration> governmentProductConfigurations,
+            boolean mortgageInsuranceRequired,
             boolean priceBoundaryPolicyRequired) {
         public PricingConfigurationSnapshot(
                 String tenantId,
@@ -721,22 +963,83 @@ public final class FinalPriceApi {
                 List<AdjustmentRule> adjustmentRules,
                 List<CapFloorRule> capFloorRules) {
             this(tenantId, versionRefs, productCode, investorCode, channelCode, roundingScope, roundingOutputContext,
-                    adjustmentRules, capFloorRules, false);
+                    adjustmentRules, capFloorRules, List.of(), List.of(), List.of(), false, false);
+        }
+
+        public PricingConfigurationSnapshot(
+                String tenantId,
+                List<String> versionRefs,
+                String productCode,
+                String investorCode,
+                String channelCode,
+                String roundingScope,
+                String roundingOutputContext,
+                List<AdjustmentRule> adjustmentRules,
+                List<CapFloorRule> capFloorRules,
+                boolean priceBoundaryPolicyRequired) {
+            this(tenantId, versionRefs, productCode, investorCode, channelCode, roundingScope, roundingOutputContext,
+                    adjustmentRules, capFloorRules, List.of(), List.of(), List.of(), false, priceBoundaryPolicyRequired);
+        }
+
+        public PricingConfigurationSnapshot(
+                String tenantId,
+                List<String> versionRefs,
+                String productCode,
+                String investorCode,
+                String channelCode,
+                String roundingScope,
+                String roundingOutputContext,
+                List<AdjustmentRule> adjustmentRules,
+                List<CapFloorRule> capFloorRules,
+                List<MiRateCard> miRateCards,
+                List<MiProgram> miPrograms,
+                boolean mortgageInsuranceRequired) {
+            this(tenantId, versionRefs, productCode, investorCode, channelCode, roundingScope, roundingOutputContext,
+                    adjustmentRules, capFloorRules, miRateCards, miPrograms, List.of(), mortgageInsuranceRequired, false);
+        }
+
+        public PricingConfigurationSnapshot(
+                String tenantId,
+                List<String> versionRefs,
+                String productCode,
+                String investorCode,
+                String channelCode,
+                String roundingScope,
+                String roundingOutputContext,
+                List<AdjustmentRule> adjustmentRules,
+                List<CapFloorRule> capFloorRules,
+                List<MiRateCard> miRateCards,
+                List<MiProgram> miPrograms,
+                List<GovernmentProductConfiguration> governmentProductConfigurations,
+                boolean mortgageInsuranceRequired) {
+            this(tenantId, versionRefs, productCode, investorCode, channelCode, roundingScope, roundingOutputContext,
+                    adjustmentRules, capFloorRules, miRateCards, miPrograms, governmentProductConfigurations,
+                    mortgageInsuranceRequired, false);
         }
 
         public PricingConfigurationSnapshot {
             versionRefs = versionRefs == null ? List.of() : List.copyOf(versionRefs);
             adjustmentRules = adjustmentRules == null ? List.of() : List.copyOf(adjustmentRules);
             capFloorRules = capFloorRules == null ? List.of() : List.copyOf(capFloorRules);
+            miRateCards = miRateCards == null ? List.of() : List.copyOf(miRateCards);
+            miPrograms = miPrograms == null ? List.of() : List.copyOf(miPrograms);
+            governmentProductConfigurations = governmentProductConfigurations == null ? List.of() : List.copyOf(governmentProductConfigurations);
             roundingScope = roundingScope == null || roundingScope.isBlank() ? "BASE" : roundingScope;
             roundingOutputContext = roundingOutputContext == null || roundingOutputContext.isBlank()
                     ? "FINAL_PRICE" : roundingOutputContext;
         }
 
         VersionGraph versionGraph(String gridVersionRef, String roundingPolicyVersionRef) {
+            return versionGraph(gridVersionRef, roundingPolicyVersionRef, List.of());
+        }
+
+        VersionGraph versionGraph(String gridVersionRef, String roundingPolicyVersionRef, List<String> extraRefs) {
             List<String> refs = new ArrayList<>(versionRefs);
             refs.add(gridVersionRef);
             refs.add(roundingPolicyVersionRef);
+            if (extraRefs != null) {
+                refs.addAll(extraRefs);
+            }
             return new VersionGraph(refs, stableHash(refs));
         }
     }

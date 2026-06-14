@@ -41,6 +41,61 @@ export type ProductCatalogManagerView = {
   uiTraceId: string;
 };
 
+export type ProductAdminStatus = 'DRAFT' | 'REVIEW' | 'PUBLISHED' | 'DEPRECATED' | string;
+
+export type ProductAdminProduct = {
+  productId: string;
+  productCode: string;
+  productName: string;
+  productType: string;
+  investorCode: string;
+  channelCode: string;
+  status: ProductAdminStatus;
+  description?: string;
+  minLoanAmount?: number | null;
+  maxLoanAmount?: number | null;
+  minFico?: number | null;
+  maxLtv?: number | null;
+  maxDti?: number | null;
+  propertyTypes: string[];
+  occupancyTypes: string[];
+  loanPurposes: string[];
+  pricingRuleSet?: string | null;
+  version: number;
+  changeSummary?: string;
+};
+
+export type ProductAdminStipulation = {
+  stipulationId: string;
+  stipulationCode: string;
+  stipulationName: string;
+  category: string;
+  severity: 'REQUIRED' | 'CONDITIONAL' | 'ADVISORY' | string;
+  description?: string;
+  validationRule: Record<string, unknown> | null;
+  appliesToProductTypes: string[];
+};
+
+export type ProductAdminMapping = {
+  productId: string;
+  stipulationId: string;
+  isRequired: boolean;
+  conditionExpression: Record<string, unknown> | null;
+  displayOrder: number;
+};
+
+export type ProductAdminView = {
+  tenantContext: string;
+  dependencyStatus: string;
+  products: ProductAdminProduct[];
+  stipulations: ProductAdminStipulation[];
+  mappings: ProductAdminMapping[];
+  pricingRuleSets: string[];
+  lifecycle: ProductAdminStatus[];
+  fallbackReason: string;
+  uiTraceId: string;
+};
+
 export async function createProductCatalogEntry(
   product: ProductSetupRequest,
   fetchImpl: typeof fetch = fetch,
@@ -76,4 +131,20 @@ export async function fetchProductCatalogManager(fetchImpl: typeof fetch = fetch
   }
 
   return response.json() as Promise<ProductCatalogManagerView>;
+}
+
+export async function fetchProductAdmin(fetchImpl: typeof fetch = fetch): Promise<ProductAdminView> {
+  const response = await fetchImpl('/api/v1/admin/products', {
+    headers: {
+      Accept: 'application/json',
+      'X-Tenant-Context': 'ui-preview-tenant',
+      'X-Ui-Trace-Id': 'product-admin-local-trace',
+    },
+  });
+
+  if (response.status >= 500) {
+    throw new Error('Product administration is temporarily unavailable.');
+  }
+
+  return response.json() as Promise<ProductAdminView>;
 }
