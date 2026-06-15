@@ -44,7 +44,7 @@ export function useAnnounce() {
   }, [context]);
 }
 
-export function usePageTitle(title: string, appName = 'Pricing Workbench') {
+export function usePageTitle(title: string, appName = 'LoanWeft') {
   useEffect(() => {
     const previousTitle = document.title;
     document.title = title.includes(appName) ? title : `${title} | ${appName}`;

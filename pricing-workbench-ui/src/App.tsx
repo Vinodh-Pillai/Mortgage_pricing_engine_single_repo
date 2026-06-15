@@ -1,5 +1,5 @@
 ﻿import { type ReactNode, Suspense, lazy, useEffect, useState } from 'react';
-import { Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   fetchOfferComparison,
   fetchOfferExplanation,
@@ -169,21 +169,31 @@ function readInitialLayoutTheme(): 'dark' | 'light' {
 
 export function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>(readInitialLayoutTheme);
+  const location = useLocation();
   const currentRoute = useCurrentRoute();
   const activeModule = currentRoute.module;
   const activeRunId = currentRoute.params.runId ?? null;
+  const isLoginRoute = location.pathname === '/login';
 
   return (
     <ThemeProvider>
       <AuthProvider>
-        <Shell
+        {isLoginRoute ? (
+          <Suspense fallback={<section className="panel"><p role="status">Loading route...</p></section>}>
+            <Routes>
+              <Route path="/login" element={<LoginScreen />} />
+              <Route path="*" element={<Navigate to="/login" replace />} />
+            </Routes>
+          </Suspense>
+        ) : (
+          <Shell
           activeModuleId={activeModule.id}
           activeRunId={activeRunId}
           breadcrumb={activeModule.breadcrumb}
           notifications={[]}
           onThemeToggle={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
           theme={theme}
-          user={{ name: 'Workbench user', role: 'Pricing analyst' }}
+          user={{ name: 'LoanWeft user', role: 'Pricing analyst' }}
         >
           <Suspense fallback={<section className="panel"><p role="status">Loading route...</p></section>}>
             <RouteGuard>
@@ -250,7 +260,8 @@ export function App() {
             </Routes>
             </RouteGuard>
           </Suspense>
-        </Shell>
+          </Shell>
+        )}
       </AuthProvider>
     </ThemeProvider>
   );

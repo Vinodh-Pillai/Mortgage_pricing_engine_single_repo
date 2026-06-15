@@ -11,8 +11,8 @@ export const loginScreenModule = createScreenModule({
   stateCoverage: ['loading', 'empty', 'blocked', 'needs-attention', 'ready'],
   evidenceTarget: getEvidenceTarget('login-screen', 'PII-25-S03'),
   personaVisibility: ['*'],
-  dependencyStatus: 'Public route backed by PostgreSQL authentication through /api/auth endpoints.',
-  adapterStatus: 'Uses AuthContext.login(email, password) and HttpOnly cookie session state.',
+  dependencyStatus: 'Public route backed by the authentication service.',
+  adapterStatus: 'Uses AuthContext.login(email, password) and authenticated session state.',
   Component: lazy(() => import('./LoginScreen').then((module) => ({ default: module.LoginScreen }))),
 });
 

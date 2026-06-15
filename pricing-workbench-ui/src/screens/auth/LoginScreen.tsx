@@ -75,14 +75,9 @@ export function LoginScreen({ initialEmail = '', loading = false, disableAutoRed
           <div className="login-logo" aria-hidden="true">
             <span className="login-logo__mark">◇</span>
           </div>
-          <p className="login-eyebrow">Secure workbench sign in</p>
+          <p className="login-eyebrow">Secure sign in</p>
           <h1 id="login-title">{t('pricingWorkbench')}</h1>
           <p id="login-tagline" className="login-tagline">{t('tagline')}</p>
-          <div className="login-hero__signals" aria-label="Login screen highlights">
-            <span>PostgreSQL users</span>
-            <span>HttpOnly session cookie</span>
-            <span>Role-based access</span>
-          </div>
         </div>
 
         <form className="login-search-panel login-form" onSubmit={handleSubmit} aria-busy={busy}>
@@ -130,14 +125,9 @@ export function LoginScreen({ initialEmail = '', loading = false, disableAutoRed
           </div>
 
           <p className="login-search-help" aria-live="polite">
-            Use your workbench account. The backend session cookie keeps you signed in for this browser session.
+            Use your organization account to access LoanWeft.
           </p>
         </form>
-
-        <footer className="login-footer">
-          <p>{t('demoNotice')}</p>
-          <p>Sessions are issued by the PostgreSQL-backed authentication service and stored in an HttpOnly cookie.</p>
-        </footer>
       </section>
     </main>
   );

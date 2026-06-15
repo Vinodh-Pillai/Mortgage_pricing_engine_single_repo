@@ -2,8 +2,9 @@
   --login-bg: radial-gradient(circle at top left, color-mix(in srgb, var(--ds-color-primary) 24%, transparent), transparent 34rem),
     radial-gradient(circle at 86% 14%, color-mix(in srgb, var(--ds-color-secondary) 24%, transparent), transparent 28rem),
     linear-gradient(135deg, var(--ds-color-background), color-mix(in srgb, var(--ds-color-background) 84%, #000 16%));
-  min-height: min(100vh, 74rem);
-  margin: calc(var(--ds-space-6) * -1);
+  box-sizing: border-box;
+  min-height: 100vh;
+  margin: 0;
   padding: clamp(var(--ds-space-6), 5vw, var(--ds-space-12));
   color: var(--ds-color-text);
   background: var(--login-bg);

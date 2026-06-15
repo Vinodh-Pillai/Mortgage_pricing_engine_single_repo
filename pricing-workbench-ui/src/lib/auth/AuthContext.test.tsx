@@ -13,6 +13,7 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 function installFetchMock() {
+  vi.stubEnv('VITE_TENANT_CONTEXT_AUTH_BASE_URL', 'http://tenant-context.local');
   vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://localhost');
     if (url.pathname === '/api/auth/me') {
@@ -53,6 +54,7 @@ describe('AuthContext', () => {
 
   afterEach(() => {
     cleanup();
+    vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
 

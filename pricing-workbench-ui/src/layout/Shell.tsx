@@ -29,6 +29,7 @@ export interface ShellProps {
 export function Shell({ children, activeModuleId, activeRunId, breadcrumb, modules = workbenchModules, onThemeToggle, theme, user, notifications }: ShellProps) {
   const { t } = useTranslation('common');
   const auth = useOptionalAuth();
+  const showAuthenticatedChrome = auth ? auth.isLoading || auth.isAuthenticated : true;
   const currentUser = auth?.currentPersona ? { name: auth.currentPersona.name, role: roleLabels[auth.currentPersona.role], avatar: auth.currentPersona.avatar } : user;
   const mode = useNavRailMode();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -54,6 +55,12 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, modul
     if (mode === 'rail') setDrawerOpen(false);
   }, [mode]);
 
+  useEffect(() => {
+    if (showAuthenticatedChrome) return;
+    setDrawerOpen(false);
+    setNotificationsOpen(false);
+  }, [showAuthenticatedChrome]);
+
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
   const toggleCollapsed = useCallback(() => {
     setNavCollapsed((current) => {
@@ -73,28 +80,33 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, modul
       <Header
         breadcrumb={breadcrumb}
         drawerOpen={drawerOpen}
-        notificationCount={notifications.length}
+        notificationCount={showAuthenticatedChrome ? notifications.length : 0}
+        showAuthenticatedChrome={showAuthenticatedChrome}
         onMenuToggle={() => setDrawerOpen((current) => !current)}
-        onNotificationsToggle={() => setNotificationsOpen((current) => !current)}
+        onNotificationsToggle={() => {
+          if (showAuthenticatedChrome) setNotificationsOpen((current) => !current);
+        }}
         onLogout={auth?.logout}
         onThemeToggle={onThemeToggle}
         theme={theme}
         user={currentUser}
       />
       <div className="layout-frame">
-        <NavRail
-          activeModuleId={activeModuleId}
-          activeRunId={activeRunId}
-          collapsed={railCollapsed}
-          drawerOpen={drawerOpen}
-          mode={mode}
-          modules={modules}
-          onCloseDrawer={closeDrawer}
-          onToggleCollapsed={toggleCollapsed}
-        />
+        {showAuthenticatedChrome ? (
+          <NavRail
+            activeModuleId={activeModuleId}
+            activeRunId={activeRunId}
+            collapsed={railCollapsed}
+            drawerOpen={drawerOpen}
+            mode={mode}
+            modules={modules}
+            onCloseDrawer={closeDrawer}
+            onToggleCollapsed={toggleCollapsed}
+          />
+        ) : null}
         <ContentArea>{children}</ContentArea>
       </div>
-      {notificationsOpen ? (
+      {showAuthenticatedChrome && notificationsOpen ? (
         <aside className="layout-notifications" aria-label={t('notifications', { count: notifications.length })} role="status">
           {notifications.length ? notifications.map((notification) => <p key={notification.id}>{notification.label}</p>) : <p>{t('noNotifications')}</p>}
         </aside>

@@ -8,6 +8,7 @@ type HeaderProps = {
   breadcrumb: string;
   drawerOpen: boolean;
   notificationCount: number;
+  showAuthenticatedChrome?: boolean;
   onMenuToggle: () => void;
   onNotificationsToggle: () => void;
   onLogout?: () => void;
@@ -16,7 +17,7 @@ type HeaderProps = {
   user: { name: string; role: string; avatar?: string };
 };
 
-export function Header({ breadcrumb, drawerOpen, notificationCount, onMenuToggle, onNotificationsToggle, onLogout, onThemeToggle, theme, user }: HeaderProps) {
+export function Header({ breadcrumb, drawerOpen, notificationCount, showAuthenticatedChrome = true, onMenuToggle, onNotificationsToggle, onLogout, onThemeToggle, theme, user }: HeaderProps) {
   const { t } = useTranslation('common');
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -25,6 +26,10 @@ export function Header({ breadcrumb, drawerOpen, notificationCount, onMenuToggle
   const initials = user.avatar ?? user.name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
 
   useEffect(() => {
+    if (!showAuthenticatedChrome) {
+      setUserMenuOpen(false);
+      return undefined;
+    }
     if (!userMenuOpen) return undefined;
     const onPointerDown = (event: PointerEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) setUserMenuOpen(false);
@@ -52,17 +57,19 @@ export function Header({ breadcrumb, drawerOpen, notificationCount, onMenuToggle
 
   return (
     <header className="layout-header" role="banner">
-      <Button
-        className="layout-header__menu"
-        type="button"
-        variant="ghost"
-        aria-label={drawerOpen ? t('closeNavigationMenu') : t('openNavigationMenu')}
-        aria-expanded={drawerOpen}
-        aria-controls="primary-navigation"
-        onClick={onMenuToggle}
-      >
-        {t('menu')}
-      </Button>
+      {showAuthenticatedChrome ? (
+        <Button
+          className="layout-header__menu"
+          type="button"
+          variant="ghost"
+          aria-label={drawerOpen ? t('closeNavigationMenu') : t('openNavigationMenu')}
+          aria-expanded={drawerOpen}
+          aria-controls="primary-navigation"
+          onClick={onMenuToggle}
+        >
+          {t('menu')}
+        </Button>
+      ) : null}
       <div className="layout-header__title">
         <p className="eyebrow">{t('appTitle')}</p>
         <h1>{t('pricingWorkbench')}</h1>
@@ -74,33 +81,37 @@ export function Header({ breadcrumb, drawerOpen, notificationCount, onMenuToggle
         </nav>
       </div>
       <div className="layout-header__actions">
-        <button className="layout-icon-button" type="button" onClick={onNotificationsToggle} aria-label={t('notifications', { count: notificationCount })}>
-          <span aria-hidden="true">🔔</span><span className="layout-header__action-label">{t('alerts')}</span>{notificationCount > 0 ? <span className="layout-badge">{notificationCount}</span> : null}
-        </button>
+        {showAuthenticatedChrome ? (
+          <button className="layout-icon-button" type="button" onClick={onNotificationsToggle} aria-label={t('notifications', { count: notificationCount })}>
+            <span aria-hidden="true">🔔</span><span className="layout-header__action-label">{t('alerts')}</span>{notificationCount > 0 ? <span className="layout-badge">{notificationCount}</span> : null}
+          </button>
+        ) : null}
         <label className="layout-theme-toggle">
           <span aria-hidden="true">{theme === 'dark' ? '🌙' : '☀️'}</span>
           <span>{t('theme', { theme: theme === 'dark' ? t('dark') : t('light') })}</span>
           <Switch checked={theme === 'dark'} onClick={toggleTheme} aria-label={t('toggleTheme')} />
         </label>
-        <div className="layout-user-menu-shell" ref={menuRef}>
-          <button className="layout-user-menu" type="button" aria-haspopup="menu" aria-expanded={userMenuOpen} aria-label={t('userMenuFor', { name: user.name })} onClick={() => setUserMenuOpen((open) => !open)}>
-            <Avatar initials={initials} roleColor={roleColor} roleLabel={user.role} aria-hidden="true" />
-            <span>{user.name}</span>
-            <small>{user.role}</small>
-          </button>
-          {userMenuOpen ? (
-            <div className="layout-user-menu__dropdown" role="menu" aria-label={t('userMenuFor', { name: user.name })}>
-              <div className="layout-user-menu__identity">
-                <Avatar initials={initials} roleColor={roleColor} roleLabel={user.role} aria-hidden="true" />
-                <div>
-                  <strong>{user.name}</strong>
-                  <span className="layout-role-badge" style={{ '--layout-role-color': roleColor } as CSSProperties}>{user.role}</span>
+        {showAuthenticatedChrome ? (
+          <div className="layout-user-menu-shell" ref={menuRef}>
+            <button className="layout-user-menu" type="button" aria-haspopup="menu" aria-expanded={userMenuOpen} aria-label={t('userMenuFor', { name: user.name })} onClick={() => setUserMenuOpen((open) => !open)}>
+              <Avatar initials={initials} roleColor={roleColor} roleLabel={user.role} aria-hidden="true" />
+              <span>{user.name}</span>
+              <small>{user.role}</small>
+            </button>
+            {userMenuOpen ? (
+              <div className="layout-user-menu__dropdown" role="menu" aria-label={t('userMenuFor', { name: user.name })}>
+                <div className="layout-user-menu__identity">
+                  <Avatar initials={initials} roleColor={roleColor} roleLabel={user.role} aria-hidden="true" />
+                  <div>
+                    <strong>{user.name}</strong>
+                    <span className="layout-role-badge" style={{ '--layout-role-color': roleColor } as CSSProperties}>{user.role}</span>
+                  </div>
                 </div>
+                <button type="button" role="menuitem" className="layout-user-menu__item" onClick={() => { onLogout?.(); setUserMenuOpen(false); }}>{t('logout')}</button>
               </div>
-              <button type="button" role="menuitem" className="layout-user-menu__item" onClick={() => { onLogout?.(); setUserMenuOpen(false); }}>{t('logout')}</button>
-            </div>
-          ) : null}
-        </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </header>
   );

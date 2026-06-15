@@ -35,7 +35,23 @@ export type AuthUser = User;
 export type LoginPayload = LoginRequest;
 export type RegisterPayload = RegisterRequest & { name?: string };
 
-const authApiBaseUrl = (import.meta.env.VITE_TENANT_CONTEXT_API_BASE_URL ?? '').replace(/\/$/, '');
+export interface AuthClientConfig {
+  tenantContextAuthBaseUrl: string;
+  tenantContextApiBaseUrl: string;
+  bffApiBaseUrl: string;
+}
+
+export const AUTH_CONFIG = {
+  tenantContextAuthBaseUrl: 'VITE_TENANT_CONTEXT_AUTH_BASE_URL',
+  tenantContextApiBaseUrl: 'VITE_TENANT_CONTEXT_API_BASE_URL',
+  bffApiBaseUrl: 'VITE_BFF_API_BASE_URL',
+} as const;
+
+export const AUTH_SECURITY_BLOCKERS = [
+  'Password login and registration require VITE_TENANT_CONTEXT_AUTH_BASE_URL.',
+  'The UI must not submit raw credentials to VITE_BFF_API_BASE_URL.',
+  'Full OIDC/PKCE or server-side BFF auth code exchange remains blocked until IdP issuer, client id, redirect URIs, scopes, and token/session ownership are supplied by approved configuration.',
+] as const;
 
 type RawAuthResponse = AuthResponse | { user?: Partial<User> & { name?: string }; error?: string; message?: string };
 
@@ -55,7 +71,50 @@ function normalizeAuthResponse(response: RawAuthResponse): AuthResponse {
   return { user: normalizeUser(response.user) };
 }
 
-async function authFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+function normalizeBaseUrl(value: unknown): string {
+  return typeof value === 'string' ? value.trim().replace(/\/$/, '') : '';
+}
+
+export function getAuthClientConfig(): AuthClientConfig {
+  return {
+    tenantContextAuthBaseUrl: normalizeBaseUrl(import.meta.env.VITE_TENANT_CONTEXT_AUTH_BASE_URL),
+    tenantContextApiBaseUrl: normalizeBaseUrl(import.meta.env.VITE_TENANT_CONTEXT_API_BASE_URL),
+    bffApiBaseUrl: normalizeBaseUrl(import.meta.env.VITE_BFF_API_BASE_URL),
+  };
+}
+
+function canonicalConfiguredBaseUrl(value: string): string {
+  if (!value) return '';
+  try {
+    return new URL(value).toString().replace(/\/$/, '');
+  } catch {
+    return value.replace(/\/$/, '');
+  }
+}
+
+function sameConfiguredBaseUrl(left: string, right: string): boolean {
+  return Boolean(left && right && canonicalConfiguredBaseUrl(left) === canonicalConfiguredBaseUrl(right));
+}
+
+function resolveAuthApiBaseUrl(credentialRequest: boolean): string {
+  const config = getAuthClientConfig();
+  const credentialAuthBaseUrl = config.tenantContextAuthBaseUrl;
+
+  if (credentialRequest) {
+    if (!credentialAuthBaseUrl) {
+      throw new Error('Tenant-context authentication base URL is required before submitting credentials. Configure VITE_TENANT_CONTEXT_AUTH_BASE_URL; full OIDC/PKCE or server-side BFF auth flow remains blocked by missing IdP configuration.');
+    }
+    if (sameConfiguredBaseUrl(credentialAuthBaseUrl, config.bffApiBaseUrl)) {
+      throw new Error('Credential authentication base URL must not match the BFF API base URL. Configure VITE_TENANT_CONTEXT_AUTH_BASE_URL separately before submitting credentials.');
+    }
+    return credentialAuthBaseUrl;
+  }
+
+  return credentialAuthBaseUrl || config.bffApiBaseUrl;
+}
+
+async function authFetch<T>(path: string, init: RequestInit = {}, options: { credentialRequest?: boolean } = {}): Promise<T> {
+  const authApiBaseUrl = resolveAuthApiBaseUrl(Boolean(options.credentialRequest));
   const response = await fetch(`${authApiBaseUrl}/api/auth${path}`, {
     ...init,
     credentials: 'include',
@@ -73,12 +132,12 @@ async function authFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export async function login(email: string, password: string): Promise<AuthResponse> {
-  const response = await authFetch<RawAuthResponse>('/login', { method: 'POST', body: JSON.stringify({ email, password } satisfies LoginRequest) });
+  const response = await authFetch<RawAuthResponse>('/login', { method: 'POST', body: JSON.stringify({ email, password } satisfies LoginRequest) }, { credentialRequest: true });
   return normalizeAuthResponse(response);
 }
 
 export async function register(email: string, password: string, fullName: string, role: UserRole): Promise<AuthResponse> {
-  const response = await authFetch<RawAuthResponse>('/register', { method: 'POST', body: JSON.stringify({ email, password, fullName, role } satisfies RegisterRequest) });
+  const response = await authFetch<RawAuthResponse>('/register', { method: 'POST', body: JSON.stringify({ email, password, fullName, role } satisfies RegisterRequest) }, { credentialRequest: true });
   return normalizeAuthResponse(response);
 }
 

@@ -14,7 +14,7 @@
     "harness:validate-evidence": "vitest run --environment jsdom src/lib/evidence/evidence.test.tsx",
     "test:data-layer": "vitest run --environment jsdom src/lib/data",
     "test:routing": "vitest run --environment jsdom src/routing",
-    "test:auth": "vitest run --environment jsdom src/lib/auth src/routing/RouteGuard.test.tsx src/layout/navigation-auth.test.ts",
+    "test:auth": "vitest run --environment jsdom src/lib/api/auth.test.ts src/lib/auth src/routing/RouteGuard.test.tsx src/layout/navigation-auth.test.ts",
     "test:login": "vitest run --environment jsdom src/screens/auth/LoginScreen.test.tsx",
     "test:layout": "vitest run --environment jsdom src/layout",
     "test:design-system": "vitest run --environment jsdom src/design-system",
