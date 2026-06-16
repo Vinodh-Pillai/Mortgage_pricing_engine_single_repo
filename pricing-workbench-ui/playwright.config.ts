@@ -78,6 +78,7 @@ export default defineConfig({
     timeout: 120_000,
     env: {
       VITE_API_BASE: process.env.VITE_API_BASE || 'http://localhost:8080',
+      VITE_BFF_API_BASE_URL: process.env.VITE_BFF_API_BASE_URL || process.env.VITE_API_BASE || 'http://localhost:8080',
     },
   },
   snapshotDir: './tests/baselines',

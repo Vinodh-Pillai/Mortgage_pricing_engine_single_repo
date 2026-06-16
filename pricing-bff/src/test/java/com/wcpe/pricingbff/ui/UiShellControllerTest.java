@@ -24,6 +24,7 @@ class UiShellControllerTest {
 
   @Test
   void uiSurfacesAreRegisteredAsSeparateControllersOverOneFallbackAdapter() {
+    assertThat(context.getBean(AuthUiController.class)).isNotNull();
     assertThat(context.getBean(ShellUiController.class)).isNotNull();
     assertThat(context.getBean(ProductCatalogUiController.class)).isNotNull();
     assertThat(context.getBean(QuoteRunUiController.class)).isNotNull();
@@ -39,6 +40,15 @@ class UiShellControllerTest {
     assertThat(context.getBean(AdminUiController.class)).isNotNull();
     assertThat(context.getBean(MlAdvisoryUiController.class)).isNotNull();
     assertThat(context.getBean(PricingBffUiFallbackAdapter.class)).isNotNull();
+  }
+
+  @Test
+  void authLoginFailsClosedWhenTenantContextContractIsMissing() throws Exception {
+    mvc.perform(post("/api/auth/login")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"email\":\"user@example.test\",\"password\":\"test-password-value\"}"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.error").value("Tenant-context authentication contract is not configured for the BFF"));
   }
 
   @Test
