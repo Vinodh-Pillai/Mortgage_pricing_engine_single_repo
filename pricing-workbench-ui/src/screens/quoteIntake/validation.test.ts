@@ -7,4 +7,9 @@ describe('ValidationTest', () => {
     const errors = validateFields([{ fieldId: 'contactEmail', label: 'Contact email', groupId: 'borrower-credit', dataType: 'email', required: true, helpText: '', sourceRef: '', decisionQuality: 'VERIFIED', validationMessages: [] }], initialQuoteIntake);
     expect(errors.contactEmail).toBe('Contact email is required.');
   });
+
+  it('doesNotTreatSelectBackedFieldsAsNumericEvenWhenMetadataIsWrong', () => {
+    const errors = validateFields([{ fieldId: 'incomeType', label: 'Income type', groupId: 'income-assets', dataType: 'number', required: false, helpText: '', sourceRef: '', decisionQuality: 'VERIFIED', validationMessages: [] }], initialQuoteIntake);
+    expect(errors.incomeType).toBeUndefined();
+  });
 });

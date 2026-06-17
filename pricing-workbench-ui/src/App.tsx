@@ -114,9 +114,8 @@ import {
 } from './lib/api/tenantPlatform';
 import { WorkbenchModuleRail } from './screens/workbenchShell/WorkbenchShell';
 import { DiagnosticsDetails } from './components/DiagnosticsDetails';
-import { ThemeProvider } from './design-system';
+import { ThemeProvider, useTheme } from './design-system';
 import { Shell } from './layout';
-import { layoutThemeStorageKey } from './layout/Header';
 import { AuthProvider } from './lib/auth/AuthContext';
 import { RouteGuard } from './routing/RouteGuard';
 import { useCurrentRoute } from './routing/hooks';
@@ -145,7 +144,7 @@ const LtvSensitivityScreen = lazy(() => import('./screens/scenarioAnalysis/sensi
 const ProductComparisonScreen = lazy(() => import('./screens/scenarioAnalysis/comparison/ProductComparison').then((module) => ({ default: module.ProductComparisonScreen })));
 const LockPeriodComparisonScreen = lazy(() => import('./screens/scenarioAnalysis/comparison/LockPeriodComparison').then((module) => ({ default: module.LockPeriodComparisonScreen })));
 const TenantOnboardingScreen = lazy(() => import('./screens/tenant/TenantOnboardingScreen').then((module) => ({ default: module.TenantOnboardingScreen })));
-const TenantHomeScreen = lazy(() => import('./screens/tenantHome').then((module) => ({ default: module.TenantHomeScreen })));
+const HomeScreen = lazy(() => import('./screens/home').then((module) => ({ default: module.HomeScreen })));
 const TenantAdminScreen = lazy(() => import('./screens/tenantAdmin').then((module) => ({ default: module.TenantAdminScreen })));
 const ProductManagementScreen = lazy(() => import('./screens/product/ProductManagementScreen').then((module) => ({ default: module.ProductManagementScreen })));
 const RateSheetIntakeScreen = lazy(() => import('./screens/ratesheet/RateSheetIntakeScreen').then((module) => ({ default: module.RateSheetIntakeScreen })));
@@ -155,20 +154,18 @@ const LockManagementScreen = lazy(() => import('./screens/locks/LockManagementSc
 const uiTraceId = 'brw-s01-local-trace';
 const tenantBoundaryPlaceholder = 'ui-preview-tenant';
 const partnerBoundaryPlaceholder = 'partner-preview';
-const selectedOfferStoragePrefix = 'wcpe:selectedOfferId:';
-
-function readInitialLayoutTheme(): 'dark' | 'light' {
-  if (typeof window === 'undefined') return 'dark';
-  try {
-    const stored = window.localStorage.getItem(layoutThemeStorageKey);
-    return stored === 'light' || stored === 'dark' ? stored : 'dark';
-  } catch {
-    return 'dark';
-  }
-}
+const selectedOfferStoragePrefix = 'loanweft:selectedOfferId:';
 
 export function App() {
-  const [theme, setTheme] = useState<'dark' | 'light'>(readInitialLayoutTheme);
+  return (
+    <ThemeProvider>
+      <AppRoutes />
+    </ThemeProvider>
+  );
+}
+
+function AppRoutes() {
+  const { resolvedTheme, setTheme } = useTheme();
   const location = useLocation();
   const currentRoute = useCurrentRoute();
   const activeModule = currentRoute.module;
@@ -176,8 +173,7 @@ export function App() {
   const isLoginRoute = location.pathname === '/login';
 
   return (
-    <ThemeProvider>
-      <AuthProvider>
+    <AuthProvider>
         {isLoginRoute ? (
           <Suspense fallback={<section className="panel"><p role="status">Loading route...</p></section>}>
             <Routes>
@@ -191,16 +187,16 @@ export function App() {
           activeRunId={activeRunId}
           breadcrumb={activeModule.breadcrumb}
           notifications={[]}
-          onThemeToggle={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
-          theme={theme}
-          user={{ name: 'LoanWeft user', role: 'Pricing analyst' }}
+          onThemeToggle={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
+          theme={resolvedTheme}
+          user={{ name: 'Pricing user', role: 'Pricing analyst' }}
         >
           <Suspense fallback={<section className="panel"><p role="status">Loading route...</p></section>}>
             <RouteGuard>
             <Routes>
               <Route path="/" element={<Navigate to="/home" replace />} />
               <Route path="/login" element={<LoginScreen />} />
-              <Route path="/home" element={<TenantHomeScreen userId="local-tenant-user" />} />
+              <Route path="/home" element={<HomeScreen userId="local-home-user" role="pricing_analyst" />} />
               <Route path="/pipeline" element={<QuoteIntakeScreen tenantId={tenantBoundaryPlaceholder} />} />
               <Route path="/quote/start" element={<Navigate to="/pipeline" replace />} />
               <Route path="/quote/:runId">
@@ -262,8 +258,7 @@ export function App() {
           </Suspense>
           </Shell>
         )}
-      </AuthProvider>
-    </ThemeProvider>
+    </AuthProvider>
   );
 }
 

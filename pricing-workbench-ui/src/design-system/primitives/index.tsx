@@ -21,6 +21,8 @@ const controlClass = cva('ds-control', {
   defaultVariants: { variant: 'primary', size: 'md', state: 'default' },
 });
 
+const touchTargetStyle = { minHeight: '44px', minWidth: '44px' } as const;
+
 export const Box = forwardRef<HTMLElement, BoxProps>(function Box({ as: Component = 'div', className, variant = 'default', ...props }, ref) {
   const AsComponent = Component as ElementType;
   return <AsComponent ref={ref} className={cx('ds-box', surfaceClasses[variant], className)} {...props} />;
@@ -52,11 +54,11 @@ Heading.displayName = 'Heading';
 
 export type ButtonProps = ComponentPropsWithoutRef<'button'> & { variant?: Variant; size?: Size; state?: State; loading?: boolean };
 
-export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button({ className, variant = 'primary', size = 'md', state = 'default', loading, disabled, children, ...props }, ref) {
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button({ className, variant = 'primary', size = 'md', state = 'default', loading, disabled, children, style, ...props }, ref) {
   const computedState = loading ? 'loading' : disabled ? 'disabled' : state;
   const { t } = useTranslation('common');
   return (
-    <button ref={ref} className={cx(controlClass({ variant, size, state: computedState }), 'ds-button', className)} disabled={disabled || loading} aria-busy={loading || undefined} {...props}>
+    <button ref={ref} className={cx(controlClass({ variant, size, state: computedState }), 'ds-button', className)} disabled={disabled || loading} aria-busy={loading || undefined} style={{ ...touchTargetStyle, ...style }} {...props}>
       {loading ? <Spinner size="sm" aria-label={t('loading')} /> : null}
       {children}
     </button>
@@ -66,15 +68,15 @@ Button.displayName = 'Button';
 
 type InputProps = Omit<ComponentPropsWithoutRef<'input'>, 'size'> & { size?: Size; state?: State; variant?: SurfaceVariant; label?: ReactNode };
 
-export const Input = forwardRef<HTMLInputElement, InputProps>(function Input({ className, size = 'md', state = 'default', variant = 'default', label, ...props }, ref) {
-  const input = <input ref={ref} className={cx('ds-control ds-input', sizeClasses[size], stateClasses[state], variant === 'glass' && 'ds-input--glass', className)} aria-invalid={state === 'error' || undefined} {...props} />;
+export const Input = forwardRef<HTMLInputElement, InputProps>(function Input({ className, size = 'md', state = 'default', variant = 'default', label, style, ...props }, ref) {
+  const input = <input ref={ref} className={cx('ds-control ds-input', sizeClasses[size], stateClasses[state], variant === 'glass' && 'ds-input--glass', className)} aria-invalid={state === 'error' || undefined} style={{ ...touchTargetStyle, ...style }} {...props} />;
   return label ? <label className="ds-floating-field"><span>{label}</span>{input}</label> : input;
 });
 Input.displayName = 'Input';
 
 type SelectProps = Omit<ComponentPropsWithoutRef<'select'>, 'size'> & { size?: Size; state?: State; variant?: SurfaceVariant };
-const SelectBase = forwardRef<HTMLSelectElement, SelectProps>(function SelectBase({ className, size = 'md', state = 'default', variant = 'default', ...props }, ref) {
-  return <select ref={ref} className={cx('ds-control ds-select', sizeClasses[size], stateClasses[state], variant === 'glass' && 'ds-select--glass', className)} aria-invalid={state === 'error' || undefined} {...props} />;
+const SelectBase = forwardRef<HTMLSelectElement, SelectProps>(function SelectBase({ className, size = 'md', state = 'default', variant = 'default', style, ...props }, ref) {
+  return <select ref={ref} className={cx('ds-control ds-select', sizeClasses[size], stateClasses[state], variant === 'glass' && 'ds-select--glass', className)} aria-invalid={state === 'error' || undefined} style={{ ...touchTargetStyle, ...style }} {...props} />;
 });
 SelectBase.displayName = 'Select';
 
@@ -90,8 +92,8 @@ SelectGroup.displayName = 'Select.Group';
 
 export const Select = Object.assign(SelectBase, { Option: SelectOption, Group: SelectGroup });
 
-export const Textarea = forwardRef<HTMLTextAreaElement, ComponentPropsWithoutRef<'textarea'> & { state?: State; variant?: SurfaceVariant }>(function Textarea({ className, state = 'default', variant = 'default', ...props }, ref) {
-  return <textarea ref={ref} className={cx('ds-control ds-textarea', stateClasses[state], variant === 'glass' && 'ds-textarea--glass', className)} aria-invalid={state === 'error' || undefined} {...props} />;
+export const Textarea = forwardRef<HTMLTextAreaElement, ComponentPropsWithoutRef<'textarea'> & { state?: State; variant?: SurfaceVariant }>(function Textarea({ className, state = 'default', variant = 'default', style, ...props }, ref) {
+  return <textarea ref={ref} className={cx('ds-control ds-textarea', stateClasses[state], variant === 'glass' && 'ds-textarea--glass', className)} aria-invalid={state === 'error' || undefined} style={{ minHeight: '44px', ...style }} {...props} />;
 });
 Textarea.displayName = 'Textarea';
 
@@ -105,8 +107,8 @@ export const Radio = forwardRef<HTMLInputElement, ComponentPropsWithoutRef<'inpu
 });
 Radio.displayName = 'Radio';
 
-export const Switch = forwardRef<HTMLButtonElement, ButtonProps & { checked?: boolean; variant?: SurfaceVariant }>(function Switch({ className, checked = false, variant = 'default', ...props }, ref) {
-  return <button ref={ref} role="switch" aria-checked={checked} className={cx('ds-switch', checked && 'ds-switch--checked', variant === 'glass' && 'ds-switch--glass', className)} {...props} />;
+export const Switch = forwardRef<HTMLButtonElement, ButtonProps & { checked?: boolean; variant?: SurfaceVariant }>(function Switch({ className, checked = false, variant = 'default', style, ...props }, ref) {
+  return <button ref={ref} role="switch" aria-checked={checked} className={cx('ds-switch', checked && 'ds-switch--checked', variant === 'glass' && 'ds-switch--glass', className)} style={{ ...touchTargetStyle, ...style }} {...props} />;
 });
 Switch.displayName = 'Switch';
 

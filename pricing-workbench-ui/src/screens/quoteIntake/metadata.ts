@@ -18,10 +18,10 @@ export const quoteIntakeSteps: QuoteIntakeStepDefinition[] = [
   {
     id: 1,
     section: 'scenario-identity',
-    label: 'Scenario Identity',
-    shortLabel: 'Identity',
-    summary: 'Create a draft scenario before collecting downstream quote facts.',
-    fallbackFields: ['quoteIntent', 'channel', 'scenarioName', 'externalLoanId'],
+    label: 'Loan Basics',
+    shortLabel: 'Basics',
+    summary: 'Capture the minimum loan facts needed to create or store a draft pipeline record.',
+    fallbackFields: ['loanPurpose', 'loanAmount', 'purchasePriceOrValue', 'propertyType', 'propertyZip', 'occupancyType', 'unitCount'],
   },
   {
     id: 2,
@@ -58,10 +58,10 @@ export const quoteIntakeSteps: QuoteIntakeStepDefinition[] = [
   {
     id: 6,
     section: 'preferences',
-    label: 'Preferences & Filters',
+    label: 'Preferences & Launch',
     shortLabel: 'Launch',
-    summary: 'Confirm preferences and launch the quote run or show setup blockers.',
-    fallbackFields: ['productFamily', 'productPreference', 'quoteFilters', 'effectiveDate', 'actorId', 'clientContext'],
+    summary: 'Confirm quote preferences and optional technical metadata before launch.',
+    fallbackFields: ['productFamily', 'productPreference', 'quoteFilters', 'effectiveDate', 'quoteIntent', 'channel', 'scenarioName', 'externalLoanId', 'actorId', 'clientContext'],
   },
 ];
 
@@ -71,7 +71,22 @@ export const borrowerIntakeFields = [
 
 const borrowerFieldSet = new Set<string>(borrowerIntakeFields);
 
-const requiredFallbackFields = new Set<keyof BorrowerIntake>(['quoteIntent', 'channel', 'borrowerName', 'contactEmail', 'propertyState', 'propertyZip']);
+const optionalTechnicalFields = new Set<keyof BorrowerIntake>(['quoteIntent', 'channel', 'scenarioName', 'externalLoanId']);
+
+const requiredFallbackFields = new Set<keyof BorrowerIntake>(['loanPurpose', 'loanAmount', 'purchasePriceOrValue', 'propertyZip', 'borrowerName', 'contactEmail', 'propertyState']);
+
+const complexFieldHelpTooltips: Partial<Record<keyof BorrowerIntake, string>> = {
+  suppliedDti: 'Debt-to-Income ratio: total monthly debt divided by gross monthly income. Used for qualification.',
+  loanAmount: 'Loan-to-Value ratio: loan amount divided by property value. Affects pricing and mortgage insurance.',
+  purchasePriceOrValue: 'Loan-to-Value ratio: loan amount divided by property value. Affects pricing and mortgage insurance.',
+  requestedLockPeriodDays: 'Rate lock period in days. Longer locks may have higher rates.',
+  amortizationType: 'Adjustable Rate Mortgage: rate fixed for initial period then adjusts periodically.',
+  lienPosition: 'First lien is the primary mortgage. Second lien is a home equity loan or HELOC.',
+};
+
+const complexFieldIds = new Set<keyof BorrowerIntake>(Object.keys(complexFieldHelpTooltips) as Array<keyof BorrowerIntake>);
+
+const selectBackedFallbackFields = new Set<keyof BorrowerIntake>(['channel', 'incomeType', 'incomeVerificationStatus', 'propertyState', 'propertyType', 'occupancyType']);
 
 const fieldLabels: Record<keyof BorrowerIntake, string> = {
   quoteIntent: 'Quote intent',
@@ -147,8 +162,26 @@ export async function fetchIntakeMetadata(tenantId: string, fetchImpl: typeof fe
 export function fieldsForStep(metadata: ScenarioIntakeMetadata | null | undefined, stepId: QuoteIntakeStepId): ScenarioIntakeField[] {
   const step = quoteIntakeSteps.find((candidate) => candidate.id === stepId) ?? quoteIntakeSteps[0];
   const metadataFields = metadata ? metadataFieldsForStep(metadata, step) : [];
-  if (metadataFields.length > 0) return metadataFields;
+  if (metadataFields.length > 0) return withSectionFallbackComplements(normalizeOptionalTechnicalFields(metadataFields), step).map(normalizeFieldHelpDisplay);
   return fallbackFieldsForStep(step);
+}
+
+export function stepsForMetadata(metadata: ScenarioIntakeMetadata | null | undefined): QuoteIntakeStepDefinition[] {
+  const configuredOrder = metadata?.quickQuoteState?.progressiveSectionOrder ?? [];
+  const orderedSections = configuredOrder.filter((section): section is QuoteIntakeSection => quoteIntakeSteps.some((step) => step.section === section));
+  if (orderedSections.length === 0) return quoteIntakeSteps;
+
+  const orderedSteps = orderedSections
+    .map((section) => quoteIntakeSteps.find((step) => step.section === section))
+    .filter((step): step is QuoteIntakeStepDefinition => Boolean(step));
+
+  const includesFirstStep = orderedSteps.some((step) => step.id === 1);
+  const includesLaunchStep = orderedSteps.some((step) => step.id === 6);
+  return uniqueSteps([
+    ...(includesFirstStep ? [] : [quoteIntakeSteps[0]]),
+    ...orderedSteps,
+    ...(includesLaunchStep ? [] : [quoteIntakeSteps[5]]),
+  ]);
 }
 
 export function metadataFieldsForStep(metadata: ScenarioIntakeMetadata, step: QuoteIntakeStepDefinition): ScenarioIntakeField[] {
@@ -208,7 +241,7 @@ function fallbackQuickQuoteState(reason: string): ProgressiveQuickQuoteState {
 }
 
 function fallbackField(fieldId: keyof BorrowerIntake, groupId: string): ScenarioIntakeField {
-  const isNumeric = /amount|score|months|dti|count|value|price|debt|income|assets|reserves|days/i.test(fieldId);
+  const isNumeric = !selectBackedFallbackFields.has(fieldId) && /amount|score|months|dti|count|value|price|debt|income|assets|reserves|days/i.test(fieldId);
   const isEmail = fieldId === 'contactEmail';
   const isTextarea = fieldId === 'quoteFilters' || fieldId === 'clientContext' || fieldId === 'productPreference';
   return {
@@ -216,17 +249,30 @@ function fallbackField(fieldId: keyof BorrowerIntake, groupId: string): Scenario
     label: fieldLabels[fieldId],
     groupId,
     dataType: isTextarea ? 'textarea' : isEmail ? 'email' : isNumeric ? 'number' : 'text',
-    required: requiredFallbackFields.has(fieldId),
-    helpText: `${fieldLabels[fieldId]} supplied by intake metadata or local fallback descriptor.`,
+    required: requiredFallbackFields.has(fieldId) && !optionalTechnicalFields.has(fieldId),
+    helpText: '',
+    helpTooltip: complexFieldHelpTooltips[fieldId],
+    showHelpIcon: complexFieldIds.has(fieldId),
     sourceRef: 'intake-metadata',
     decisionQuality: 'UNKNOWN',
     validationMessages: [],
   };
 }
 
+function normalizeFieldHelpDisplay(field: ScenarioIntakeField): ScenarioIntakeField {
+  const fallbackTooltip = complexFieldHelpTooltips[field.fieldId];
+  const showHelpIcon = complexFieldIds.has(field.fieldId);
+  return {
+    ...field,
+    helpText: '',
+    helpTooltip: showHelpIcon ? field.helpTooltip || field.helpText || fallbackTooltip : undefined,
+    showHelpIcon,
+  };
+}
+
 function sectionAliases(section: QuoteIntakeSection) {
   const aliases: Record<QuoteIntakeSection, string[]> = {
-    'scenario-identity': ['scenarioidentity', 'identity', 'scenario', 'basics'],
+    'scenario-identity': ['scenarioidentity', 'identity', 'scenario', 'basics', 'loanbasics'],
     'borrower-credit': ['borrowercredit', 'borrower', 'credit'],
     'loan-structure': ['loanstructure', 'loan'],
     property: ['property'],
@@ -234,6 +280,17 @@ function sectionAliases(section: QuoteIntakeSection) {
     preferences: ['preferences', 'product', 'filters', 'lock', 'decisionquality'],
   };
   return aliases[section];
+}
+
+function normalizeOptionalTechnicalFields(fields: ScenarioIntakeField[]) {
+  return fields.map((field) => optionalTechnicalFields.has(field.fieldId) ? { ...field, required: false, groupId: 'preferences' } : field);
+}
+
+function withSectionFallbackComplements(fields: ScenarioIntakeField[], step: QuoteIntakeStepDefinition) {
+  const scopedFields = step.id === 6 ? fields : fields.filter((field) => !optionalTechnicalFields.has(field.fieldId));
+  const seen = new Set(scopedFields.map((field) => field.fieldId));
+  const complements = step.fallbackFields.filter((fieldId) => !seen.has(fieldId)).map((fieldId) => fallbackField(fieldId, step.section));
+  return uniqueFields([...scopedFields, ...complements]);
 }
 
 function normalized(value: string) {
@@ -245,6 +302,15 @@ function uniqueFields(fields: ScenarioIntakeField[]) {
   return fields.filter((field) => {
     if (seen.has(field.fieldId)) return false;
     seen.add(field.fieldId);
+    return true;
+  });
+}
+
+function uniqueSteps(steps: QuoteIntakeStepDefinition[]) {
+  const seen = new Set<QuoteIntakeStepId>();
+  return steps.filter((step) => {
+    if (seen.has(step.id)) return false;
+    seen.add(step.id);
     return true;
   });
 }

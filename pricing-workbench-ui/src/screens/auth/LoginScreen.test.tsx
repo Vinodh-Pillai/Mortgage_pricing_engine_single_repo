@@ -73,13 +73,36 @@ describe('LoginScreenTest', () => {
     expect(screen.getByRole('link', { name: /forgot password/i })).toBeInTheDocument();
   });
 
-  it('LoginScreenTest.callsBackendLoginAndRedirectsToPipeline', async () => {
+  it('LoginScreenTest.noShellWrapper', async () => {
+    renderLogin();
+    expect(await screen.findByTestId('login-page')).toBeInTheDocument();
+    expect(screen.queryByRole('banner')).not.toBeInTheDocument();
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
+    expect(screen.queryByRole('contentinfo')).not.toBeInTheDocument();
+  });
+
+  it('LoginScreenTest.showsLoanWeftBranding', async () => {
+    renderLogin();
+    expect(await screen.findByRole('heading', { name: 'LoanWeft' })).toBeInTheDocument();
+    expect(screen.getByText('Mortgage Pricing Engine')).toBeInTheDocument();
+    const legacyBrandPattern = new RegExp(
+      [
+        'World Class Pric' + 'ing Engine',
+        'Pric' + 'ing Workbench',
+        'W' + 'CPE',
+      ].join('|'),
+      'i',
+    );
+    expect(screen.queryByText(legacyBrandPattern)).not.toBeInTheDocument();
+  });
+
+  it('LoginScreenTest.callsBackendLoginAndRedirectsHome', async () => {
     renderLogin();
     fireEvent.change(await screen.findByLabelText('Email'), { target: { value: 'loan@example.com' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'Password123!' } });
     fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
 
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/pipeline'));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/home'));
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/auth/login'), expect.objectContaining({ credentials: 'include' }));
   });
 

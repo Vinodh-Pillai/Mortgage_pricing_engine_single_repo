@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ThemeProvider, themeStorageKey, useTheme } from './ThemeProvider';
 
 function ThemeProbe() {
@@ -33,12 +33,30 @@ describe('ThemeProviderTest', () => {
     });
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('persistsThemePreference', () => {
     render(<ThemeProvider><ThemeProbe /></ThemeProvider>);
     fireEvent.click(screen.getByRole('button', { name: 'Light' }));
     expect(window.localStorage.getItem(themeStorageKey)).toBe('light');
     expect(document.documentElement.dataset.theme).toBe('light');
     expect(screen.getByLabelText('preference')).toHaveTextContent('light');
+  });
+
+  it('doesNotReadOrUseLegacyThemeStorageKey', () => {
+    window.localStorage.setItem('wcpe:theme', 'dark');
+    const getItemSpy = vi.spyOn(Storage.prototype, 'getItem');
+    const removeItemSpy = vi.spyOn(Storage.prototype, 'removeItem');
+
+    render(<ThemeProvider><ThemeProbe /></ThemeProvider>);
+
+    expect(screen.getByLabelText('preference')).toHaveTextContent('system');
+    expect(window.localStorage.getItem(themeStorageKey)).toBe('system');
+    expect(getItemSpy).toHaveBeenCalledWith(themeStorageKey);
+    expect(getItemSpy).not.toHaveBeenCalledWith('wcpe:theme');
+    expect(removeItemSpy).not.toHaveBeenCalledWith('wcpe:theme');
   });
 
   it('respectsSystemPreference', () => {

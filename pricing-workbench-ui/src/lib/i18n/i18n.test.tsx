@@ -26,7 +26,7 @@ describe('I18nTest', () => {
     expect(document.documentElement.lang).toBe('en-US');
     expect(document.documentElement.dir).toBe('ltr');
     expect(screen.getByText('User menu for Alex')).toBeInTheDocument();
-    expect(setItem).not.toHaveBeenCalledWith('wcpe:locale', expect.any(String));
+    expect(setItem).not.toHaveBeenCalledWith('loanweft:locale', expect.any(String));
   });
 });
 

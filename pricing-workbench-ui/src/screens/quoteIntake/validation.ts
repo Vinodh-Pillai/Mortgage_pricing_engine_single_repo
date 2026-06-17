@@ -3,6 +3,8 @@ import { quoteIntakeTraceId } from './metadata';
 
 export type IntakeFieldErrors = Partial<Record<keyof BorrowerIntake, string>>;
 
+const selectBackedFields = new Set<keyof BorrowerIntake>(['channel', 'incomeType', 'incomeVerificationStatus', 'propertyState', 'propertyType', 'occupancyType']);
+
 export function validateFields(fields: ScenarioIntakeField[], values: BorrowerIntake): IntakeFieldErrors {
   const errors: IntakeFieldErrors = {};
   for (const field of fields) {
@@ -15,7 +17,7 @@ export function validateFields(fields: ScenarioIntakeField[], values: BorrowerIn
       errors[field.fieldId] = `${field.label} must be a valid email address.`;
       continue;
     }
-    if (value.trim() && field.dataType === 'number' && Number.isNaN(Number(value))) {
+    if (value.trim() && field.dataType === 'number' && !selectBackedFields.has(field.fieldId) && Number.isNaN(Number(value))) {
       errors[field.fieldId] = `${field.label} must be numeric.`;
     }
   }

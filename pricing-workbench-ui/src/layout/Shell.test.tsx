@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getBreakpointForWidth } from './hooks/useBreakpoint';
 import { buildNavigationTree } from './navigation';
 import { Shell } from './Shell';
+import { themeStorageKey, zIndex } from '../design-system';
 import type { WorkbenchScreenModule } from '../screens/workbenchShell/WorkbenchShell';
 
 const modules: WorkbenchScreenModule[] = [
@@ -58,7 +59,7 @@ describe('responsive layout shell', () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
-    window.localStorage.removeItem('wcpe:layout-shell:nav-rail-collapsed');
+    window.localStorage.removeItem('loanweft:layout-shell:nav-rail-collapsed');
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
   });
 
@@ -86,6 +87,8 @@ describe('responsive layout shell', () => {
 
     expect(screen.getByText('Skip to main content')).toHaveAttribute('href', '#main-content');
     expect(screen.getByRole('banner')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'LoanWeft' })).toBeInTheDocument();
+    expect(screen.getByRole('banner').textContent?.match(/LoanWeft/g)).toHaveLength(1);
     expect(screen.getByRole('navigation', { name: 'Main navigation' })).toBeInTheDocument();
     expect(screen.getByRole('main')).toHaveTextContent('Screen content');
     expect(screen.getByRole('contentinfo')).toHaveTextContent('Responsive shell ready');
@@ -113,7 +116,7 @@ describe('responsive layout shell', () => {
 
   it('toggles and persists rail collapse without changing desktop/tablet rail mode', () => {
     installMatchMedia(false);
-    window.localStorage.removeItem('wcpe:layout-shell:nav-rail-collapsed');
+    window.localStorage.removeItem('loanweft:layout-shell:nav-rail-collapsed');
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1199 });
     renderShell(
       <Shell activeModuleId="quote" activeRunId="run-123" breadcrumb="Quote" modules={modules} notifications={[]} onThemeToggle={vi.fn()} theme="dark" user={{ name: 'Alex Rivera', role: 'Pricing analyst' }}>
@@ -126,10 +129,33 @@ describe('responsive layout shell', () => {
     expect(shell).toHaveAttribute('data-nav-collapsed', 'false');
     fireEvent.click(screen.getByRole('button', { name: 'Collapse' }));
     expect(shell).toHaveClass('layout-shell--nav-collapsed');
-    expect(window.localStorage.getItem('wcpe:layout-shell:nav-rail-collapsed')).toBe('true');
+    expect(window.localStorage.getItem('loanweft:layout-shell:nav-rail-collapsed')).toBe('true');
     fireEvent.click(screen.getByRole('button', { name: 'Expand' }));
     expect(shell).not.toHaveClass('layout-shell--nav-collapsed');
-    expect(window.localStorage.getItem('wcpe:layout-shell:nav-rail-collapsed')).toBe('false');
+    expect(window.localStorage.getItem('loanweft:layout-shell:nav-rail-collapsed')).toBe('false');
+  });
+
+  it('uses the header menu button to expand and collapse desktop navigation', () => {
+    installMatchMedia(false);
+    window.localStorage.removeItem('loanweft:layout-shell:nav-rail-collapsed');
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
+    renderShell(
+      <Shell activeModuleId="quote" activeRunId="run-123" breadcrumb="Quote" modules={modules} notifications={[]} onThemeToggle={vi.fn()} theme="dark" user={{ name: 'Alex Rivera', role: 'Pricing analyst' }}>
+        <section>Screen content</section>
+      </Shell>,
+    );
+
+    const shell = document.querySelector('.layout-shell');
+    const menuButton = screen.getByRole('button', { name: 'Close navigation menu' });
+    expect(menuButton).toHaveAttribute('aria-controls', 'primary-navigation');
+    expect(menuButton).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(menuButton);
+    expect(shell).toHaveClass('layout-shell--nav-collapsed');
+    expect(menuButton).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.keyDown(menuButton, { key: 'Enter' });
+    fireEvent.click(menuButton);
+    expect(shell).not.toHaveClass('layout-shell--nav-collapsed');
+    expect(screen.getByRole('navigation', { name: 'Main navigation' })).toBeInTheDocument();
   });
 
   it('opens user menu with role badge and persists theme toggles', () => {
@@ -146,9 +172,19 @@ describe('responsive layout shell', () => {
     expect(screen.getByRole('menu', { name: 'User menu for Alex Rivera' })).toHaveTextContent('Logout');
     expect(screen.getAllByText('Pricing analyst').some((element) => element.classList.contains('layout-role-badge'))).toBe(true);
 
-    fireEvent.click(screen.getByRole('switch', { name: 'Toggle theme' }));
-    expect(window.localStorage.getItem('wcpe:layout-theme')).toBe('light');
+    const themeToggle = screen.getByRole('button', { name: 'Toggle theme' });
+    expect(themeToggle).toHaveClass('layout-theme-toggle');
+    fireEvent.click(themeToggle);
+    expect(themeStorageKey).toBe('wcpe:design-system-theme');
+    expect(window.localStorage.getItem(themeStorageKey)).toBe('light');
+    expect(window.localStorage.getItem('wcpe:layout-theme')).toBeNull();
     expect(toggle).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps profile dropdown above base content layer', () => {
+    expect(zIndex.base).toBe(0);
+    expect(zIndex.dropdown).toBe(200);
+    expect(zIndex.dropdown).toBeGreaterThan(zIndex.base);
   });
 
   it('supports arrow-key movement through nav rail links', () => {

@@ -15,13 +15,12 @@ type ThemeContextValue = {
 };
 
 const storageKey = 'wcpe:design-system-theme';
-const legacyStorageKey = 'wcpe:theme';
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 function readStoredPreference(): ThemePreference {
   if (typeof window === 'undefined') return 'system';
   try {
-    const value = window.localStorage.getItem(storageKey) ?? window.localStorage.getItem(legacyStorageKey);
+    const value = window.localStorage.getItem(storageKey);
     return value === 'dark' || value === 'light' || value === 'system' ? value : 'system';
   } catch {
     return 'system';
@@ -53,7 +52,6 @@ export function ThemeProvider({ children, defaultPreference = 'system', role }: 
     }
     try {
       window.localStorage.setItem(storageKey, preference);
-      window.localStorage.removeItem(legacyStorageKey);
     } catch {
       // Storage can be disabled; theme remains functional for the current session.
     }

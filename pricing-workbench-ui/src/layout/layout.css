@@ -26,7 +26,7 @@
 
 .layout-shell > * {
   position: relative;
-  z-index: 1;
+  z-index: var(--ds-z-base);
 }
 
 .layout-skip-link {
@@ -63,7 +63,34 @@
 }
 
 .layout-header__menu {
-  display: none;
+  display: inline-flex;
+}
+
+.layout-header__brand {
+  align-items: center;
+  display: flex;
+  gap: var(--ds-space-3);
+  min-width: 0;
+}
+
+.layout-header__brand-mark {
+  align-items: center;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--ds-color-primary) 34%, transparent), color-mix(in srgb, var(--ds-color-secondary) 18%, transparent));
+  border: 1px solid color-mix(in srgb, var(--ds-color-primary) 52%, transparent);
+  border-radius: 0.9rem;
+  box-shadow: 0 0 28px color-mix(in srgb, var(--ds-color-primary) 18%, transparent);
+  color: var(--ds-color-primary);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-weight: 900;
+  height: 2.75rem;
+  justify-content: center;
+  letter-spacing: -0.08em;
+  width: 2.75rem;
+}
+
+.layout-header__title {
+  min-width: 0;
 }
 
 .layout-header__title h1,
@@ -104,7 +131,8 @@
   font: inherit;
   font-weight: 800;
   gap: 0.5rem;
-  min-height: 2.5rem;
+  min-height: 44px;
+  min-width: 44px;
   padding: 0.4rem 0.75rem;
   transition: var(--ds-motion-normal) var(--ds-ease-standard);
 }
@@ -138,6 +166,7 @@
 
 .layout-user-menu-shell {
   position: relative;
+  z-index: var(--ds-z-dropdown);
 }
 
 .layout-user-menu__dropdown {
@@ -153,7 +182,7 @@
   position: absolute;
   right: 0;
   top: calc(100% + 0.75rem);
-  z-index: var(--ds-z-dropdown);
+  z-index: var(--ds-z-tooltip);
 }
 
 .layout-user-menu__identity {
@@ -208,9 +237,30 @@
 
 .layout-theme-toggle {
   align-items: center;
+  background: var(--ds-glass-surface);
+  border: 1px solid var(--ds-glass-border);
+  border-radius: var(--ds-radius-full);
+  color: var(--ds-color-text);
   display: inline-flex;
   font-size: var(--ds-font-size-sm);
+  font-weight: 900;
   gap: 0.5rem;
+  line-height: 1;
+  padding: 0.35rem 0.55rem;
+}
+
+.layout-theme-toggle:hover,
+.layout-theme-toggle:focus-visible {
+  border-color: var(--ds-glass-border-strong);
+  box-shadow: var(--ds-shadow-focus);
+  outline: 0;
+}
+
+.layout-theme-toggle__text {
+  max-width: 4rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .layout-frame {
@@ -229,7 +279,8 @@
   display: grid;
   gap: var(--ds-space-4);
   max-height: calc(100vh - 4rem);
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: var(--ds-space-4);
   position: sticky;
   top: 4rem;
@@ -281,7 +332,7 @@
   display: flex;
   gap: 0.5rem;
   justify-content: space-between;
-  min-height: 2.5rem;
+  min-height: 44px;
   overflow: hidden;
   padding: 0.55rem 0.65rem;
   position: relative;
@@ -330,7 +381,8 @@
   max-width: 1400px;
   min-width: 0;
   outline: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 1.5rem;
   scroll-behavior: smooth;
   width: 100%;
@@ -343,6 +395,8 @@
   border-radius: clamp(var(--ds-radius-lg), 1.4vw, var(--ds-radius-xl));
   box-shadow: var(--ds-shadow-glass);
   min-height: calc(100vh - 9rem);
+  min-width: 0;
+  overflow-x: auto;
   padding: clamp(1.5rem, 3vw, 2.5rem);
 }
 
@@ -392,16 +446,28 @@
 @media (max-width: 767px) {
   .layout-header {
     grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    gap: var(--ds-space-2) var(--ds-space-3);
     min-height: 3.5rem;
-  }
-
-  .layout-header__menu {
-    display: inline-flex;
+    padding-inline: 1rem;
   }
 
   .layout-header__actions {
     grid-column: 1 / -1;
     justify-content: space-between;
+    padding-top: 0.25rem;
+  }
+
+  .layout-header__brand-mark {
+    height: 2.5rem;
+    width: 2.5rem;
+  }
+
+  .layout-header__title h1,
+  .layout-breadcrumbs {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .layout-frame {
@@ -424,18 +490,22 @@
 
   .layout-content {
     max-width: none;
-    padding: 1.5rem;
+    padding: 1rem;
   }
 
   .layout-content__panel {
     min-height: auto;
-    padding: 1.5rem;
+    padding: 1rem;
   }
 
   .layout-header__action-label,
-  .layout-theme-toggle > span:nth-child(2),
+  .layout-theme-toggle__text,
   .layout-user-menu > span:not(.ds-avatar) {
     display: none;
+  }
+
+  .layout-theme-toggle {
+    gap: 0.25rem;
   }
 }
 

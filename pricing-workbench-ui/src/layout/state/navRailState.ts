@@ -1,4 +1,4 @@
-export const navRailStorageKey = 'wcpe:layout-shell:nav-rail-collapsed';
+export const navRailStorageKey = 'loanweft:layout-shell:nav-rail-collapsed';
 
 export function readPersistedNavRailCollapsed() {
   if (typeof window === 'undefined') return false;

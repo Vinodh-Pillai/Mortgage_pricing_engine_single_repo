@@ -60,6 +60,8 @@ export type ScenarioIntakeField = {
   dataType: 'text' | 'email' | 'textarea' | 'number';
   required: boolean;
   helpText: string;
+  helpTooltip?: string;
+  showHelpIcon?: boolean;
   sourceRef: string;
   decisionQuality: 'VERIFIED' | 'UNKNOWN' | 'CONFLICTING';
   validationMessages: string[];
@@ -327,6 +329,67 @@ export type LockConfirmationResult = {
   historyEvent?: LockWorkflowHistoryEvent;
 };
 
+type PipelineResponseBody =
+  | { kind: 'json'; value: unknown }
+  | { kind: 'empty' }
+  | { kind: 'non-json' };
+
+type PipelineApiOptions = {
+  endpointContext: string;
+  unavailableMessage: string;
+};
+
+export class PipelineApiResponseError extends Error {
+  readonly status: number;
+  readonly endpointContext: string;
+
+  constructor(status: number, endpointContext: string, message: string) {
+    super(message);
+    this.name = 'PipelineApiResponseError';
+    this.status = status;
+    this.endpointContext = endpointContext;
+  }
+}
+
+async function readPipelineJson<T>(response: Response, options: PipelineApiOptions): Promise<T> {
+  const body = await readPipelineResponseBody(response);
+  const success = response.status >= 200 && response.status < 300;
+
+  if (response.status >= 500 || (!success && body.kind !== 'json')) {
+    throw pipelineResponseError(response.status, options, body);
+  }
+
+  if (body.kind !== 'json') {
+    throw pipelineResponseError(response.status, options, body);
+  }
+
+  return body.value as T;
+}
+
+async function readPipelineResponseBody(response: Response): Promise<PipelineResponseBody> {
+  if (typeof response.text === 'function') {
+    const text = await response.text();
+    if (!text.trim()) return { kind: 'empty' };
+    try {
+      return { kind: 'json', value: JSON.parse(text) };
+    } catch {
+      return { kind: 'non-json' };
+    }
+  }
+
+  try {
+    return { kind: 'json', value: await response.json() };
+  } catch {
+    return { kind: 'non-json' };
+  }
+}
+
+function pipelineResponseError(status: number, options: PipelineApiOptions, body: PipelineResponseBody): PipelineApiResponseError {
+  const reason = body.kind === 'empty' ? 'empty response body' : body.kind === 'non-json' ? 'non-JSON response body' : 'error response';
+  const prefix = status >= 500 ? options.unavailableMessage : `${options.endpointContext} request failed.`;
+  return new PipelineApiResponseError(status, options.endpointContext, `${prefix} Pipeline API returned HTTP ${status} for ${options.endpointContext} with ${reason}.`);
+}
+
 export async function fetchScenarioIntakeMetadata(
   tenantId: string,
   fetchImpl: typeof fetch = fetch,
@@ -338,11 +401,10 @@ export async function fetchScenarioIntakeMetadata(
     },
   });
 
-  if (response.status >= 500) {
-    throw new Error('Scenario intake metadata is temporarily unavailable.');
-  }
-
-  return (await response.json()) as ScenarioIntakeMetadata;
+  return readPipelineJson<ScenarioIntakeMetadata>(response, {
+    endpointContext: 'scenario intake metadata',
+    unavailableMessage: 'Scenario intake metadata is temporarily unavailable.',
+  });
 }
 
 export async function launchQuoteRun(
@@ -360,12 +422,10 @@ export async function launchQuoteRun(
     body: JSON.stringify(intake),
   });
 
-  const launch = (await response.json()) as QuoteRunLaunch;
-  if (response.status >= 500) {
-    throw new Error('BFF borrower intake boundary is temporarily unavailable.');
-  }
-
-  return launch;
+  return readPipelineJson<QuoteRunLaunch>(response, {
+    endpointContext: 'quote run launch',
+    unavailableMessage: 'BFF borrower intake boundary is temporarily unavailable.',
+  });
 }
 
 export async function fetchPricingWaterfall(
@@ -380,11 +440,10 @@ export async function fetchPricingWaterfall(
     },
   });
 
-  if (response.status >= 500) {
-    throw new Error('Pricing waterfall evidence is temporarily unavailable.');
-  }
-
-  return (await response.json()) as PricingWaterfallView;
+  return readPipelineJson<PricingWaterfallView>(response, {
+    endpointContext: 'pricing waterfall evidence',
+    unavailableMessage: 'Pricing waterfall evidence is temporarily unavailable.',
+  });
 }
 
 export async function fetchQuoteJourneyMap(
@@ -399,11 +458,10 @@ export async function fetchQuoteJourneyMap(
     },
   });
 
-  if (response.status >= 500) {
-    throw new Error('Quote journey map is temporarily unavailable.');
-  }
-
-  return (await response.json()) as QuoteJourneyMapView;
+  return readPipelineJson<QuoteJourneyMapView>(response, {
+    endpointContext: 'quote journey map',
+    unavailableMessage: 'Quote journey map is temporarily unavailable.',
+  });
 }
 
 export async function fetchLockWorkflow(
@@ -420,11 +478,10 @@ export async function fetchLockWorkflow(
     },
   });
 
-  if (response.status >= 500) {
-    throw new Error('Lock workflow evidence is temporarily unavailable.');
-  }
-
-  return (await response.json()) as LockWorkflowView;
+  return readPipelineJson<LockWorkflowView>(response, {
+    endpointContext: 'lock workflow evidence',
+    unavailableMessage: 'Lock workflow evidence is temporarily unavailable.',
+  });
 }
 
 export async function confirmLockWorkflowAction(
@@ -443,5 +500,8 @@ export async function confirmLockWorkflowAction(
     body: JSON.stringify(request),
   });
 
-  return (await response.json()) as LockConfirmationResult;
+  return readPipelineJson<LockConfirmationResult>(response, {
+    endpointContext: 'lock confirmation',
+    unavailableMessage: 'Lock confirmation is temporarily unavailable.',
+  });
 }

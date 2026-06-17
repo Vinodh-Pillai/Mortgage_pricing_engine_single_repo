@@ -24,7 +24,7 @@ export interface LoginScreenProps extends Partial<ScreenProps> {
 
 function emitLoginEvidence(detail: LoginEvidenceDetail) {
   if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return;
-  window.dispatchEvent(new CustomEvent<LoginEvidenceDetail>('wcpe:login-screen', { detail }));
+  window.dispatchEvent(new CustomEvent<LoginEvidenceDetail>('loanweft:login-screen', { detail }));
 }
 
 export function LoginScreen({ initialEmail = '', loading = false, disableAutoRedirect = false }: LoginScreenProps) {
@@ -39,8 +39,8 @@ export function LoginScreen({ initialEmail = '', loading = false, disableAutoRed
 
   useEffect(() => {
     if (!disableAutoRedirect && isAuthenticated && location.pathname === '/login') {
-      emitLoginEvidence({ type: 'route-redirect', userId: user?.id, target: '/pipeline' });
-      navigate('/pipeline', { replace: true });
+      emitLoginEvidence({ type: 'route-redirect', userId: user?.id, target: '/home' });
+      navigate('/home', { replace: true });
     }
   }, [disableAutoRedirect, isAuthenticated, location.pathname, navigate, user?.id]);
 
@@ -50,8 +50,8 @@ export function LoginScreen({ initialEmail = '', loading = false, disableAutoRed
     setError(null);
     try {
       const signedInUser = await login(email, password);
-      emitLoginEvidence({ type: 'login-submit', userId: signedInUser.id, target: '/pipeline' });
-      navigate('/pipeline', { replace: true });
+      emitLoginEvidence({ type: 'login-submit', userId: signedInUser.id, target: '/home' });
+      navigate('/home', { replace: true });
     } catch (exception) {
       const message = exception instanceof Error ? exception.message : 'Invalid email or password';
       setError(message);

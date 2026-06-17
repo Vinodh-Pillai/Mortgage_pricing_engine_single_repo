@@ -19,6 +19,7 @@ const lazyScreen = (loader: () => Promise<{ default: ComponentType<any> }>) => l
 
 export const routeComponentLoaders: Record<string, () => Promise<{ default: ComponentType<any> }>> = {
   login: () => import('../screens/auth/LoginScreen').then((module) => ({ default: module.LoginScreen })),
+  home: () => import('../screens/home').then((module) => ({ default: module.HomeScreen })),
   'tenant-home': () => import('../screens/tenantHome').then((module) => ({ default: module.TenantHomeScreen })),
   shell: () => import('../screens/quoteIntake/QuoteIntakeScreen').then((module) => ({ default: module.QuoteIntakeScreen })),
   'quote-intake': () => import('../screens/quoteIntake/QuoteIntakeScreen').then((module) => ({ default: module.QuoteIntakeScreen })),

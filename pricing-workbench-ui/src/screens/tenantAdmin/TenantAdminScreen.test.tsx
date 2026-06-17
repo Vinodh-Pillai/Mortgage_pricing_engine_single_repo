@@ -1,8 +1,10 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TenantAdminScreen } from './TenantAdminScreen';
 
 describe('TenantAdminScreen', () => {
+  afterEach(() => cleanup());
+
   it('renders local blocked preview when tenant admin API is unavailable', async () => {
     const fetchImpl = vi.fn().mockRejectedValue(new Error('offline')) as unknown as typeof fetch;
 
@@ -33,5 +35,52 @@ describe('TenantAdminScreen', () => {
     fireEvent.click(screen.getAllByRole('button', { name: /Feature Flags/i })[0]);
     expect(await screen.findByRole('dialog', { name: /Feature Flags/i })).toBeInTheDocument();
     expect(screen.getByText(/quick pricer/i)).toBeInTheDocument();
+  });
+
+  it('supports search, status filters, lifecycle preview actions, edit modal, and blocked evidence capture', async () => {
+    const fetchImpl = vi.fn().mockRejectedValue(new Error('offline')) as unknown as typeof fetch;
+    const onEvidenceCapture = vi.fn();
+
+    render(<TenantAdminScreen fetchImpl={fetchImpl} onEvidenceCapture={onEvidenceCapture} />);
+    await screen.findByRole('alert');
+    await waitFor(() => expect(onEvidenceCapture).toHaveBeenCalled());
+    expect(onEvidenceCapture.mock.calls.at(-1)?.[0]).toMatchObject({ screenId: 'tenant-admin', state: 'blocked' });
+
+    fireEvent.change(screen.getByPlaceholderText('Search tenants'), { target: { value: 'regional' } });
+    expect(screen.getByText('regional-lending')).toBeInTheDocument();
+    expect(screen.queryByText('acme-mortgage')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'PENDING_ACTIVATION' } });
+    expect(screen.getByText(/No tenants match/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText('Search tenants'), { target: { value: '' } });
+    expect(screen.getByText('acme-mortgage')).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Activate' })[0]);
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'all' } });
+    await waitFor(() => expect(screen.getAllByText('ACTIVE').length).toBeGreaterThan(0));
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Suspend' }).find((button) => !button.hasAttribute('disabled'))!);
+    await waitFor(() => expect(screen.getByText('SUSPENDED')).toBeInTheDocument());
+    fireEvent.click(screen.getAllByRole('button', { name: 'Deactivate' }).find((button) => !button.hasAttribute('disabled'))!);
+    await waitFor(() => expect(screen.getByText('DEACTIVATED')).toBeInTheDocument());
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Edit' })[0]);
+    const dialog = screen.getByRole('dialog', { name: /Tenant profile and branding/i });
+    expect(within(dialog).getByLabelText(/^Tenant Name$/i)).toBeDisabled();
+    fireEvent.change(within(dialog).getByLabelText(/^Display Name$/i), { target: { value: 'Updated Tenant Preview' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Save Tenant$/i }));
+    expect(await screen.findByText('Updated Tenant Preview')).toBeInTheDocument();
+  });
+
+  it('renders injected empty evidence as an empty ready state without blocked API fetch', () => {
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const onEvidenceCapture = vi.fn();
+
+    render(<TenantAdminScreen fetchImpl={fetchImpl} evidence={[]} onEvidenceCapture={onEvidenceCapture} />);
+
+    expect(screen.getByText(/Injected tenant admin evidence/i)).toBeInTheDocument();
+    expect(screen.getByText(/No tenants match/i)).toBeInTheDocument();
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(onEvidenceCapture).toHaveBeenCalledWith(expect.objectContaining({ screenId: 'tenant-admin', state: 'empty' }));
   });
 });

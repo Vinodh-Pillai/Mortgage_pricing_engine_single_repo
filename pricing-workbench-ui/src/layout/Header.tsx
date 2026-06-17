@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Avatar, Button, Switch, roleColorKeyForLabel, roleColors } from '../design-system';
+import { Avatar, Button, roleColorKeyForLabel, roleColors, themeStorageKey } from '../design-system';
 import { useTranslation } from '../lib/i18n';
-
-export const layoutThemeStorageKey = 'wcpe:layout-theme';
 
 type HeaderProps = {
   breadcrumb: string;
@@ -23,7 +21,8 @@ export function Header({ breadcrumb, drawerOpen, notificationCount, showAuthenti
   const menuRef = useRef<HTMLDivElement>(null);
   const roleColorKey = roleColorKeyForLabel(user.role);
   const roleColor = roleColors[roleColorKey];
-  const initials = user.avatar ?? user.name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
+  const displayName = user.name?.trim() || t('pricingWorkbench');
+  const initials = user.avatar ?? displayName.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
 
   useEffect(() => {
     if (!showAuthenticatedChrome) {
@@ -48,7 +47,7 @@ export function Header({ breadcrumb, drawerOpen, notificationCount, showAuthenti
   const toggleTheme = () => {
     const nextTheme = theme === 'dark' ? 'light' : 'dark';
     try {
-      window.localStorage.setItem(layoutThemeStorageKey, nextTheme);
+      window.localStorage.setItem(themeStorageKey, nextTheme);
     } catch {
       // Theme still toggles for the current render path when storage is unavailable.
     }
@@ -70,15 +69,17 @@ export function Header({ breadcrumb, drawerOpen, notificationCount, showAuthenti
           {t('menu')}
         </Button>
       ) : null}
-      <div className="layout-header__title">
-        <p className="eyebrow">{t('appTitle')}</p>
-        <h1>{t('pricingWorkbench')}</h1>
-        <nav aria-label={t('navigation:breadcrumb')} className="layout-breadcrumbs">
-          <ol>
-            <li>{t('home')}</li>
-            <li aria-current="page">{breadcrumb || t('unknownScreen')}</li>
-          </ol>
-        </nav>
+      <div className="layout-header__brand">
+        <div className="layout-header__brand-mark" aria-hidden="true">LW</div>
+        <div className="layout-header__title">
+          <h1>{t('appTitle')}</h1>
+          <nav aria-label={t('navigation:breadcrumb')} className="layout-breadcrumbs">
+            <ol>
+              <li>{t('home')}</li>
+              <li aria-current="page">{breadcrumb || t('unknownScreen')}</li>
+            </ol>
+          </nav>
+        </div>
       </div>
       <div className="layout-header__actions">
         {showAuthenticatedChrome ? (
@@ -86,24 +87,32 @@ export function Header({ breadcrumb, drawerOpen, notificationCount, showAuthenti
             <span aria-hidden="true">🔔</span><span className="layout-header__action-label">{t('alerts')}</span>{notificationCount > 0 ? <span className="layout-badge">{notificationCount}</span> : null}
           </button>
         ) : null}
-        <label className="layout-theme-toggle">
+        <Button
+          className="layout-theme-toggle"
+          type="button"
+          variant="ghost"
+          size="sm"
+          aria-pressed={theme === 'dark'}
+          aria-label={t('toggleTheme')}
+          title={t('theme', { theme: theme === 'dark' ? t('dark') : t('light') })}
+          onClick={toggleTheme}
+        >
           <span aria-hidden="true">{theme === 'dark' ? '🌙' : '☀️'}</span>
-          <span>{t('theme', { theme: theme === 'dark' ? t('dark') : t('light') })}</span>
-          <Switch checked={theme === 'dark'} onClick={toggleTheme} aria-label={t('toggleTheme')} />
-        </label>
+          <span className="layout-theme-toggle__text">{theme === 'dark' ? t('dark') : t('light')}</span>
+        </Button>
         {showAuthenticatedChrome ? (
           <div className="layout-user-menu-shell" ref={menuRef}>
-            <button className="layout-user-menu" type="button" aria-haspopup="menu" aria-expanded={userMenuOpen} aria-label={t('userMenuFor', { name: user.name })} onClick={() => setUserMenuOpen((open) => !open)}>
+            <button className="layout-user-menu" type="button" aria-haspopup="menu" aria-expanded={userMenuOpen} aria-label={t('userMenuFor', { name: displayName })} onClick={() => setUserMenuOpen((open) => !open)}>
               <Avatar initials={initials} roleColor={roleColor} roleLabel={user.role} aria-hidden="true" />
-              <span>{user.name}</span>
+              <span>{displayName}</span>
               <small>{user.role}</small>
             </button>
             {userMenuOpen ? (
-              <div className="layout-user-menu__dropdown" role="menu" aria-label={t('userMenuFor', { name: user.name })}>
+              <div className="layout-user-menu__dropdown" role="menu" aria-label={t('userMenuFor', { name: displayName })}>
                 <div className="layout-user-menu__identity">
                   <Avatar initials={initials} roleColor={roleColor} roleLabel={user.role} aria-hidden="true" />
                   <div>
-                    <strong>{user.name}</strong>
+                    <strong>{displayName}</strong>
                     <span className="layout-role-badge" style={{ '--layout-role-color': roleColor } as CSSProperties}>{user.role}</span>
                   </div>
                 </div>

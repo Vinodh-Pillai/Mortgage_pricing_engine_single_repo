@@ -96,4 +96,37 @@ describe('TenantHomeTest', () => {
     expect(tenantHomeScreenModule.match('/home')).toBe(true);
     expect(tenantHomeScreenModule.stateCoverage).toEqual(expect.arrayContaining(['loading', 'empty', 'blocked', 'needs-attention', 'ready']));
   });
+
+  it('falls back to bounded local preview when tenant product API is unavailable and emits blocked evidence', async () => {
+    const onEvidenceCapture = vi.fn();
+    const fetchImpl = vi.fn().mockRejectedValue(new Error('tenant api offline')) as unknown as typeof fetch;
+
+    render(<TenantHomeScreen fetchImpl={fetchImpl} onEvidenceCapture={onEvidenceCapture} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/tenant api offline/i);
+    expect(screen.getByText(/Showing bounded local preview products/i)).toBeInTheDocument();
+    await waitFor(() => expect(onEvidenceCapture).toHaveBeenCalled());
+    expect(onEvidenceCapture.mock.calls.at(-1)?.[0]).toMatchObject({ screenId: 'tenant-home', state: 'blocked' });
+  });
+
+  it('handles empty injected evidence, single-tenant selector state, and partial rate indicators', async () => {
+    const emptyTenant: TenantHomeTenantContext = { tenantId: 'tenant-empty', tenantName: 'Only Tenant', status: 'INACTIVE', userId: 'user-empty' };
+    const partialRateProducts: AuthorizedProduct[] = [
+      { productCode: 'RATE_MIN', productName: 'Min only', productType: 'CONVENTIONAL', investorCode: 'FNMA', channelCode: 'RETAIL', status: 'INACTIVE', baseRateMin: 6.125, lastUpdated: 'backend-ref:min' },
+      { productCode: 'RATE_RANGE', productName: 'Range', productType: 'FHA', investorCode: 'GNMA', channelCode: 'WHOLESALE', status: 'ACTIVE', baseRateMin: 6, baseRateMax: 6.5, authorizationExpiresAt: 'backend-ref:expires', lastUpdated: 'backend-ref:range' },
+    ];
+
+    render(<TenantHomeScreen tenants={[emptyTenant]} initialProducts={[]} userId="user-empty" />);
+    expect(await screen.findByText(/Single-tenant access/i)).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(/No products match/i);
+
+    cleanup();
+    window.localStorage.setItem('wcpe:tenantContext:user-empty', '{not-json');
+    render(<TenantHomeScreen tenants={[emptyTenant]} initialProducts={partialRateProducts} userId="user-empty" />);
+    fireEvent.click(await screen.findByLabelText('ALL'));
+    expect(await screen.findByText('6.125%')).toBeInTheDocument();
+    expect(screen.getByText('6.000% - 6.500%')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('INACTIVE'));
+    await waitFor(() => expect(screen.getByText('RATE_MIN')).toBeInTheDocument());
+  });
 });

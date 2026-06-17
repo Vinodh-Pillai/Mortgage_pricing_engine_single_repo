@@ -22,6 +22,10 @@ export default defineConfig({
         'src/screens/productAdmin/**',
         'src/screens/uiValidation/**',
       ],
+      exclude: [
+        '**/*.stories.tsx',
+        '**/index.ts',
+      ],
     },
   },
 });

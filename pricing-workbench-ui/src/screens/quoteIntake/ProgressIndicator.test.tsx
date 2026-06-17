@@ -12,7 +12,7 @@ describe('ProgressIndicatorTest', () => {
     const statuses = quoteIntakeSteps.reduce((acc, step) => ({ ...acc, [step.id]: step.id === 1 ? 'complete' : 'empty' }), {} as Record<any, StepStatus>);
     render(<ProgressIndicator steps={quoteIntakeSteps} activeStep={2} statuses={statuses} onStepSelect={onStepSelect} />);
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '2');
-    fireEvent.click(screen.getByRole('button', { name: /Identitycomplete/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Basicscomplete/i }));
     expect(onStepSelect).toHaveBeenCalledWith(1);
   });
 });

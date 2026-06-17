@@ -49,9 +49,9 @@ export const pii54ValidationCommands = [
 ] as const;
 
 export const pii54BlockedValidationGaps = [
-  'Storybook/Chromatic visual validation is present as stories and scripts, but this repository does not currently declare Storybook runtime packages in package.json.',
+  'Storybook visual validation is represented by local stories and a storybook:build script using declared Storybook packages; external Chromatic upload is intentionally not required without a token.',
   'Playwright and axe gates validate route registration and the local authentication gate; authenticated full-screen journeys remain blocked until the local auth service/session runtime is available.',
-  'Lighthouse CI is represented by a local budget artifact and validator; browser-based LHCI execution remains blocked until the package and local server runtime are available.',
+  'Lighthouse CI is represented by a deterministic local budget validator; live browser LHCI remains optional when local runtime ports or service dependencies are unavailable.',
 ] as const;
 
 export function validatePii54Manifest() {

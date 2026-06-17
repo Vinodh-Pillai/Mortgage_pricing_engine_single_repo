@@ -49,6 +49,7 @@ export const SuccessIcon = makeIcon('M5 13l4 4L19 7');
 export const WarningIcon = makeIcon('M12 3l10 18H2L12 3z', 'M12 9v4M12 17h.01');
 export const ErrorIcon = makeIcon('M6 6l12 12M18 6L6 18');
 export const InfoIcon = makeIcon('M12 17v-6M12 7h.01M12 22a10 10 0 100-20 10 10 0 000 20z');
+export const HelpIcon = InfoIcon;
 export const BlockedIcon = makeIcon('M6 6l12 12', 'M12 22a10 10 0 100-20 10 10 0 000 20z');
 export const PendingIcon = makeIcon('M12 6v6l4 2M12 22a10 10 0 100-20 10 10 0 000 20z');
 

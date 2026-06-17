@@ -78,7 +78,7 @@
   --ds-role-borrower-text: #ffffff;
   --ds-role-borrower-border: #4f46e5;
   --ds-z-base: 0;
-  --ds-z-dropdown: 100;
+  --ds-z-dropdown: 200;
   --ds-z-modal: 300;
   --ds-z-toast: 400;
   --ds-z-tooltip: 500;

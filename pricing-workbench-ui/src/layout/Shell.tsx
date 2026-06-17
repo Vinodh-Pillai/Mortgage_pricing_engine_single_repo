@@ -5,6 +5,7 @@ import { roleLabels } from '../lib/auth/personas';
 import { workbenchModules, type WorkbenchScreenModule } from '../screens/workbenchShell/WorkbenchShell';
 import { ContentArea } from './ContentArea';
 import { Footer } from './Footer';
+import { themeStorageKey } from '../design-system';
 import { Header } from './Header';
 import { useNavRailMode } from './hooks/useNavRailMode';
 import './layout.css';
@@ -42,10 +43,11 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, modul
   });
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const railCollapsed = mode === 'rail' && navCollapsed;
+  const navigationExpanded = mode === 'drawer' ? drawerOpen : !railCollapsed;
 
   useEffect(() => {
     try {
-      if (window.localStorage.getItem('wcpe:layout-theme') !== theme) window.localStorage.setItem('wcpe:layout-theme', theme);
+      if (window.localStorage.getItem(themeStorageKey) !== theme) window.localStorage.setItem(themeStorageKey, theme);
     } catch {
       // Storage can be disabled; the shell remains usable.
     }
@@ -73,16 +75,23 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, modul
       return next;
     });
   }, []);
+  const togglePrimaryNavigation = useCallback(() => {
+    if (mode === 'drawer') {
+      setDrawerOpen((current) => !current);
+      return;
+    }
+    toggleCollapsed();
+  }, [mode, toggleCollapsed]);
 
   return (
     <div className={`layout-shell layout-shell--${mode}${railCollapsed ? ' layout-shell--nav-collapsed' : ''}`} data-breakpoint-mode={mode} data-nav-collapsed={railCollapsed ? 'true' : 'false'}>
       <SkipLink />
       <Header
         breadcrumb={breadcrumb}
-        drawerOpen={drawerOpen}
+        drawerOpen={navigationExpanded}
         notificationCount={showAuthenticatedChrome ? notifications.length : 0}
         showAuthenticatedChrome={showAuthenticatedChrome}
-        onMenuToggle={() => setDrawerOpen((current) => !current)}
+        onMenuToggle={togglePrimaryNavigation}
         onNotificationsToggle={() => {
           if (showAuthenticatedChrome) setNotificationsOpen((current) => !current);
         }}

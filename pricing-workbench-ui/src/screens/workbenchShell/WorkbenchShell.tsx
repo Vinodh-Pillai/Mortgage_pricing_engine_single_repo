@@ -1,5 +1,6 @@
 import type { ComponentType } from 'react';
 import { fairLendingScreenModule } from '../fairLending';
+import { homeScreenModule } from '../home';
 import { scenarioAnalysisEvidenceTarget, scenarioAnalysisStateCoverage } from '../scenarioAnalysis';
 
 export type WorkbenchScreenModule = {
@@ -61,20 +62,7 @@ function registryCopyFor(screen: WorkbenchScreenModule): RegistryCopy {
 }
 
 export const workbenchModules: WorkbenchScreenModule[] = [
-  {
-    id: 'tenant-home',
-    label: 'Home',
-    routePattern: '/home',
-    breadcrumb: 'Home',
-    screenPackage: 'screens/tenantHome',
-    dataBoundary: 'lib/api/tenantHome and catalog-service tenant product authorization APIs',
-    stateCoverage: ['loading', 'load-state', 'empty', 'blocked', 'needs-attention', 'ready'],
-    personaVisibility: ['loan-officer', 'pricing-analyst', 'borrower', 'admin'],
-    dependencyStatus: 'Catalog-service tenant product authorization APIs own persisted product visibility and rate indicators.',
-    adapterStatus: 'Screen renders bounded local preview products when backend tenant-product APIs are unavailable.',
-    evidenceTarget: '.local-harness/evidence/PII-51-S01/tenant-home-screen.json',
-    match: (pathname) => pathname === '/home' || pathname.startsWith('/home/'),
-  },
+  homeScreenModule,
   {
     id: 'quote-intake',
     label: 'Pipeline',

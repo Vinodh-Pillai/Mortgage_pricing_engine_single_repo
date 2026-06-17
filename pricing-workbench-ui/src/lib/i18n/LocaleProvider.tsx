@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { defaultLocale, normalizeLocale, type SupportedLocale } from './config';
 import { getDirectionForLocale } from './rtl';
 
-const localeStorageKey = 'wcpe:locale';
+const localeStorageKey = 'loanweft:locale';
 
 export type LocaleDetectionInput = {
   search?: string;

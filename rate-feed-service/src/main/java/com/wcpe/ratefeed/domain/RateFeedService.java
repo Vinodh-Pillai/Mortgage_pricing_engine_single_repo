@@ -10,6 +10,8 @@ import com.wcpe.ratefeed.parser.CsvParser;
 import com.wcpe.ratefeed.parser.HeaderDetector;
 import com.wcpe.ratefeed.parser.RateSheetParser;
 import com.wcpe.ratefeed.parser.TypeCoercer;
+import com.wcpe.ratefeed.normalization.MappingWizardModels;
+import com.wcpe.ratefeed.normalization.MappingWizardService;
 import com.wcpe.ratefeed.rulebook.LlpaGridToRuleBookMapper;
 import com.wcpe.ratefeed.validation.RateSheetValidator;
 import com.wcpe.ratefeed.resolution.GridLookup;
@@ -24,6 +26,7 @@ import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.*;
 import java.util.*;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -56,13 +59,23 @@ class RateFeedService {
   private final AuditService auditService;
   private final ReplayService replayService;
   private final ApplicationEventPublisher eventPublisher;
+  private final MappingWizardService mappingWizardService;
   private final LlpaGridToRuleBookMapper ruleBookMapper = new LlpaGridToRuleBookMapper();
   private final Map<UUID, RateFeedModels.PipelineStatusRow> pipelineRows = new LinkedHashMap<>();
 
   RateFeedService(RateFeedRepository repository, JdbcTemplate jdbc, ObjectMapper mapper,
                    ActivationService activationService, VersionManager versionManager,
-                    CachedRateResolver rateResolver, GridLookup gridLookup, AuditService auditService,
-                    ReplayService replayService, ApplicationEventPublisher eventPublisher) {
+                     CachedRateResolver rateResolver, GridLookup gridLookup, AuditService auditService,
+                     ReplayService replayService, ApplicationEventPublisher eventPublisher) {
+    this(repository, jdbc, mapper, activationService, versionManager, rateResolver, gridLookup, auditService, replayService, eventPublisher, null);
+  }
+
+  @Autowired
+  RateFeedService(RateFeedRepository repository, JdbcTemplate jdbc, ObjectMapper mapper,
+                   ActivationService activationService, VersionManager versionManager,
+                     CachedRateResolver rateResolver, GridLookup gridLookup, AuditService auditService,
+                     ReplayService replayService, ApplicationEventPublisher eventPublisher,
+                     MappingWizardService mappingWizardService) {
     this.repository = repository;
     this.jdbc = jdbc;
     this.mapper = mapper;
@@ -73,6 +86,7 @@ class RateFeedService {
     this.auditService = auditService;
     this.replayService = replayService;
     this.eventPublisher = eventPublisher;
+    this.mappingWizardService = mappingWizardService;
   }
 
   // ── Existing session lifecycle ──
@@ -652,11 +666,11 @@ class RateFeedService {
 
     UUID jobId = UUID.randomUUID();
     Instant startedAt = Instant.now();
-    String profileVersion = request.normalizationProfileId().toString();
+    ProfileSelection profileSelection = selectNormalizationProfile(tenantId, batch, request);
     jdbc.update("insert into rate_feed.rate_feed_normalization_job(tenant_id,normalization_job_id,batch_id,profile_id,profile_version,status,started_at,idempotency_key) values (?,?,?,?,?,?,?,?)",
-        tenantId, jobId, batchId, request.normalizationProfileId(), profileVersion, "RUNNING", Timestamp.from(startedAt), idempotencyKey);
+        tenantId, jobId, batchId, profileSelection.profileId(), profileSelection.profileVersion(), "RUNNING", Timestamp.from(startedAt), idempotencyKey);
 
-    List<NormalizedCandidate> candidates = normalizeParsedRows(tenantId, batchId, profileVersion);
+    List<NormalizedCandidate> candidates = normalizeParsedRows(tenantId, batchId, profileSelection.profileId(), profileSelection.profileVersion());
     int errors = (int) candidates.stream().filter(candidate -> "ERROR".equals(candidate.severity())).count();
     int warnings = (int) candidates.stream().filter(candidate -> "WARNING".equals(candidate.severity())).count();
     String status = errors == 0 ? "NORMALIZED" : "NORMALIZATION_FAILED";
@@ -674,9 +688,9 @@ class RateFeedService {
 
     String eventType = errors == 0 ? "RateSheetNormalized.v1" : "RateSheetNormalizationFailed.v1";
     repository.outbox(tenantId, batchId, eventType, 1, actor, correlationId, parseHeaders(batch),
-        Map.of("batchId", batchId, "normalizationJobId", jobId, "profileId", request.normalizationProfileId(), "profileVersion", profileVersion, "entryCount", candidates.size() - errors, "errorCount", errors, "warningCount", warnings, "resultHash", resultHash));
+        Map.of("batchId", batchId, "normalizationJobId", jobId, "profileId", profileSelection.profileId(), "profileVersion", profileSelection.profileVersion(), "profileMatchScore", profileSelection.matchScore(), "profileRoutingAction", profileSelection.routingAction(), "entryCount", candidates.size() - errors, "errorCount", errors, "warningCount", warnings, "resultHash", resultHash));
     repository.audit(tenantId, batchId, errors == 0 ? "RATE_SHEET_NORMALIZED" : "RATE_SHEET_NORMALIZATION_FAILED", "RateFeedBatch", actor, correlationId, parseHash, resultHash,
-        Map.of("batchId", batchId, "normalizationJobId", jobId, "status", status, "profileId", request.normalizationProfileId(), "entryCount", candidates.size() - errors, "errorCount", errors, "warningCount", warnings));
+        Map.of("batchId", batchId, "normalizationJobId", jobId, "status", status, "profileId", profileSelection.profileId(), "profileVersion", profileSelection.profileVersion(), "profileMatchScore", profileSelection.matchScore(), "profileRoutingAction", profileSelection.routingAction(), "entryCount", candidates.size() - errors, "errorCount", errors, "warningCount", warnings));
     return new RateFeedModels.NormalizeBatchResponse(jobId, status);
   }
 
@@ -835,8 +849,33 @@ class RateFeedService {
 
   private void validateNormalizeRequest(RateFeedModels.NormalizeBatchRequest request) {
     if (request == null) throw validation("REQUEST_BODY_REQUIRED", "Request body is required.");
-    if (request.normalizationProfileId() == null) throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "NORMALIZATION_PROFILE_NOT_FOUND", "normalizationProfileId is required for governed normalization.");
+    if (request.normalizationProfileId() == null && mappingWizardService == null) throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "NORMALIZATION_PROFILE_NOT_FOUND", "normalizationProfileId is required when auto profile matching is unavailable.");
     rejectFormulaMetadata("expectedParseResultHash", request.expectedParseResultHash());
+  }
+
+  private ProfileSelection selectNormalizationProfile(UUID tenantId, RateFeedRepository.BatchParseSource batch, RateFeedModels.NormalizeBatchRequest request) {
+    if (request.normalizationProfileId() != null) {
+      String profileVersion = request.normalizationProfileId().toString();
+      return new ProfileSelection(request.normalizationProfileId(), profileVersion, 100, "EXPLICIT_PROFILE");
+    }
+    MappingWizardModels.AutoMatchResponse match = mappingWizardService.autoMatch(tenantId, incomingFingerprintForBatch(tenantId, batch));
+    if (!match.autoApply() || match.profile() == null) {
+      throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "NO_PROFILE_MATCH", match.fallbackReason().isBlank() ? "No matching published profile >=80. Use Mapping Wizard." : match.fallbackReason());
+    }
+    String profileVersion = match.profile().profileId() + ":v" + match.profile().version();
+    return new ProfileSelection(match.profile().profileId(), profileVersion, match.matchScore(), match.routingAction());
+  }
+
+  private com.fasterxml.jackson.databind.JsonNode incomingFingerprintForBatch(UUID tenantId, RateFeedRepository.BatchParseSource batch) {
+    com.fasterxml.jackson.databind.node.ObjectNode fingerprint = mapper.createObjectNode();
+    fingerprint.put("formatType", batch.feedFormatId().toString());
+    fingerprint.put("investorCode", batch.investorId().toString());
+    com.fasterxml.jackson.databind.node.ArrayNode headers = mapper.createArrayNode();
+    List<String> fieldNames = jdbc.queryForList("select distinct field_name from rate_feed.rate_feed_parsed_field where tenant_id=? and batch_id=? order by field_name", String.class, tenantId, batch.batchId());
+    for (String fieldName : fieldNames) if (fieldName != null && !fieldName.isBlank()) headers.add(fieldName);
+    fingerprint.set("headerSignatures", headers);
+    fingerprint.set("fieldSignatures", headers.deepCopy());
+    return fingerprint;
   }
 
   private String latestParseResultHash(UUID tenantId, UUID batchId) {
@@ -846,24 +885,24 @@ class RateFeedService {
     } catch (Exception ex) { return ""; }
   }
 
-  private List<NormalizedCandidate> normalizeParsedRows(UUID tenantId, UUID batchId, String profileVersion) {
+  private List<NormalizedCandidate> normalizeParsedRows(UUID tenantId, UUID batchId, UUID profileId, String profileVersion) {
     List<ParsedField> fields = jdbc.query("select source_row_number,field_name,raw_value,candidate_value,source_column,severity,error_code,message from rate_feed.rate_feed_parsed_field where tenant_id=? and batch_id=? order by source_row_number, source_column",
         (rs, row) -> new ParsedField(rs.getInt("source_row_number"), rs.getString("field_name"), rs.getString("raw_value"), rs.getString("candidate_value"), rs.getInt("source_column"), rs.getString("severity"), rs.getString("error_code"), rs.getString("message")), tenantId, batchId);
     Map<Integer, List<ParsedField>> byRow = new TreeMap<>();
     for (ParsedField field : fields) byRow.computeIfAbsent(field.sourceRowNumber(), ignored -> new ArrayList<>()).add(field);
     if (byRow.isEmpty()) throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "BATCH_NOT_PARSED", "Parsed batch contains no field rows.");
     List<NormalizedCandidate> candidates = new ArrayList<>();
-    for (Map.Entry<Integer, List<ParsedField>> row : byRow.entrySet()) candidates.add(normalizeParsedRow(row.getKey(), row.getValue(), profileVersion));
+    for (Map.Entry<Integer, List<ParsedField>> row : byRow.entrySet()) candidates.add(normalizeParsedRow(row.getKey(), row.getValue(), profileId, profileVersion));
     return candidates;
   }
 
-  private NormalizedCandidate normalizeParsedRow(int sourceRow, List<ParsedField> fields, String profileVersion) {
+  private NormalizedCandidate normalizeParsedRow(int sourceRow, List<ParsedField> fields, UUID profileId, String profileVersion) {
     Map<String, ParsedField> byName = new LinkedHashMap<>();
     Map<String, String> raw = new LinkedHashMap<>();
     for (ParsedField field : fields) {
       byName.put(field.fieldName(), field);
       raw.put(field.fieldName(), field.rawValue());
-      if ("ERROR".equals(field.severity())) return NormalizedCandidate.error(sourceRow, "Parsed row contains blocking field errors.", raw, profileVersion);
+      if ("ERROR".equals(field.severity())) return NormalizedCandidate.error(sourceRow, "Parsed row contains blocking field errors.", raw, profileId, profileVersion);
     }
     try {
       String productKey = requiredGovernedCandidate(byName, "canonical_product_key");
@@ -874,9 +913,9 @@ class RateFeedService {
       BigDecimal adjustmentValue = optionalGovernedDecimal(byName, "adjustment_value");
       String adjustmentType = optionalGovernedCandidate(byName, "adjustment_type");
       String adjustmentUnit = optionalGovernedCandidate(byName, "adjustment_unit");
-      return NormalizedCandidate.success(sourceRow, productKey, programKey, lockPeriod, rate, price, adjustmentType, adjustmentValue, adjustmentUnit, raw, mappingRefs(byName, profileVersion), profileVersion);
+      return NormalizedCandidate.success(sourceRow, productKey, programKey, lockPeriod, rate, price, adjustmentType, adjustmentValue, adjustmentUnit, raw, mappingRefs(byName, profileId, profileVersion), profileVersion);
     } catch (RuntimeException ex) {
-      return NormalizedCandidate.error(sourceRow, ex.getMessage(), raw, profileVersion);
+      return NormalizedCandidate.error(sourceRow, ex.getMessage(), raw, profileId, profileVersion);
     }
   }
 
@@ -898,8 +937,9 @@ class RateFeedService {
     return value == null ? null : new BigDecimal(value);
   }
 
-  private static Map<String, Object> mappingRefs(Map<String, ParsedField> fields, String profileVersion) {
+  private static Map<String, Object> mappingRefs(Map<String, ParsedField> fields, UUID profileId, String profileVersion) {
     Map<String, Object> refs = new LinkedHashMap<>();
+    refs.put("profileId", profileId.toString());
     refs.put("profileVersion", profileVersion);
     Map<String, Object> fieldRefs = new LinkedHashMap<>();
     for (ParsedField field : fields.values()) {
@@ -1454,6 +1494,7 @@ class RateFeedService {
 
   private record ParsedCsv(int rowCount, List<ParsedField> fields) {}
   private record ParsedField(int sourceRowNumber, String fieldName, String rawValue, String candidateValue, int sourceColumn, String severity, String errorCode, String message) {}
+  private record ProfileSelection(UUID profileId, String profileVersion, int matchScore, String routingAction) {}
   private record OcrCellForApproval(UUID cellId, int rowIndex, int columnIndex, String rawText, String reviewedText, String status) {}
   private record ValidationCandidate(UUID entryId, int sourceRowNumber, String canonicalProductKey, int lockPeriodDays, BigDecimal ratePercent, BigDecimal pricePoints, String adjustmentType, BigDecimal adjustmentValue, String adjustmentUnit, String severity, String message) {}
   private record ValidationFindingDraft(UUID entryId, RateFeedModels.ValidationFindingSeverity severity, String ruleCode, String ruleVersion, String fieldName, String messageCode, Map<String, Object> messageParams, String remediationCode, Integer sourceRowNumber) {
@@ -1483,8 +1524,8 @@ class RateFeedService {
     static NormalizedCandidate success(int sourceRowNumber, String productKey, String programKey, int lockPeriodDays, BigDecimal ratePercent, BigDecimal pricePoints, String adjustmentType, BigDecimal adjustmentValue, String adjustmentUnit, Map<String, String> rawAttributes, Map<String, Object> mappingRefs, String profileVersion) {
       return new NormalizedCandidate(UUID.randomUUID(), sourceRowNumber, productKey, programKey, lockPeriodDays, ratePercent, pricePoints, adjustmentType, adjustmentValue, adjustmentUnit, "INFO", "normalized", Map.copyOf(rawAttributes), Map.copyOf(mappingRefs));
     }
-    static NormalizedCandidate error(int sourceRowNumber, String message, Map<String, String> rawAttributes, String profileVersion) {
-      return new NormalizedCandidate(UUID.randomUUID(), sourceRowNumber, null, null, 0, null, null, null, null, null, "ERROR", message, Map.copyOf(rawAttributes), Map.of("profileVersion", profileVersion));
+    static NormalizedCandidate error(int sourceRowNumber, String message, Map<String, String> rawAttributes, UUID profileId, String profileVersion) {
+      return new NormalizedCandidate(UUID.randomUUID(), sourceRowNumber, null, null, 0, null, null, null, null, null, "ERROR", message, Map.copyOf(rawAttributes), Map.of("profileId", profileId.toString(), "profileVersion", profileVersion));
     }
     Map<String, Object> dimensions() {
       Map<String, Object> dimensions = new LinkedHashMap<>();
