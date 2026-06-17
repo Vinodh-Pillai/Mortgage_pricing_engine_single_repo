@@ -26,58 +26,70 @@ const tenantBoundaryPlaceholder = 'ui-preview-tenant';
 const localUnsyncedDraftId = 'local-unsynced-pipeline-draft';
 
 export const initialQuoteIntake: BorrowerIntake = {
-  quoteIntent: '',
   channel: '',
-  scenarioName: '',
-  externalLoanId: '',
-  sourceSystem: 'PRICING_WORKBENCH',
-  borrowerName: '',
-  borrowerRole: 'PRIMARY',
-  coBorrowerName: '',
-  coBorrowerRole: 'CO_BORROWER',
+  loanNumber: '',
+  borrowerFirstName: '',
+  borrowerLastName: '',
+  numberOfBorrowers: '',
   contactEmail: '',
-  creditStatus: 'AVAILABLE',
-  creditScore: '',
-  creditScoreSource: 'TRI_MERGE',
-  creditReportDate: '',
-  creditReadiness: '',
+  creditStatus: '',
+  decisionCreditScore: '',
+  citizenshipType: '',
+  professional: '',
   loanPurpose: '',
-  loanAmount: '',
-  purchasePriceOrValue: '',
+  baseLoanAmount: '',
   downPaymentOrEquity: '',
-  subordinateFinancingAmount: '0',
-  helocDrawnAmount: '0',
-  helocLimitAmount: '0',
-  lienPosition: 'FIRST',
-  termMonths: '360',
-  amortizationType: 'FIXED',
-  requestedLockPeriodDays: '30',
-  propertyState: '',
-  propertyCounty: '',
+  lienPosition: '',
+  desiredLoanTerm: '',
+  desiredAmortizationType: '',
+  desiredRateLockPeriod: '',
+  desiredInterestRate: '',
+  prepaymentPenaltyTerm: '',
+  waiveEscrows: '',
+  interestOnly: '',
+  mortgageType: '',
+  state: '',
   propertyZip: '',
-  propertyType: 'SINGLE_FAMILY',
-  occupancyType: 'PRIMARY_RESIDENCE',
-  unitCount: '1',
+  propertyType: '',
+  occupancyType: '',
+  numberOfUnits: '',
+  propertyLocation: '',
+  numberOfLeasedUnits: '',
+  shortTermRental: '',
+  monthlyMarketRent: '',
+  investorExperience: '',
+  additionalMonthlyHousingExpenses: '',
+  propertySquareFootage: '',
+  propertyAcreageNumber: '',
+  monthlyTaxes: '',
+  monthlyInsurance: '',
+  monthlyHOA: '',
+  additionalAnnualHousingExpenses: '',
+  annualTaxes: '',
+  annualInsurance: '',
+  annualHOA: '',
   purchasePrice: '',
   appraisedValue: '',
-  condoProjectType: '',
-  manufacturedHomeFlag: 'false',
-  monthlyIncome: '',
-  incomeType: 'W2',
-  employmentType: 'SALARIED',
+  selfEmployed: '',
+  totalBorrowerIncome: '',
   monthlyDebt: '',
-  suppliedDti: '',
-  reserveMonths: '',
-  incomeVerificationStatus: 'VERIFIED',
-  assetVerificationStatus: 'VERIFIED',
+  estimatedDti: '',
+  monthsOfReserves: '',
   liquidAssets: '',
-  reserves: '',
-  productFamily: '',
-  productPreference: '',
-  quoteFilters: '',
-  effectiveDate: '',
-  actorId: '',
-  clientContext: '',
+  documentationType: '',
+  secondaryDocumentationType: '',
+  estimatedDscr: '',
+  gift: '',
+  achPayment: '',
+  mortgageLatePayments: '',
+  creditEvent: '',
+  wholesaleCompensation: '',
+  lockExtension: '',
+  lockExtension2: '',
+  concession: '',
+  secondaryAdjustment: '',
+  aus: '',
+  manualUnderwriting: '',
 };
 
 export function PipelineIntakePage({
@@ -228,7 +240,7 @@ export function PipelineIntakePage({
       const resolvedScenarioId = savedDraft?.scenarioId ?? scenarioId ?? resumeBackup?.scenarioId;
       if (!resolvedScenarioId) throw new Error('Connected scenario draft is unavailable; quote launch requires backend draft support.');
       const resolvedVersion = savedDraft?.scenarioVersion ?? (scenarioVersion || resumeBackup?.scenarioVersion || 1);
-      const validation = await validateDraftSection(tenantId, resolvedScenarioId, resolvedVersion, 'preferences');
+      const validation = await validateDraftSection(tenantId, resolvedScenarioId, resolvedVersion, 'income-assets');
       if (!validation.passed) {
         setLocalErrors(validation.blockers);
         setFlowState({ kind: 'blocked', validation });
@@ -270,7 +282,7 @@ export function PipelineIntakePage({
     Object.entries(resumedIntake).forEach(([field, value]) => {
       if (typeof value === 'string') onChange?.(field as keyof BorrowerIntake, value);
     });
-    setExpandedSections(new Set([1, 6]));
+    setExpandedSections(new Set([1, 5]));
     setResumeDismissed(true);
     setStatusMessage(`Draft ${resumeBackup.scenarioId} resumed.`);
   }
@@ -303,7 +315,7 @@ export function PipelineIntakePage({
   }
 
   function capture(action: string, detail: Record<string, unknown>) {
-    onEvidenceCapture?.({ action, storyId: 'PII-26-S14', ...detail });
+    onEvidenceCapture?.({ action, storyId: 'PII-26-S13', ...detail });
   }
 
   return (
@@ -360,15 +372,15 @@ function pickFields(values: BorrowerIntake, fields: ScenarioIntakeField[]) {
 }
 
 function isLoanBasicsField(field: keyof BorrowerIntake) {
-  return ['loanPurpose', 'loanAmount', 'purchasePriceOrValue', 'propertyType', 'propertyZip', 'occupancyType', 'unitCount'].includes(field);
+  return ['borrowerLastName', 'loanNumber', 'mortgageType'].includes(field);
 }
 
 function normalizeDisplayedIntake(input: BorrowerIntake): BorrowerIntake {
-  if (input.purchasePrice !== '-1' && input.purchasePriceOrValue !== '-1') return input;
+  if (input.purchasePrice !== '-1' && input.appraisedValue !== '-1') return input;
   return {
     ...input,
     purchasePrice: input.purchasePrice === '-1' ? '' : input.purchasePrice,
-    purchasePriceOrValue: input.purchasePriceOrValue === '-1' ? '' : input.purchasePriceOrValue,
+    appraisedValue: input.appraisedValue === '-1' ? '' : input.appraisedValue,
   };
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fetchScenarioIntakeMetadata, launchQuoteRun, PipelineApiResponseError, type BorrowerIntake, type QuoteRunLaunch, type ScenarioIntakeMetadata } from './quoteRuns';
+import { fetchScenarioIntakeMetadata, launchQuoteRun, PipelineApiResponseError, toLoanPassQuoteIntakePayload, type BorrowerIntake, type QuoteRunLaunch, type ScenarioIntakeMetadata } from './quoteRuns';
 
 describe('quoteRuns pipeline API response handling', () => {
   it('preserves successful JSON response behavior', async () => {
@@ -26,7 +26,7 @@ describe('quoteRuns pipeline API response handling', () => {
       runId: null,
       status: 'BLOCKED',
       nextRoute: null,
-      validationSummary: { passed: false, status: 'BLOCKED', message: 'missing facts', blockers: { loanAmount: 'Loan amount is required.' } },
+      validationSummary: { passed: false, status: 'BLOCKED', message: 'missing facts', blockers: { baseLoanAmount: 'Base loan amount is required.' } },
       uiTraceId: 'trace',
       events: [],
       fallbackMode: false,
@@ -74,6 +74,34 @@ describe('quoteRuns pipeline API response handling', () => {
       expect((error as Error).message).not.toContain('secret-value');
     }
   });
+
+  it('serializes only LoanPass-aligned intake fields for quote launch', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      runId: 'run-1',
+      status: 'CREATED',
+      nextRoute: null,
+      validationSummary: { passed: true, status: 'PASSED', message: 'ok', blockers: {} },
+      uiTraceId: 'trace',
+      events: [],
+      fallbackMode: false,
+      dependencyStatus: 'READY',
+      auditPackageId: null,
+      replayHashRef: null,
+      validationIssues: [],
+    }));
+
+    await launchQuoteRun('tenant-a', intake(), fetchMock);
+
+    const payload = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(payload).toEqual(toLoanPassQuoteIntakePayload(intake()));
+    expect(payload.borrowerLastName).toBe('Johnson');
+    expect(payload.loanNumber).toBe('LP-1001');
+    expect(payload.mortgageType).toBe('Conventional');
+    expect(payload).not.toHaveProperty('borrowerName');
+    expect(payload).not.toHaveProperty('loanAmount');
+    expect(payload).not.toHaveProperty('purchasePriceOrValue');
+    expect(payload).not.toHaveProperty('productFamily');
+  });
 });
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -82,58 +110,70 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function intake(): BorrowerIntake {
   return {
-    quoteIntent: 'purchase',
-    channel: 'retail',
-    scenarioName: 'Pipeline error handling test',
-    externalLoanId: 'loan-1',
-    sourceSystem: 'test',
-    borrowerName: 'Alex',
-    borrowerRole: 'borrower',
-    coBorrowerName: '',
-    coBorrowerRole: '',
+    channel: 'Retail',
+    loanNumber: 'LP-1001',
+    borrowerFirstName: 'Alex',
+    borrowerLastName: 'Johnson',
+    numberOfBorrowers: '1',
     contactEmail: 'alex@example.test',
     creditStatus: 'known',
-    creditScore: '720',
-    creditScoreSource: 'borrower',
-    creditReportDate: '2026-06-17',
-    creditReadiness: 'ready',
+    decisionCreditScore: '720',
+    citizenshipType: 'US Citizen',
+    professional: 'No',
     loanPurpose: 'purchase',
-    loanAmount: '450000',
-    purchasePriceOrValue: '500000',
+    baseLoanAmount: '450000',
     downPaymentOrEquity: '50000',
-    subordinateFinancingAmount: '0',
-    helocDrawnAmount: '0',
-    helocLimitAmount: '0',
-    lienPosition: 'first',
-    termMonths: '360',
-    amortizationType: 'fixed',
-    requestedLockPeriodDays: '30',
-    propertyState: 'CA',
-    propertyCounty: 'Los Angeles',
+    lienPosition: 'First',
+    desiredLoanTerm: '30',
+    desiredAmortizationType: 'Fixed',
+    desiredRateLockPeriod: '30',
+    desiredInterestRate: '',
+    prepaymentPenaltyTerm: 'No Prepay',
+    waiveEscrows: 'No',
+    interestOnly: 'No',
+    mortgageType: 'Conventional',
+    state: 'CA',
     propertyZip: '90001',
-    propertyType: 'single-family',
-    occupancyType: 'primary',
-    unitCount: '1',
+    propertyType: 'Single Family',
+    occupancyType: 'Primary Residence',
+    numberOfUnits: '1',
+    propertyLocation: 'Not Applicable',
+    numberOfLeasedUnits: '0',
+    shortTermRental: 'No',
+    monthlyMarketRent: '',
+    investorExperience: 'Non-Experienced',
+    additionalMonthlyHousingExpenses: '',
+    propertySquareFootage: '',
+    propertyAcreageNumber: '',
+    monthlyTaxes: '',
+    monthlyInsurance: '',
+    monthlyHOA: '',
+    additionalAnnualHousingExpenses: '',
+    annualTaxes: '',
+    annualInsurance: '',
+    annualHOA: '',
     purchasePrice: '500000',
     appraisedValue: '500000',
-    condoProjectType: '',
-    manufacturedHomeFlag: 'false',
-    monthlyIncome: '12000',
-    incomeType: 'w2',
-    employmentType: 'employed',
+    selfEmployed: 'No',
+    totalBorrowerIncome: '12000',
     monthlyDebt: '1000',
-    suppliedDti: '20',
-    reserveMonths: '6',
-    incomeVerificationStatus: 'verified',
-    assetVerificationStatus: 'verified',
+    estimatedDti: '20',
+    monthsOfReserves: '6',
     liquidAssets: '100000',
-    reserves: '50000',
-    productFamily: 'conventional',
-    productPreference: 'fixed',
-    quoteFilters: '',
-    effectiveDate: '2026-06-17',
-    actorId: 'tester',
-    clientContext: 'vitest',
+    documentationType: 'Full Documentation',
+    secondaryDocumentationType: 'None',
+    estimatedDscr: '',
+    gift: 'No',
+    achPayment: 'No',
+    mortgageLatePayments: 'No',
+    creditEvent: 'No',
+    wholesaleCompensation: 'Borrower Paid',
+    lockExtension: '',
+    lockExtension2: '',
+    concession: 'No',
+    secondaryAdjustment: 'No',
+    aus: 'None',
+    manualUnderwriting: 'No',
   };
 }
 

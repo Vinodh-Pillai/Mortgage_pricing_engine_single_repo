@@ -1,57 +1,127 @@
 export type BorrowerIntake = {
-  quoteIntent: string;
   channel: string;
-  scenarioName: string;
-  externalLoanId: string;
-  sourceSystem: string;
-  borrowerName: string;
-  borrowerRole: string;
-  coBorrowerName: string;
-  coBorrowerRole: string;
+  loanNumber: string;
+  borrowerFirstName: string;
+  borrowerLastName: string;
+  numberOfBorrowers: string;
   contactEmail: string;
   creditStatus: string;
-  creditScore: string;
-  creditScoreSource: string;
-  creditReportDate: string;
-  creditReadiness: string;
+  decisionCreditScore: string;
+  citizenshipType: string;
+  professional: string;
   loanPurpose: string;
-  loanAmount: string;
-  purchasePriceOrValue: string;
+  baseLoanAmount: string;
   downPaymentOrEquity: string;
-  subordinateFinancingAmount: string;
-  helocDrawnAmount: string;
-  helocLimitAmount: string;
   lienPosition: string;
-  termMonths: string;
-  amortizationType: string;
-  requestedLockPeriodDays: string;
-  propertyState: string;
-  propertyCounty: string;
+  desiredLoanTerm: string;
+  desiredAmortizationType: string;
+  desiredRateLockPeriod: string;
+  desiredInterestRate: string;
+  prepaymentPenaltyTerm: string;
+  waiveEscrows: string;
+  interestOnly: string;
+  mortgageType: string;
+  state: string;
   propertyZip: string;
   propertyType: string;
   occupancyType: string;
-  unitCount: string;
+  numberOfUnits: string;
+  propertyLocation: string;
+  numberOfLeasedUnits: string;
+  shortTermRental: string;
+  monthlyMarketRent: string;
+  investorExperience: string;
+  additionalMonthlyHousingExpenses: string;
+  propertySquareFootage: string;
+  propertyAcreageNumber: string;
+  monthlyTaxes: string;
+  monthlyInsurance: string;
+  monthlyHOA: string;
+  additionalAnnualHousingExpenses: string;
+  annualTaxes: string;
+  annualInsurance: string;
+  annualHOA: string;
   purchasePrice: string;
   appraisedValue: string;
-  condoProjectType: string;
-  manufacturedHomeFlag: string;
-  monthlyIncome: string;
-  incomeType: string;
-  employmentType: string;
+  selfEmployed: string;
+  totalBorrowerIncome: string;
   monthlyDebt: string;
-  suppliedDti: string;
-  reserveMonths: string;
-  incomeVerificationStatus: string;
-  assetVerificationStatus: string;
+  estimatedDti: string;
+  monthsOfReserves: string;
   liquidAssets: string;
-  reserves: string;
-  productFamily: string;
-  productPreference: string;
-  quoteFilters: string;
-  effectiveDate: string;
-  actorId: string;
-  clientContext: string;
+  documentationType: string;
+  secondaryDocumentationType: string;
+  estimatedDscr: string;
+  gift: string;
+  achPayment: string;
+  mortgageLatePayments: string;
+  creditEvent: string;
+  wholesaleCompensation: string;
+  lockExtension: string;
+  lockExtension2: string;
+  concession: string;
+  secondaryAdjustment: string;
+  aus: string;
+  manualUnderwriting: string;
+
+  /** Legacy UI fields retained only for backwards-compatible compiled callers; LoanPass launch payloads exclude them. */
+  quoteIntent?: string;
+  scenarioName?: string;
+  externalLoanId?: string;
+  sourceSystem?: string;
+  borrowerName?: string;
+  borrowerRole?: string;
+  coBorrowerName?: string;
+  coBorrowerRole?: string;
+  creditScore?: string;
+  creditScoreSource?: string;
+  creditReportDate?: string;
+  creditReadiness?: string;
+  loanAmount?: string;
+  purchasePriceOrValue?: string;
+  subordinateFinancingAmount?: string;
+  helocDrawnAmount?: string;
+  helocLimitAmount?: string;
+  termMonths?: string;
+  amortizationType?: string;
+  requestedLockPeriodDays?: string;
+  propertyState?: string;
+  propertyCounty?: string;
+  unitCount?: string;
+  condoProjectType?: string;
+  manufacturedHomeFlag?: string;
+  monthlyIncome?: string;
+  incomeType?: string;
+  employmentType?: string;
+  suppliedDti?: string;
+  reserveMonths?: string;
+  incomeVerificationStatus?: string;
+  assetVerificationStatus?: string;
+  reserves?: string;
+  productFamily?: string;
+  productPreference?: string;
+  quoteFilters?: string;
+  effectiveDate?: string;
+  actorId?: string;
+  clientContext?: string;
 };
+
+export const loanPassQuoteIntakeFields = [
+  'channel', 'loanNumber', 'borrowerFirstName', 'borrowerLastName', 'numberOfBorrowers', 'contactEmail', 'creditStatus', 'decisionCreditScore', 'citizenshipType', 'professional',
+  'loanPurpose', 'baseLoanAmount', 'downPaymentOrEquity', 'lienPosition', 'desiredLoanTerm', 'desiredAmortizationType', 'desiredRateLockPeriod', 'desiredInterestRate', 'prepaymentPenaltyTerm', 'waiveEscrows', 'interestOnly', 'mortgageType',
+  'state', 'propertyZip', 'propertyType', 'occupancyType', 'numberOfUnits', 'propertyLocation', 'numberOfLeasedUnits', 'shortTermRental', 'monthlyMarketRent', 'investorExperience', 'additionalMonthlyHousingExpenses', 'propertySquareFootage', 'propertyAcreageNumber', 'monthlyTaxes', 'monthlyInsurance', 'monthlyHOA', 'additionalAnnualHousingExpenses', 'annualTaxes', 'annualInsurance', 'annualHOA', 'purchasePrice', 'appraisedValue',
+  'selfEmployed', 'totalBorrowerIncome', 'monthlyDebt', 'estimatedDti', 'monthsOfReserves', 'liquidAssets', 'documentationType', 'secondaryDocumentationType', 'estimatedDscr', 'gift', 'achPayment', 'mortgageLatePayments', 'creditEvent', 'wholesaleCompensation', 'lockExtension', 'lockExtension2', 'concession', 'secondaryAdjustment', 'aus', 'manualUnderwriting',
+] as const satisfies ReadonlyArray<keyof BorrowerIntake>;
+
+export type LoanPassQuoteIntakePayload = Pick<BorrowerIntake, typeof loanPassQuoteIntakeFields[number]>;
+
+export function toLoanPassQuoteIntakePayload(intake: BorrowerIntake): LoanPassQuoteIntakePayload {
+  const payload: Partial<LoanPassQuoteIntakePayload> = {};
+  for (const field of loanPassQuoteIntakeFields) {
+    (payload as Record<keyof LoanPassQuoteIntakePayload, string>)[field] = intake[field];
+  }
+  return payload as LoanPassQuoteIntakePayload;
+}
 
 export type ScenarioIntakeField = {
   fieldId: keyof BorrowerIntake;
@@ -419,7 +489,7 @@ export async function launchQuoteRun(
       'Content-Type': 'application/json',
       'X-Ui-Trace-Id': 'brw-s01-local-trace',
     },
-    body: JSON.stringify(intake),
+    body: JSON.stringify(toLoanPassQuoteIntakePayload(intake)),
   });
 
   return readPipelineJson<QuoteRunLaunch>(response, {

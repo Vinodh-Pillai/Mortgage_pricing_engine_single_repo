@@ -24,41 +24,135 @@ const usStateOptions: SelectOption[] = [
 const selectOptionsByField: Partial<Record<keyof BorrowerIntake, SelectOption[]>> = {
   channel: [
     { value: '', label: 'Select channel' },
-    { value: 'RETAIL', label: 'Retail' },
-    { value: 'WHOLESALE', label: 'Wholesale' },
-    { value: 'CORRESPONDENT', label: 'Correspondent' },
-    { value: 'CONSUMER_DIRECT', label: 'Consumer Direct' },
+    { value: 'Retail', label: 'Retail' },
+    { value: 'Wholesale', label: 'Wholesale' },
+    { value: 'Correspondent', label: 'Correspondent' },
+    { value: 'Consumer Direct', label: 'Consumer Direct' },
   ],
-  incomeType: [
-    { value: '', label: 'Select income type' },
-    { value: 'W2', label: 'W-2' },
-    { value: 'SELF_EMPLOYED', label: 'Self-Employed' },
-    { value: 'RETIREMENT', label: 'Retirement' },
-    { value: 'OTHER', label: 'Other' },
+  documentationType: [
+    { value: '', label: 'Select documentation type' },
+    { value: 'DSCR', label: 'DSCR' },
+    { value: 'Full Documentation', label: 'Full Documentation' },
+    { value: 'Bank Statements', label: 'Bank Statements' },
+    { value: '1099', label: '1099' },
+    { value: 'Profit and Loss', label: 'Profit and Loss' },
+    { value: 'WVOE Only', label: 'WVOE Only' },
+    { value: 'Asset Utilization', label: 'Asset Utilization' },
+    { value: 'ATR-In-Full', label: 'ATR-In-Full' },
+    { value: 'K-1 Only', label: 'K-1 Only' },
   ],
-  incomeVerificationStatus: [
-    { value: '', label: 'Select income verification status' },
-    { value: 'VERIFIED', label: 'Verified' },
-    { value: 'STATED', label: 'Stated' },
-    { value: 'UNKNOWN', label: 'Unknown' },
-    { value: 'NOT_REQUIRED', label: 'Not Required' },
+  secondaryDocumentationType: [
+    { value: '', label: 'Select secondary documentation type' },
+    { value: 'None', label: 'None' },
+    { value: 'Bank Statement', label: 'Bank Statement' },
+    { value: '1099', label: '1099' },
+    { value: 'P&L', label: 'P&L' },
+    { value: 'Asset Depletion', label: 'Asset Depletion' },
+    { value: 'WVOE', label: 'WVOE' },
+    { value: 'ATR-in-Full', label: 'ATR-in-Full' },
+    { value: 'Streamline', label: 'Streamline' },
+    { value: 'K-1', label: 'K-1' },
+    { value: 'Asset Qualifier', label: 'Asset Qualifier' },
+    { value: 'Asset Utilization', label: 'Asset Utilization' },
   ],
-  propertyState: usStateOptions,
+  state: usStateOptions,
   propertyType: [
     { value: '', label: 'Select property type' },
-    { value: 'SINGLE_FAMILY', label: 'Single Family' },
-    { value: 'CONDO', label: 'Condo' },
-    { value: 'TOWNHOUSE', label: 'Townhouse' },
-    { value: 'MULTI_FAMILY_2_4', label: 'Multi-Family (2-4 units)' },
-    { value: 'MANUFACTURED', label: 'Manufactured Home' },
+    { value: 'Single Family', label: 'Single Family' },
+    { value: 'Condominium', label: 'Condominium' },
+    { value: 'Condotel', label: 'Condotel' },
+    { value: 'Two to Four Family', label: 'Two to Four Family' },
+    { value: 'Manufactured Home', label: 'Manufactured Home' },
+    { value: 'PUD', label: 'PUD' },
+    { value: 'Multi-Family', label: 'Multi-Family' },
+    { value: 'Cooperative', label: 'Cooperative' },
+    { value: 'Townhouse', label: 'Townhouse' },
+    { value: 'Modular Home', label: 'Modular Home' },
+    { value: 'Mixed-Use', label: 'Mixed-Use' },
   ],
   occupancyType: [
     { value: '', label: 'Select occupancy type' },
-    { value: 'PRIMARY_RESIDENCE', label: 'Primary Residence' },
-    { value: 'SECOND_HOME', label: 'Second Home' },
-    { value: 'INVESTMENT_PROPERTY', label: 'Investment Property' },
+    { value: 'Investment', label: 'Investment' },
+    { value: 'Primary Residence', label: 'Primary Residence' },
+    { value: 'Second Home', label: 'Second Home' },
   ],
+  lienPosition: [
+    { value: '', label: 'Select lien position' },
+    { value: 'First', label: 'First' },
+    { value: 'Second', label: 'Second' },
+  ],
+  desiredAmortizationType: [
+    { value: '', label: 'Select amortization type' },
+    { value: 'Fixed', label: 'Fixed' },
+    { value: 'Adjustable Rate', label: 'Adjustable Rate' },
+  ],
+  mortgageType: [
+    { value: '', label: 'Select mortgage type' },
+    { value: 'Conventional', label: 'Conventional' },
+    { value: 'NonQM', label: 'NonQM' },
+    { value: 'FHA', label: 'FHA' },
+    { value: 'VA', label: 'VA' },
+    { value: 'Jumbo', label: 'Jumbo' },
+    { value: 'Home Equity', label: 'Home Equity' },
+  ],
+  selfEmployed: yesNoOptions('Select self-employed status'),
+  citizenshipType: [
+    { value: '', label: 'Select citizenship type' },
+    { value: 'US Citizen', label: 'US Citizen' },
+    { value: 'Permanent Resident Alien', label: 'Permanent Resident Alien' },
+    { value: 'Non-Permanent Resident Alien', label: 'Non-Permanent Resident Alien' },
+    { value: 'Foreign National', label: 'Foreign National' },
+    { value: 'ITIN', label: 'ITIN' },
+    { value: 'DACA', label: 'DACA' },
+  ],
+  propertyLocation: [
+    { value: '', label: 'Select property location' },
+    { value: 'Not Applicable', label: 'Not Applicable' },
+    { value: 'Rural Property', label: 'Rural Property' },
+  ],
+  investorExperience: [
+    { value: '', label: 'Select investor experience' },
+    { value: 'Experienced', label: 'Experienced' },
+    { value: 'Non-Experienced', label: 'Non-Experienced' },
+  ],
+  wholesaleCompensation: [
+    { value: '', label: 'Select wholesale compensation' },
+    { value: 'Borrower Paid', label: 'Borrower Paid' },
+    { value: 'Lender Paid', label: 'Lender Paid' },
+  ],
+  prepaymentPenaltyTerm: [
+    { value: '', label: 'Select prepayment penalty term' },
+    { value: 'No Prepay', label: 'No Prepay' },
+    { value: '6 Month', label: '6 Month' },
+    { value: '1 Year', label: '1 Year' },
+    { value: '2 Year', label: '2 Year' },
+    { value: '3 Year', label: '3 Year' },
+    { value: '4 Year', label: '4 Year' },
+    { value: '5 Year', label: '5 Year' },
+  ],
+  waiveEscrows: yesNoOptions('Select escrow waiver'),
+  gift: yesNoOptions('Select gift'),
+  aus: [
+    { value: '', label: 'Select AUS' },
+    { value: 'FannieMae DU', label: 'FannieMae DU' },
+    { value: 'None', label: 'None' },
+    { value: 'FreddieMac LP', label: 'FreddieMac LP' },
+    { value: 'USDA GUS', label: 'USDA GUS' },
+  ],
+  manualUnderwriting: yesNoOptions('Select manual underwriting'),
+  interestOnly: yesNoOptions('Select interest-only'),
+  achPayment: yesNoOptions('Select ACH payment'),
+  mortgageLatePayments: yesNoOptions('Select mortgage late payments'),
+  creditEvent: yesNoOptions('Select credit event'),
+  concession: yesNoOptions('Select concession'),
+  secondaryAdjustment: yesNoOptions('Select secondary adjustment'),
+  shortTermRental: yesNoOptions('Select short-term rental'),
+  professional: yesNoOptions('Select professional status'),
 };
+
+function yesNoOptions(placeholder: string): SelectOption[] {
+  return [{ value: '', label: placeholder }, { value: 'Yes', label: 'Yes' }, { value: 'No', label: 'No' }];
+}
 
 export type StepFieldsProps = {
   fields: ScenarioIntakeField[];
@@ -74,7 +168,7 @@ export function StepFields({ fields, intake, errors, onChange }: StepFieldsProps
 
   return (
     <div className="quote-intake-fields">
-      {fields.map((field) => <MetadataDrivenField key={field.fieldId} field={field} value={intake[field.fieldId]} error={errors[field.fieldId]} onChange={onChange} />)}
+      {fields.map((field) => <MetadataDrivenField key={field.fieldId} field={field} value={intake[field.fieldId] ?? ''} error={errors[field.fieldId]} onChange={onChange} />)}
     </div>
   );
 }
@@ -99,6 +193,7 @@ function MetadataDrivenField({
     id: field.fieldId,
     name: field.fieldId,
     value: renderedValue,
+    required: field.required,
     'aria-invalid': Boolean(error),
     'aria-describedby': describedBy,
     onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => onChange(field.fieldId, event.target.value),
@@ -130,7 +225,7 @@ function MetadataDrivenField({
 }
 
 function dateLikeField(fieldId: keyof BorrowerIntake) {
-  return /Date$/.test(fieldId) || fieldId === 'effectiveDate';
+  return /Date$/.test(fieldId);
 }
 
 function optionsForField(fieldId: keyof BorrowerIntake, value: string): SelectOption[] | undefined {
@@ -141,7 +236,7 @@ function optionsForField(fieldId: keyof BorrowerIntake, value: string): SelectOp
 }
 
 function displayValue(fieldId: keyof BorrowerIntake, value: string) {
-  if ((fieldId === 'purchasePrice' || fieldId === 'purchasePriceOrValue') && value.trim() === '-1') return '';
+  if ((fieldId === 'purchasePrice' || fieldId === 'appraisedValue') && value.trim() === '-1') return '';
   return value;
 }
 

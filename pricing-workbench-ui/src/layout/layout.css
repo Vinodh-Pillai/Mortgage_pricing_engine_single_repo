@@ -1,5 +1,9 @@
 .layout-shell {
   --layout-nav-width: 280px;
+  --layout-z-sticky: 100;
+  --layout-z-drawer-backdrop: 900;
+  --layout-z-drawer: 950;
+  --layout-z-dropdown: 1000;
 
   background:
     radial-gradient(circle at 8% 0%, color-mix(in srgb, var(--ds-color-primary) 18%, transparent), transparent 28rem),
@@ -59,7 +63,7 @@
   padding: 0.75rem clamp(1rem, 3vw, 2rem);
   position: sticky;
   top: 0;
-  z-index: var(--ds-z-sticky);
+  z-index: var(--layout-z-sticky);
 }
 
 .layout-header__menu {
@@ -166,7 +170,16 @@
 
 .layout-user-menu-shell {
   position: relative;
-  z-index: var(--ds-z-dropdown);
+  z-index: var(--layout-z-dropdown);
+}
+
+.layout-user-menu[aria-expanded='true'] .layout-user-menu__arrow {
+  transform: rotate(180deg);
+}
+
+.layout-user-menu__arrow {
+  display: inline-block;
+  transition: transform 250ms var(--ds-ease-standard);
 }
 
 .layout-user-menu__dropdown {
@@ -182,7 +195,7 @@
   position: absolute;
   right: 0;
   top: calc(100% + 0.75rem);
-  z-index: var(--ds-z-tooltip);
+  z-index: var(--layout-z-dropdown);
 }
 
 .layout-user-menu__identity {
@@ -244,13 +257,18 @@
   display: inline-flex;
   font-size: var(--ds-font-size-sm);
   font-weight: 900;
-  gap: 0.5rem;
+  height: 40px;
+  justify-content: center;
   line-height: 1;
-  padding: 0.35rem 0.55rem;
+  min-height: 40px;
+  min-width: 40px;
+  padding: 0;
+  width: 40px;
 }
 
 .layout-theme-toggle:hover,
-.layout-theme-toggle:focus-visible {
+.layout-theme-toggle:focus-visible,
+.layout-theme-toggle:active {
   border-color: var(--ds-glass-border-strong);
   box-shadow: var(--ds-shadow-focus);
   outline: 0;
@@ -261,6 +279,16 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.layout-nav-backdrop {
+  background: rgb(7 17 31 / 58%);
+  border: 0;
+  cursor: pointer;
+  inset: 0;
+  padding: 0;
+  position: fixed;
+  z-index: var(--layout-z-drawer-backdrop);
 }
 
 .layout-frame {
@@ -478,14 +506,17 @@
   .layout-nav--drawer {
     backdrop-filter: var(--ds-glass-blur-strong);
     background: var(--ds-glass-background);
-    inset: 0;
+    bottom: 0;
+    left: 0;
     min-height: 100dvh;
     max-height: none;
     overflow: auto;
     position: fixed;
     top: 0;
-    width: 100vw;
-    z-index: var(--ds-z-modal);
+    transform: translateX(0);
+    transition: transform 250ms var(--ds-ease-standard);
+    width: min(22rem, calc(100vw - 3rem));
+    z-index: var(--layout-z-drawer);
   }
 
   .layout-content {

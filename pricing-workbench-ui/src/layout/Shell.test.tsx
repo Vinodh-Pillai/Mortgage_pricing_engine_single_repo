@@ -109,6 +109,11 @@ describe('responsive layout shell', () => {
     menuButton.focus();
     fireEvent.click(menuButton);
     expect(screen.getByRole('dialog', { name: 'Primary navigation drawer' })).toBeInTheDocument();
+    expect(document.querySelector('.layout-nav-backdrop')).toBeInTheDocument();
+    fireEvent.click(document.querySelector('.layout-nav-backdrop') as Element);
+    expect(screen.queryByRole('dialog', { name: 'Primary navigation drawer' })).not.toBeInTheDocument();
+    fireEvent.click(menuButton);
+    expect(screen.getByRole('dialog', { name: 'Primary navigation drawer' })).toBeInTheDocument();
     fireEvent.keyDown(screen.getByRole('dialog', { name: 'Primary navigation drawer' }), { key: 'Escape' });
     expect(screen.queryByRole('dialog', { name: 'Primary navigation drawer' })).not.toBeInTheDocument();
     expect(menuButton).toHaveFocus();
@@ -169,11 +174,18 @@ describe('responsive layout shell', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'User menu for Alex Rivera' }));
-    expect(screen.getByRole('menu', { name: 'User menu for Alex Rivera' })).toHaveTextContent('Logout');
+    expect(screen.getByRole('menu', { name: 'User menu for Alex Rivera' })).toHaveTextContent('Profile');
+    expect(screen.getByRole('menu', { name: 'User menu for Alex Rivera' })).toHaveTextContent('Settings');
+    expect(screen.getByRole('menu', { name: 'User menu for Alex Rivera' })).toHaveTextContent('Sign Out');
+    expect(screen.getByRole('menuitem', { name: 'Profile' })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole('menu', { name: 'User menu for Alex Rivera' }), { key: 'Tab', shiftKey: true });
+    expect(screen.getByRole('menuitem', { name: 'Sign Out' })).toHaveFocus();
     expect(screen.getAllByText('Pricing analyst').some((element) => element.classList.contains('layout-role-badge'))).toBe(true);
 
     const themeToggle = screen.getByRole('button', { name: 'Toggle theme' });
     expect(themeToggle).toHaveClass('layout-theme-toggle');
+    expect(themeToggle).toHaveAttribute('title', 'Toggle theme');
+    expect(themeToggle).toHaveTextContent('☀️');
     fireEvent.click(themeToggle);
     expect(themeStorageKey).toBe('wcpe:design-system-theme');
     expect(window.localStorage.getItem(themeStorageKey)).toBe('light');
@@ -183,8 +195,11 @@ describe('responsive layout shell', () => {
 
   it('keeps profile dropdown above base content layer', () => {
     expect(zIndex.base).toBe(0);
-    expect(zIndex.dropdown).toBe(200);
-    expect(zIndex.dropdown).toBeGreaterThan(zIndex.base);
+    expect(zIndex.sticky).toBe(100);
+    expect(zIndex.drawerBackdrop).toBe(900);
+    expect(zIndex.drawer).toBe(950);
+    expect(zIndex.dropdown).toBe(1000);
+    expect(zIndex.dropdown).toBeGreaterThan(zIndex.drawer);
   });
 
   it('supports arrow-key movement through nav rail links', () => {

@@ -31,7 +31,11 @@ export function CollapsibleSection({ id, title, summary, expanded, alwaysExpande
         </span>
         {hasErrors ? <em>Needs review</em> : null}
       </button>
-      {expanded ? <div id={panelId} className="quote-intake-section__panel">{children}</div> : null}
+      {expanded ? (
+        <div id={panelId} className="quote-intake-section__panel">
+          <div className="quote-intake-section__panel-inner">{children}</div>
+        </div>
+      ) : null}
     </section>
   );
 }

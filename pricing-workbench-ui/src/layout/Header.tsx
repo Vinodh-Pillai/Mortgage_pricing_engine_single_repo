@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Avatar, Button, roleColorKeyForLabel, roleColors, themeStorageKey } from '../design-system';
 import { useTranslation } from '../lib/i18n';
 
@@ -19,6 +19,8 @@ export function Header({ breadcrumb, drawerOpen, notificationCount, showAuthenti
   const { t } = useTranslation('common');
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const userMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const userMenuDropdownRef = useRef<HTMLDivElement>(null);
   const roleColorKey = roleColorKeyForLabel(user.role);
   const roleColor = roleColors[roleColorKey];
   const displayName = user.name?.trim() || t('pricingWorkbench');
@@ -34,7 +36,10 @@ export function Header({ breadcrumb, drawerOpen, notificationCount, showAuthenti
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) setUserMenuOpen(false);
     };
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape') setUserMenuOpen(false);
+      if (event.key === 'Escape') {
+        setUserMenuOpen(false);
+        userMenuTriggerRef.current?.focus();
+      }
     };
     document.addEventListener('pointerdown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
@@ -42,7 +47,34 @@ export function Header({ breadcrumb, drawerOpen, notificationCount, showAuthenti
       document.removeEventListener('pointerdown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
     };
+  }, [showAuthenticatedChrome, userMenuOpen]);
+
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    userMenuDropdownRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
   }, [userMenuOpen]);
+
+  const closeUserMenu = () => setUserMenuOpen(false);
+
+  const handleUserMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeUserMenu();
+      userMenuTriggerRef.current?.focus();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const items = Array.from(userMenuDropdownRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+    if (!items.length) return;
+    const currentIndex = items.indexOf(document.activeElement as HTMLElement);
+    if (event.shiftKey && currentIndex <= 0) {
+      event.preventDefault();
+      items[items.length - 1].focus();
+    } else if (!event.shiftKey && currentIndex === items.length - 1) {
+      event.preventDefault();
+      items[0].focus();
+    }
+  };
 
   const toggleTheme = () => {
     const nextTheme = theme === 'dark' ? 'light' : 'dark';
@@ -94,21 +126,21 @@ export function Header({ breadcrumb, drawerOpen, notificationCount, showAuthenti
           size="sm"
           aria-pressed={theme === 'dark'}
           aria-label={t('toggleTheme')}
-          title={t('theme', { theme: theme === 'dark' ? t('dark') : t('light') })}
+          title={t('toggleTheme')}
           onClick={toggleTheme}
         >
-          <span aria-hidden="true">{theme === 'dark' ? '🌙' : '☀️'}</span>
-          <span className="layout-theme-toggle__text">{theme === 'dark' ? t('dark') : t('light')}</span>
+          <span aria-hidden="true">{theme === 'dark' ? '☀️' : '🌙'}</span>
         </Button>
         {showAuthenticatedChrome ? (
           <div className="layout-user-menu-shell" ref={menuRef}>
-            <button className="layout-user-menu" type="button" aria-haspopup="menu" aria-expanded={userMenuOpen} aria-label={t('userMenuFor', { name: displayName })} onClick={() => setUserMenuOpen((open) => !open)}>
+            <button ref={userMenuTriggerRef} className="layout-user-menu" type="button" aria-haspopup="menu" aria-expanded={userMenuOpen} aria-controls="layout-user-menu-dropdown" aria-label={t('userMenuFor', { name: displayName })} onClick={() => setUserMenuOpen((open) => !open)}>
               <Avatar initials={initials} roleColor={roleColor} roleLabel={user.role} aria-hidden="true" />
               <span>{displayName}</span>
               <small>{user.role}</small>
+              <span className="layout-user-menu__arrow" aria-hidden="true">⌄</span>
             </button>
             {userMenuOpen ? (
-              <div className="layout-user-menu__dropdown" role="menu" aria-label={t('userMenuFor', { name: displayName })}>
+              <div id="layout-user-menu-dropdown" ref={userMenuDropdownRef} className="layout-user-menu__dropdown" role="menu" aria-label={t('userMenuFor', { name: displayName })} onKeyDown={handleUserMenuKeyDown}>
                 <div className="layout-user-menu__identity">
                   <Avatar initials={initials} roleColor={roleColor} roleLabel={user.role} aria-hidden="true" />
                   <div>
@@ -116,7 +148,9 @@ export function Header({ breadcrumb, drawerOpen, notificationCount, showAuthenti
                     <span className="layout-role-badge" style={{ '--layout-role-color': roleColor } as CSSProperties}>{user.role}</span>
                   </div>
                 </div>
-                <button type="button" role="menuitem" className="layout-user-menu__item" onClick={() => { onLogout?.(); setUserMenuOpen(false); }}>{t('logout')}</button>
+                <button type="button" role="menuitem" className="layout-user-menu__item" onClick={closeUserMenu}>{t('profile')}</button>
+                <button type="button" role="menuitem" className="layout-user-menu__item" onClick={closeUserMenu}>{t('settings')}</button>
+                <button type="button" role="menuitem" className="layout-user-menu__item" onClick={() => { onLogout?.(); closeUserMenu(); }}>Sign Out</button>
               </div>
             ) : null}
           </div>

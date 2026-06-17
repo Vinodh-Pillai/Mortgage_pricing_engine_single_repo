@@ -102,16 +102,19 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, modul
       />
       <div className="layout-frame">
         {showAuthenticatedChrome ? (
-          <NavRail
-            activeModuleId={activeModuleId}
-            activeRunId={activeRunId}
-            collapsed={railCollapsed}
-            drawerOpen={drawerOpen}
-            mode={mode}
-            modules={modules}
-            onCloseDrawer={closeDrawer}
-            onToggleCollapsed={toggleCollapsed}
-          />
+          <>
+            {mode === 'drawer' && drawerOpen ? <button type="button" className="layout-nav-backdrop" aria-label="Close navigation backdrop" onClick={closeDrawer} /> : null}
+            <NavRail
+              activeModuleId={activeModuleId}
+              activeRunId={activeRunId}
+              collapsed={railCollapsed}
+              drawerOpen={drawerOpen}
+              mode={mode}
+              modules={modules}
+              onCloseDrawer={closeDrawer}
+              onToggleCollapsed={toggleCollapsed}
+            />
+          </>
         ) : null}
         <ContentArea>{children}</ContentArea>
       </div>
