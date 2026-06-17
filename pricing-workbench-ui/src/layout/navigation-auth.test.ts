@@ -41,7 +41,7 @@ describe('navigation RBAC filtering', () => {
   it('NavigationTest.buildsVisibleTreeWithPersonaBadges', () => {
     const opsLead = getPersonaById('persona-operations-lead')!;
     const items = buildNavigationTree(modules, 'run-123', opsLead);
-    expect(items).toHaveLength(1);
-    expect(items[0]).toEqual(expect.objectContaining({ label: 'Ops dashboard', route: '/ops/dashboard', group: 'Operations', badgeCount: 2 }));
+    expect(items).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Ops dashboard', route: '/ops/dashboard', group: 'Operations', badgeCount: 2 })]));
+    expect(items).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Quick Quote', group: 'Pipeline' })]));
   });
 });

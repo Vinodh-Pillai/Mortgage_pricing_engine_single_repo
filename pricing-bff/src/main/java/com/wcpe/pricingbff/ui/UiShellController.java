@@ -73,27 +73,33 @@ class PricingBffUiFallbackAdapter {
   ResponseEntity<ProductCatalogResult> createProductCatalogEntry(
       @RequestBody(required = false) Map<String, Object> product) {
     Map<String, String> blockers = new LinkedHashMap<>();
-    if (isBlankText(product, "productName")) {
-      blockers.put("productName", "Product name is required before a catalog draft can be recorded.");
+    if (isBlankText(product, "productId")) {
+      blockers.put("productId", "LoanPASS productId is required before a product can be returned to pricing clients.");
     }
-    if (isBlankText(product, "productOwner")) {
-      blockers.put("productOwner", "Product owner is required before a catalog draft can be recorded.");
+    if (isBlankText(product, "mortgageType")) {
+      blockers.put("mortgageType", "LoanPASS mortgageType is required before a product can be returned to pricing clients.");
     }
-    if (isBlankText(product, "borrowerNeed")) {
-      blockers.put("borrowerNeed", "Borrower need is required before a catalog draft can be recorded.");
+    if (isBlankText(product, "priceGroupId")) {
+      blockers.put("priceGroupId", "LoanPASS priceGroupId is required before a product can be returned to pricing clients.");
     }
     if (!blockers.isEmpty()) {
       return ResponseEntity.badRequest().body(new ProductCatalogResult(null, "BLOCKED",
-          "Complete the highlighted product fields.", "Finish product setup details.", blockers.values().stream().toList()));
+          "Complete the highlighted LoanPASS product fields.", "Provide productId, mortgageType, and priceGroupId.",
+          blockers.values().stream().toList(), null, List.of()));
     }
 
-    String productId = "product-" + Integer.toUnsignedString((normalized(product.get("productName")) + "|"
-        + normalized(product.get("productOwner"))).hashCode(), 36);
+    String productId = normalizedRaw(product.get("productId"));
+    LoanPassProduct productContract = new LoanPassProduct(productId, normalizedRaw(product.get("selectedProgramId")),
+        normalizedRaw(product.get("priceGroupId")), normalizedRaw(product.get("mortgageType")),
+        normalizedRaw(product.get("loanQualificationType")), normalizedRaw(product.get("desiredLoanTerm")),
+        normalizedRaw(product.get("desiredAmortizationType")), normalizedRaw(product.get("channelType")));
     return ResponseEntity.status(HttpStatus.CREATED).body(new ProductCatalogResult(productId, "RECORDED",
-        "Product catalog draft was recorded in local preview mode.",
-        "Connect configured product catalog services before production publishing.",
-        List.of("Product terms, eligibility, rates, thresholds, and regulatory values are not inferred.",
-            "Catalog publishing remains blocked until a configured product contract is available.")));
+        "LoanPASS product contract was recorded in local preview mode.",
+        "Resolve product authorization and versioned catalog snapshots before production pricing.",
+        List.of("Pricing rules, eligibility thresholds, rates, and regulatory values are not inferred.",
+            "Product authorization remains blocked until configured catalog mappings are available."),
+        productContract,
+        List.of("field@desired-mortgage-type", "field@desired-loan-term", "field@desired-amortization-type")));
   }
 
   ProductCatalogManagerView productCatalogManager(String tenantContext, String uiTraceId) {
@@ -157,78 +163,78 @@ class PricingBffUiFallbackAdapter {
         new ScenarioIntakeFieldGroup("scenario-identity", "Scenario identity",
             "Step 1: capture the minimum scenario and channel facts needed before progressive intake expands.",
             List.of(
-                metadataField("quoteIntent", "Quote intent", "scenario-identity", "select", true,
-                    "Select the backend-owned quote intent before the UI reveals downstream sections.", "scenario-service:quote-intent-catalog", "UNKNOWN",
-                    List.of("Scenario-service quote intent catalog is required before this can be marked verified.")),
+                metadataField("borrowerLastName", "Borrower last name", "scenario-identity", "text", true,
+                    "Capture the LoanPASS minimum borrower identity field.", "LoanPASS:quoteBorrowerInfo.borrowerLastName", "MAPPED",
+                    List.of()),
+                metadataField("loanNumber", "Loan number", "scenario-identity", "text", true,
+                    "Capture the LoanPASS quoteBorrowerInfo.loanNumber / external loan id.", "LoanPASS:quoteBorrowerInfo.loanNumber", "MAPPED",
+                    List.of()),
                 metadataField("channel", "Channel", "scenario-identity", "select", true,
-                    "Select the originating channel supplied by the configured scenario submission profile.", "catalog-service:channel-catalog", "UNKNOWN",
+                    "Select the LoanPASS channelType supplied by configured metadata.", "LoanPASS:channelType", "UNKNOWN",
                     List.of("Catalog-service channel catalog is required before this can be marked verified.")),
-                metadataField("scenarioName", "Scenario name", "scenario-identity", "text", false,
-                    "Optional local label for support, audit, and replay correlation.", "scenario-service:scenario-draft", "UNKNOWN",
-                    List.of("Configured scenario-service metadata is required before this field can be marked verified.")),
-                metadataField("externalLoanId", "External loan id", "scenario-identity", "text", false,
-                    "Store a caller-provided loan reference when available; do not infer one in the UI.", "scenario-service:create-request", "UNKNOWN", List.of()))),
+                metadataField("clientId", "Client id", "scenario-identity", "text", false,
+                    "Optional LoanPASS client identity when supplied by configured tenant mapping.", "LoanPASS:clientId", "UNKNOWN", List.of()))),
         new ScenarioIntakeFieldGroup("borrower-credit", "Borrower and credit",
             "Step 2: capture borrower and credit fact refs for downstream validation without local pricing decisions.",
             List.of(
-                metadataField("borrowerRole", "Borrower role", "borrower-credit", "select", false,
-                    "Identify the primary borrower role for scenario review.", "scenario-service:borrower-role-metadata", "UNKNOWN", List.of()),
-                metadataField("borrowerCount", "Borrower count", "borrower-credit", "number", false,
-                    "Capture borrower count as supplied; the BFF does not infer household composition.", "scenario-service:borrower-profile", "UNKNOWN", List.of()),
-                metadataField("creditScore", "Credit score", "borrower-credit", "number", false,
-                    "Optional borrower-provided score value; verified credit remains backend-owned.", "credit-service:credit-score", "UNKNOWN", List.of()),
-                metadataField("creditScoreSource", "Credit score source", "borrower-credit", "text", false,
-                    "Capture source labels without verifying credit in the UI.", "credit-service:source-ref", "UNKNOWN", List.of()))),
+                metadataField("numberOfBorrowers", "Number of borrowers", "borrower-credit", "number", false,
+                    "Map to quoteBorrowerInfo.numberOfBorrowers when supplied.", "LoanPASS:quoteBorrowerInfo.numberOfBorrowers", "MAPPED", List.of()),
+                metadataField("decisionCreditScore", "Decision credit score", "borrower-credit", "number", false,
+                    "Map to creditScore and field@decision-credit-score.", "LoanPASS:creditScore", "MAPPED", List.of()),
+                metadataField("documentationType", "Documentation type", "borrower-credit", "select", false,
+                    "Map to incomeDocumentationType and field@documentation-type.", "LoanPASS:incomeDocumentationType", "UNKNOWN", List.of()))),
         new ScenarioIntakeFieldGroup("loan-structure", "Loan structure",
             "Step 3: capture loan facts that quote-service needs for launch.",
             List.of(
                 metadataField("loanPurpose", "Loan purpose", "loan-structure", "select", false,
                     "Purpose fact captured for scenario completeness and quote launch.", "catalog-service:loan-purpose-catalog", "UNKNOWN", List.of()),
-                metadataField("loanAmount", "Loan amount", "loan-structure", "number", false,
-                    "Requested amount captured as a fact; the UI does not calculate ratios.", "scenario-service:loan-structure", "UNKNOWN", List.of()),
-                metadataField("purchasePriceOrValue", "Purchase price or estimated value", "loan-structure", "number", false,
-                    "Capture the purchase price or current estimated value without calculating ratios.", "loan-structure metadata", "UNKNOWN", List.of()),
+                metadataField("baseLoanAmount", "Base loan amount", "loan-structure", "number", false,
+                    "Map to requestedLoanAmount and field@base-loan-amount.", "LoanPASS:requestedLoanAmount", "MAPPED", List.of()),
+                metadataField("purchasePrice", "Purchase price", "loan-structure", "number", false,
+                    "Map to purchasePrice and field@purchase-price.", "LoanPASS:purchasePrice", "MAPPED", List.of()),
+                metadataField("appraisedValue", "Appraised value", "loan-structure", "number", false,
+                    "Map to propertyValue and field@appraised-value.", "LoanPASS:propertyValue", "MAPPED", List.of()),
                 metadataField("downPaymentOrEquity", "Down payment or equity", "loan-structure", "number", false,
                     "Capture down payment or equity as supplied by the user; no ratio is inferred.", "loan-structure metadata", "UNKNOWN", List.of()))),
         new ScenarioIntakeFieldGroup("property", "Property",
             "Step 4: capture property refs for configured downstream validation only.",
             List.of(
-                metadataField("propertyState", "Property state", "property", "select", false,
-                    "State reference captured for configured downstream validation.", "catalog-service:market-catalog", "UNKNOWN", List.of()),
-                metadataField("propertyCounty", "Property county", "property", "text", false,
-                    "County reference captured for configured validation.", "catalog-service:market-catalog", "UNKNOWN", List.of()),
+                metadataField("quoteAddressDTO.state", "Property state", "property", "select", false,
+                    "Map to quoteAddressDTO.state and field@state.", "LoanPASS:quoteAddressDTO.state", "MAPPED", List.of()),
+                metadataField("quoteAddressDTO.zip", "Property zip", "property", "text", false,
+                    "Map to quoteAddressDTO.zip.", "LoanPASS:quoteAddressDTO.zip", "MAPPED", List.of()),
+                metadataField("quoteAddressDTO.countyFips", "County FIPS", "property", "text", false,
+                    "Map to quoteAddressDTO.countyFips and field@county when configured.", "LoanPASS:quoteAddressDTO.countyFips", "UNKNOWN", List.of()),
                 metadataField("propertyType", "Property type", "property", "select", false,
                     "Property type captured for downstream scenario validation only.", "catalog-service:property-type-catalog", "UNKNOWN", List.of()),
                 metadataField("occupancyType", "Occupancy type", "property", "select", false,
                     "Occupancy fact captured for downstream scenario validation only.", "catalog-service:occupancy-catalog", "UNKNOWN", List.of()),
-                metadataField("unitCount", "Unit count", "property", "number", false,
-                    "Unit count captured when supplied; no property eligibility is inferred.", "property metadata", "UNKNOWN", List.of()))),
+                metadataField("numberOfUnits", "Number of units", "property", "number", false,
+                    "Map to numberOfUnits and field@number-of-units.", "LoanPASS:numberOfUnits", "MAPPED", List.of()))),
         new ScenarioIntakeFieldGroup("income-assets", "Income and assets",
             "Step 5: capture optional income and asset facts without deriving capacity or pricing.",
             List.of(
-                metadataField("monthlyIncome", "Monthly income", "income-assets", "number", false,
-                    "Optional income fact for downstream scenario-service validation.", "income-asset metadata", "UNKNOWN", List.of()),
-                metadataField("incomeType", "Employment or income type", "income-assets", "text", false,
-                    "Capture employment or income type as supplied by the borrower.", "income-asset metadata", "UNKNOWN", List.of()),
+                metadataField("totalMonthlyIncome", "Total monthly income", "income-assets", "number", false,
+                    "Map to totalMonthlyIncome and field@total-monthly-income.", "LoanPASS:totalMonthlyIncome", "MAPPED", List.of()),
                 metadataField("monthlyDebt", "Monthly debt", "income-assets", "number", false,
                     "Optional monthly debt fact for connected workflow review.", "income-asset metadata", "UNKNOWN", List.of()),
-                metadataField("liquidAssets", "Liquid assets", "income-assets", "number", false,
-                    "Optional asset fact for downstream scenario-service validation.", "income-asset metadata", "UNKNOWN", List.of()),
-                metadataField("reserves", "Reserves", "income-assets", "text", false,
-                    "Reserve information captured as supplied; no reserve requirement is inferred.", "income-asset metadata", "UNKNOWN", List.of()))),
-        new ScenarioIntakeFieldGroup("preferences", "Preferences",
-            "Step 6: capture product, filter, effective-date, and lock-period preferences as backend-owned refs.",
+                metadataField("estimatedDti", "Estimated DTI", "income-assets", "number", false,
+                    "Map to debtToIncomeRatio and field@estimated-dti.", "LoanPASS:debtToIncomeRatio", "MAPPED", List.of()),
+                metadataField("monthsOfReserves", "Months of reserves", "income-assets", "number", false,
+                    "Map to monthsOfReserves and field@months-of-reserves.", "LoanPASS:monthsOfReserves", "MAPPED", List.of()))),
+        new ScenarioIntakeFieldGroup("loan-product-controls", "Loan Product Controls",
+            "Step 6: capture LoanPASS product/pricing controls only.",
             List.of(
-                metadataField("productPreference", "Product preference", "preferences", "select", false,
-                    "Preference label or configured product ref supplied by catalog-service when available.", "catalog-service product preference", "UNKNOWN", List.of("Catalog-service product preference setup is unavailable in local preview mode.")),
-                metadataField("productFamily", "Product family preference", "preferences", "select", false,
-                    "Capture preferred product family labels without inferring eligibility or investor behavior.", "catalog-service product preference", "UNKNOWN", List.of()),
-                metadataField("quoteFilters", "Quote filters", "preferences", "textarea", false,
-                    "Filter refs or plain labels to pass to quote-service; the UI does not evaluate them.", "quote-service creation filters", "UNKNOWN", List.of("Configured filter schema is required before validation can be verified.")),
-                metadataField("effectiveDate", "Effective date", "preferences", "text", false,
-                    "Effective date supplied by the actor or configured client context; no default market date is inferred.", "quote-service effective date", "UNKNOWN", List.of("Quote-service requires an explicit effective date before live creation.")),
-                metadataField("requestedLockPeriods", "Requested lock periods", "preferences", "text", false,
-                    "Requested lock-period refs passed through for quote-service and lock-service; no durations are invented.", "lock-service:lock-period-catalog", "UNKNOWN", List.of("Configured lock-period catalog is required before options can be verified.")))));
+                metadataField("mortgageType", "Mortgage type", "loan-product-controls", "select", false,
+                    "Map to mortgageType and field@desired-mortgage-type.", "LoanPASS:mortgageType", "UNKNOWN", List.of()),
+                metadataField("desiredLoanTerm", "Desired loan term", "loan-product-controls", "select", false,
+                    "Map to loanTermType and field@desired-loan-term.", "LoanPASS:loanTermType", "UNKNOWN", List.of()),
+                metadataField("desiredAmortizationType", "Desired amortization type", "loan-product-controls", "select", false,
+                    "Map to amortizationType and field@desired-amortization-type.", "LoanPASS:amortizationType", "UNKNOWN", List.of()),
+                metadataField("desiredRateLockPeriod", "Desired rate lock period", "loan-product-controls", "number", false,
+                    "Map to desiredRateLockPeriod; do not send effectiveDate or quote filters.", "LoanPASS:desiredRateLockPeriod", "UNKNOWN", List.of()),
+                metadataField("lienPosition", "Lien position", "loan-product-controls", "select", false,
+                    "Map to lienPositionType and field@lien-position.", "LoanPASS:lienPositionType", "UNKNOWN", List.of()))));
     List<String> minimalFirstStepFields = fieldGroups.get(0).fields().stream()
         .filter(ScenarioIntakeField::required)
         .map(ScenarioIntakeField::fieldId)
@@ -241,16 +247,18 @@ class PricingBffUiFallbackAdapter {
         List.of(new ScenarioIntakeValidationIssue("SCENARIO_SERVICE_CONTRACT_REQUIRED", "scenarioService", "BLOCKING",
             "Scenario setup, validation guidance, review package, and review reference must be configured before connected quote decisions can change."),
             new ScenarioIntakeValidationIssue("QUOTE_SERVICE_CONTRACT_REQUIRED", "quoteService", "BLOCKING",
-                "Quote setup needs scenario id/version, filters, requested lock periods, effective date, actor id, and client context before live quote creation.")),
+                "Quote setup needs LoanPASS quoteBorrowerInfo, quoteAddressDTO, product controls, and creditApplicationFields before live quote creation.")),
         "review-package-required-after-scenario-create", "review-reference-required-after-scenario-create",
         "Connected scenario, catalog, eligibility, pricing, and lock contracts are not fully configured; this local response carries non-secret progressive sections and actionable setup blockers only.", traceId,
         new ProgressiveQuickQuoteState(
             minimalFirstStepFields,
             fieldGroups.stream().skip(1).map(ScenarioIntakeFieldGroup::groupId).toList(),
-            List.of("scenarioId", "scenarioVersion", "quoteIntent", "channel", "loanPurpose", "loanAmount"),
-            List.of("creditScore", "propertyValidation", "incomeVerification"),
-            List.of("investor-pricing-config", "margin-config", "scenario-service-contract", "catalog-service-contract", "lock-period-catalog"),
-            "Investor pricing, margin, scenario, catalog, and lock-period configuration are required for full quote launch."));
+            List.of("borrowerLastName", "loanNumber", "channel", "loanPurpose", "baseLoanAmount", "quoteAddressDTO.state",
+                "quoteAddressDTO.zip", "decisionCreditScore", "documentationType", "mortgageType", "desiredLoanTerm",
+                "desiredAmortizationType", "numberOfUnits"),
+            List.of("creditApplicationFields", "quoteAddressDTO", "catalog-enum-variants"),
+            List.of("loanpass-enum-mapping", "catalog-service-contract", "lock-period-catalog"),
+            "LoanPASS field mapping, catalog enum variants, and lock-period configuration are required for full quote launch."));
   }
 
   @PostMapping("/api/v1/tenants/{tenantId}/quote-runs/{runId}/intake/validate")
@@ -1475,11 +1483,14 @@ class PricingBffUiFallbackAdapter {
 
   private IntakeValidation validateBorrowerIntake(Map<String, Object> intake) {
     Map<String, String> blockers = new LinkedHashMap<>();
-    if (isBlankText(intake, "quoteIntent")) {
-      blockers.put("quoteIntent", "Quote intent is required before a quote run can start.");
+    if (isBlankText(intake, "borrowerLastName")) {
+      blockers.put("borrowerLastName", "Borrower last name is required before a LoanPASS quote run can start.");
+    }
+    if (isBlankText(intake, "loanNumber") && isBlankText(intake, "externalLoanId")) {
+      blockers.put("loanNumber", "Loan number or externalLoanId is required before a LoanPASS quote run can start.");
     }
     if (isBlankText(intake, "channel")) {
-      blockers.put("channel", "Channel is required before a quote run can start.");
+      blockers.put("channel", "LoanPASS channelType is required before a quote run can start.");
     }
 
     if (!blockers.isEmpty()) {
@@ -1491,9 +1502,10 @@ class PricingBffUiFallbackAdapter {
 
   private List<String> backendFactRefs(Map<String, Object> intake) {
     List<String> refs = new java.util.ArrayList<>();
-    List.of("scenarioId", "scenarioVersion", "quoteIntent", "channel", "loanPurpose", "loanAmount", "propertyState",
-        "occupancyType", "monthlyIncome", "liquidAssets", "productPreference", "quoteFilters", "effectiveDate",
-        "requestedLockPeriods", "actorId", "clientContext").forEach(field -> {
+    List.of("borrowerLastName", "loanNumber", "externalLoanId", "channel", "loanPurpose", "baseLoanAmount", "purchasePrice",
+        "appraisedValue", "quoteAddressDTO.state", "quoteAddressDTO.zip", "propertyType", "occupancyType", "numberOfUnits",
+        "decisionCreditScore", "documentationType", "totalMonthlyIncome", "estimatedDti", "mortgageType", "desiredLoanTerm",
+        "desiredAmortizationType", "desiredRateLockPeriod", "lienPosition", "actorId", "clientContext").forEach(field -> {
           if (!isBlankText(intake, field)) {
             refs.add("fact:" + field);
           }
@@ -1504,12 +1516,18 @@ class PricingBffUiFallbackAdapter {
   private List<String> quoteServiceMissingFacts(Map<String, Object> intake) {
     List<String> missing = new java.util.ArrayList<>();
     Map<String, String> required = new LinkedHashMap<>();
-    required.put("scenarioId", "Quote-service scenario id is missing; select or create a scenario through configured scenario-service.");
-    required.put("scenarioVersion", "Quote-service scenario version is missing; scenario-service version evidence is required.");
-    required.put("quoteIntent", "Quote intent is missing; scenario-service intent metadata is required before launch.");
-    required.put("channel", "Channel is missing; catalog or scenario submission profile evidence is required.");
-    required.put("loanPurpose", "Loan purpose is missing; quote-service launch requires an explicit purpose fact.");
-    required.put("loanAmount", "Loan amount is missing; quote-service launch requires an explicit amount fact.");
+    required.put("borrowerLastName", "LoanPASS borrowerLastName is missing; quoteBorrowerInfo identity is required.");
+    required.put("channel", "LoanPASS channelType is missing; catalog or tenant mapping evidence is required.");
+    required.put("loanPurpose", "LoanPASS transactionType is missing; quote request requires an explicit purpose fact.");
+    required.put("baseLoanAmount", "LoanPASS requestedLoanAmount/baseLoanAmount is missing.");
+    required.put("quoteAddressDTO.state", "LoanPASS quoteAddressDTO.state is missing.");
+    required.put("quoteAddressDTO.zip", "LoanPASS quoteAddressDTO.zip is missing.");
+    required.put("decisionCreditScore", "LoanPASS creditScore/field@decision-credit-score is missing.");
+    required.put("documentationType", "LoanPASS incomeDocumentationType/field@documentation-type is missing.");
+    required.put("mortgageType", "LoanPASS mortgageType/field@desired-mortgage-type is missing.");
+    required.put("desiredLoanTerm", "LoanPASS loanTermType/field@desired-loan-term is missing.");
+    required.put("desiredAmortizationType", "LoanPASS amortizationType/field@desired-amortization-type is missing.");
+    required.put("numberOfUnits", "LoanPASS numberOfUnits/field@number-of-units is missing.");
     required.forEach((field, message) -> {
       if (isBlankText(intake, field)) {
         missing.add(message);
@@ -1525,13 +1543,30 @@ class PricingBffUiFallbackAdapter {
   }
 
   private boolean isBlankText(Map<String, Object> intake, String field) {
-    Object value = intake == null ? null : intake.get(field);
+    Object value = null;
+    if (intake != null) {
+      value = intake.get(field);
+      if (value == null && field.contains(".")) {
+        String[] parts = field.split("\\.");
+        Object current = intake;
+        for (String part : parts) {
+          if (current instanceof Map<?, ?> map) {
+            current = map.get(part);
+          } else {
+            current = null;
+            break;
+          }
+        }
+        value = current;
+      }
+    }
     return value == null || value.toString().isBlank();
   }
 
   private String deterministicRunId(String tenantId, Map<String, Object> intake) {
-    String seed = normalized(tenantId) + "|" + normalized(intake.get("quoteIntent")) + "|"
-        + normalized(intake.get("channel")) + "|" + normalized(intake.get("scenarioName"));
+    String loanNumber = isBlankText(intake, "loanNumber") ? normalized(intake.get("externalLoanId")) : normalized(intake.get("loanNumber"));
+    String seed = normalized(tenantId) + "|" + normalized(intake.get("borrowerLastName")) + "|"
+        + normalized(intake.get("channel")) + "|" + loanNumber;
     return "run-" + Integer.toUnsignedString(seed.hashCode(), 36);
   }
 
@@ -1573,7 +1608,10 @@ class PricingBffUiFallbackAdapter {
       List<String> placeholders) {}
 
   record ProductCatalogResult(String productId, String status, String message, String nextStep,
-      List<String> placeholders) {}
+      List<String> placeholders, LoanPassProduct product, List<String> creditApplicationFieldIds) {}
+
+  record LoanPassProduct(String productId, String selectedProgramId, String priceGroupId, String mortgageType,
+      String loanQualificationType, String desiredLoanTerm, String desiredAmortizationType, String channelType) {}
 
   record ProductCatalogManagerView(String tenantContext, String dependencyStatus, List<ProductCatalogArea> areas,
       ProductCatalogLifecycle lifecycle, List<String> events, String fallbackReason, String uiTraceId) {}

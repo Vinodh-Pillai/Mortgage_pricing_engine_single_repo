@@ -112,41 +112,31 @@ class LosApiTest {
           "requestId": "%s",
           "tenantId": "tenant-los",
           "callbackUrl": "https://los.example.test/pricing/callback",
-          "loan": {
-            "loanPurpose": "PURCHASE",
-            "loanAmount": 450000,
-            "loanType": "CONVENTIONAL",
-            "termMonths": 360,
-            "amortizationType": "FIXED",
-            "property": {
-              "address": "123 Main St",
-              "city": "Austin",
-              "state": "TX",
-              "zip": "78701",
-              "county": "TRAVIS",
-              "propertyType": "SINGLE_FAMILY",
-              "occupancy": "PRIMARY_RESIDENCE",
-              "units": 1,
-              "purchasePrice": 500000,
-              "appraisedValue": 500000
-            },
-            "borrowers": [{
-              "borrowerId": "los-borrower-001",
-              "creditScore": 745,
-              "creditScoreSource": "TRI_MERGE",
-              "creditReportDate": "2026-06-01",
-              "income": { "monthly": 12500, "type": "W2" },
-              "assets": { "liquid": 50000, "retirement": 100000 },
-              "liabilities": { "monthlyDebt": 2500 }
-            }]
-          },
-          "pricing": {
-            "channel": "RETAIL",
-            "productFamily": "CONVENTIONAL",
-            "investorPreference": ["FNMA", "FHLMC"],
-            "lockPeriodDays": 30,
-            "effectiveDate": "2026-06-12"
-          }
+          "quoteBorrowerInfo": { "borrowerLastName": "Rivera", "loanNumber": "LN-001", "numberOfBorrowers": 1 },
+          "quoteAddressDTO": { "street": "123 Main St", "city": "Austin", "state": "TX", "zip": "78701", "countyName": "TRAVIS" },
+          "requestedLoanAmount": 450000,
+          "purchasePrice": 500000,
+          "propertyValue": 500000,
+          "transactionType": "purchase",
+          "propertyInformationType": "single-family",
+          "occupancyType": "primary-residence",
+          "numberOfUnits": 1,
+          "incomeDocumentationType": "full-documentation",
+          "totalMonthlyIncome": 12500,
+          "totalLiabilityMonthlyPayment": 2500,
+          "creditScore": 745,
+          "mortgageType": "conventional",
+          "amortizationType": "fixed",
+          "loanTermType": "30-year",
+          "desiredRateLockPeriod": 30,
+          "lockPeriodType": "30-day",
+          "channelType": "retail",
+          "creditApplicationFields": [
+            { "fieldId": "field@base-loan-amount", "value": { "type": "number", "value": 450000 } },
+            { "fieldId": "field@loan-purpose", "value": { "type": "enum", "enumTypeId": "loan-purpose", "variantId": "purchase", "value": "purchase" } },
+            { "fieldId": "field@decision-credit-score", "value": { "type": "number", "value": 745 } },
+            { "fieldId": "field@desired-loan-term", "value": { "type": "duration", "value": "30-year" } }
+          ]
         }
         """.formatted(requestId);
   }

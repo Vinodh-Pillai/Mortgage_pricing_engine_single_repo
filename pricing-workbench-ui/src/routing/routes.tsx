@@ -50,7 +50,11 @@ export const routeComponentLoaders: Record<string, () => Promise<{ default: Comp
   'tenant-admin': () => import('../screens/tenantAdmin').then((module) => ({ default: module.TenantAdminScreen })),
   'product-catalog-manager': () => import('../screens/productCatalogManager').then((module) => ({ default: module.ProductCatalogManagerScreen })),
   'product-admin': () => import('../screens/productAdmin').then((module) => ({ default: module.ProductAdminScreen })),
-  'product-management': () => import('../screens/product/ProductManagementScreen').then((module) => ({ default: module.ProductManagementScreen })),
+  'product-management': () => import('../screens/productManagement/ProductManagementScreen').then((module) => ({ default: module.ProductManagementScreen })),
+  'investor-management': () => import('../screens/investorManagement/InvestorManagementScreen').then((module) => ({ default: module.InvestorManagementScreen })),
+  'rules-engine': () => import('../screens/rulesEngine/RulesEngineScreen'),
+  'pricing-profiles': () => import('../screens/pricingProfiles/PricingProfilesScreen'),
+  'user-management': () => import('../screens/userManagement/UserManagementScreen'),
   'rate-sheet-intake': () => import('../screens/ratesheet/RateSheetIntakeScreen').then((module) => ({ default: module.RateSheetIntakeScreen })),
   'pricing-analysis': () => import('../screens/pricing/PricingAnalysisScreen').then((module) => ({ default: module.PricingAnalysisScreen })),
   'lock-management': () => import('../screens/locks/LockManagementScreen').then((module) => ({ default: module.LockManagementScreen })),
@@ -96,7 +100,9 @@ const scenarioChildRoutes: WorkbenchRouteDefinition[] = scenarioModule ? [
 const functionalityChildRoutes: WorkbenchRouteDefinition[] = [
   ...(tenantOnboardingModule ? [{ ...definitionForModule(tenantOnboardingModule), id: 'tenant-onboarding-admin-new', path: '/admin/tenants/new', label: 'New Tenant', breadcrumb: 'New Tenant', lazyComponent: lazyScreen(routeComponentLoaders['tenant-onboarding']) }] : []),
   ...(productManagementModule ? [
-    { ...definitionForModule(productManagementModule), id: 'product-management-detail', path: '/admin/products/catalog/:productCode', label: 'Product Detail', breadcrumb: 'Product Detail', lazyComponent: lazyScreen(routeComponentLoaders['product-management']) },
+    { ...definitionForModule(productManagementModule), id: 'product-management-alias', path: '/admin/products/management', label: 'Product Management', breadcrumb: 'Product Management', lazyComponent: lazyScreen(routeComponentLoaders['product-management']) },
+    { ...definitionForModule(productManagementModule), id: 'product-management-detail', path: '/admin/products/management/:productCode', label: 'Product Detail', breadcrumb: 'Product Detail', lazyComponent: lazyScreen(routeComponentLoaders['product-management']) },
+    { ...definitionForModule(productManagementModule), id: 'product-management-legacy-detail', path: '/admin/products/catalog/:productCode', label: 'Product Detail', breadcrumb: 'Product Detail', lazyComponent: lazyScreen(routeComponentLoaders['product-management']) },
     { ...definitionForModule(productManagementModule), id: 'product-management-new', path: '/admin/products/new', label: 'New Product', breadcrumb: 'New Product', lazyComponent: lazyScreen(routeComponentLoaders['product-management']) },
   ] : []),
   ...(rateSheetModule ? [

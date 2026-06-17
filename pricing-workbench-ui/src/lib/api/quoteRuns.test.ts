@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fetchScenarioIntakeMetadata, launchQuoteRun, PipelineApiResponseError, toLoanPassQuoteIntakePayload, type BorrowerIntake, type QuoteRunLaunch, type ScenarioIntakeMetadata } from './quoteRuns';
+import { fetchScenarioIntakeMetadata, launchQuoteRun, loanPassQuoteIntakeFields, PipelineApiResponseError, toLoanPassQuoteIntakePayload, type BorrowerIntake, type QuoteRunLaunch, type ScenarioIntakeMetadata } from './quoteRuns';
 
 describe('quoteRuns pipeline API response handling', () => {
   it('preserves successful JSON response behavior', async () => {
@@ -92,7 +92,8 @@ describe('quoteRuns pipeline API response handling', () => {
 
     await launchQuoteRun('tenant-a', intake(), fetchMock);
 
-    const payload = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    const firstCall = fetchMock.mock.calls[0] as unknown as [unknown, RequestInit];
+    const payload = JSON.parse(String(firstCall[1].body));
     expect(payload).toEqual(toLoanPassQuoteIntakePayload(intake()));
     expect(payload.borrowerLastName).toBe('Johnson');
     expect(payload.loanNumber).toBe('LP-1001');
@@ -110,13 +111,13 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function intake(): BorrowerIntake {
   return {
+    ...emptyIntake(),
     channel: 'Retail',
     loanNumber: 'LP-1001',
     borrowerFirstName: 'Alex',
     borrowerLastName: 'Johnson',
     numberOfBorrowers: '1',
     contactEmail: 'alex@example.test',
-    creditStatus: 'known',
     decisionCreditScore: '720',
     citizenshipType: 'US Citizen',
     professional: 'No',
@@ -133,7 +134,7 @@ function intake(): BorrowerIntake {
     interestOnly: 'No',
     mortgageType: 'Conventional',
     state: 'CA',
-    propertyZip: '90001',
+    zip: '90001',
     propertyType: 'Single Family',
     occupancyType: 'Primary Residence',
     numberOfUnits: '1',
@@ -162,7 +163,7 @@ function intake(): BorrowerIntake {
     liquidAssets: '100000',
     documentationType: 'Full Documentation',
     secondaryDocumentationType: 'None',
-    estimatedDscr: '',
+    estimatedDSCR: '',
     gift: 'No',
     achPayment: 'No',
     mortgageLatePayments: 'No',
@@ -175,6 +176,11 @@ function intake(): BorrowerIntake {
     aus: 'None',
     manualUnderwriting: 'No',
   };
+}
+
+function emptyIntake(): BorrowerIntake {
+  const legacyFields = ['coBorrowerName', 'coBorrowerRole', 'quoteIntent', 'scenarioName', 'externalLoanId', 'sourceSystem', 'borrowerName', 'borrowerRole', 'creditStatus', 'creditScore', 'creditScoreSource', 'creditReportDate', 'creditReadiness', 'loanAmount', 'purchasePriceOrValue', 'propertyZip', 'termMonths', 'amortizationType', 'requestedLockPeriodDays', 'propertyState', 'propertyCounty', 'unitCount', 'condoProjectType', 'manufacturedHomeFlag', 'monthlyIncome', 'incomeType', 'employmentType', 'suppliedDti', 'reserveMonths', 'incomeVerificationStatus', 'assetVerificationStatus', 'productFamily', 'productPreference', 'quoteFilters', 'effectiveDate', 'actorId', 'clientContext', 'downPaymentOrEquity', 'subordinateFinancingAmount', 'helocDrawnAmount', 'helocLimitAmount', 'reserves'] as const;
+  return Object.fromEntries([...loanPassQuoteIntakeFields, ...legacyFields].map((field) => [field, ''])) as BorrowerIntake;
 }
 
 const _metadataCompileCheck: Partial<ScenarioIntakeMetadata> = {};

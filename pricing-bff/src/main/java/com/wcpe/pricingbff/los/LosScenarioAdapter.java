@@ -14,27 +14,38 @@ class LosScenarioAdapter {
   LosScenario toScenario(LosPricingRequest request) {
     Map<String, String> facts = new LinkedHashMap<>();
     facts.put("losRequestId", request.requestId());
-    facts.put("loanPurpose", safe(request.loan().loanPurpose()));
-    facts.put("loanType", safe(request.loan().loanType()));
-    facts.put("amortizationType", safe(request.loan().amortizationType()));
-    facts.put("loanAmount", safeValue(request.loan().loanAmount()));
-    facts.put("termMonths", safeValue(request.loan().termMonths()));
-    if (request.loan().property() != null) {
-      facts.put("propertyState", safe(request.loan().property().state()));
-      facts.put("propertyCounty", safe(request.loan().property().county()));
-      facts.put("propertyType", safe(request.loan().property().propertyType()));
-      facts.put("occupancy", safe(request.loan().property().occupancy()));
-      facts.put("units", safeValue(request.loan().property().units()));
-      facts.put("purchasePrice", safeValue(request.loan().property().purchasePrice()));
-      facts.put("appraisedValue", safeValue(request.loan().property().appraisedValue()));
+    facts.put("transactionType", safe(request.transactionType()));
+    facts.put("requestedLoanAmount", safeValue(request.requestedLoanAmount()));
+    facts.put("loanTermType", safe(request.loanTermType()));
+    facts.put("amortizationType", safe(request.amortizationType()));
+    facts.put("mortgageType", safe(request.mortgageType()));
+    facts.put("purchasePrice", safeValue(request.purchasePrice()));
+    facts.put("propertyValue", safeValue(request.propertyValue()));
+    facts.put("propertyInformationType", safe(request.propertyInformationType()));
+    facts.put("occupancyType", safe(request.occupancyType()));
+    facts.put("numberOfUnits", safeValue(request.numberOfUnits()));
+    facts.put("creditScore", safeValue(request.creditScore()));
+    facts.put("incomeDocumentationType", safe(request.incomeDocumentationType()));
+    facts.put("totalMonthlyIncome", safeValue(request.totalMonthlyIncome()));
+    facts.put("debtToIncomeRatio", safeValue(request.debtToIncomeRatio()));
+    facts.put("desiredRateLockPeriod", safeValue(request.desiredRateLockPeriod()));
+    if (request.quoteAddressDTO() != null) {
+      facts.put("quoteAddressDTO.state", safe(request.quoteAddressDTO().state()));
+      facts.put("quoteAddressDTO.zip", safe(request.quoteAddressDTO().zip()));
+      facts.put("quoteAddressDTO.countyFips", safe(request.quoteAddressDTO().countyFips()));
+      facts.put("quoteAddressDTO.countyCode", safe(request.quoteAddressDTO().countyCode()));
+      facts.put("quoteAddressDTO.countyName", safe(request.quoteAddressDTO().countyName()));
+      facts.put("quoteAddressDTO.city", safe(request.quoteAddressDTO().city()));
+      facts.put("quoteAddressDTO.street", safe(request.quoteAddressDTO().street()));
     }
-    if (!request.loan().borrowers().isEmpty()) {
-      facts.put("representativeCreditScore", safeValue(request.loan().borrowers().get(0).creditScore()));
-      facts.put("borrowerCount", Integer.toString(request.loan().borrowers().size()));
+    if (request.quoteBorrowerInfo() != null) {
+      facts.put("quoteBorrowerInfo.borrowerLastName", safe(request.quoteBorrowerInfo().borrowerLastName()));
+      facts.put("quoteBorrowerInfo.loanNumber", safe(request.quoteBorrowerInfo().loanNumber()));
+      facts.put("quoteBorrowerInfo.numberOfBorrowers", safeValue(request.quoteBorrowerInfo().numberOfBorrowers()));
     }
     String scenarioId = UUID.nameUUIDFromBytes((request.tenantId() + ":" + request.requestId()).getBytes(StandardCharsets.UTF_8)).toString();
-    List<Integer> lockPeriods = request.pricing().lockPeriodDays() == null ? List.of() : List.of(request.pricing().lockPeriodDays());
-    return new LosScenario(scenarioId, request.tenantId(), 1, facts, lockPeriods, request.pricing().effectiveDate());
+    List<Integer> lockPeriods = request.desiredRateLockPeriod() == null ? List.of() : List.of(request.desiredRateLockPeriod());
+    return new LosScenario(scenarioId, request.tenantId(), 1, facts, lockPeriods);
   }
 
   private String safe(String value) {

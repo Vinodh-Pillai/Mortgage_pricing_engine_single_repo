@@ -16,8 +16,8 @@ class LosLockServiceClient {
     String seed = request.pricingRequestId() + ":" + request.offerId() + ":" + request.requestedBy();
     String lockId = UUID.nameUUIDFromBytes(seed.getBytes(StandardCharsets.UTF_8)).toString();
     Instant expiration = Instant.now().plus(request.lockPeriodDays() == null ? 30 : request.lockPeriodDays(), ChronoUnit.DAYS);
-    String investor = offer == null ? "PENDING" : offer.investor();
-    LockTerms terms = offer == null ? new LockTerms(null, null, null) : new LockTerms(offer.rate(), offer.price(), offer.points());
+    String investor = offer == null ? "PENDING" : offer.investorName();
+    LockTerms terms = offer == null ? new LockTerms(null, null, null) : new LockTerms(offer.noteRate(), offer.price(), null);
     return new LosLockResponse(lockId, request.pricingRequestId(), request.offerId(), "CONFIRMED", expiration, investor,
         investor + "-LOCK-" + lockId.substring(0, 8).toUpperCase(), terms, correlationId);
   }

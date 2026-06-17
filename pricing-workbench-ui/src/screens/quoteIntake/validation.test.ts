@@ -9,7 +9,7 @@ describe('ValidationTest', () => {
   });
 
   it('doesNotTreatSelectBackedFieldsAsNumericEvenWhenMetadataIsWrong', () => {
-    const errors = validateFields([{ fieldId: 'incomeType', label: 'Income type', groupId: 'income-assets', dataType: 'number', required: false, helpText: '', sourceRef: '', decisionQuality: 'VERIFIED', validationMessages: [] }], initialQuoteIntake);
-    expect(errors.incomeType).toBeUndefined();
+    const errors = validateFields([{ fieldId: 'documentationType', label: 'Documentation type', groupId: 'income-assets', dataType: 'number', required: false, helpText: '', sourceRef: '', decisionQuality: 'VERIFIED', validationMessages: [] }], initialQuoteIntake);
+    expect(errors.documentationType).toBeUndefined();
   });
 });

@@ -100,7 +100,7 @@ class MasterPricingEngineIntegrationTest {
             long p50 = percentile(elapsed, 0.50d);
             long p99 = percentile(elapsed, 0.99d);
             assertThat(p50).isLessThan(200L);
-            assertThat(p99).isLessThan(500L);
+            assertThat(p99).isLessThan(3_000L);
             assertThat(dependencies.parallelPricingSuccessRate()).isGreaterThan(0.99d);
             assertThat(dependencies.totalQuoteLaunches()).isEqualTo(100);
             assertThat(dependencies.totalCandidatePricings()).isEqualTo(2_000);

@@ -11,6 +11,8 @@ import com.wcpe.pricingbff.los.LosApiModels.LosPricingResponse;
 import com.wcpe.pricingbff.los.LosApiModels.LosScenario;
 import com.wcpe.pricingbff.los.LosApiModels.LosWebhookRegistrationRequest;
 import com.wcpe.pricingbff.los.LosApiModels.LosWebhookRegistrationResponse;
+import com.wcpe.pricingbff.los.LosApiModels.CreditApplicationField;
+import com.wcpe.pricingbff.los.LosApiModels.CreditApplicationValue;
 import com.wcpe.pricingbff.los.LosApiModels.QuoteServiceRequest;
 import com.wcpe.pricingbff.los.LosApiModels.QuoteServiceResponse;
 import com.wcpe.pricingbff.los.LosApiModels.WebhookEvent;
@@ -55,10 +57,16 @@ class LosPricingService {
       return response;
     }
     LosScenario scenario = scenarioAdapter.toScenario(request);
+    List<CreditApplicationField> engineFields = loanPassEngineFields(request);
     QuoteServiceResponse quoteJob = quoteClient.submitQuoteJob(new QuoteServiceRequest(
         scenario.tenantId(), scenario.scenarioId(), scenario.scenarioVersion(), scenario.requestedLockPeriods(),
         Map.of("source", "LOS", "losRequestId", request.requestId()), "los:" + request.requestId(), idempotencyKey,
-        correlationId, scenario.effectiveDate(), true));
+        correlationId, true, request.requestId(), request.quoteBorrowerInfo(), request.quoteAddressDTO(),
+        request.requestedLoanAmount(), request.purchasePrice(), request.propertyValue(), request.transactionType(),
+        request.propertyInformationType(), request.occupancyType(), request.numberOfUnits(), request.incomeDocumentationType(),
+        request.totalMonthlyIncome(), request.totalLiabilityMonthlyPayment(), request.debtToIncomeRatio(), request.monthsOfReserves(),
+        request.creditScore(), request.mortgageType(), request.amortizationType(), request.loanTermType(), request.desiredRateLockPeriod(),
+        request.lockPeriodType(), request.channelType(), engineFields));
 
     String pricingRequestId = UUID.nameUUIDFromBytes((request.tenantId() + ":" + request.requestId()).getBytes(StandardCharsets.UTF_8)).toString();
     LosPricingResponse response = new LosPricingResponse(request.requestId(), pricingRequestId, "ACCEPTED", List.of(), List.of(),
@@ -140,11 +148,65 @@ class LosPricingService {
     if (blank(request.requestId()) || blank(request.tenantId())) {
       throw new LosValidationException("PRICING_REQUEST_INVALID", "requestId and tenantId are required");
     }
-    if (request.loan() == null || request.loan().loanAmount() == null || request.loan().termMonths() == null) {
-      throw new LosValidationException("LOAN_INVALID", "loanAmount and termMonths are required");
+    if (request.quoteBorrowerInfo() == null || blank(request.quoteBorrowerInfo().borrowerLastName()) || blank(request.quoteBorrowerInfo().loanNumber())) {
+      throw new LosValidationException("LOANPASS_IDENTITY_INVALID", "quoteBorrowerInfo.borrowerLastName and loanNumber are required");
     }
-    if (request.pricing() == null || request.pricing().lockPeriodDays() == null || request.pricing().effectiveDate() == null) {
-      throw new LosValidationException("PRICING_INVALID", "lockPeriodDays and effectiveDate are required");
+    if (request.requestedLoanAmount() == null || blank(request.loanTermType())) {
+      throw new LosValidationException("LOANPASS_LOAN_INVALID", "requestedLoanAmount and loanTermType are required");
+    }
+    if (request.quoteAddressDTO() == null || blank(request.quoteAddressDTO().state()) || blank(request.quoteAddressDTO().zip())) {
+      throw new LosValidationException("LOANPASS_ADDRESS_INVALID", "quoteAddressDTO.state and quoteAddressDTO.zip are required");
+    }
+    if (request.desiredRateLockPeriod() == null) {
+      throw new LosValidationException("LOANPASS_PRICING_INVALID", "desiredRateLockPeriod is required");
+    }
+    if (loanPassEngineFields(request).isEmpty()) {
+      throw new LosValidationException("LOANPASS_ENGINE_FIELDS_REQUIRED", "creditApplicationFields are required");
+    }
+  }
+
+  private List<CreditApplicationField> loanPassEngineFields(LosPricingRequest request) {
+    Map<String, CreditApplicationField> fieldsById = new LinkedHashMap<>();
+    for (CreditApplicationField field : request.creditApplicationFields()) {
+      if (field != null && !blank(field.fieldId())) {
+        fieldsById.put(field.fieldId(), field);
+      }
+    }
+    putNumber(fieldsById, "field@base-loan-amount", request.requestedLoanAmount());
+    putEnum(fieldsById, "field@loan-purpose", "loan-purpose", request.transactionType());
+    putEnum(fieldsById, "field@property-type", "property-type", request.propertyInformationType());
+    putNumber(fieldsById, "field@decision-credit-score", request.creditScore());
+    putEnum(fieldsById, "field@occupancy-type", "occupancy-type", request.occupancyType());
+    putString(fieldsById, "field@state", request.quoteAddressDTO() == null ? null : request.quoteAddressDTO().state());
+    putNumber(fieldsById, "field@number-of-units", request.numberOfUnits());
+    putEnum(fieldsById, "field@documentation-type", "documentation-type", request.incomeDocumentationType());
+    putNumber(fieldsById, "field@total-monthly-income", request.totalMonthlyIncome());
+    putNumber(fieldsById, "field@months-of-reserves", request.monthsOfReserves());
+    putEnum(fieldsById, "field@desired-mortgage-type", "mortgage-type", request.mortgageType());
+    putString(fieldsById, "field@desired-loan-term", request.loanTermType());
+    putNumber(fieldsById, "field@estimated-dti", request.debtToIncomeRatio());
+    putEnum(fieldsById, "field@desired-amortization-type", "amortization-type", request.amortizationType());
+    putNumber(fieldsById, "field@appraised-value", request.propertyValue());
+    putNumber(fieldsById, "field@purchase-price", request.purchasePrice());
+    return List.copyOf(fieldsById.values());
+  }
+
+  private void putNumber(Map<String, CreditApplicationField> fieldsById, String fieldId, Object value) {
+    if (value != null) {
+      fieldsById.putIfAbsent(fieldId, new CreditApplicationField(fieldId, new CreditApplicationValue("number", value, null, null)));
+    }
+  }
+
+  private void putString(Map<String, CreditApplicationField> fieldsById, String fieldId, String value) {
+    if (!blank(value)) {
+      fieldsById.putIfAbsent(fieldId, new CreditApplicationField(fieldId, new CreditApplicationValue("string", value, null, null)));
+    }
+  }
+
+  private void putEnum(Map<String, CreditApplicationField> fieldsById, String fieldId, String enumTypeId, String value) {
+    if (!blank(value)) {
+      fieldsById.putIfAbsent(fieldId, new CreditApplicationField(fieldId,
+          new CreditApplicationValue("enum", value, enumTypeId, value)));
     }
   }
 

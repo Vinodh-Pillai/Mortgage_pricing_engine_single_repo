@@ -39,7 +39,8 @@ public class LosQuoteIntegrationService {
     if (existing != null && existing.requestHash().equals(requestHash)) {
       return existing.toResponse();
     }
-    String jobId = UUID.nameUUIDFromBytes((request.tenantId() + ":" + request.scenarioId() + ":" + idempotencyKey).getBytes(StandardCharsets.UTF_8)).toString();
+    String quoteIdentity = request.quoteBorrowerInfo() == null ? request.requestId() : request.quoteBorrowerInfo().loanNumber();
+    String jobId = UUID.nameUUIDFromBytes((request.tenantId() + ":" + quoteIdentity + ":" + idempotencyKey).getBytes(StandardCharsets.UTF_8)).toString();
     StoredQuoteJob job = new StoredQuoteJob(jobId, request.tenantId(), request.scenarioId(), "QUEUED", requestHash,
         correlationId == null || correlationId.isBlank() ? request.correlationId() : correlationId, clock.instant(),
         Map.of("source", "LOS", "stage", "accepted"));
@@ -56,11 +57,17 @@ public class LosQuoteIntegrationService {
     if (request == null) {
       throw new LosQuoteValidationException("LOS_QUOTE_REQUEST_REQUIRED", "LOS quote request body is required");
     }
-    if (blank(request.tenantId()) || blank(request.scenarioId())) {
-      throw new LosQuoteValidationException("LOS_QUOTE_REQUEST_INVALID", "tenantId and scenarioId are required");
+    if (blank(request.tenantId()) || blank(request.requestId())) {
+      throw new LosQuoteValidationException("LOS_QUOTE_REQUEST_INVALID", "tenantId and requestId are required");
     }
-    if (request.scenarioVersion() < 1) {
-      throw new LosQuoteValidationException("LOS_QUOTE_REQUEST_INVALID", "scenarioVersion must be at least 1");
+    if (request.quoteBorrowerInfo() == null || blank(request.quoteBorrowerInfo().borrowerLastName()) || blank(request.quoteBorrowerInfo().loanNumber())) {
+      throw new LosQuoteValidationException("LOS_QUOTE_IDENTITY_INVALID", "quoteBorrowerInfo.borrowerLastName and loanNumber are required");
+    }
+    if (request.quoteAddressDTO() == null || blank(request.quoteAddressDTO().state()) || blank(request.quoteAddressDTO().zip())) {
+      throw new LosQuoteValidationException("LOS_QUOTE_ADDRESS_INVALID", "quoteAddressDTO.state and quoteAddressDTO.zip are required");
+    }
+    if (request.creditApplicationFields().isEmpty()) {
+      throw new LosQuoteValidationException("LOS_QUOTE_ENGINE_FIELDS_REQUIRED", "creditApplicationFields are required");
     }
     if (blank(requestId) && blank(request.idempotencyKey())) {
       throw new LosQuoteValidationException("LOS_IDEMPOTENCY_REQUIRED", "X-Request-ID or idempotencyKey is required");

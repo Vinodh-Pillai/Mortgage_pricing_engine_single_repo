@@ -3,7 +3,7 @@ import { quoteIntakeTraceId } from './metadata';
 
 export type IntakeFieldErrors = Partial<Record<keyof BorrowerIntake, string>>;
 
-const selectBackedFields = new Set<keyof BorrowerIntake>(['channel', 'incomeType', 'incomeVerificationStatus', 'propertyState', 'propertyType', 'occupancyType']);
+const selectBackedFields = new Set<keyof BorrowerIntake>(['channel', 'documentationType', 'secondaryDocumentationType', 'documentationTypeTimeFrame', 'selfEmployedTimeFrame', 'state', 'propertyType', 'occupancyType', 'lienPosition', 'desiredAmortizationType', 'mortgageType', 'selfEmployed', 'citizenshipType']);
 
 export function validateFields(fields: ScenarioIntakeField[], values: BorrowerIntake): IntakeFieldErrors {
   const errors: IntakeFieldErrors = {};

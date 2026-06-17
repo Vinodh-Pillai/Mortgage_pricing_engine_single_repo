@@ -110,7 +110,7 @@ describe('TenantHomeTest', () => {
   });
 
   it('handles empty injected evidence, single-tenant selector state, and partial rate indicators', async () => {
-    const emptyTenant: TenantHomeTenantContext = { tenantId: 'tenant-empty', tenantName: 'Only Tenant', status: 'INACTIVE', userId: 'user-empty' };
+    const emptyTenant: TenantHomeTenantContext = { tenantId: 'tenant-empty', tenantName: 'Only Tenant', status: 'SUSPENDED', userId: 'user-empty' };
     const partialRateProducts: AuthorizedProduct[] = [
       { productCode: 'RATE_MIN', productName: 'Min only', productType: 'CONVENTIONAL', investorCode: 'FNMA', channelCode: 'RETAIL', status: 'INACTIVE', baseRateMin: 6.125, lastUpdated: 'backend-ref:min' },
       { productCode: 'RATE_RANGE', productName: 'Range', productType: 'FHA', investorCode: 'GNMA', channelCode: 'WHOLESALE', status: 'ACTIVE', baseRateMin: 6, baseRateMax: 6.5, authorizationExpiresAt: 'backend-ref:expires', lastUpdated: 'backend-ref:range' },

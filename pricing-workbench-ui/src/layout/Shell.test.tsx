@@ -72,8 +72,10 @@ describe('responsive layout shell', () => {
 
   it('builds navigation from registry modules and persona visibility', () => {
     const items = buildNavigationTree(modules, 'run-123', 'operations lead');
-    expect(items).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Quote workspace', route: '/quote/run-123/offers', group: 'Quote' })]));
+    expect(items).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Quote workspace', route: '/quote/run-123/offers', group: 'Quotes' })]));
     expect(items).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Operations dashboard', group: 'Operations', badgeCount: 1 })]));
+    expect(items).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Quick Quote', group: 'Pipeline' })]));
+    expect(items).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Feature Flags', group: 'Admin' })]));
   });
 
   it('renders header nav content footer and focusable skip link', () => {
@@ -92,7 +94,7 @@ describe('responsive layout shell', () => {
     expect(screen.getByRole('navigation', { name: 'Main navigation' })).toBeInTheDocument();
     expect(screen.getByRole('main')).toHaveTextContent('Screen content');
     expect(screen.getByRole('contentinfo')).toHaveTextContent('Responsive shell ready');
-    expect(screen.getByRole('link', { name: 'Quote workspace' })).toHaveClass('layout-nav__link--active');
+    expect(screen.getByRole('link', { name: 'Quote workspace' })).toHaveClass('layout-sidebar__link--active');
   });
 
   it('closes mobile drawer with Escape and restores focus to trigger', () => {
@@ -107,10 +109,10 @@ describe('responsive layout shell', () => {
 
     const menuButton = screen.getByRole('button', { name: 'Open navigation menu' });
     menuButton.focus();
-    fireEvent.click(menuButton);
+    fireEvent.click(screen.getByRole('button', { name: 'Open navigation menu' }));
     expect(screen.getByRole('dialog', { name: 'Primary navigation drawer' })).toBeInTheDocument();
-    expect(document.querySelector('.layout-nav-backdrop')).toBeInTheDocument();
-    fireEvent.click(document.querySelector('.layout-nav-backdrop') as Element);
+    expect(document.querySelector('.layout-sidebar-backdrop')).toBeInTheDocument();
+    fireEvent.click(document.querySelector('.layout-sidebar-backdrop') as Element);
     expect(screen.queryByRole('dialog', { name: 'Primary navigation drawer' })).not.toBeInTheDocument();
     fireEvent.click(menuButton);
     expect(screen.getByRole('dialog', { name: 'Primary navigation drawer' })).toBeInTheDocument();
@@ -140,7 +142,7 @@ describe('responsive layout shell', () => {
     expect(window.localStorage.getItem('loanweft:layout-shell:nav-rail-collapsed')).toBe('false');
   });
 
-  it('uses the header menu button to expand and collapse desktop navigation', () => {
+  it('uses the sidebar control to expand and collapse desktop navigation', () => {
     installMatchMedia(false);
     window.localStorage.removeItem('loanweft:layout-shell:nav-rail-collapsed');
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
@@ -151,14 +153,11 @@ describe('responsive layout shell', () => {
     );
 
     const shell = document.querySelector('.layout-shell');
-    const menuButton = screen.getByRole('button', { name: 'Close navigation menu' });
-    expect(menuButton).toHaveAttribute('aria-controls', 'primary-navigation');
+    const menuButton = screen.getByRole('button', { name: 'Collapse' });
     expect(menuButton).toHaveAttribute('aria-expanded', 'true');
     fireEvent.click(menuButton);
     expect(shell).toHaveClass('layout-shell--nav-collapsed');
-    expect(menuButton).toHaveAttribute('aria-expanded', 'false');
-    fireEvent.keyDown(menuButton, { key: 'Enter' });
-    fireEvent.click(menuButton);
+    fireEvent.click(screen.getByRole('button', { name: 'Expand' }));
     expect(shell).not.toHaveClass('layout-shell--nav-collapsed');
     expect(screen.getByRole('navigation', { name: 'Main navigation' })).toBeInTheDocument();
   });
@@ -185,7 +184,8 @@ describe('responsive layout shell', () => {
     const themeToggle = screen.getByRole('button', { name: 'Toggle theme' });
     expect(themeToggle).toHaveClass('layout-theme-toggle');
     expect(themeToggle).toHaveAttribute('title', 'Toggle theme');
-    expect(themeToggle).toHaveTextContent('☀️');
+    expect(themeToggle).toHaveAttribute('data-theme', 'dark');
+    expect(themeToggle.querySelector('.layout-theme-toggle__track')).toBeInTheDocument();
     fireEvent.click(themeToggle);
     expect(themeStorageKey).toBe('wcpe:design-system-theme');
     expect(window.localStorage.getItem(themeStorageKey)).toBe('light');
@@ -211,9 +211,9 @@ describe('responsive layout shell', () => {
       </Shell>,
     );
 
-    const firstLink = screen.getByRole('link', { name: 'Quote workspace' });
+    const firstLink = screen.getByRole('link', { name: /Pipeline Intake/ });
     firstLink.focus();
     fireEvent.keyDown(screen.getByRole('navigation', { name: 'Main navigation' }), { key: 'ArrowDown' });
-    expect(screen.getByRole('link', { name: 'Operations dashboard' })).toHaveFocus();
+    expect(screen.getByRole('link', { name: /Quick Quote/ })).toHaveFocus();
   });
 });

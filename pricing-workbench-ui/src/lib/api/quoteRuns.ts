@@ -5,58 +5,103 @@ export type BorrowerIntake = {
   borrowerLastName: string;
   numberOfBorrowers: string;
   contactEmail: string;
-  creditStatus: string;
+  coBorrowerName: string;
+  coBorrowerRole: string;
   decisionCreditScore: string;
+  creditScoreType: string;
   citizenshipType: string;
   professional: string;
+  firstTimeHomeBuyer: string;
+  firstTimeInvestor: string;
   loanPurpose: string;
   baseLoanAmount: string;
-  downPaymentOrEquity: string;
+  purchasePrice: string;
+  appraisedValue: string;
+  downPayment: string;
+  percentDownpayment: string;
+  loanToValue: string;
+  combinedLoanToValue: string;
+  cashOutAmount: string;
+  loanBalance: string;
+  firstLoanBalance: string;
+  secondLoanBalance: string;
+  firstLienAmount: string;
+  secondLienAmount: string;
   lienPosition: string;
+  refinancingType: string;
   desiredLoanTerm: string;
   desiredAmortizationType: string;
   desiredRateLockPeriod: string;
+  lockPeriodType: string;
   desiredInterestRate: string;
   prepaymentPenaltyTerm: string;
+  prePaymentPenaltyStructureType: string;
   waiveEscrows: string;
   interestOnly: string;
   mortgageType: string;
+  loanQualificationType: string;
+  mortgageInsuranceType: string;
+  miOptionType: string;
+  gift: string;
+  achPayment: string;
+  wholesaleCompensation: string;
+  compensationPaidType: string;
+  vaLoanType: string;
+  vaFundingFeeExemptionType: string;
+  vaFirstTimeUse: string;
   state: string;
-  propertyZip: string;
+  zip: string;
+  countyFips: string;
+  countyCode: string;
+  countyName: string;
+  city: string;
+  street: string;
+  addressSearchString: string;
   propertyType: string;
   occupancyType: string;
   numberOfUnits: string;
   propertyLocation: string;
   numberOfLeasedUnits: string;
   shortTermRental: string;
-  monthlyMarketRent: string;
-  investorExperience: string;
-  additionalMonthlyHousingExpenses: string;
   propertySquareFootage: string;
   propertyAcreageNumber: string;
+  condoApprovalType: string;
+  acquisitionDate: string;
+  monthlyMarketRent: string;
+  propertyRentalIncome: string;
+  rentalIncomeMightBeUsed: string;
+  investorExperience: string;
+  additionalMonthlyHousingExpenses: string;
+  additionalAnnualHousingExpenses: string;
   monthlyTaxes: string;
   monthlyInsurance: string;
   monthlyHOA: string;
-  additionalAnnualHousingExpenses: string;
   annualTaxes: string;
   annualInsurance: string;
   annualHOA: string;
-  purchasePrice: string;
-  appraisedValue: string;
   selfEmployed: string;
+  selfEmployedTimeFrame: string;
   totalBorrowerIncome: string;
   monthlyDebt: string;
+  totalLiabilityMonthlyPayment: string;
   estimatedDti: string;
+  estimatedDSCR: string;
   monthsOfReserves: string;
   liquidAssets: string;
   documentationType: string;
   secondaryDocumentationType: string;
-  estimatedDscr: string;
-  gift: string;
-  achPayment: string;
+  documentationTypeTimeFrame: string;
   mortgageLatePayments: string;
+  mortgageHistoryDesc: string;
   creditEvent: string;
-  wholesaleCompensation: string;
+  chapter7BankruptcyDate: string;
+  chapter11BankruptcyDate: string;
+  chapter13BankruptcyDate: string;
+  deedInLieuDate: string;
+  foreclosureDate: string;
+  shortSaleDate: string;
+  mortgageModificationDate: string;
+  forbearanceDate: string;
   lockExtension: string;
   lockExtension2: string;
   concession: string;
@@ -64,63 +109,92 @@ export type BorrowerIntake = {
   aus: string;
   manualUnderwriting: string;
 
-  /** Legacy UI fields retained only for backwards-compatible compiled callers; LoanPass launch payloads exclude them. */
-  quoteIntent?: string;
-  scenarioName?: string;
-  externalLoanId?: string;
-  sourceSystem?: string;
-  borrowerName?: string;
-  borrowerRole?: string;
-  coBorrowerName?: string;
-  coBorrowerRole?: string;
-  creditScore?: string;
-  creditScoreSource?: string;
-  creditReportDate?: string;
-  creditReadiness?: string;
-  loanAmount?: string;
-  purchasePriceOrValue?: string;
-  subordinateFinancingAmount?: string;
-  helocDrawnAmount?: string;
-  helocLimitAmount?: string;
-  termMonths?: string;
-  amortizationType?: string;
-  requestedLockPeriodDays?: string;
-  propertyState?: string;
-  propertyCounty?: string;
-  unitCount?: string;
-  condoProjectType?: string;
-  manufacturedHomeFlag?: string;
-  monthlyIncome?: string;
-  incomeType?: string;
-  employmentType?: string;
-  suppliedDti?: string;
-  reserveMonths?: string;
-  incomeVerificationStatus?: string;
-  assetVerificationStatus?: string;
-  reserves?: string;
-  productFamily?: string;
-  productPreference?: string;
-  quoteFilters?: string;
-  effectiveDate?: string;
-  actorId?: string;
-  clientContext?: string;
+  /** Optional compatibility aliases accepted from older drafts; LoanPass launch payloads normalize or exclude them. */
+  quoteIntent: string;
+  scenarioName: string;
+  externalLoanId: string;
+  sourceSystem: string;
+  borrowerName: string;
+  borrowerRole: string;
+  creditStatus: string;
+  creditScore: string;
+  creditScoreSource: string;
+  creditReportDate: string;
+  creditReadiness: string;
+  loanAmount: string;
+  purchasePriceOrValue: string;
+  propertyZip: string;
+  termMonths: string;
+  amortizationType: string;
+  requestedLockPeriodDays: string;
+  propertyState: string;
+  propertyCounty: string;
+  unitCount: string;
+  condoProjectType: string;
+  manufacturedHomeFlag: string;
+  monthlyIncome: string;
+  incomeType: string;
+  employmentType: string;
+  suppliedDti: string;
+  reserveMonths: string;
+  incomeVerificationStatus: string;
+  assetVerificationStatus: string;
+  productFamily: string;
+  productPreference: string;
+  quoteFilters: string;
+  effectiveDate: string;
+  actorId: string;
+  clientContext: string;
+  downPaymentOrEquity: string;
+  subordinateFinancingAmount: string;
+  helocDrawnAmount: string;
+  helocLimitAmount: string;
+  reserves: string;
 };
 
 export const loanPassQuoteIntakeFields = [
-  'channel', 'loanNumber', 'borrowerFirstName', 'borrowerLastName', 'numberOfBorrowers', 'contactEmail', 'creditStatus', 'decisionCreditScore', 'citizenshipType', 'professional',
-  'loanPurpose', 'baseLoanAmount', 'downPaymentOrEquity', 'lienPosition', 'desiredLoanTerm', 'desiredAmortizationType', 'desiredRateLockPeriod', 'desiredInterestRate', 'prepaymentPenaltyTerm', 'waiveEscrows', 'interestOnly', 'mortgageType',
-  'state', 'propertyZip', 'propertyType', 'occupancyType', 'numberOfUnits', 'propertyLocation', 'numberOfLeasedUnits', 'shortTermRental', 'monthlyMarketRent', 'investorExperience', 'additionalMonthlyHousingExpenses', 'propertySquareFootage', 'propertyAcreageNumber', 'monthlyTaxes', 'monthlyInsurance', 'monthlyHOA', 'additionalAnnualHousingExpenses', 'annualTaxes', 'annualInsurance', 'annualHOA', 'purchasePrice', 'appraisedValue',
-  'selfEmployed', 'totalBorrowerIncome', 'monthlyDebt', 'estimatedDti', 'monthsOfReserves', 'liquidAssets', 'documentationType', 'secondaryDocumentationType', 'estimatedDscr', 'gift', 'achPayment', 'mortgageLatePayments', 'creditEvent', 'wholesaleCompensation', 'lockExtension', 'lockExtension2', 'concession', 'secondaryAdjustment', 'aus', 'manualUnderwriting',
+  'channel', 'loanNumber', 'borrowerFirstName', 'borrowerLastName', 'numberOfBorrowers', 'contactEmail', 'decisionCreditScore', 'creditScoreType', 'citizenshipType', 'professional', 'firstTimeHomeBuyer', 'firstTimeInvestor',
+  'loanPurpose', 'baseLoanAmount', 'purchasePrice', 'appraisedValue', 'downPayment', 'percentDownpayment', 'loanToValue', 'combinedLoanToValue', 'cashOutAmount', 'loanBalance', 'firstLoanBalance', 'secondLoanBalance', 'firstLienAmount', 'secondLienAmount', 'lienPosition', 'refinancingType',
+  'desiredLoanTerm', 'desiredAmortizationType', 'desiredRateLockPeriod', 'lockPeriodType', 'desiredInterestRate', 'prepaymentPenaltyTerm', 'prePaymentPenaltyStructureType', 'waiveEscrows', 'interestOnly', 'mortgageType', 'loanQualificationType', 'mortgageInsuranceType', 'miOptionType', 'gift', 'achPayment', 'wholesaleCompensation', 'compensationPaidType', 'vaLoanType', 'vaFundingFeeExemptionType', 'vaFirstTimeUse',
+  'state', 'zip', 'countyFips', 'countyCode', 'countyName', 'city', 'street', 'addressSearchString', 'propertyType', 'occupancyType', 'numberOfUnits', 'propertyLocation', 'numberOfLeasedUnits', 'shortTermRental', 'propertySquareFootage', 'propertyAcreageNumber', 'condoApprovalType', 'acquisitionDate',
+  'monthlyMarketRent', 'propertyRentalIncome', 'rentalIncomeMightBeUsed', 'investorExperience', 'additionalMonthlyHousingExpenses', 'additionalAnnualHousingExpenses', 'monthlyTaxes', 'monthlyInsurance', 'monthlyHOA', 'annualTaxes', 'annualInsurance', 'annualHOA',
+  'selfEmployed', 'selfEmployedTimeFrame', 'totalBorrowerIncome', 'monthlyDebt', 'totalLiabilityMonthlyPayment', 'estimatedDti', 'estimatedDSCR', 'monthsOfReserves', 'liquidAssets', 'documentationType', 'secondaryDocumentationType', 'documentationTypeTimeFrame', 'mortgageLatePayments', 'mortgageHistoryDesc', 'creditEvent', 'chapter7BankruptcyDate', 'chapter11BankruptcyDate', 'chapter13BankruptcyDate', 'deedInLieuDate', 'foreclosureDate', 'shortSaleDate', 'mortgageModificationDate', 'forbearanceDate',
+  'lockExtension', 'lockExtension2', 'concession', 'secondaryAdjustment', 'aus', 'manualUnderwriting',
 ] as const satisfies ReadonlyArray<keyof BorrowerIntake>;
 
-export type LoanPassQuoteIntakePayload = Pick<BorrowerIntake, typeof loanPassQuoteIntakeFields[number]>;
+export type LoanPassQuoteIntakePayload = Partial<Record<keyof BorrowerIntake, string>>;
 
 export function toLoanPassQuoteIntakePayload(intake: BorrowerIntake): LoanPassQuoteIntakePayload {
-  const payload: Partial<LoanPassQuoteIntakePayload> = {};
-  for (const field of loanPassQuoteIntakeFields) {
-    (payload as Record<keyof LoanPassQuoteIntakePayload, string>)[field] = intake[field];
-  }
-  return payload as LoanPassQuoteIntakePayload;
+  const aliases: Partial<Record<keyof BorrowerIntake, string>> = {
+    zip: intake.zip || intake.propertyZip || '',
+    loanNumber: intake.loanNumber || intake.externalLoanId || '',
+    baseLoanAmount: intake.baseLoanAmount || intake.loanAmount || '',
+    appraisedValue: intake.appraisedValue || intake.purchasePriceOrValue || '',
+    desiredLoanTerm: intake.desiredLoanTerm || intake.termMonths || '',
+    desiredAmortizationType: intake.desiredAmortizationType || intake.amortizationType || '',
+    desiredRateLockPeriod: intake.desiredRateLockPeriod || intake.requestedLockPeriodDays || '',
+    documentationType: intake.documentationType || intake.incomeType || '',
+    selfEmployed: intake.selfEmployed || (normalizedValue(intake.employmentType ?? '') === 'selfemployed' ? 'Yes' : intake.employmentType ? 'No' : ''),
+    totalBorrowerIncome: intake.totalBorrowerIncome || intake.monthlyIncome || '',
+    estimatedDti: intake.estimatedDti || intake.suppliedDti || '',
+    monthsOfReserves: intake.monthsOfReserves || intake.reserveMonths || intake.reserves || '',
+    decisionCreditScore: intake.decisionCreditScore || intake.creditScore || '',
+    numberOfUnits: intake.numberOfUnits || intake.unitCount || '',
+    mortgageType: intake.mortgageType || intake.productFamily || '',
+    downPayment: intake.downPayment || intake.downPaymentOrEquity || '',
+    secondLienAmount: intake.secondLienAmount || intake.subordinateFinancingAmount || '',
+    propertyRentalIncome: intake.propertyRentalIncome || intake.monthlyMarketRent || '',
+    totalLiabilityMonthlyPayment: intake.totalLiabilityMonthlyPayment || intake.monthlyDebt || '',
+    compensationPaidType: intake.compensationPaidType || intake.wholesaleCompensation || '',
+  };
+
+  return Object.fromEntries(
+    loanPassQuoteIntakeFields.map((field) => [field, aliases[field] ?? intake[field] ?? '']),
+  ) as LoanPassQuoteIntakePayload;
+}
+
+function normalizedValue(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
 export type ScenarioIntakeField = {

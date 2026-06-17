@@ -135,6 +135,9 @@ const FairLendingDashboard = lazy(() => import('./screens/fairLending').then((mo
 const ProductCatalogManagerScreen = lazy(() => import('./screens/productCatalogManager').then((module) => ({ default: module.ProductCatalogManagerScreen })));
 const ProductAdminScreen = lazy(() => import('./screens/productAdmin').then((module) => ({ default: module.ProductAdminScreen })));
 const AdminGovernanceScreen = lazy(() => import('./screens/adminGovernance').then((module) => ({ default: module.AdminGovernanceScreen })));
+const RulesEngineScreen = lazy(() => import('./screens/rulesEngine/RulesEngineScreen'));
+const PricingProfilesScreen = lazy(() => import('./screens/pricingProfiles/PricingProfilesScreen'));
+const UserManagementScreen = lazy(() => import('./screens/userManagement/UserManagementScreen'));
 const MlAdvisoryInsightsScreen = lazy(() => import('./screens/mlAdvisoryInsights').then((module) => ({ default: module.MlAdvisoryInsightsScreen })));
 const ModelVersionGovernanceScreen = lazy(() => import('./screens/modelVersionGovernance').then((module) => ({ default: module.ModelVersionGovernanceScreen })));
 const DriftMonitoringScreen = lazy(() => import('./screens/driftMonitoring').then((module) => ({ default: module.DriftMonitoringScreen })));
@@ -146,7 +149,8 @@ const LockPeriodComparisonScreen = lazy(() => import('./screens/scenarioAnalysis
 const TenantOnboardingScreen = lazy(() => import('./screens/tenant/TenantOnboardingScreen').then((module) => ({ default: module.TenantOnboardingScreen })));
 const HomeScreen = lazy(() => import('./screens/home').then((module) => ({ default: module.HomeScreen })));
 const TenantAdminScreen = lazy(() => import('./screens/tenantAdmin').then((module) => ({ default: module.TenantAdminScreen })));
-const ProductManagementScreen = lazy(() => import('./screens/product/ProductManagementScreen').then((module) => ({ default: module.ProductManagementScreen })));
+const ProductManagementScreen = lazy(() => import('./screens/productManagement/ProductManagementScreen').then((module) => ({ default: module.ProductManagementScreen })));
+const InvestorManagementScreen = lazy(() => import('./screens/investorManagement/InvestorManagementScreen').then((module) => ({ default: module.InvestorManagementScreen })));
 const RateSheetIntakeScreen = lazy(() => import('./screens/ratesheet/RateSheetIntakeScreen').then((module) => ({ default: module.RateSheetIntakeScreen })));
 const PricingAnalysisScreen = lazy(() => import('./screens/pricing/PricingAnalysisScreen').then((module) => ({ default: module.PricingAnalysisScreen })));
 const LockManagementScreen = lazy(() => import('./screens/locks/LockManagementScreen').then((module) => ({ default: module.LockManagementScreen })));
@@ -232,19 +236,25 @@ function AppRoutes() {
               <Route path="/quality/validation" element={<QualityGuardrailsSection />} />
               <Route path="/tenant/onboarding" element={<TenantOnboardingScreen />} />
               <Route path="/admin/tenants" element={<TenantAdminScreen />} />
+              <Route path="/admin/users" element={<UserManagementScreen />} />
               <Route path="/admin/tenants/new" element={<TenantOnboardingScreen />} />
               <Route path="/admin/products" element={<ProductAdminScreen />} />
+              <Route path="/admin/products/management" element={<ProductManagementScreen />} />
+              <Route path="/admin/products/management/:productCode" element={<ProductManagementScreen />} />
               <Route path="/admin/products/catalog" element={<ProductManagementScreen />} />
               <Route path="/admin/products/catalog/:productCode" element={<ProductManagementScreen />} />
               <Route path="/admin/products/new" element={<ProductManagementScreen />} />
+              <Route path="/admin/investors" element={<InvestorManagementScreen />} />
               <Route path="/pricing/rate-sheets" element={<RateSheetIntakeScreen />} />
               <Route path="/pricing/rate-sheets/new" element={<RateSheetIntakeScreen />} />
               <Route path="/pricing/rate-sheets/:id" element={<RateSheetIntakeScreen />} />
+              <Route path="/pricing/profiles" element={<PricingProfilesScreen />} />
               <Route path="/pricing/analysis" element={<PricingAnalysisScreen />} />
               <Route path="/pricing/analysis/:runId" element={<PricingAnalysisScreen />} />
               <Route path="/locks" element={<LockManagementScreen />} />
               <Route path="/locks/:lockId" element={<LockManagementScreen />} />
               <Route path="/admin/governance" element={<AdminGovernanceScreen />} />
+              <Route path="/rules-engine" element={<RulesEngineScreen />} />
               <Route path="/custom-rules" element={<CustomRuleEvidenceSection />} />
               <Route path="/platform/tenant-context" element={<TenantPlatformCoverageSection />} />
               <Route path="/audit/replay" element={<AuditReplayWorkbenchSection />} />
@@ -3319,7 +3329,8 @@ function OfferComparisonSection({ runId }: { runId: string }) {
       .then((comparison) => {
         if (!active) return;
         setOfferState({ kind: 'loaded', comparison });
-        if (comparison.sortOptions[0]) setSortKey(comparison.sortOptions[0]);
+        const [firstSortOption] = comparison.sortOptions;
+        if (firstSortOption) setSortKey(firstSortOption);
       })
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : 'Offer comparison is unavailable.';
@@ -3414,7 +3425,7 @@ function OfferComparisonSection({ runId }: { runId: string }) {
         <div className="offer-toolbar" aria-label="Offer comparison controls">
           <label htmlFor="offer-sort">Sort by</label>
           <select id="offer-sort" value={sortKey} onChange={(event) => setSortKey(event.target.value)}>
-            {comparison.sortOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+            {(comparison.sortOptions.length > 0 ? comparison.sortOptions : ['rank']).map((option) => <option key={option} value={option}>{option}</option>)}
           </select>
           <label htmlFor="confidence-filter">Filter confidence</label>
           <input
@@ -3428,7 +3439,7 @@ function OfferComparisonSection({ runId }: { runId: string }) {
         {visibleOffers.length === 0 ? (
           <p role="status">No comparable offers are loaded. Selection is blocked until explanation data is available.</p>
         ) : (
-          <div className="offer-grid" role="list" aria-label="Comparable offers">
+          <div className="offer-grid" role="list" aria-label="Offer cards">
             {visibleOffers.map((offer) => (
               <article
                 key={offer.offerId}

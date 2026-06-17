@@ -15,7 +15,7 @@ public interface NormalizationProfileRepository extends JpaRepository<Normalizat
     List<NormalizationProfile> findByTenantIdAndStatus(UUID tenantId, String status);
 
     List<NormalizationProfile> findByTenantIdAndInvestorCodeAndProductCode(
-            UUID tenantId, String investorCode, String productCode productCode);
+            UUID tenantId, String investorCode, String productCode);
 
     @Query("SELECT p FROM NormalizationProfile p " +
            "WHERE p.tenantId = :tenantId " +

@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { Avatar, Button, roleColorKeyForLabel, roleColors, themeStorageKey } from '../design-system';
+import { Avatar, roleColorKeyForLabel, roleColors, themeStorageKey } from '../design-system';
 import { useTranslation } from '../lib/i18n';
 
 type HeaderProps = {
   breadcrumb: string;
-  drawerOpen: boolean;
   notificationCount: number;
   showAuthenticatedChrome?: boolean;
-  onMenuToggle: () => void;
   onNotificationsToggle: () => void;
   onLogout?: () => void;
   onThemeToggle: () => void;
@@ -15,7 +13,7 @@ type HeaderProps = {
   user: { name: string; role: string; avatar?: string };
 };
 
-export function Header({ breadcrumb, drawerOpen, notificationCount, showAuthenticatedChrome = true, onMenuToggle, onNotificationsToggle, onLogout, onThemeToggle, theme, user }: HeaderProps) {
+export function Header({ breadcrumb, notificationCount, showAuthenticatedChrome = true, onNotificationsToggle, onLogout, onThemeToggle, theme, user }: HeaderProps) {
   const { t } = useTranslation('common');
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -56,6 +54,11 @@ export function Header({ breadcrumb, drawerOpen, notificationCount, showAuthenti
 
   const closeUserMenu = () => setUserMenuOpen(false);
 
+  const handleNotificationsToggle = () => {
+    closeUserMenu();
+    onNotificationsToggle();
+  };
+
   const handleUserMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -77,6 +80,7 @@ export function Header({ breadcrumb, drawerOpen, notificationCount, showAuthenti
   };
 
   const toggleTheme = () => {
+    closeUserMenu();
     const nextTheme = theme === 'dark' ? 'light' : 'dark';
     try {
       window.localStorage.setItem(themeStorageKey, nextTheme);
@@ -88,19 +92,6 @@ export function Header({ breadcrumb, drawerOpen, notificationCount, showAuthenti
 
   return (
     <header className="layout-header" role="banner">
-      {showAuthenticatedChrome ? (
-        <Button
-          className="layout-header__menu"
-          type="button"
-          variant="ghost"
-          aria-label={drawerOpen ? t('closeNavigationMenu') : t('openNavigationMenu')}
-          aria-expanded={drawerOpen}
-          aria-controls="primary-navigation"
-          onClick={onMenuToggle}
-        >
-          {t('menu')}
-        </Button>
-      ) : null}
       <div className="layout-header__brand">
         <div className="layout-header__brand-mark" aria-hidden="true">LW</div>
         <div className="layout-header__title">
@@ -115,22 +106,25 @@ export function Header({ breadcrumb, drawerOpen, notificationCount, showAuthenti
       </div>
       <div className="layout-header__actions">
         {showAuthenticatedChrome ? (
-          <button className="layout-icon-button" type="button" onClick={onNotificationsToggle} aria-label={t('notifications', { count: notificationCount })}>
+          <button className="layout-icon-button" type="button" onClick={handleNotificationsToggle} aria-label={t('notifications', { count: notificationCount })}>
             <span aria-hidden="true">🔔</span><span className="layout-header__action-label">{t('alerts')}</span>{notificationCount > 0 ? <span className="layout-badge">{notificationCount}</span> : null}
           </button>
         ) : null}
-        <Button
+        <button
           className="layout-theme-toggle"
           type="button"
-          variant="ghost"
-          size="sm"
           aria-pressed={theme === 'dark'}
           aria-label={t('toggleTheme')}
           title={t('toggleTheme')}
+          data-theme={theme}
           onClick={toggleTheme}
         >
-          <span aria-hidden="true">{theme === 'dark' ? '☀️' : '🌙'}</span>
-        </Button>
+          <span className="layout-theme-toggle__track" aria-hidden="true">
+            <span className="layout-theme-toggle__icon layout-theme-toggle__icon--sun">☼</span>
+            <span className="layout-theme-toggle__thumb" />
+            <span className="layout-theme-toggle__icon layout-theme-toggle__icon--moon">◐</span>
+          </span>
+        </button>
         {showAuthenticatedChrome ? (
           <div className="layout-user-menu-shell" ref={menuRef}>
             <button ref={userMenuTriggerRef} className="layout-user-menu" type="button" aria-haspopup="menu" aria-expanded={userMenuOpen} aria-controls="layout-user-menu-dropdown" aria-label={t('userMenuFor', { name: displayName })} onClick={() => setUserMenuOpen((open) => !open)}>

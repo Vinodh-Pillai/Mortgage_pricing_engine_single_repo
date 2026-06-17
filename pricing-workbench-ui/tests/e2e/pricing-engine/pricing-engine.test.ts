@@ -1148,9 +1148,9 @@ describe("Pricing Engine E2E Tests", () => {
       });
     }
   });
-  
+
   // ========================================================================
-  HEADED MODE DEMO TEST
+  // HEADED MODE DEMO TEST
   // ========================================================================
   describe("Headed Mode Demo", () => {
     test("PRICING_ANALYST - Demo: Full pricing engine walkthrough (headed)", async ({ page }, testInfo) => {

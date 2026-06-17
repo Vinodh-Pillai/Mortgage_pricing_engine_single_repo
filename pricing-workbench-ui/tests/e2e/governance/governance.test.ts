@@ -3,11 +3,12 @@ import { test, expect, describe, beforeAll, afterAll, beforeEach, afterEach } fr
 import { apiHelper, type ApiResponse, type TestContext } from "../core/helpers/api-helper";
 import { uiHelper, type NavigationResult } from "../core/helpers/ui-helper";
 import { driftDetector, type DriftFinding, type DriftReport, type BaselineExpectation } from "../core/drift/drift-detector";
-import { personas, type PersonaRole, getPersona, getTestScenarios, getAccessibleRoutes, getRestrictedRoutes } from "../core/personas/personas";const GOVERNANCE_PERSONAS = [" GOVERNANCE_REVIEWER\, \ADMIN\] as PersonaRole[];
-const COMPLIANCE_PERSONAS = [\COMPLIANCE_OFFICER\, \ADMIN\] as PersonaRole[];
-const PARTNER_PERSONAS = [\CAPITAL_MARKETS\, \ADMIN\, \WHOLESALE_LO\, \CORRESPONDENT_LO\] as PersonaRole[];
-const ALL_PERSONAS = [\GOVERNANCE_REVIEWER\, \COMPLIANCE_OFFICER\, \ADMIN\, \CAPITAL_MARKETS\] as PersonaRole[];
-const HEADLESS_MODE = process.env.HEADED !== \true\;
+import { personas, type PersonaRole, getPersona, getTestScenarios, getAccessibleRoutes, getRestrictedRoutes } from "../core/personas/personas";
+const GOVERNANCE_PERSONAS = ["GOVERNANCE_REVIEWER", "ADMIN"] as PersonaRole[];
+const COMPLIANCE_PERSONAS = ["COMPLIANCE_OFFICER", "ADMIN"] as PersonaRole[];
+const PARTNER_PERSONAS = ["CAPITAL_MARKETS", "ADMIN", "WHOLESALE_LO", "CORRESPONDENT_LO"] as PersonaRole[];
+const ALL_PERSONAS = ["GOVERNANCE_REVIEWER", "COMPLIANCE_OFFICER", "ADMIN", "CAPITAL_MARKETS"] as PersonaRole[];
+const HEADLESS_MODE = process.env.HEADED !== "true";
 
 interface TestRunState {
  runId: string;

@@ -125,13 +125,14 @@ class UiShellControllerTest {
   void productCatalogPlaceholderRecordsDraftWithoutPricingRules() throws Exception {
     mvc.perform(post("/api/v1/products/catalog")
             .contentType(MediaType.APPLICATION_JSON)
-            .content("{\"productName\":\"Standard purchase draft\",\"productOwner\":\"Product manager\",\"borrowerNeed\":\"Compare purchase options\"}"))
+            .content("{\"productId\":\"lp-prod-001\",\"mortgageType\":\"conventional\",\"priceGroupId\":\"pg-retail\",\"selectedProgramId\":\"program-001\",\"desiredLoanTerm\":\"30-year\",\"desiredAmortizationType\":\"fixed\"}"))
         .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.productId").value(org.hamcrest.Matchers.startsWith("product-")))
+        .andExpect(jsonPath("$.productId").value("lp-prod-001"))
         .andExpect(jsonPath("$.status").value("RECORDED"))
-        .andExpect(jsonPath("$.message").value("Product catalog draft was recorded in local preview mode."))
+        .andExpect(jsonPath("$.message").value("LoanPASS product contract was recorded in local preview mode."))
+        .andExpect(jsonPath("$.product.priceGroupId").value("pg-retail"))
         .andExpect(jsonPath("$.placeholders[0]")
-            .value("Product terms, eligibility, rates, thresholds, and regulatory values are not inferred."));
+            .value("Pricing rules, eligibility thresholds, rates, and regulatory values are not inferred."));
 
     mvc.perform(post("/api/v1/products/catalog")
             .contentType(MediaType.APPLICATION_JSON)
@@ -256,19 +257,20 @@ class UiShellControllerTest {
         .andExpect(jsonPath("$.status").value("BLOCKED"))
         .andExpect(jsonPath("$.fallbackMode").value(true))
         .andExpect(jsonPath("$.validationSummary.passed").value(false))
-        .andExpect(jsonPath("$.validationSummary.blockers.quoteIntent")
-            .value("Quote intent is required before a quote run can start."))
+        .andExpect(jsonPath("$.validationSummary.blockers.borrowerLastName")
+            .value("Borrower last name is required before a LoanPASS quote run can start."))
         .andExpect(jsonPath("$.validationSummary.blockers.channel")
-            .value("Channel is required before a quote run can start."));
+            .value("LoanPASS channelType is required before a quote run can start."));
   }
 
   @Test
   void borrowerQuoteRunCreatesDeterministicRunIdWithoutCallingUpstreams() throws Exception {
     String intake = """
         {
-          "quoteIntent": "purchase",
+          "borrowerLastName": "Rivera",
+          "loanNumber": "LN-001",
           "channel": "retail",
-          "scenarioName": "Alex purchase scenario"
+          "loanPurpose": "purchase"
         }
         """;
 
@@ -290,24 +292,27 @@ class UiShellControllerTest {
         .andExpect(jsonPath("$.auditPackageId").value("audit-package-required-after-scenario-service-create"))
         .andExpect(jsonPath("$.replayHashRef").value("replay-hash-required-after-scenario-service-create"))
         .andExpect(jsonPath("$.validationIssues[0].code").value("SCENARIO_SERVICE_CONTRACT_REQUIRED"))
-        .andExpect(jsonPath("$.missingContractBlockers[0]").value(org.hamcrest.Matchers.containsString("scenario id")))
-        .andExpect(jsonPath("$.quickQuoteState.minimalFirstStepFields", hasSize(2)))
-        .andExpect(jsonPath("$.quickQuoteState.quoteServiceRequiredFacts[0]").value("scenarioId"));
+        .andExpect(jsonPath("$.missingContractBlockers[0]").value(org.hamcrest.Matchers.containsString("baseLoanAmount")))
+        .andExpect(jsonPath("$.quickQuoteState.minimalFirstStepFields", hasSize(3)))
+        .andExpect(jsonPath("$.quickQuoteState.quoteServiceRequiredFacts[0]").value("borrowerLastName"));
   }
 
   @Test
   void quickQuoteLaunchCarriesCompletedBackendFactsAndMissingContractBlockers() throws Exception {
     String intake = """
         {
-          "quoteIntent": "purchase",
+          "borrowerLastName": "Rivera",
+          "loanNumber": "LN-123",
           "channel": "retail",
-          "scenarioName": "Alex purchase scenario",
-          "scenarioId": "scenario-ref-123",
-          "scenarioVersion": "version-ref-7",
           "loanPurpose": "purchase",
-          "loanAmount": "loan-amount-ref",
-          "requestedLockPeriods": "lock-period-ref-from-catalog",
-          "effectiveDate": "effective-date-ref",
+          "baseLoanAmount": "loan-amount-ref",
+          "quoteAddressDTO": { "state": "TX", "zip": "78701" },
+          "decisionCreditScore": "credit-score-ref",
+          "documentationType": "full-documentation",
+          "mortgageType": "conventional",
+          "desiredLoanTerm": "30-year",
+          "desiredAmortizationType": "fixed",
+          "numberOfUnits": "1",
           "actorId": "actor-ref",
           "clientContext": "client-context-ref"
         }
@@ -317,9 +322,9 @@ class UiShellControllerTest {
             .contentType(MediaType.APPLICATION_JSON)
             .content(intake))
         .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.backendFactRefs[0]").value("fact:scenarioId"))
-        .andExpect(jsonPath("$.backendFactRefs[1]").value("fact:scenarioVersion"))
-        .andExpect(jsonPath("$.backendFactRefs[2]").value("fact:quoteIntent"))
+        .andExpect(jsonPath("$.backendFactRefs[0]").value("fact:borrowerLastName"))
+        .andExpect(jsonPath("$.backendFactRefs[1]").value("fact:loanNumber"))
+        .andExpect(jsonPath("$.backendFactRefs[2]").value("fact:channel"))
         .andExpect(jsonPath("$.missingContractBlockers", empty()))
         .andExpect(jsonPath("$.quickQuoteState.progressiveSectionOrder", hasSize(5)));
   }
@@ -332,26 +337,26 @@ class UiShellControllerTest {
         .andExpect(jsonPath("$.tenantContext").value("demo-tenant"))
         .andExpect(jsonPath("$.dependencyStatus").value("PARTIAL"))
         .andExpect(jsonPath("$.fieldGroups", hasSize(6)))
-        .andExpect(jsonPath("$.fieldGroups[0].fields[0].fieldId").value("quoteIntent"))
+        .andExpect(jsonPath("$.fieldGroups[0].fields[0].fieldId").value("borrowerLastName"))
         .andExpect(jsonPath("$.fieldGroups[0].fields[0].required").value(true))
-        .andExpect(jsonPath("$.fieldGroups[0].fields[1].fieldId").value("channel"))
-        .andExpect(jsonPath("$.fieldGroups[1].fields[2].fieldId").value("creditScore"))
-        .andExpect(jsonPath("$.fieldGroups[2].fields[1].fieldId").value("loanAmount"))
-        .andExpect(jsonPath("$.fieldGroups[3].fields[2].fieldId").value("propertyType"))
-        .andExpect(jsonPath("$.fieldGroups[4].fields[2].fieldId").value("monthlyDebt"))
-        .andExpect(jsonPath("$.fieldGroups[5].groupId").value("preferences"))
-        .andExpect(jsonPath("$.fieldGroups[5].fields[4].fieldId").value("requestedLockPeriods"))
+        .andExpect(jsonPath("$.fieldGroups[0].fields[1].fieldId").value("loanNumber"))
+        .andExpect(jsonPath("$.fieldGroups[1].fields[1].fieldId").value("decisionCreditScore"))
+        .andExpect(jsonPath("$.fieldGroups[2].fields[1].fieldId").value("baseLoanAmount"))
+        .andExpect(jsonPath("$.fieldGroups[3].fields[2].fieldId").value("quoteAddressDTO.countyFips"))
+        .andExpect(jsonPath("$.fieldGroups[4].fields[2].fieldId").value("estimatedDti"))
+        .andExpect(jsonPath("$.fieldGroups[5].groupId").value("loan-product-controls"))
+        .andExpect(jsonPath("$.fieldGroups[5].fields[3].fieldId").value("desiredRateLockPeriod"))
         .andExpect(jsonPath("$.decisionControls[2]").value("Keep pricing calculations outside the workbench intake surface."))
         .andExpect(jsonPath("$.decisionControls[3]").value("Keep the first step minimal and reveal backend-mapped sections progressively."))
         .andExpect(jsonPath("$.validationIssues[0].severity").value("BLOCKING"))
         .andExpect(jsonPath("$.validationIssues[1].code").value("QUOTE_SERVICE_CONTRACT_REQUIRED"))
-        .andExpect(jsonPath("$.quickQuoteState.minimalFirstStepFields[0]").value("quoteIntent"))
-        .andExpect(jsonPath("$.quickQuoteState.minimalFirstStepFields[1]").value("channel"))
+        .andExpect(jsonPath("$.quickQuoteState.minimalFirstStepFields[0]").value("borrowerLastName"))
+        .andExpect(jsonPath("$.quickQuoteState.minimalFirstStepFields[1]").value("loanNumber"))
         .andExpect(jsonPath("$.quickQuoteState.progressiveSectionOrder", hasSize(5)))
-        .andExpect(jsonPath("$.quickQuoteState.quoteServiceRequiredFacts[2]").value("quoteIntent"))
-        .andExpect(jsonPath("$.quickQuoteState.quoteServiceRequiredFacts[5]").value("loanAmount"))
-        .andExpect(jsonPath("$.quickQuoteState.backendOwnedFactSources[0]").value("creditScore"))
-        .andExpect(jsonPath("$.quickQuoteState.blockedByContracts", hasSize(5)))
+        .andExpect(jsonPath("$.quickQuoteState.quoteServiceRequiredFacts[2]").value("channel"))
+        .andExpect(jsonPath("$.quickQuoteState.quoteServiceRequiredFacts[4]").value("baseLoanAmount"))
+        .andExpect(jsonPath("$.quickQuoteState.backendOwnedFactSources[0]").value("creditApplicationFields"))
+        .andExpect(jsonPath("$.quickQuoteState.blockedByContracts", hasSize(3)))
         .andExpect(jsonPath("$.auditPackageId").value("review-package-required-after-scenario-create"))
         .andExpect(jsonPath("$.replayHashRef").value("review-reference-required-after-scenario-create"))
         .andExpect(jsonPath("$.uiTraceId").value("trace-brw-s01"));

@@ -331,6 +331,7 @@ export async function mockPii25BackendApis(page: Page): Promise<void> {
   await page.route('**/api/v1/tenants/*/scenarios/scenario-e2e-pii25/**', async (route) => route.fulfill({ json: { scenarioId: 'scenario-e2e-pii25', scenarioVersion: 2, status: 'DRAFT_INCOMPLETE' } }));
   await page.route('**/api/v1/tenants/*/scenarios/scenario-e2e-pii25/**/validate', async (route) => route.fulfill({ json: { passed: true, status: 'PASSED', message: 'Validated by mocked PII-25 scenario service.', blockers: {} } }));
   await page.route('**/api/v1/tenants/*/quote-runs', async (route) => route.fulfill({ json: { status: 'CREATED', runId: 'e2e-run', nextRoute: '/quote/e2e-run/offers', validationSummary: { passed: true, status: 'PASSED', message: 'Quote run launched from mocked backend.', blockers: {} }, uiTraceId: 'pii25-e2e', events: [{ eventType: 'QUOTE_RUN_CREATED' }], fallbackMode: false, dependencyStatus: 'READY', auditPackageId: 'audit-pii25', replayHashRef: 'replay-pii25', validationIssues: [], missingContractBlockers: [] } }));
+  await page.route('**/api/v1/tenants/*/quote-runs/*/offers', async (route) => route.fulfill({ json: pii25OfferComparison(runIdFromUrl(route.request().url())) }));
   await page.route('**/api/v1/tenants/*/products/**', async (route) => route.fulfill({ json: { products: [{ id: 'product-alpha', status: 'ready' }], total: 1 } }));
   await page.route('**/api/v1/products/**', async (route) => route.fulfill({ json: { products: [{ id: 'product-alpha', status: 'ready' }], total: 1 } }));
   await page.route('**/api/v1/tenants/*/rate-sheets/**', async (route) => route.fulfill({ json: { rateSheets: [{ id: 'rs-001', status: 'ready' }], validation: { passed: true } } }));
@@ -350,7 +351,7 @@ function pii25IntakeMetadata() {
     tenantContext: 'ui-preview-tenant',
     dependencyStatus: 'READY',
     fieldGroups: [
-      { groupId: 'scenario-identity', label: 'Scenario Identity', helpText: '', fields: [pii25Field('quoteIntent', true), pii25Field('channel', true), pii25Field('scenarioName'), pii25Field('externalLoanId')] },
+      { groupId: 'scenario-identity', label: 'Scenario Identity', helpText: '', fields: [pii25Field('borrowerLastName', true), pii25Field('loanNumber', true), pii25Field('channel', true), pii25Field('quoteIntent'), pii25Field('scenarioName'), pii25Field('externalLoanId')] },
       { groupId: 'borrower-credit', label: 'Borrower Credit', helpText: '', fields: [pii25Field('borrowerName', true), pii25Field('contactEmail', true, 'email'), pii25Field('creditScore', false, 'number')] },
       { groupId: 'loan-structure', label: 'Loan Structure', helpText: '', fields: [pii25Field('loanPurpose', true), pii25Field('loanAmount', false, 'number'), pii25Field('purchasePriceOrValue', false, 'number')] },
       { groupId: 'property', label: 'Property', helpText: '', fields: [pii25Field('propertyState', true), pii25Field('propertyZip', true), pii25Field('propertyCounty')] },
@@ -363,7 +364,7 @@ function pii25IntakeMetadata() {
     replayHashRef: 'replay-pii25',
     fallbackReason: '',
     uiTraceId: 'pii25-e2e',
-    quickQuoteState: { minimalFirstStepFields: ['quoteIntent', 'channel'], progressiveSectionOrder: ['scenario-identity', 'borrower-credit', 'loan-structure', 'property', 'income-assets', 'preferences'], quoteServiceRequiredFacts: ['scenarioId'], backendOwnedFactSources: ['scenario-service', 'quote-service'], blockedByContracts: [], fallbackReason: '' },
+    quickQuoteState: { minimalFirstStepFields: ['borrowerLastName', 'loanNumber', 'mortgageType'], progressiveSectionOrder: ['scenario-identity', 'borrower-credit', 'loan-structure', 'property', 'income-assets', 'preferences'], quoteServiceRequiredFacts: ['scenarioId'], backendOwnedFactSources: ['scenario-service', 'quote-service'], blockedByContracts: [], fallbackReason: '' },
   };
 }
 
@@ -381,6 +382,46 @@ function pii25DraftScenario() {
       propertyState: 'CA',
       propertyZip: '90210',
     },
+  };
+}
+
+function runIdFromUrl(url: string) {
+  return new URL(url).pathname.match(/\/quote-runs\/([^/]+)\/offers/)?.[1] ?? 'e2e-run';
+}
+
+function pii25OfferComparison(runId: string) {
+  return {
+    runId,
+    status: 'QUOTE_SERVICE_EVIDENCE_VISIBLE',
+    offers: [
+      {
+        offerId: 'offer-e2e-primary',
+        rank: 1,
+        productLabel: 'Backend-ranked offer',
+        payment: 'payment-ref-required',
+        apr: 'apr-ref-required',
+        confidence: 'score:backend-owned',
+        rankScore: 'rank-score-ref-required',
+        rationaleChips: ['Rank supplied by mocked quote-service evidence'],
+        scenarioFlags: ['E2E_QUOTE_RUN_CREATED'],
+        explanationStatus: 'AVAILABLE',
+        sourceScenarioId: 'scenario-e2e-pii25',
+        scenarioVersion: 2,
+        upstreamRefs: ['quote-service:offers'],
+        lockEligibilityRefs: ['lock-eligibility:pending:offer-e2e-primary'],
+        snapshotRefs: [`snapshot:quote-service:run:${runId}`],
+        auditIds: ['audit:quote-ready-required'],
+        explanationSections: ['ranking', 'comparison', 'detail'],
+      },
+    ],
+    sortOptions: ['rank', 'confidence', 'payment'],
+    selectedOfferId: null,
+    commitBlocked: false,
+    fallbackReason: 'Mocked quote-service offer evidence is present for the E2E pipeline-to-offers path.',
+    requiredFacts: ['scenarioVersion'],
+    backendRefs: ['quote-service.ranking'],
+    uiTraceId: 'pii25-e2e-offers',
+    events: ['OfferListRendered'],
   };
 }
 

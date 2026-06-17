@@ -11,12 +11,12 @@ class LosContractTest {
 
   @Test
   void pricingRequestSchema() {
-    assertThat(spec).contains("LosPricingRequest:", "/pricing-requests:", "requestId", "tenantId", "LosLoan:");
+    assertThat(spec).contains("LosPricingRequest:", "/pricing-requests:", "requestId", "tenantId", "creditApplicationFields:", "quoteAddressDTO:");
   }
 
   @Test
   void pricingResponseSchema() {
-    assertThat(spec).contains("LosPricingResponse:", "LosOffer:", "WaterfallStep:", "status:");
+    assertThat(spec).contains("LosPricingResponse:", "LosOffer:", "loanPassProduct:", "status:");
   }
 
   @Test

@@ -13,8 +13,10 @@ describe('ProductAdmin route registration', () => {
     expect(productAdminModule?.match('/admin/products')).toBe(true);
     expect(productAdminModule?.match('/admin/products/catalog')).toBe(false);
     expect(productManagementModule?.match('/admin/products/catalog')).toBe(true);
+    expect(productManagementModule?.match('/admin/products/management')).toBe(true);
     expect(matchAppRoute('/admin/products').id).toBe('product-admin');
     expect(matchAppRoute('/admin/products/catalog').id).toBe('product-management');
+    expect(matchAppRoute('/admin/products/management').id).toBe('product-management-alias');
     expect(matchAppRoute('/admin/products/new').id).toBe('product-management-new');
   });
 });

@@ -47,13 +47,19 @@ const selectOptionsByField: Partial<Record<keyof BorrowerIntake, SelectOption[]>
     { value: 'Bank Statement', label: 'Bank Statement' },
     { value: '1099', label: '1099' },
     { value: 'P&L', label: 'P&L' },
-    { value: 'Asset Depletion', label: 'Asset Depletion' },
     { value: 'WVOE', label: 'WVOE' },
-    { value: 'ATR-in-Full', label: 'ATR-in-Full' },
-    { value: 'Streamline', label: 'Streamline' },
-    { value: 'K-1', label: 'K-1' },
-    { value: 'Asset Qualifier', label: 'Asset Qualifier' },
     { value: 'Asset Utilization', label: 'Asset Utilization' },
+    { value: 'K-1 Only', label: 'K-1 Only' },
+  ],
+  documentationTypeTimeFrame: [
+    { value: '', label: 'Select documentation timeframe' },
+    { value: '12 Month', label: '12 Month' },
+    { value: '24 Month', label: '24 Month' },
+  ],
+  selfEmployedTimeFrame: [
+    { value: '', label: 'Select self-employed timeframe' },
+    { value: 'Less Than 2 Years', label: 'Less Than 2 Years' },
+    { value: '2 Years', label: '2 Years' },
   ],
   state: usStateOptions,
   propertyType: [
@@ -99,12 +105,14 @@ const selectOptionsByField: Partial<Record<keyof BorrowerIntake, SelectOption[]>
   citizenshipType: [
     { value: '', label: 'Select citizenship type' },
     { value: 'US Citizen', label: 'US Citizen' },
-    { value: 'Permanent Resident Alien', label: 'Permanent Resident Alien' },
-    { value: 'Non-Permanent Resident Alien', label: 'Non-Permanent Resident Alien' },
+    { value: 'Permanent Resident', label: 'Permanent Resident' },
+    { value: 'Non-Permanent Resident', label: 'Non-Permanent Resident' },
     { value: 'Foreign National', label: 'Foreign National' },
     { value: 'ITIN', label: 'ITIN' },
     { value: 'DACA', label: 'DACA' },
   ],
+  firstTimeHomeBuyer: yesNoOptions('Select first-time home buyer'),
+  firstTimeInvestor: yesNoOptions('Select first-time investor'),
   propertyLocation: [
     { value: '', label: 'Select property location' },
     { value: 'Not Applicable', label: 'Not Applicable' },
@@ -130,6 +138,32 @@ const selectOptionsByField: Partial<Record<keyof BorrowerIntake, SelectOption[]>
     { value: '4 Year', label: '4 Year' },
     { value: '5 Year', label: '5 Year' },
   ],
+  prePaymentPenaltyStructureType: [
+    { value: '', label: 'Select prepayment structure' },
+    { value: 'None', label: 'None' },
+  ],
+  lockPeriodType: [
+    { value: '', label: 'Select lock period' },
+    { value: '30 Days', label: '30 Days' },
+  ],
+  loanQualificationType: [
+    { value: '', label: 'Select loan qualification type' },
+    { value: 'QM', label: 'QM' },
+    { value: 'Non-QM', label: 'Non-QM' },
+    { value: 'DSCR', label: 'DSCR' },
+  ],
+  mortgageInsuranceType: [
+    { value: '', label: 'Select mortgage insurance type' },
+    { value: 'None', label: 'None' },
+    { value: 'Borrower Paid', label: 'Borrower Paid' },
+    { value: 'Lender Paid', label: 'Lender Paid' },
+  ],
+  miOptionType: [
+    { value: '', label: 'Select MI option type' },
+    { value: 'None', label: 'None' },
+    { value: 'Monthly', label: 'Monthly' },
+    { value: 'Single Premium', label: 'Single Premium' },
+  ],
   waiveEscrows: yesNoOptions('Select escrow waiver'),
   gift: yesNoOptions('Select gift'),
   aus: [
@@ -148,6 +182,34 @@ const selectOptionsByField: Partial<Record<keyof BorrowerIntake, SelectOption[]>
   secondaryAdjustment: yesNoOptions('Select secondary adjustment'),
   shortTermRental: yesNoOptions('Select short-term rental'),
   professional: yesNoOptions('Select professional status'),
+  rentalIncomeMightBeUsed: yesNoOptions('Select rental income use'),
+  condoApprovalType: [
+    { value: '', label: 'Select condo approval type' },
+    { value: 'Not Applicable', label: 'Not Applicable' },
+    { value: 'Warrantable', label: 'Warrantable' },
+    { value: 'Non-Warrantable', label: 'Non-Warrantable' },
+  ],
+  compensationPaidType: [
+    { value: '', label: 'Select compensation paid type' },
+    { value: 'Borrower Paid', label: 'Borrower Paid' },
+    { value: 'Lender Paid', label: 'Lender Paid' },
+  ],
+  vaLoanType: [
+    { value: '', label: 'Select VA loan type' },
+    { value: 'Purchase', label: 'Purchase' },
+    { value: 'IRRRL', label: 'IRRRL' },
+    { value: 'Cash-Out', label: 'Cash-Out' },
+  ],
+  vaFundingFeeExemptionType: [
+    { value: '', label: 'Select VA funding fee exemption' },
+    { value: 'Completely Exempt', label: 'Completely Exempt' },
+  ],
+  vaFirstTimeUse: yesNoOptions('Select VA first-time use'),
+  refinancingType: [
+    { value: '', label: 'Select refinancing type' },
+    { value: 'Rate/Term', label: 'Rate/Term' },
+    { value: 'Cash-Out', label: 'Cash-Out' },
+  ],
 };
 
 function yesNoOptions(placeholder: string): SelectOption[] {

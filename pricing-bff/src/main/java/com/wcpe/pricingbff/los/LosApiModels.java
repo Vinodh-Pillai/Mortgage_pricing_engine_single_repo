@@ -2,7 +2,6 @@ package com.wcpe.pricingbff.los;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
@@ -12,67 +11,43 @@ public final class LosApiModels {
 
   public record LosPricingRequest(
       String requestId,
-      LosLoan loan,
-      LosPricing pricing,
       String tenantId,
-      String callbackUrl) {
-  }
-
-  public record LosLoan(
-      String loanPurpose,
-      BigDecimal loanAmount,
-      String loanType,
-      Integer termMonths,
-      String amortizationType,
-      LosProperty property,
-      List<LosBorrower> borrowers) {
-    public LosLoan {
-      borrowers = List.copyOf(borrowers == null ? List.of() : borrowers);
-    }
-  }
-
-  public record LosProperty(
-      String address,
-      String city,
-      String state,
-      String zip,
-      String county,
-      String propertyType,
-      String occupancy,
-      Integer units,
+      String callbackUrl,
+      LoanPassBorrowerInfo quoteBorrowerInfo,
+      LoanPassAddress quoteAddressDTO,
+      BigDecimal requestedLoanAmount,
       BigDecimal purchasePrice,
-      BigDecimal appraisedValue) {
-  }
-
-  public record LosBorrower(
-      String borrowerId,
+      BigDecimal propertyValue,
+      String transactionType,
+      String propertyInformationType,
+      String occupancyType,
+      Integer numberOfUnits,
+      String incomeDocumentationType,
+      BigDecimal totalMonthlyIncome,
+      BigDecimal totalLiabilityMonthlyPayment,
+      BigDecimal debtToIncomeRatio,
+      Integer monthsOfReserves,
       Integer creditScore,
-      String creditScoreSource,
-      LocalDate creditReportDate,
-      BorrowerIncome income,
-      BorrowerAssets assets,
-      BorrowerLiabilities liabilities) {
-  }
-
-  public record BorrowerIncome(BigDecimal monthly, String type) {
-  }
-
-  public record BorrowerAssets(BigDecimal liquid, BigDecimal retirement) {
-  }
-
-  public record BorrowerLiabilities(BigDecimal monthlyDebt) {
-  }
-
-  public record LosPricing(
-      String channel,
-      String productFamily,
-      List<String> investorPreference,
-      Integer lockPeriodDays,
-      LocalDate effectiveDate) {
-    public LosPricing {
-      investorPreference = List.copyOf(investorPreference == null ? List.of() : investorPreference);
+      String mortgageType,
+      String amortizationType,
+      String loanTermType,
+      Integer desiredRateLockPeriod,
+      String lockPeriodType,
+      String channelType,
+      List<CreditApplicationField> creditApplicationFields) {
+    public LosPricingRequest {
+      creditApplicationFields = List.copyOf(creditApplicationFields == null ? List.of() : creditApplicationFields);
     }
   }
+
+  public record LoanPassBorrowerInfo(String borrowerLastName, String loanNumber, Integer numberOfBorrowers) {}
+
+  public record LoanPassAddress(String street, String city, String state, String zip, String countyFips,
+      String countyCode, String countyName, String searchString) {}
+
+  public record CreditApplicationField(String fieldId, CreditApplicationValue value) {}
+
+  public record CreditApplicationValue(String type, Object value, String enumTypeId, String variantId) {}
 
   public record LosPricingResponse(
       String requestId,
@@ -92,27 +67,23 @@ public final class LosApiModels {
 
   public record LosOffer(
       String offerId,
-      String investor,
+      String productId,
+      String selectedProgramId,
+      String priceGroupId,
+      String investorId,
       String investorName,
-      BigDecimal rate,
+      BigDecimal noteRate,
       BigDecimal price,
-      BigDecimal points,
       BigDecimal apr,
-      Integer lockPeriodDays,
-      LocalDate lockExpiration,
-      List<LosLlpa> llpas,
-      BigDecimal totalAdjustmentPoints,
-      BigDecimal margin,
-      Integer marginBps,
-      String eligibility,
+      Integer desiredRateLockPeriod,
+      String lockPeriodType,
+      String eligibilityStatus,
       Boolean bestExecution,
-      Integer rank) {
+      Integer rank,
+      Map<String, Object> loanPassProduct) {
     public LosOffer {
-      llpas = List.copyOf(llpas == null ? List.of() : llpas);
+      loanPassProduct = Map.copyOf(loanPassProduct == null ? Map.of() : loanPassProduct);
     }
-  }
-
-  public record LosLlpa(String code, String description, BigDecimal points) {
   }
 
   public record WaterfallStep(String step, BigDecimal input, String operation, BigDecimal output) {
@@ -182,8 +153,7 @@ public final class LosApiModels {
       String tenantId,
       int scenarioVersion,
       Map<String, String> loanFacts,
-      List<Integer> requestedLockPeriods,
-      LocalDate effectiveDate) {
+      List<Integer> requestedLockPeriods) {
     public LosScenario {
       loanFacts = Map.copyOf(loanFacts == null ? Map.of() : loanFacts);
       requestedLockPeriods = List.copyOf(requestedLockPeriods == null ? List.of() : requestedLockPeriods);
@@ -199,11 +169,34 @@ public final class LosApiModels {
       String actorId,
       String idempotencyKey,
       String correlationId,
-      LocalDate effectiveDate,
-      boolean preferAsync) {
+      boolean preferAsync,
+      String requestId,
+      LoanPassBorrowerInfo quoteBorrowerInfo,
+      LoanPassAddress quoteAddressDTO,
+      BigDecimal requestedLoanAmount,
+      BigDecimal purchasePrice,
+      BigDecimal propertyValue,
+      String transactionType,
+      String propertyInformationType,
+      String occupancyType,
+      Integer numberOfUnits,
+      String incomeDocumentationType,
+      BigDecimal totalMonthlyIncome,
+      BigDecimal totalLiabilityMonthlyPayment,
+      BigDecimal debtToIncomeRatio,
+      Integer monthsOfReserves,
+      Integer creditScore,
+      String mortgageType,
+      String amortizationType,
+      String loanTermType,
+      Integer desiredRateLockPeriod,
+      String lockPeriodType,
+      String channelType,
+      List<CreditApplicationField> creditApplicationFields) {
     public QuoteServiceRequest {
       requestedLockPeriods = List.copyOf(requestedLockPeriods == null ? List.of() : requestedLockPeriods);
       clientContext = Map.copyOf(clientContext == null ? Map.of() : clientContext);
+      creditApplicationFields = List.copyOf(creditApplicationFields == null ? List.of() : creditApplicationFields);
     }
   }
 

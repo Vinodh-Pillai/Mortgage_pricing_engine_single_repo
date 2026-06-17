@@ -31,7 +31,7 @@ class LosSimulatorIntegrationTest {
             .header("X-Correlation-ID", "sim-corr-001")
             .contentType(MediaType.APPLICATION_JSON)
             .content("""
-                {"requestId":"los-sim-001","tenantId":"tenant-los","loan":{"loanPurpose":"PURCHASE","loanAmount":450000,"loanType":"CONVENTIONAL","termMonths":360,"amortizationType":"FIXED","property":{"state":"TX","county":"TRAVIS","propertyType":"SINGLE_FAMILY","occupancy":"PRIMARY_RESIDENCE","units":1,"purchasePrice":500000,"appraisedValue":500000},"borrowers":[{"borrowerId":"b1","creditScore":745}]},"pricing":{"channel":"RETAIL","productFamily":"CONVENTIONAL","investorPreference":["FNMA"],"lockPeriodDays":30,"effectiveDate":"2026-06-12"}}
+                {"requestId":"los-sim-001","tenantId":"tenant-los","quoteBorrowerInfo":{"borrowerLastName":"Rivera","loanNumber":"LN-SIM-001","numberOfBorrowers":1},"quoteAddressDTO":{"state":"TX","zip":"78701","countyName":"TRAVIS"},"requestedLoanAmount":450000,"purchasePrice":500000,"propertyValue":500000,"transactionType":"purchase","propertyInformationType":"single-family","occupancyType":"primary-residence","numberOfUnits":1,"incomeDocumentationType":"full-documentation","creditScore":745,"mortgageType":"conventional","amortizationType":"fixed","loanTermType":"30-year","desiredRateLockPeriod":30,"lockPeriodType":"30-day","channelType":"retail","creditApplicationFields":[{"fieldId":"field@base-loan-amount","value":{"type":"number","value":450000}},{"fieldId":"field@decision-credit-score","value":{"type":"number","value":745}}]}
                 """))
         .andExpect(status().isAccepted())
         .andExpect(jsonPath("$.pricingRequestId").exists())

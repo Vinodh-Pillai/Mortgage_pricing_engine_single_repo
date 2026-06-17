@@ -200,74 +200,68 @@ components:
   schemas:
     LosPricingRequest:
       type: object
-      required: [requestId, loan, pricing, tenantId]
+      required: [requestId, tenantId, quoteBorrowerInfo, quoteAddressDTO, requestedLoanAmount, loanTermType, desiredRateLockPeriod, creditApplicationFields]
       properties:
         requestId: { type: string }
         tenantId: { type: string }
         callbackUrl: { type: string, format: uri }
-        loan: { $ref: '#/components/schemas/LosLoan' }
-        pricing: { $ref: '#/components/schemas/LosPricing' }
-    LosLoan:
-      type: object
-      required: [loanPurpose, loanAmount, loanType, termMonths, amortizationType, property, borrowers]
-      properties:
-        loanPurpose: { type: string, enum: [PURCHASE, REFINANCE, CASH_OUT_REFINANCE] }
-        loanAmount: { type: number }
-        loanType: { type: string }
-        termMonths: { type: integer }
+        quoteBorrowerInfo: { $ref: '#/components/schemas/LoanPassBorrowerInfo' }
+        quoteAddressDTO: { $ref: '#/components/schemas/LoanPassAddress' }
+        requestedLoanAmount: { type: number }
+        purchasePrice: { type: number }
+        propertyValue: { type: number }
+        transactionType: { type: string }
+        propertyInformationType: { type: string }
+        occupancyType: { type: string }
+        numberOfUnits: { type: integer }
+        incomeDocumentationType: { type: string }
+        totalMonthlyIncome: { type: number }
+        totalLiabilityMonthlyPayment: { type: number }
+        debtToIncomeRatio: { type: number }
+        monthsOfReserves: { type: integer }
+        creditScore: { type: integer }
+        mortgageType: { type: string }
         amortizationType: { type: string }
-        property: { $ref: '#/components/schemas/LosProperty' }
-        borrowers:
+        loanTermType: { type: string }
+        desiredRateLockPeriod: { type: integer }
+        lockPeriodType: { type: string }
+        channelType: { type: string }
+        creditApplicationFields:
           type: array
-          items: { $ref: '#/components/schemas/LosBorrower' }
-    LosProperty:
+          items: { $ref: '#/components/schemas/CreditApplicationField' }
+    LoanPassBorrowerInfo:
       type: object
+      required: [borrowerLastName, loanNumber]
       properties:
-        address: { type: string }
+        borrowerLastName: { type: string }
+        loanNumber: { type: string }
+        numberOfBorrowers: { type: integer }
+    LoanPassAddress:
+      type: object
+      required: [state, zip]
+      properties:
+        street: { type: string }
         city: { type: string }
         state: { type: string }
         zip: { type: string }
-        county: { type: string }
-        propertyType: { type: string }
-        occupancy: { type: string }
-        units: { type: integer }
-        purchasePrice: { type: number }
-        appraisedValue: { type: number }
-    LosBorrower:
+        countyFips: { type: string }
+        countyCode: { type: string }
+        countyName: { type: string }
+        searchString: { type: string }
+    CreditApplicationField:
       type: object
+      required: [fieldId, value]
       properties:
-        borrowerId: { type: string }
-        creditScore: { type: integer }
-        creditScoreSource: { type: string }
-        creditReportDate: { type: string, format: date }
-        income: { $ref: '#/components/schemas/BorrowerIncome' }
-        assets: { $ref: '#/components/schemas/BorrowerAssets' }
-        liabilities: { $ref: '#/components/schemas/BorrowerLiabilities' }
-    BorrowerIncome:
+        fieldId: { type: string, example: field@base-loan-amount }
+        value: { $ref: '#/components/schemas/CreditApplicationValue' }
+    CreditApplicationValue:
       type: object
+      required: [type]
       properties:
-        monthly: { type: number }
-        type: { type: string }
-    BorrowerAssets:
-      type: object
-      properties:
-        liquid: { type: number }
-        retirement: { type: number }
-    BorrowerLiabilities:
-      type: object
-      properties:
-        monthlyDebt: { type: number }
-    LosPricing:
-      type: object
-      required: [channel, productFamily, lockPeriodDays, effectiveDate]
-      properties:
-        channel: { type: string }
-        productFamily: { type: string }
-        investorPreference:
-          type: array
-          items: { type: string }
-        lockPeriodDays: { type: integer }
-        effectiveDate: { type: string, format: date }
+        type: { type: string, enum: [number, string, enum, duration] }
+        value: {}
+        enumTypeId: { type: string }
+        variantId: { type: string }
     LosPricingResponse:
       type: object
       required: [requestId, pricingRequestId, status, offers, waterfall]
@@ -289,29 +283,22 @@ components:
       type: object
       properties:
         offerId: { type: string }
-        investor: { type: string }
+        productId: { type: string }
+        selectedProgramId: { type: string }
+        priceGroupId: { type: string }
+        investorId: { type: string }
         investorName: { type: string }
-        rate: { type: number }
+        noteRate: { type: number }
         price: { type: number }
-        points: { type: number }
         apr: { type: number }
-        lockPeriodDays: { type: integer }
-        lockExpiration: { type: string, format: date }
-        llpas:
-          type: array
-          items: { $ref: '#/components/schemas/LosLlpa' }
-        totalAdjustmentPoints: { type: number }
-        margin: { type: number }
-        marginBps: { type: integer }
-        eligibility: { type: string }
+        desiredRateLockPeriod: { type: integer }
+        lockPeriodType: { type: string }
+        eligibilityStatus: { type: string }
         bestExecution: { type: boolean }
         rank: { type: integer }
-    LosLlpa:
-      type: object
-      properties:
-        code: { type: string }
-        description: { type: string }
-        points: { type: number }
+        loanPassProduct:
+          type: object
+          additionalProperties: true
     WaterfallStep:
       type: object
       properties:

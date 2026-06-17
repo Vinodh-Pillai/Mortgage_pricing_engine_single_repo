@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { fetchPricingWaterfall, type PricingWaterfallView, type RedactedWaterfallValue, type WaterfallLedgerRow } from '../../lib/api/quoteRuns';
 import type { ScreenProps, ScreenVisualState } from '../contract/ScreenProps';
 import { deterministicPricingWaterfall } from './fixtures';
@@ -63,6 +63,7 @@ export function WaterfallLayout({ waterfall, visualState, onNavigate }: { waterf
     const configMatches = !configFilter || row.configRef.toLowerCase().includes(configFilter.toLowerCase());
     return sectionMatches && reasonMatches && configMatches;
   }), [configFilter, reasonFilter, sectionFilter, waterfall.finalPrice.ledger]);
+  const visibleRows = useMemo(() => filteredRows.slice(0, 80), [filteredRows]);
   const totalAdjustmentRows = waterfall.finalPrice.ledger.filter((row) => sectionFor(row) === 'Adjustments').length;
 
   function toggleRow(ordinal: number) {
@@ -105,7 +106,7 @@ export function WaterfallLayout({ waterfall, visualState, onNavigate }: { waterf
         <EvidenceRefs waterfall={waterfall} onNavigate={navigate} />
       </section>
 
-      <LedgerPanel groups={groups} rows={filteredRows} expandedSteps={expandedSteps} sectionFilter={sectionFilter} reasonFilter={reasonFilter} configFilter={configFilter} onSectionFilter={setSectionFilter} onReasonFilter={setReasonFilter} onConfigFilter={setConfigFilter} onToggleRow={toggleRow} onExpandAll={expandAllVisible} onCollapseAll={() => setExpandedSteps(new Set())} onNavigate={navigate} />
+      <LedgerPanel groups={groups} rows={visibleRows} expandedSteps={expandedSteps} sectionFilter={sectionFilter} reasonFilter={reasonFilter} configFilter={configFilter} onSectionFilter={setSectionFilter} onReasonFilter={setReasonFilter} onConfigFilter={setConfigFilter} onToggleRow={toggleRow} onExpandAll={expandAllVisible} onCollapseAll={() => setExpandedSteps(new Set())} onNavigate={navigate} />
       {exportText ? <textarea aria-label="Exported pricing waterfall" readOnly value={exportText} rows={12} /> : null}
     </main>
   );
@@ -132,7 +133,7 @@ function LedgerPanel(props: { groups: Map<string, WaterfallLedgerRow[]>; rows: W
     <section className="panel" aria-labelledby="ledger-heading">
       <h2 id="ledger-heading">Ledger</h2>
       <div className="status-grid" aria-label="Ledger grouping summary">
-        {Array.from(groups.entries()).map(([section, groupedRows]) => <><dt key={`${section}-label`}>{section}</dt><dd key={`${section}-count`}>{groupedRows.length} rows</dd></>)}
+        {Array.from(groups.entries()).map(([section, groupedRows]) => <Fragment key={section}><dt>{section}</dt><dd>{groupedRows.length} rows</dd></Fragment>)}
       </div>
       <div role="search" aria-label="Ledger filters">
         <label>Group by section <select value={sectionFilter} onChange={(event) => onSectionFilter(event.target.value)}><option value="all">All</option>{Array.from(groups.keys()).map((section) => <option key={section} value={section}>{section}</option>)}</select></label>{' '}

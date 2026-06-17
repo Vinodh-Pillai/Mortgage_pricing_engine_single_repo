@@ -9,7 +9,7 @@ import { themeStorageKey } from '../design-system';
 import { Header } from './Header';
 import { useNavRailMode } from './hooks/useNavRailMode';
 import './layout.css';
-import { NavRail } from './NavRail';
+import { Sidebar } from './Sidebar';
 import { SkipLink } from './SkipLink';
 import { persistNavRailCollapsed, readPersistedNavRailCollapsed } from './state/navRailState';
 
@@ -43,7 +43,6 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, modul
   });
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const railCollapsed = mode === 'rail' && navCollapsed;
-  const navigationExpanded = mode === 'drawer' ? drawerOpen : !railCollapsed;
 
   useEffect(() => {
     try {
@@ -75,23 +74,13 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, modul
       return next;
     });
   }, []);
-  const togglePrimaryNavigation = useCallback(() => {
-    if (mode === 'drawer') {
-      setDrawerOpen((current) => !current);
-      return;
-    }
-    toggleCollapsed();
-  }, [mode, toggleCollapsed]);
-
   return (
     <div className={`layout-shell layout-shell--${mode}${railCollapsed ? ' layout-shell--nav-collapsed' : ''}`} data-breakpoint-mode={mode} data-nav-collapsed={railCollapsed ? 'true' : 'false'}>
       <SkipLink />
       <Header
         breadcrumb={breadcrumb}
-        drawerOpen={navigationExpanded}
         notificationCount={showAuthenticatedChrome ? notifications.length : 0}
         showAuthenticatedChrome={showAuthenticatedChrome}
-        onMenuToggle={togglePrimaryNavigation}
         onNotificationsToggle={() => {
           if (showAuthenticatedChrome) setNotificationsOpen((current) => !current);
         }}
@@ -103,8 +92,8 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, modul
       <div className="layout-frame">
         {showAuthenticatedChrome ? (
           <>
-            {mode === 'drawer' && drawerOpen ? <button type="button" className="layout-nav-backdrop" aria-label="Close navigation backdrop" onClick={closeDrawer} /> : null}
-            <NavRail
+            {mode === 'drawer' && drawerOpen ? <button type="button" className="layout-sidebar-backdrop" aria-label="Close navigation backdrop" onClick={closeDrawer} /> : null}
+            <Sidebar
               activeModuleId={activeModuleId}
               activeRunId={activeRunId}
               collapsed={railCollapsed}
@@ -112,6 +101,7 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, modul
               mode={mode}
               modules={modules}
               onCloseDrawer={closeDrawer}
+              onOpenDrawer={() => setDrawerOpen(true)}
               onToggleCollapsed={toggleCollapsed}
             />
           </>

@@ -1,4 +1,4 @@
-import type { BorrowerIntake, IntakeValidation, QuoteRunLaunch } from '../../lib/api/quoteRuns';
+import { toLoanPassQuoteIntakePayload, type BorrowerIntake, type IntakeValidation, type QuoteRunLaunch } from '../../lib/api/quoteRuns';
 import { quoteIntakeTraceId } from './metadata';
 
 export type QuoteLaunchResult =
@@ -20,7 +20,11 @@ export async function launchQuoteRun(
       'Content-Type': 'application/json',
       'X-Ui-Trace-Id': quoteIntakeTraceId,
     },
-    body: JSON.stringify({ scenarioId, scenarioVersion, intakeData }),
+    body: JSON.stringify({
+      scenarioId,
+      scenarioVersion,
+      ...toLoanPassQuoteIntakePayload(intakeData as BorrowerIntake),
+    }),
   });
 
   if (response.status >= 500) throw new Error('Quote run launch is temporarily unavailable.');

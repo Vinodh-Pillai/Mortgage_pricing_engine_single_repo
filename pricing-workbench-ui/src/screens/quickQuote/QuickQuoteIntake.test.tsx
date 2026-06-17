@@ -4,8 +4,10 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import QuickQuoteIntake from './QuickQuoteIntake';
 import type { BorrowerIntake, MetadataState } from '../../lib/api/quoteRuns';
+import { initialQuoteIntake } from '../quoteIntake';
 
 const baseIntake: BorrowerIntake = {
+  ...initialQuoteIntake,
   quoteIntent: '',
   channel: '',
   scenarioName: '',

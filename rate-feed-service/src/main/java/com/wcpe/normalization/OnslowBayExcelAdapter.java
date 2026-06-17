@@ -282,7 +282,7 @@ public class OnslowBayExcelAdapter {
             if (!byProduct.has(key)) {
                 byProduct.putObject(key).put("count", 0);
             }
-            byProduct.get(key).put("count", byProduct.get(key).get("count").asInt() + 1);
+            ((ObjectNode) byProduct.get(key)).put("count", byProduct.get(key).get("count").asInt() + 1);
         }
         sample.set("by_product", byProduct);
 
