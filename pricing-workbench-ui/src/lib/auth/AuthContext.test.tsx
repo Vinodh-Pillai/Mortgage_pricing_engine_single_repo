@@ -81,6 +81,7 @@ describe('AuthContext', () => {
     render(<AuthProvider><AuthProbe /></AuthProvider>);
     await waitFor(() => expect(screen.getByTestId('permission')).toHaveTextContent('true'));
     expect(screen.getByTestId('route')).toHaveTextContent('false');
-    expect(rolePermissionMatrix.loan_officer).toEqual(['quote:create', 'quote:read', 'scenario:create', 'lock:create', 'eligibility:read']);
+    expect(rolePermissionMatrix.loan_officer).toEqual(expect.arrayContaining(['quote:create', 'quote:read', 'scenario:create', 'lock:create', 'eligibility:read']));
+    expect(rolePermissionMatrix.pricing_analyst).toEqual(expect.arrayContaining(['product:read', 'rate-feed:read', 'pricing:analysis']));
   });
 });

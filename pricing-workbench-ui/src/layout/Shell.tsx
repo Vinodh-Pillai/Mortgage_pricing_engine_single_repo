@@ -98,6 +98,7 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, modul
               activeRunId={activeRunId}
               collapsed={railCollapsed}
               drawerOpen={drawerOpen}
+              fallbackPersona={user.role}
               mode={mode}
               modules={modules}
               onCloseDrawer={closeDrawer}

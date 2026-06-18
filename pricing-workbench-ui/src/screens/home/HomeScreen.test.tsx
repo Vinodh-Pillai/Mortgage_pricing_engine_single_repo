@@ -33,9 +33,13 @@ describe('HomeScreenTest', () => {
     render(<HomeScreen role="pricing_analyst" userId="user-1" initialActivity={activity} onNavigate={vi.fn()} />, { wrapper: MemoryRouter });
 
     expect(screen.getByRole('heading', { name: "Today's work" })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Rate Sheet Upload/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Rate Sheet Review/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Pricing Analysis/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Product Catalog Review/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Tenant Settings/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/Configured tenant\/product mappings are unavailable/)).toBeInTheDocument();
+    expect(screen.getByText(/Product mappings are visible as setup blockers/)).toBeInTheDocument();
+    expect(screen.queryByText(/Product catalog changes require audit evidence/)).not.toBeInTheDocument();
   });
 
   it('HomeScreenTest.filtersQuickActionsByPermission', () => {
@@ -51,6 +55,10 @@ describe('HomeScreenTest', () => {
     const onNavigate = vi.fn();
     render(<HomeScreen role="loan_officer" userId="user-1" initialActivity={activity} onNavigate={onNavigate} />, { wrapper: MemoryRouter });
 
+    expect(screen.getByRole('button', { name: /Quote Workspace/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Tenant Settings/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /User Access/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Product Catalog Review/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Johnson' }));
 
     expect(screen.getByText('456 Oak Ave, Springfield, IL')).toBeInTheDocument();
@@ -78,6 +86,39 @@ describe('HomeScreenTest', () => {
 
     expect(catalog).toHaveFocus();
     expect(onNavigate).toHaveBeenCalledWith('/admin/products/catalog');
+  });
+
+  it('HomeScreenTest.hidesRestrictedActionsWhenRoleMetadataIsUnavailable', () => {
+    render(<HomeScreen role="not-a-role" userId="unknown-user" onNavigate={vi.fn()} />, { wrapper: MemoryRouter });
+
+    expect(screen.getByRole('alert', { name: 'Role metadata unavailable' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Tenant Settings/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Rate Sheet Review/ })).not.toBeInTheDocument();
+  });
+
+  it('HomeScreenTest.rendersOperationsAndAdminPersonaActionsFromConfiguredScopes', () => {
+    const onNavigate = vi.fn();
+    const { rerender } = render(<HomeScreen role="operations-lead" userId="ops-user" onNavigate={onNavigate} />, { wrapper: MemoryRouter });
+
+    expect(screen.getByRole('button', { name: /Operational Remediation/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Rate Sheet Review/ })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Async quote callbacks and ratesheet jobs/ })).toBeInTheDocument();
+    expect(screen.getByText('Async quote callback queue')).toBeInTheDocument();
+    expect(screen.getByText('Ratesheet import job')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Review callback exceptions/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Retry ratesheet job/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /User Access/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /Tenant, product, and access changes are audited/ })).not.toBeInTheDocument();
+
+    rerender(<HomeScreen role="admin" userId="admin-user" onNavigate={onNavigate} />);
+
+    expect(screen.getByRole('button', { name: /Tenant Settings/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /User Access/ })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Tenant, product, and access changes are audited/ })).toBeInTheDocument();
+    expect(screen.getByText(/Administrative tenant settings, product catalog setup, and user access changes/)).toBeInTheDocument();
+    expect(screen.getByText(/Product catalog changes require audit evidence/)).toBeInTheDocument();
+    expect(screen.getByText(/Tenant management changes must be traceable in audit history/)).toBeInTheDocument();
+    expect(screen.getByText(/User access updates require audit evidence/)).toBeInTheDocument();
   });
 
   it('registers the home screen module contract', () => {

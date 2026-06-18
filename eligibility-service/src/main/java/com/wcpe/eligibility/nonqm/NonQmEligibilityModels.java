@@ -143,6 +143,24 @@ public final class NonQmEligibilityModels {
         Map<String, String> ppeFieldRefs
     ) {}
 
+    public record RuleConfigRef(
+        String ruleSetId,
+        String ruleId,
+        int version,
+        RuleSetSource source,
+        String sourceSystemRef,
+        Instant effectiveStart,
+        Instant effectiveEnd,
+        Map<String, String> fieldRefs
+    ) {}
+
+    public record FieldMessage(
+        String fieldPath,
+        String reasonCode,
+        String displayMessage,
+        Map<String, String> fieldRefs
+    ) {}
+
     public record NonQmEligibilityResult(
         String productCode,
         EligibilityDecision decision,
@@ -151,8 +169,16 @@ public final class NonQmEligibilityModels {
         Map<String, Object> calculatedFacts,
         List<RuleOutcome> outcomes,
         List<String> missingFacts,
+        List<RuleConfigRef> ruleConfigRefs,
+        List<FieldMessage> fieldMessages,
         String auditHash
-    ) {}
+    ) {
+        public NonQmEligibilityResult(String productCode, EligibilityDecision decision, boolean eligible, int ruleSetVersion,
+                                      Map<String, Object> calculatedFacts, List<RuleOutcome> outcomes, List<String> missingFacts,
+                                      String auditHash) {
+            this(productCode, decision, eligible, ruleSetVersion, calculatedFacts, outcomes, missingFacts, List.of(), List.of(), auditHash);
+        }
+    }
 
     public record PpeRuleSetImportRequest(
         RuleSetSource source,
@@ -162,8 +188,15 @@ public final class NonQmEligibilityModels {
         String investorCode,
         String channelCode,
         int version,
+        Instant effectiveStart,
+        Instant effectiveEnd,
         List<Map<String, Object>> rules
-    ) {}
+    ) {
+        public PpeRuleSetImportRequest(RuleSetSource source, String sourceSystemRef, String productCode, String productType,
+                                       String investorCode, String channelCode, int version, List<Map<String, Object>> rules) {
+            this(source, sourceSystemRef, productCode, productType, investorCode, channelCode, version, null, null, rules);
+        }
+    }
 
     public record PpeRuleSetExportResponse(String format, String ruleSetId, Map<String, Object> payload) {}
 }

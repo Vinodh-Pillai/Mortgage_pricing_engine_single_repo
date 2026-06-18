@@ -1,8 +1,11 @@
 package com.wcpe.catalog.domain;
 
 import com.wcpe.catalog.auth.AuthorizationService;
+import com.wcpe.catalog.auth.TenantProductAuthorization;
+import com.wcpe.catalog.auth.TenantProductAuthorizationService;
 import java.util.*;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
 
@@ -12,11 +15,18 @@ class CatalogController {
   private final CatalogService service;
   private final DomainRepository domainRepository;
   private final AuthorizationService authorizationService;
+  private final TenantProductAuthorizationService tenantAuthorizationService;
 
   CatalogController(CatalogService service, DomainRepository domainRepository, AuthorizationService authorizationService) {
+    this(service, domainRepository, authorizationService, null);
+  }
+
+  @Autowired
+  CatalogController(CatalogService service, DomainRepository domainRepository, AuthorizationService authorizationService, TenantProductAuthorizationService tenantAuthorizationService) {
     this.service = service;
     this.domainRepository = domainRepository;
     this.authorizationService = authorizationService;
+    this.tenantAuthorizationService = tenantAuthorizationService;
   }
 
   @PostMapping("/conventional-products/drafts")
@@ -27,6 +37,24 @@ class CatalogController {
   @PostMapping("/products/drafts")
   CatalogResponse addProduct(@PathVariable UUID tenantId, @RequestBody ProductRequest request, HttpServletRequest http) {
     Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.addProduct(tenantId, request, h.idempotencyKey, h.actorId, h.correlationId));
+  }
+
+  @PostMapping("/products")
+  @ResponseStatus(HttpStatus.CREATED)
+  ProductCreationResponse createProduct(@PathVariable UUID tenantId, @RequestBody ProductCreationRequest request, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.createProduct(tenantId, request, h.idempotencyKey, h.actorId, h.correlationId));
+  }
+
+  @PutMapping("/products/{productCode}/pricing-configuration")
+  ProductPricingConfigurationResponse attachProductPricingConfiguration(@PathVariable UUID tenantId, @PathVariable String productCode, @RequestBody ProductPricingConfigurationRequest request, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles);
+    ProductPricingConfigurationRequest scoped = new ProductPricingConfigurationRequest(productCode, request == null ? null : request.effectiveStart(), request == null ? null : request.effectiveEnd(), request == null ? null : request.refs());
+    return withRoles(h.roles, () -> service.attachProductPricingConfiguration(tenantId, scoped, h.idempotencyKey, h.actorId, h.correlationId));
+  }
+
+  @GetMapping("/products/{productCode}/pricing-configuration")
+  ProductPricingConfigurationResponse resolveProductPricingConfiguration(@PathVariable UUID tenantId, @PathVariable String productCode, @RequestParam(required = false) java.time.Instant asOf, HttpServletRequest http) {
+    String roles = http.getHeader("X-Roles"); authorizationService.authorize("READ_CATALOG", roles); return service.resolveProductPricingConfiguration(tenantId, productCode, asOf == null ? java.time.Instant.now() : asOf);
   }
 
   @PostMapping("/investors/drafts")
@@ -184,6 +212,11 @@ class CatalogController {
     Headers h = headers(http); authorizationService.authorize("READ_CATALOG", h.roles); return service.resolve(tenantId, request, h.idempotencyKey, h.actorId, h.correlationId);
   }
 
+  @PostMapping("/loanpass-mapped/config-snapshots/resolve")
+  ProductConfigSnapshot resolveLoanPassMappedCatalog(@PathVariable UUID tenantId, @RequestBody LoanPassMappedCatalogRequest request, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("READ_CATALOG", h.roles); return service.resolveLoanPassMappedCatalog(tenantId, request, h.idempotencyKey, h.actorId, h.correlationId);
+  }
+
   @PostMapping("/conventional-products/resolve")
   ConventionalProductResolveResponse resolveConventionalProducts(@PathVariable UUID tenantId, @RequestBody ConventionalProductResolveRequest request, HttpServletRequest http) {
     Headers h = headers(http); authorizationService.authorize("READ_CATALOG", h.roles); return service.resolveConventionalProducts(tenantId, request, h.actorId, h.correlationId);
@@ -236,7 +269,15 @@ class CatalogController {
   @GetMapping("/products")
   ProductListResponse listProductsDomain(@PathVariable UUID tenantId, @RequestParam(required = false) String status, HttpServletRequest http) {
     String roles = http.getHeader("X-Roles"); authorizationService.authorize("READ_CATALOG", roles);
-    return new ProductListResponse(domainRepository.listProducts(tenantId, status), domainRepository.listProducts(tenantId, status).size());
+    List<ProductResponse> products = domainRepository.listProducts(tenantId, status);
+    if (tenantAuthorizationService != null) {
+      List<TenantProductAuthorization> rules = tenantAuthorizationService.getAuthorizedRulesAsOf(tenantId, java.time.Instant.now());
+      if (rules.isEmpty()) throw new CatalogException("TENANT_PRODUCT_AUTHORIZATION_CONFIG_REQUIRED");
+      products = products.stream()
+          .filter(product -> rules.stream().anyMatch(rule -> rule.matches(product.code(), null, null)))
+          .toList();
+    }
+    return new ProductListResponse(products, products.size());
   }
 
   @GetMapping("/channels")
@@ -313,11 +354,23 @@ class CatalogController {
           "code", "RESTRICTED",
           "message", "Select an enabled property market or escalate to product operations."));
     }
-    if ("PRODUCT_CONFIG_SNAPSHOT_UNAVAILABLE".equals(errorCode)) {
+    if ("PRODUCT_CONFIG_SNAPSHOT_UNAVAILABLE".equals(errorCode) || "TENANT_PRODUCT_AUTHORIZATION_CONFIG_REQUIRED".equals(errorCode) || "PRODUCT_NOT_AUTHORIZED".equals(errorCode)) {
       return List.of(Map.of(
-          "field", "asOf",
-          "code", "NO_PUBLISHED_CONFIG",
-          "message", "Choose a timestamp with published catalog configuration."));
+          "field", "tenantProductAuthorization",
+          "code", errorCode,
+          "message", tenantProductAuthorizationMessage(errorCode)));
+    }
+    if (errorCode.startsWith("TENANT_MAPPING_")) {
+      return List.of(Map.of(
+          "field", tenantMappingField(errorCode),
+          "code", errorCode,
+          "message", tenantMappingMessage(errorCode)));
+    }
+    if (errorCode.startsWith("PRICING_CONFIG_") || "PRODUCT_PRICING_CONFIGURATION_NOT_FOUND".equals(errorCode)) {
+      return List.of(Map.of(
+          "field", "pricingConfigurationRefs",
+          "code", errorCode,
+          "message", "Provide published, tenant-scoped pricing configuration reference codes and version IDs effective for the requested date."));
     }
     if ("MARKET_NOT_ENABLED".equals(errorCode)) {
       return List.of(Map.of(
@@ -330,6 +383,16 @@ class CatalogController {
           "field", "includeInactive",
           "code", "PERMISSION_DENIED",
           "message", "includeInactive requires product catalog debug permission."));
+    }
+    if ("PRODUCT_CODE_REQUIRED".equals(errorCode) || "PRODUCT_NAME_REQUIRED".equals(errorCode) || "PRODUCT_FAMILY_REQUIRED".equals(errorCode)
+        || "PRODUCT_TYPE_REQUIRED".equals(errorCode) || "SUPPORTED_TERMS_REQUIRED".equals(errorCode) || "AMORTIZATION_TYPES_REQUIRED".equals(errorCode)
+        || "LOAN_PURPOSES_REQUIRED".equals(errorCode) || "SUPPORTED_CHANNELS_REQUIRED".equals(errorCode) || "ALLOWED_STATES_REQUIRED".equals(errorCode)
+        || "EFFECTIVE_START_REQUIRED".equals(errorCode) || "EFFECTIVE_WINDOW_INVALID".equals(errorCode) || "INVALID_PRODUCT_STATUS".equals(errorCode)
+        || "MAPPING_METADATA_KEY_REQUIRED".equals(errorCode) || "MAPPING_METADATA_VALUE_REQUIRED".equals(errorCode) || "PRODUCT_CODE_DUPLICATE".equals(errorCode)) {
+      return List.of(Map.of(
+          "field", productCreationField(errorCode),
+          "code", errorCode,
+          "message", productCreationMessage(errorCode)));
     }
     if ("INVALID_COUNTY_FIPS".equals(errorCode)) {
       return List.of(Map.of(
@@ -344,6 +407,57 @@ class CatalogController {
           "message", "Use a USPS state code or DC."));
     }
     return List.of();
+  }
+
+  private static String productCreationField(String errorCode) {
+    return switch (errorCode) {
+      case "PRODUCT_CODE_REQUIRED", "PRODUCT_CODE_DUPLICATE" -> "productCode";
+      case "PRODUCT_NAME_REQUIRED" -> "displayName";
+      case "PRODUCT_FAMILY_REQUIRED" -> "productFamily";
+      case "PRODUCT_TYPE_REQUIRED" -> "productType";
+      case "SUPPORTED_TERMS_REQUIRED" -> "supportedTerms";
+      case "AMORTIZATION_TYPES_REQUIRED" -> "amortizationTypes";
+      case "LOAN_PURPOSES_REQUIRED" -> "loanPurposes";
+      case "SUPPORTED_CHANNELS_REQUIRED" -> "supportedChannels";
+      case "ALLOWED_STATES_REQUIRED" -> "allowedStates";
+      case "EFFECTIVE_START_REQUIRED", "EFFECTIVE_WINDOW_INVALID" -> "effectiveWindow";
+      case "INVALID_PRODUCT_STATUS" -> "status";
+      case "MAPPING_METADATA_KEY_REQUIRED", "MAPPING_METADATA_VALUE_REQUIRED" -> "metadataRefs";
+      default -> "product";
+    };
+  }
+
+  private static String productCreationMessage(String errorCode) {
+    return switch (errorCode) {
+      case "PRODUCT_CODE_DUPLICATE" -> "Choose a unique product code or create a new version through the versioning workflow.";
+      case "EFFECTIVE_WINDOW_INVALID" -> "Use an effective end after the effective start.";
+      case "MAPPING_METADATA_KEY_REQUIRED", "MAPPING_METADATA_VALUE_REQUIRED" -> "Provide complete LoanPass mapping metadata keys and values.";
+      default -> "Provide a valid product creation value for " + productCreationField(errorCode) + ".";
+    };
+  }
+
+  private static String tenantProductAuthorizationMessage(String errorCode) {
+    if ("PRODUCT_CONFIG_SNAPSHOT_UNAVAILABLE".equals(errorCode)) return "Choose a timestamp with published catalog configuration.";
+    if ("PRODUCT_NOT_AUTHORIZED".equals(errorCode)) return "Configure an active tenant product authorization for the requested product, investor, channel, and as-of timestamp.";
+    return "Configure active tenant product authorization before catalog, quote, or eligibility APIs can consider products.";
+  }
+
+  private static String tenantMappingField(String errorCode) {
+    return switch (errorCode) {
+      case "TENANT_MAPPING_TENANT_REQUIRED", "TENANT_MAPPING_TENANT_INVALID", "TENANT_MAPPING_TENANT_MISMATCH" -> "mappedTenantId";
+      case "TENANT_MAPPING_CHANNEL_REQUIRED" -> "mappedChannelCode";
+      case "TENANT_MAPPING_INVESTOR_REQUIRED" -> "mappedInvestorCode";
+      case "TENANT_MAPPING_AUDIT_REF_REQUIRED" -> "tenantMappingAuditRef";
+      default -> "tenantMapping";
+    };
+  }
+
+  private static String tenantMappingMessage(String errorCode) {
+    return switch (errorCode) {
+      case "TENANT_MAPPING_TENANT_MISMATCH" -> "Resolved tenant mapping must match the requested tenant path.";
+      case "TENANT_MAPPING_AUDIT_REF_REQUIRED" -> "Resolved tenant mapping audit reference is required before catalog authorization.";
+      default -> "Resolve a complete tenant/channel/investor mapping before catalog authorization.";
+    };
   }
 
   private static String permissionForVersionAction(String action) {

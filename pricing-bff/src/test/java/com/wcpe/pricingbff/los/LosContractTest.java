@@ -20,13 +20,37 @@ class LosContractTest {
   }
 
   @Test
+  void productCatalogSchema() {
+    assertThat(spec).contains("/products:", "/products/{productId}:", "/products/search:", "searchLosProducts", "getLosProductDetail", "LosProductCatalogResponse:", "LosProductSummary:", "LosProductDetailResponse:", "authorizationStatus:", "blockedReason:", "appliedFilters", "mappingMetadataStatus:");
+  }
+
+  @Test
+  void productEligibilitySchema() {
+    assertThat(spec).contains("/product-eligibility:", "evaluateLosProductEligibility", "LosProductEligibilityRequest:",
+        "LosProductEligibilityResponse:", "requires_more_information", "ruleConfigRefs:", "fieldMessages:",
+        "Product and product-family filters are optional", "Optional product-family filter when explicit productIds are not supplied.");
+    assertThat(spec).doesNotContain("required: [productIds]");
+  }
+
+  @Test
   void lockRequestSchema() {
     assertThat(spec).contains("LosLockRequest:", "LosLockResponse:", "/locks:", "/locks/{id}/extend:");
   }
 
   @Test
   void webhookPayloadSchema() {
-    assertThat(spec).contains("LosWebhookRegistrationRequest:", "pricing.completed", "lock.confirmed", "rate.changed");
+    assertThat(spec).contains("LosWebhookRegistrationRequest:", "LosWebhookCallbackPayload:", "LosWebhookDeliveryReceipt:",
+        "LosWebhookDeliveryStatus:", "pricing.completed", "quote.completed", "quote.failed", "callback.delivery_failed",
+        "lock.confirmed", "rate.changed", "productResultRefs:", "validationMessages:", "idempotencyKey:",
+        "enum: [BLOCKED, QUEUED, DELIVERED, DEAD]", "enum: [COMPLETED, FAILED]");
+  }
+
+  @Test
+  void permissionScopeMatrixAndDeniedPayloadsAreDocumented() {
+    assertThat(spec).contains("x-los-permission-scopes:", "requiredScope: los:pricing-request:write",
+        "requiredScope: los:product-catalog:read", "requiredScope: los:product-eligibility:write",
+        "requiredScope: los:webhook:write", "X-LOS-Scopes", "X-LOS-Service-Scopes",
+        "Permission denied because a required LOS API scope is missing", "'403':");
   }
 
   private String readSpec() {

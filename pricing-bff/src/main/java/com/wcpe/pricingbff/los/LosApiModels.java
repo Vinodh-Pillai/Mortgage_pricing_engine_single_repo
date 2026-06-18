@@ -13,6 +13,11 @@ public final class LosApiModels {
       String requestId,
       String tenantId,
       String callbackUrl,
+      String productId,
+      String selectedProgramId,
+      String priceGroupId,
+      String scenarioId,
+      Integer scenarioVersion,
       LoanPassBorrowerInfo quoteBorrowerInfo,
       LoanPassAddress quoteAddressDTO,
       BigDecimal requestedLoanAmount,
@@ -86,6 +91,130 @@ public final class LosApiModels {
     }
   }
 
+  public record LosProductCatalogResponse(
+      List<LosProductSummary> products,
+      int count,
+      int page,
+      int pageSize,
+      int totalAvailable,
+      String authorizationStatus,
+      String blockedReason,
+      Map<String, Object> metadata) {
+    public LosProductCatalogResponse {
+      products = List.copyOf(products == null ? List.of() : products);
+      metadata = Map.copyOf(metadata == null ? Map.of() : metadata);
+    }
+  }
+
+  public record LosProductSummary(
+      String productId,
+      String displayName,
+      String productFamily,
+      String productType,
+      List<String> supportedPurposes,
+      List<String> supportedTerms,
+      List<String> amortizationRefs,
+      List<String> investorRefs,
+      List<String> channelRefs,
+      String effectiveStatus,
+      String detailUrl,
+      Map<String, Object> loanPassMappings) {
+    public LosProductSummary {
+      supportedPurposes = List.copyOf(supportedPurposes == null ? List.of() : supportedPurposes);
+      supportedTerms = List.copyOf(supportedTerms == null ? List.of() : supportedTerms);
+      amortizationRefs = List.copyOf(amortizationRefs == null ? List.of() : amortizationRefs);
+      investorRefs = List.copyOf(investorRefs == null ? List.of() : investorRefs);
+      channelRefs = List.copyOf(channelRefs == null ? List.of() : channelRefs);
+      loanPassMappings = Map.copyOf(loanPassMappings == null ? Map.of() : loanPassMappings);
+    }
+  }
+
+  public record LosProductDetailResponse(
+      String productId,
+      LosProductSummary summary,
+      String authorizationStatus,
+      String blockedReason,
+      List<LosProductFieldRequirement> requiredFields,
+      List<LosProductFieldRequirement> conditionalFields,
+      Map<String, Object> supportedValues,
+      String mappingMetadataStatus,
+      Map<String, Object> quoteCompatibility,
+      Map<String, Object> metadata) {
+    public LosProductDetailResponse {
+      requiredFields = List.copyOf(requiredFields == null ? List.of() : requiredFields);
+      conditionalFields = List.copyOf(conditionalFields == null ? List.of() : conditionalFields);
+      supportedValues = Map.copyOf(supportedValues == null ? Map.of() : supportedValues);
+      quoteCompatibility = Map.copyOf(quoteCompatibility == null ? Map.of() : quoteCompatibility);
+      metadata = Map.copyOf(metadata == null ? Map.of() : metadata);
+    }
+  }
+
+  public record LosProductFieldRequirement(
+      String fieldId,
+      String requirementType,
+      String mappingStatus,
+      String metadataRef,
+      Map<String, Object> constraints) {
+    public LosProductFieldRequirement {
+      constraints = Map.copyOf(constraints == null ? Map.of() : constraints);
+    }
+  }
+
+  public record LosProductEligibilityRequest(
+      String tenantId,
+      String clientId,
+      String correlationId,
+      List<String> productIds,
+      String productFamily,
+      String channel,
+      String investor,
+      Map<String, Object> loanFields,
+      List<CreditApplicationField> creditApplicationFields) {
+    public LosProductEligibilityRequest {
+      productIds = List.copyOf(productIds == null ? List.of() : productIds);
+      loanFields = Map.copyOf(loanFields == null ? Map.of() : loanFields);
+      creditApplicationFields = List.copyOf(creditApplicationFields == null ? List.of() : creditApplicationFields);
+    }
+  }
+
+  public record LosProductEligibilityResponse(
+      String status,
+      String correlationId,
+      List<LosProductEligibilityResult> results,
+      List<String> reasonCodes,
+      Map<String, Object> metadata) {
+    public LosProductEligibilityResponse {
+      results = List.copyOf(results == null ? List.of() : results);
+      reasonCodes = List.copyOf(reasonCodes == null ? List.of() : reasonCodes);
+      metadata = Map.copyOf(metadata == null ? Map.of() : metadata);
+    }
+  }
+
+  public record LosProductEligibilityResult(
+      String productId,
+      String eligibility,
+      List<String> reasonCodes,
+      List<LosProductEligibilityFieldMessage> fieldMessages,
+      List<LosProductEligibilityRuleRef> ruleConfigRefs,
+      String productSummaryRef) {
+    public LosProductEligibilityResult {
+      reasonCodes = List.copyOf(reasonCodes == null ? List.of() : reasonCodes);
+      fieldMessages = List.copyOf(fieldMessages == null ? List.of() : fieldMessages);
+      ruleConfigRefs = List.copyOf(ruleConfigRefs == null ? List.of() : ruleConfigRefs);
+    }
+  }
+
+  public record LosProductEligibilityFieldMessage(
+      String requestPath,
+      String fieldId,
+      String reasonCode,
+      String message) {}
+
+  public record LosProductEligibilityRuleRef(
+      String source,
+      String ref,
+      String status) {}
+
   public record WaterfallStep(String step, BigDecimal input, String operation, BigDecimal output) {
   }
 
@@ -114,7 +243,8 @@ public final class LosApiModels {
   public record LockTerms(BigDecimal rate, BigDecimal price, BigDecimal points) {
   }
 
-  public record LosWebhookRegistrationRequest(String url, List<String> events, String secret, String tenantId) {
+  public record LosWebhookRegistrationRequest(String url, List<String> events, String secret, String signingCredentialRef,
+      String tenantId) {
     public LosWebhookRegistrationRequest {
       events = List.copyOf(events == null ? List.of() : events);
     }
@@ -145,7 +275,14 @@ public final class LosApiModels {
       String status,
       int attemptCount,
       Instant nextRetryAt,
-      String lastError) {
+      String lastError,
+      String idempotencyKey,
+      String signatureHeader,
+      String auditRef) {
+    public WebhookDeliveryReceipt(String deliveryId, String webhookId, String eventType, String status,
+        int attemptCount, Instant nextRetryAt, String lastError) {
+      this(deliveryId, webhookId, eventType, status, attemptCount, nextRetryAt, lastError, null, null, null);
+    }
   }
 
   public record LosScenario(
@@ -171,6 +308,9 @@ public final class LosApiModels {
       String correlationId,
       boolean preferAsync,
       String requestId,
+      String productId,
+      String selectedProgramId,
+      String priceGroupId,
       LoanPassBorrowerInfo quoteBorrowerInfo,
       LoanPassAddress quoteAddressDTO,
       BigDecimal requestedLoanAmount,

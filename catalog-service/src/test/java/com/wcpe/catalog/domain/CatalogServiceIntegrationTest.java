@@ -3,6 +3,7 @@ package com.wcpe.catalog.domain;
 import static org.assertj.core.api.Assertions.*;
 
 import java.math.BigDecimal;
+import java.sql.Timestamp;
 import java.time.*;
 import java.util.*;
 import org.junit.jupiter.api.*;
@@ -52,6 +53,7 @@ class CatalogServiceIntegrationTest {
     service.addReference(tenantId, "LOAN_PURPOSE", new ReferenceCatalogRequest("PURCHASE", "Purchase", "PURPOSE", Map.of(), LocalDate.now(), null), "lp", "actor-1", "corr-1");
     CatalogResponse afterProduct = service.addProduct(tenantId, new ProductRequest("CONV30", "Conventional 30 Year Fixed", "CONVENTIONAL", List.of("RETAIL"), List.of("TX", "CA"), LocalDate.now(), null), "prod", "actor-1", "corr-1");
     CatalogResponse afterInvestor = service.addInvestor(tenantId, new InvestorRequest("FNMA", "Fannie Mae", List.of("RETAIL"), List.of("CONV30"), LocalDate.now(), null), "inv", "actor-1", "corr-1");
+    authorizeTenantProduct(tenantId, "CONV30", "FNMA", "RETAIL", Instant.parse("2026-01-01T00:00:00Z"), null);
     service.validate(tenantId, new LifecycleActionRequest("valid"), "val", "actor-1", "corr-1");
     service.submitApproval(tenantId, new LifecycleActionRequest("submit"), "sub", "actor-1", "corr-1");
     service.approve(tenantId, new LifecycleActionRequest("approve"), "app", "actor-2", "corr-1");
@@ -250,6 +252,7 @@ class CatalogServiceIntegrationTest {
     service.submitApproval(tenantId, new LifecycleActionRequest("conventional submit"), "conv-sub-" + tenantId, "actor-1", "corr-0202");
     service.approve(tenantId, new LifecycleActionRequest("conventional approve"), "conv-app-" + tenantId, "actor-2", "corr-0202");
     service.publish(tenantId, new PublishCatalogRequest("conventional publish", LocalDate.of(2026, 1, 1)), "conv-pub-" + tenantId, "actor-3", "corr-0202");
+    authorizeTenantProduct(tenantId, "CONV_FIXED_30", "FNMA", "RETAIL", Instant.parse("2026-01-01T00:00:00Z"), null);
 
     ConventionalProductResolveResponse resolved = service.resolveConventionalProducts(tenantId,
         new ConventionalProductResolveRequest(Instant.parse("2026-03-01T12:00:00Z"), "RETAIL", "PURCHASE", "SINGLE_FAMILY", "PRIMARY_RESIDENCE", "TX", new BigDecimal("425000.00"), 360, "FIXED"),
@@ -293,6 +296,7 @@ class CatalogServiceIntegrationTest {
     service.submitApproval(tenantId, new LifecycleActionRequest("conventional submit"), "conv-sub-ca-" + tenantId, "actor-1", "corr-0202");
     service.approve(tenantId, new LifecycleActionRequest("conventional approve"), "conv-app-ca-" + tenantId, "actor-2", "corr-0202");
     service.publish(tenantId, new PublishCatalogRequest("conventional publish", LocalDate.of(2026, 1, 1)), "conv-pub-ca-" + tenantId, "actor-3", "corr-0202");
+    authorizeTenantProduct(tenantId, "CONV_FIXED_30", "FNMA", "RETAIL", Instant.parse("2026-01-01T00:00:00Z"), null);
 
     assertThatThrownBy(() -> service.resolveConventionalProducts(tenantId,
         new ConventionalProductResolveRequest(Instant.parse("2026-03-01T12:00:00Z"), "RETAIL", "PURCHASE", "SINGLE_FAMILY", "PRIMARY_RESIDENCE", "TX", new BigDecimal("425000.00"), 360, "FIXED"),
@@ -562,6 +566,7 @@ class CatalogServiceIntegrationTest {
     service.addReference(tenantId, "LOAN_PURPOSE", new ReferenceCatalogRequest("PURCHASE", "Purchase", "PURPOSE", Map.of(), LocalDate.now(), null), "lp-" + tenantId, "actor-1", "corr-1");
     service.addProduct(tenantId, new ProductRequest("CONV30", "Conventional 30 Year Fixed", "CONVENTIONAL", List.of("RETAIL"), List.of("TX", "CA"), LocalDate.now(), null), "prod-" + tenantId, "actor-1", "corr-1");
     service.addInvestor(tenantId, new InvestorRequest("FNMA", "Fannie Mae", List.of("RETAIL"), List.of("CONV30"), LocalDate.now(), null), "inv-" + tenantId, "actor-1", "corr-1");
+    authorizeTenantProduct(tenantId, "CONV30", "FNMA", "RETAIL", Instant.parse("2026-01-01T00:00:00Z"), null);
     service.validate(tenantId, new LifecycleActionRequest("valid"), "val-" + tenantId, "actor-1", "corr-1");
     service.submitApproval(tenantId, new LifecycleActionRequest("submit"), "sub-" + tenantId, "actor-1", "corr-1");
     service.approve(tenantId, new LifecycleActionRequest("approve"), "app-" + tenantId, "actor-2", "corr-1");
@@ -597,6 +602,20 @@ class CatalogServiceIntegrationTest {
     service.addMarket(tenantId, new MarketRequest("CA", null, null, "ENABLED", List.of("RETAIL"), LocalDate.of(2026, 1, 1), null), "conv-market-ca-" + tenantId, "actor-1", "corr-0202");
     service.addProduct(tenantId, new ProductRequest("CONV_REF", "Conventional reference", "CONVENTIONAL", List.of("RETAIL"), List.of("TX", "CA"), LocalDate.of(2026, 1, 1), null), "conv-product-ref-" + tenantId, "actor-1", "corr-0202");
     service.addInvestor(tenantId, new InvestorRequest("FNMA", "Fannie Mae", List.of("RETAIL"), List.of("CONV_REF"), LocalDate.of(2026, 1, 1), null), "conv-investor-" + tenantId, "actor-1", "corr-0202");
+  }
+
+  private void authorizeTenantProduct(UUID tenantId, String productCode, String investorCode, String channelCode, Instant authorizedAt, Instant expiresAt) {
+    service.getRepository().getJdbcTemplate().update("""
+        insert into catalog.tenant_product_authorization
+          (tenant_id, product_code, investor_code, channel_code, status, authorized_at, authorized_by, expires_at, notes)
+        values (?, ?, ?, ?, 'ACTIVE', ?, 'test-seed', ?, 'integration authorization')
+        on conflict (tenant_id, product_code, coalesce(investor_code, '*'), coalesce(channel_code, '*'))
+        do update set status = excluded.status,
+                      authorized_at = excluded.authorized_at,
+                      expires_at = excluded.expires_at,
+                      authorized_by = excluded.authorized_by,
+                      notes = excluded.notes
+        """, tenantId, productCode, investorCode, channelCode, Timestamp.from(authorizedAt), expiresAt == null ? null : Timestamp.from(expiresAt));
   }
 
   private void publishPropertyOccupancyCatalog(UUID tenantId) {

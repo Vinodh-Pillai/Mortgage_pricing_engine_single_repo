@@ -1,4 +1,11 @@
-import { getVisibleModules as filterModulesForPersona, type Persona } from '../lib/auth/personas';
+import {
+  canAccessRoute,
+  canSeePersonaVisibility,
+  getPersonaByRole,
+  getVisibleModules as filterModulesForPersona,
+  roleFromVisibility,
+  type Persona,
+} from '../lib/auth/personas';
 import type { WorkbenchScreenModule } from '../screens/workbenchShell/WorkbenchShell';
 
 export type NavigationGroup = 'Pipeline' | 'Products' | 'Pricing' | 'Rules' | 'Quotes' | 'Scenarios' | 'Operations' | 'Tenants' | 'Admin';
@@ -155,14 +162,30 @@ export function getVisibleModules(persona: Persona | null, allModules: Workbench
   return filterModulesForPersona(persona, allModules);
 }
 
+function personaFromNavigationInput(persona?: string | Persona | null): Persona | null {
+  if (!persona) return null;
+  if (typeof persona !== 'string') return persona;
+  const role = roleFromVisibility(persona);
+  return role ? getPersonaByRole(role) ?? null : null;
+}
+
+function isVisibleNavigationItem(item: NavigationItem, persona: Persona | null): boolean {
+  if (!persona) return false;
+  return canSeePersonaVisibility(persona, item.personas) && canAccessRoute(persona, item.route);
+}
+
 export function buildNavigationTree(modules: WorkbenchScreenModule[], activeRunId?: string | null, persona?: string | Persona | null): NavigationItem[] {
-  const personaObject = typeof persona === 'string' ? null : persona ?? null;
+  const personaObject = personaFromNavigationInput(persona);
+  if (!personaObject) return [];
   const moduleById = new Map(modules.map((module) => [module.id, module]));
   const representedModuleIds = new Set(capabilityDefinitions.map((definition) => definition.moduleId).filter((id): id is string => Boolean(id)));
-  const capabilityItems = capabilityDefinitions.map((definition) => itemForCapability(definition, moduleById, activeRunId, personaObject));
+  const capabilityItems = capabilityDefinitions
+    .map((definition) => itemForCapability(definition, moduleById, activeRunId, personaObject))
+    .filter((item) => isVisibleNavigationItem(item, personaObject));
   const registryFallbackItems = modules
     .filter((module) => !representedModuleIds.has(module.id))
-    .map((module) => itemForModule(module, activeRunId, personaObject));
+    .map((module) => itemForModule(module, activeRunId, personaObject))
+    .filter((item) => isVisibleNavigationItem(item, personaObject));
   return [...capabilityItems, ...registryFallbackItems];
 }
 

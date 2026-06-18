@@ -1,8 +1,11 @@
 package com.wcpe.catalog.domain;
 
 import com.wcpe.catalog.auth.AuthorizationService;
+import com.wcpe.catalog.auth.TenantProductAuthorization;
+import com.wcpe.catalog.auth.TenantProductAuthorizationService;
 import java.time.Instant;
 import java.util.*;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -14,10 +17,17 @@ class CatalogService {
   private static final Set<String> PUBLISHER_ROLES = Set.of("CATALOG_PUBLISHER", "CATALOG_MANAGER", "CATALOG_ADMIN");
   private final CatalogRepository repository;
   private final AuthorizationService authorizationService;
+  private final TenantProductAuthorizationService tenantAuthorizationService;
 
   CatalogService(CatalogRepository repository, AuthorizationService authorizationService) {
+    this(repository, authorizationService, null);
+  }
+
+  @Autowired
+  CatalogService(CatalogRepository repository, AuthorizationService authorizationService, TenantProductAuthorizationService tenantAuthorizationService) {
     this.repository = repository;
     this.authorizationService = authorizationService;
+    this.tenantAuthorizationService = tenantAuthorizationService;
   }
 
   @Transactional
@@ -31,6 +41,50 @@ class CatalogService {
       emit(tenantId, catalogId, "ProductDefinitionAdded.v1", Map.of("productCode", product.productCode()));
       audit(tenantId, catalogId, "PRODUCT_DEFINITION_ADDED", before, after, Map.of("productCode", product.productCode()), actorId, correlationId, idempotencyKey);
       return after;
+    });
+  }
+
+  @Transactional
+  ProductCreationResponse createProduct(UUID tenantId, ProductCreationRequest request, String idempotencyKey, String actorId, String correlationId) {
+    requireRole("CATALOG_WRITER", WRITER_ROLES);
+    return repository.idempotent(tenantId, idempotencyKey, request, ProductCreationResponse.class, () -> {
+      ProductCreationDraft draft = ProductCreationPolicy.validate(request);
+      UUID catalogId = repository.currentCatalogId(tenantId);
+      CatalogResponse before = repository.current(tenantId);
+      ProductCreationPersistence persisted = repository.addProductCreation(tenantId, catalogId, draft, actorId);
+      CatalogResponse after = repository.current(tenantId);
+      Map<String, Object> payload = new LinkedHashMap<>();
+      payload.put("productCode", persisted.product().productCode());
+      payload.put("productVersionId", persisted.productVersionId().toString());
+      payload.put("status", persisted.status());
+      payload.put("metadataRefKeys", persisted.metadataRefs().keySet().stream().sorted().toList());
+      emit(tenantId, catalogId, "ProductCreationEndpointAccepted.v1", payload);
+      audit(tenantId, catalogId, "PRODUCT_CREATION_ENDPOINT_ACCEPTED", before, after, payload, actorId, correlationId, idempotencyKey);
+      String auditRef = "catalog-audit:" + catalogId + ":" + persisted.product().productCode();
+      return new ProductCreationResponse(persisted.product().productId(), persisted.productVersionId(), persisted.product().productCode(),
+          persisted.product().productName(), persisted.status(), List.of(), auditRef, persisted.metadataRefs());
+    });
+  }
+
+  @Transactional
+  ProductPricingConfigurationResponse attachProductPricingConfiguration(UUID tenantId, ProductPricingConfigurationRequest request, String idempotencyKey, String actorId, String correlationId) {
+    requireRole("CATALOG_WRITER", WRITER_ROLES);
+    requireIdempotencyKey(idempotencyKey);
+    if (request == null) throw new CatalogException("PRICING_CONFIG_REQUEST_REQUIRED");
+    return repository.idempotent(tenantId, idempotencyKey, request, ProductPricingConfigurationResponse.class, () -> {
+      UUID catalogId = repository.currentCatalogId(tenantId);
+      CatalogResponse before = repository.current(tenantId);
+      ProductPricingConfigurationResponse response = repository.attachProductPricingConfiguration(tenantId, catalogId, request, actorId);
+      CatalogResponse after = repository.current(tenantId);
+      Map<String, Object> payload = new LinkedHashMap<>();
+      payload.put("productCode", response.productCode());
+      payload.put("productVersionId", response.productVersionId().toString());
+      payload.put("effectiveStart", response.effectiveStart().toString());
+      payload.put("refCount", response.refs().size());
+      payload.put("refTypes", response.refs().stream().map(PricingConfigReference::refType).distinct().sorted().toList());
+      emit(tenantId, catalogId, "ProductPricingConfigurationAttached.v1", payload);
+      audit(tenantId, catalogId, "PRODUCT_PRICING_CONFIGURATION_ATTACHED", before, after, payload, actorId, correlationId, idempotencyKey);
+      return response;
     });
   }
 
@@ -351,9 +405,11 @@ class CatalogService {
   ProductConfigSnapshot resolve(UUID tenantId, ResolveCatalogRequest request, String idempotencyKey, String actorId, String correlationId) {
     if (request == null) throw new CatalogException("PRODUCT_CONFIG_SNAPSHOT_REQUEST_REQUIRED");
     if (request.includeInactiveRequested() && !hasRole("CATALOG_DEBUG")) throw new CatalogException("INCLUDE_INACTIVE_REQUIRES_DEBUG_PERMISSION");
+    Instant asOf = request.effectiveAsOf();
+    List<TenantProductAuthorization> rules = tenantAuthorizationRules(tenantId, asOf);
     return repository.idempotent(tenantId, idempotencyKey, request, ProductConfigSnapshot.class, () -> {
       ProductConfigSnapshotMaterialization result = repository.resolveMaterialized(tenantId, request, correlationId);
-      ProductConfigSnapshot snapshot = result.snapshot();
+      ProductConfigSnapshot snapshot = authorizeSnapshot(result.snapshot(), rules, request.requestedChannel(), request.investorCode());
       UUID catalogId = repository.activeCatalogId(tenantId);
       if (result.materialized()) {
         Map<String, Object> payload = new LinkedHashMap<>();
@@ -371,13 +427,123 @@ class CatalogService {
     });
   }
 
+  @Transactional
+  ProductConfigSnapshot resolveLoanPassMappedCatalog(UUID tenantId, LoanPassMappedCatalogRequest request, String idempotencyKey, String actorId, String correlationId) {
+    if (request == null) throw new CatalogException("TENANT_MAPPING_CONTEXT_REQUIRED");
+    requireMappedTenant(tenantId, request.mappedTenantId());
+    String mappedChannel = requireMappedValue(request.mappedChannelCode(), "TENANT_MAPPING_CHANNEL_REQUIRED");
+    String mappedInvestor = requireMappedValue(request.mappedInvestorCode(), "TENANT_MAPPING_INVESTOR_REQUIRED");
+    String auditRef = requireMappedValue(request.tenantMappingAuditRef(), "TENANT_MAPPING_AUDIT_REF_REQUIRED");
+    ResolveCatalogRequest mappedRequest = new ResolveCatalogRequest(
+        request.asOf(),
+        null,
+        mappedChannel,
+        null,
+        request.stateCode(),
+        request.countyFips(),
+        request.productFamilyCode(),
+        null,
+        mappedInvestor,
+        request.loanPurpose(),
+        request.propertyType(),
+        request.occupancyType(),
+        request.termMonths(),
+        request.amortizationType(),
+        request.includeInactive()
+    );
+    ProductConfigSnapshot snapshot = resolve(tenantId, mappedRequest, idempotencyKey, actorId, correlationId);
+    UUID catalogId = repository.activeCatalogId(tenantId);
+    audit(tenantId, catalogId, "LOANPASS_TENANT_MAPPING_CONSUMED", null, Map.of("tenantMappingAuditRef", auditRef), Map.of("tenantMappingAuditRef", auditRef, "channelCode", mappedChannel, "investorCode", mappedInvestor), actorId, correlationId, idempotencyKey);
+    return snapshot;
+  }
+
   ProductConfigSnapshot snapshot(UUID tenantId, UUID snapshotId) { return repository.snapshot(tenantId, snapshotId); }
+  ProductPricingConfigurationResponse resolveProductPricingConfiguration(UUID tenantId, String productCode, Instant asOf) {
+    Instant effectiveAsOf = asOf == null ? Instant.now() : asOf;
+    List<TenantProductAuthorization> rules = tenantAuthorizationRules(tenantId, effectiveAsOf);
+    ProductPricingConfigurationResponse response = repository.resolveProductPricingConfiguration(tenantId, productCode, effectiveAsOf);
+    if (!isProductAuthorized(rules, response.productCode(), null, null)) throw new CatalogException("PRODUCT_NOT_AUTHORIZED");
+    return response;
+  }
   ConventionalProductResolveResponse resolveConventionalProducts(UUID tenantId, ConventionalProductResolveRequest request, String actorId, String correlationId) {
-    ConventionalProductResolveResponse response = repository.resolveConventionalProducts(tenantId, request);
+    Instant effectiveAsOf = request == null || request.asOf() == null ? Instant.now() : request.asOf();
+    List<TenantProductAuthorization> rules = tenantAuthorizationRules(tenantId, effectiveAsOf);
+    ConventionalProductResolveResponse response = authorizeConventionalResponse(repository.resolveConventionalProducts(tenantId, request), rules, request.channelCode());
     UUID catalogId = repository.activeCatalogId(tenantId);
     emit(tenantId, catalogId, "ConventionalProductDefinitionResolved.v1", Map.of("eligibleCount", response.eligibleProducts().size(), "rejectedCount", response.rejectedProducts().size()));
     audit(tenantId, catalogId, "CONVENTIONAL_PRODUCT_DEFINITION_RESOLVED", null, response, Map.of("eligibleCount", response.eligibleProducts().size(), "rejectedCount", response.rejectedProducts().size()), actorId, correlationId, null);
     return response;
+  }
+
+  private List<TenantProductAuthorization> tenantAuthorizationRules(UUID tenantId, Instant asOf) {
+    if (tenantAuthorizationService == null) return List.of();
+    List<TenantProductAuthorization> rules = tenantAuthorizationService.getAuthorizedRulesAsOf(tenantId, asOf);
+    if (rules.isEmpty()) throw new CatalogException("TENANT_PRODUCT_AUTHORIZATION_CONFIG_REQUIRED");
+    return rules;
+  }
+
+  private ProductConfigSnapshot authorizeSnapshot(ProductConfigSnapshot snapshot, List<TenantProductAuthorization> rules, String channelCode, String investorCode) {
+    if (tenantAuthorizationService == null) return snapshot;
+    String requestedInvestor = normalizeOptional(investorCode);
+    List<ProductDefinition> products = snapshot.products().stream()
+        .filter(product -> isProductAuthorized(rules, product.productCode(), requestedInvestor, channelCode)
+            || (requestedInvestor == null && isProductAuthorized(rules, product.productCode(), null, channelCode)))
+        .toList();
+    if (products.isEmpty()) throw new CatalogException("PRODUCT_NOT_AUTHORIZED");
+    Set<String> productCodes = products.stream().map(ProductDefinition::productCode).collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    List<InvestorProgram> investors = snapshot.investors().stream()
+        .filter(investor -> requestedInvestor == null || requestedInvestor.equals(normalizeOptional(investor.investorCode())))
+        .filter(investor -> investor.productCodes().stream().anyMatch(productCodes::contains))
+        .toList();
+    List<SnapshotProduct> productComponents = snapshot.productComponents().stream()
+        .filter(component -> productCodes.contains(component.productCode()))
+        .map(component -> new SnapshotProduct(component.productCode(), component.productVersionId(), component.investorCodes().stream().filter(code -> investors.stream().anyMatch(investor -> investor.investorCode().equals(code))).toList(), component.termProfileCodes(), component.pricingConfigRefs()))
+        .toList();
+    List<SnapshotInvestor> investorComponents = snapshot.investorComponents().stream()
+        .filter(component -> investors.stream().anyMatch(investor -> investor.investorCode().equals(component.code())))
+        .toList();
+    return new ProductConfigSnapshot(snapshot.snapshotId(), snapshot.tenantId(), snapshot.snapshotHash(), snapshot.asOfDate(), products, investors, snapshot.references(), snapshot.markets(), snapshot.asOf(), snapshot.channel(), snapshot.taxonomy(), productComponents, investorComponents, snapshot.referenceVersions(), snapshot.warnings(), snapshot.requestHash(), snapshot.correlationId());
+  }
+
+  private ConventionalProductResolveResponse authorizeConventionalResponse(ConventionalProductResolveResponse response, List<TenantProductAuthorization> rules, String channelCode) {
+    if (tenantAuthorizationService == null) return response;
+    List<ConventionalProductMatch> eligible = new ArrayList<>();
+    List<ConventionalProductRejected> rejected = new ArrayList<>(response.rejectedProducts());
+    for (ConventionalProductMatch match : response.eligibleProducts()) {
+      List<String> authorizedInvestors = match.investorCodes().stream()
+          .filter(investor -> isProductAuthorized(rules, match.productCode(), investor, channelCode))
+          .toList();
+      if (authorizedInvestors.isEmpty()) {
+        rejected.add(new ConventionalProductRejected(match.productCode(), "PRODUCT_NOT_AUTHORIZED", "Tenant product authorization does not allow this product for the requested channel or investor."));
+      } else {
+        eligible.add(new ConventionalProductMatch(match.productCode(), match.productVersionId(), authorizedInvestors, match.configHash()));
+      }
+    }
+    if (eligible.isEmpty()) throw new CatalogException("PRODUCT_NOT_AUTHORIZED");
+    return new ConventionalProductResolveResponse(eligible, rejected);
+  }
+
+  private static boolean isProductAuthorized(List<TenantProductAuthorization> rules, String productCode, String investorCode, String channelCode) {
+    return rules.stream().anyMatch(rule -> rule.matches(productCode, investorCode, channelCode));
+  }
+
+  private static String normalizeOptional(String value) {
+    return value == null || value.isBlank() ? null : value.trim().toUpperCase(Locale.ROOT);
+  }
+
+  private static void requireMappedTenant(UUID pathTenantId, String mappedTenantId) {
+    if (pathTenantId == null || mappedTenantId == null || mappedTenantId.isBlank()) throw new CatalogException("TENANT_MAPPING_TENANT_REQUIRED");
+    try {
+      UUID resolvedTenantId = UUID.fromString(mappedTenantId.trim());
+      if (!pathTenantId.equals(resolvedTenantId)) throw new CatalogException("TENANT_MAPPING_TENANT_MISMATCH");
+    } catch (IllegalArgumentException error) {
+      throw new CatalogException("TENANT_MAPPING_TENANT_INVALID");
+    }
+  }
+
+  private static String requireMappedValue(String value, String errorCode) {
+    if (value == null || value.isBlank()) throw new CatalogException(errorCode);
+    return value.trim();
   }
 
   TermAmortizationResolveResponse resolveTermAmortization(UUID tenantId, TermAmortizationResolveRequest request, String actorId, String correlationId) {

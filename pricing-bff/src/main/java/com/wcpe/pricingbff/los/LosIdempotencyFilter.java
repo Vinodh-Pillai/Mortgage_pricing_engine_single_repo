@@ -17,6 +17,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Order(20)
 class LosIdempotencyFilter extends OncePerRequestFilter {
   static final String IDEMPOTENCY_HEADER = "X-Request-ID";
+  static final String LOANPASS_IDEMPOTENCY_HEADER = "Idempotency-Key";
   private static final Set<String> MUTATING_METHODS = Set.of("POST", "PUT", "PATCH");
   private final ObjectMapper objectMapper;
 
@@ -32,14 +33,18 @@ class LosIdempotencyFilter extends OncePerRequestFilter {
   @Override
   protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
       throws ServletException, IOException {
-    String key = request.getHeader(IDEMPOTENCY_HEADER);
+    String key = firstPresent(request.getHeader(LOANPASS_IDEMPOTENCY_HEADER), request.getHeader(IDEMPOTENCY_HEADER));
     if (key == null || key.isBlank()) {
       response.setStatus(400);
       response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-      objectMapper.writeValue(response.getOutputStream(), new ErrorResponse("IDEMPOTENCY_KEY_REQUIRED", "X-Request-ID is required for LOS mutating endpoints", request.getHeader("X-Correlation-ID")));
+      objectMapper.writeValue(response.getOutputStream(), new ErrorResponse("IDEMPOTENCY_KEY_REQUIRED", "Idempotency-Key or X-Request-ID is required for LOS mutating endpoints", request.getHeader("X-Correlation-ID")));
       return;
     }
     request.setAttribute("los.idempotencyKey", key);
     chain.doFilter(request, response);
+  }
+
+  private String firstPresent(String preferred, String fallback) {
+    return preferred == null || preferred.isBlank() ? fallback : preferred;
   }
 }

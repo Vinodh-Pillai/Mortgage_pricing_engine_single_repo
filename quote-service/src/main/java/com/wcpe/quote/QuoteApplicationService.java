@@ -185,6 +185,7 @@ public class QuoteApplicationService {
         Quote quote = createQuote(quoteRequestFromJob(job));
         QuoteJob completed = jobRepository.save(job.completed(quote, clock.instant()));
         recordJobAuditAndEvent("QUOTE_JOB_COMPLETED", "quote_job.completed.v1", completed, actorId, correlationId);
+        recordQuoteCallbackRequested(completed, actorId, correlationId);
         return completed;
     }
 
@@ -195,6 +196,7 @@ public class QuoteApplicationService {
         }
         QuoteJob failed = jobRepository.save(getQuoteJob(tenantId, jobId).failed(failureCode, failureDetail, clock.instant()));
         recordJobAuditAndEvent("QUOTE_JOB_FAILED", "quote_job.failed.v1", failed, actorId, correlationId);
+        recordQuoteCallbackRequested(failed, actorId, correlationId);
         return failed;
     }
 
@@ -879,6 +881,7 @@ public class QuoteApplicationService {
         payload.put("presentationCurrency", request.presentationCurrency() == null ? "" : request.presentationCurrency());
         payload.put("effectiveDate", request.effectiveDate() == null ? "" : request.effectiveDate().toString());
         payload.put("clientContext", request.clientContext().toString());
+        payload.put("losRequestId", request.clientContext().getOrDefault("losRequestId", ""));
         payload.put("maxAttempts", request.clientContext().getOrDefault("asyncMaxAttempts", ""));
         return payload;
     }
@@ -964,6 +967,52 @@ public class QuoteApplicationService {
                 "jobId", job.jobId().toString(),
                 "status", job.status().name(),
                 "requestHash", job.requestHash()
+            )
+        ));
+    }
+
+    private void recordQuoteCallbackRequested(QuoteJob job, String actorId, String correlationId) {
+        String idempotencyKey = job.jobId() + ":" + job.status().name();
+        outboxEvents.add(new OutboxEvent(
+            "quote.callback_requested.v1",
+            "1",
+            job.tenantId() + ":" + job.jobId() + ":" + job.status().name(),
+            job.updatedAt(),
+            Map.of(
+                "tenantId", job.tenantId().toString(),
+                "eventType", "quote.callback_requested.v1",
+                "eventVersion", "1",
+                "sourceService", "quote-service",
+                "actorId", actorId,
+                "correlationId", correlationId,
+                "idempotencyKey", idempotencyKey,
+                "aggregateType", "QuoteJob",
+                "aggregateId", job.jobId().toString(),
+                "piiClassification", "NO_BORROWER_PII"
+            ),
+            Map.of(
+                "pricingRequestId", job.requestPayload().getOrDefault("losRequestId", ""),
+                "quoteJobId", job.jobId().toString(),
+                "status", job.status().name(),
+                "quoteId", job.quoteId() == null ? "" : job.quoteId().toString(),
+                "failureCode", job.failureCode() == null ? "" : job.failureCode(),
+                "failureDetail", job.failureDetail() == null ? "" : job.failureDetail(),
+                "correlationId", correlationId,
+                "timestamp", job.updatedAt().toString(),
+                "idempotencyKey", idempotencyKey
+            )
+        ));
+        auditEntries.add(new AuditEntry(
+            "QUOTE_CALLBACK_REQUESTED",
+            actorId,
+            job.tenantId().toString(),
+            correlationId,
+            ReplayHash.sha256(job.jobId() + ":" + job.status().name()),
+            job.updatedAt(),
+            Map.of(
+                "jobId", job.jobId().toString(),
+                "status", job.status().name(),
+                "callbackEvent", "quote.callback_requested.v1"
             )
         ));
     }

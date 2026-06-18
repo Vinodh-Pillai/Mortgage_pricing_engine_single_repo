@@ -24,14 +24,14 @@ export interface AuthContextType {
 }
 
 export const rolePermissionMatrix: Record<UserRole, readonly Permission[]> = {
-  loan_officer: ['quote:create', 'quote:read', 'scenario:create', 'lock:create', 'eligibility:read'],
-  pricing_analyst: ['quote:read', 'pricing:read', 'margin:read', 'scenario:read', 'scenario:what-if'],
-  operations_lead: ['lock:read', 'lock:manage', 'partner:read', 'ops:read', 'rate-feed:read'],
-  governance_reviewer: ['compliance:read', 'audit:read', 'governance:read', 'rules:read'],
+  loan_officer: ['quote:create', 'quote:read', 'quote:update', 'scenario:create', 'scenario:read', 'scenario:update', 'lock:create', 'lock:read', 'lock:update', 'eligibility:read', 'borrower:manage'],
+  pricing_analyst: ['quote:read', 'pricing:read', 'pricing:waterfall', 'margin:read', 'margin:analyze', 'scenario:read', 'scenario:what-if', 'adjustment:read', 'rate-feed:read', 'product:read', 'pricing:analysis'],
+  operations_lead: ['quote:read', 'lock:create', 'lock:read', 'lock:update', 'lock:manage', 'partner:read', 'partner:manage', 'ops:read', 'ops:manage', 'rate-feed:read', 'rate-feed:manage', 'rate-sheet:read', 'rate-sheet:manage', 'tenant:manage'],
+  governance_reviewer: ['quote:read', 'compliance:read', 'compliance:manage', 'audit:read', 'audit:replay', 'governance:read', 'governance:manage', 'rules:read', 'rules:manage', 'model:read', 'model:governance', 'quality:read'],
   admin: ['*'],
-  partner_manager: ['partner:read', 'partner:manage', 'quote:read'],
-  compliance_officer: ['compliance:read', 'audit:read', 'privacy:read'],
-  borrower: ['quote:create', 'quote:read', 'offer:compare'],
+  partner_manager: ['partner:read', 'partner:manage', 'partner:quotes', 'partner:integrations', 'webhook:manage', 'quote:read', 'lock:read'],
+  compliance_officer: ['compliance:read', 'compliance:manage', 'audit:read', 'audit:replay', 'privacy:read', 'privacy:manage', 'security:read', 'security:events'],
+  borrower: ['quote:create', 'quote:read', 'offer:compare', 'scenario:create', 'eligibility:read'],
 };
 
 export const ACTIVE_PERSONA_STORAGE_KEY = 'wcpe:activePersona';

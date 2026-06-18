@@ -61,9 +61,9 @@ public class AsyncQuoteJobLifecycleTest {
         assertThat(completed.quoteId()).isNotNull();
         assertThat(service.getQuote(QuoteTestSupport.TENANT, completed.quoteId()).auditRef()).isEqualTo("audit:corr-1");
         assertThat(service.outboxEvents()).extracting(OutboxEvent::eventType)
-            .contains("quote_job.created.v1", "quote_job.running.v1", "quote.created.v1", "quote.ready.v1", "quote_job.completed.v1");
+            .contains("quote_job.created.v1", "quote_job.running.v1", "quote.created.v1", "quote.ready.v1", "quote_job.completed.v1", "quote.callback_requested.v1");
         assertThat(service.auditEntries()).extracting(AuditEntry::action)
-            .contains("QUOTE_JOB_CREATED", "QUOTE_JOB_RUNNING", "QUOTE_ORCHESTRATION_COMPLETED", "QUOTE_JOB_COMPLETED");
+            .contains("QUOTE_JOB_CREATED", "QUOTE_JOB_RUNNING", "QUOTE_ORCHESTRATION_COMPLETED", "QUOTE_JOB_COMPLETED", "QUOTE_CALLBACK_REQUESTED");
         assertThatThrownBy(() -> service.cancelQuoteJob(QuoteTestSupport.TENANT, completed.jobId(), "actor-1", "corr-cancel"))
             .isInstanceOf(QuoteCreateException.class)
             .satisfies(ex -> assertThat(((QuoteCreateException) ex).code()).isEqualTo("VERSION_CONFLICT"));
@@ -83,9 +83,16 @@ public class AsyncQuoteJobLifecycleTest {
         assertThat(response.failureDetail()).isEqualTo("pricing dependency timed out");
         assertThat(response.retryAfterSeconds()).isZero();
         assertThat(service.outboxEvents()).extracting(OutboxEvent::eventType)
-            .contains("quote_job.created.v1", "quote_job.failed.v1");
+            .contains("quote_job.created.v1", "quote_job.failed.v1", "quote.callback_requested.v1");
         assertThat(service.auditEntries()).extracting(AuditEntry::action)
-            .contains("QUOTE_JOB_CREATED", "QUOTE_JOB_FAILED");
+            .contains("QUOTE_JOB_CREATED", "QUOTE_JOB_FAILED", "QUOTE_CALLBACK_REQUESTED");
+        OutboxEvent callback = service.outboxEvents().stream()
+            .filter(event -> event.eventType().equals("quote.callback_requested.v1"))
+            .findFirst()
+            .orElseThrow();
+        assertThat(callback.payload()).containsEntry("quoteJobId", failed.jobId().toString());
+        assertThat(callback.payload()).containsEntry("status", "FAILED");
+        assertThat(callback.payload()).doesNotContainKeys("borrowerLastName", "loanNumber", "creditScore");
     }
 
     @Test

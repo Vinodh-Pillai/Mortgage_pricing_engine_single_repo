@@ -43,7 +43,7 @@ public class LosQuoteIntegrationService {
     String jobId = UUID.nameUUIDFromBytes((request.tenantId() + ":" + quoteIdentity + ":" + idempotencyKey).getBytes(StandardCharsets.UTF_8)).toString();
     StoredQuoteJob job = new StoredQuoteJob(jobId, request.tenantId(), request.scenarioId(), "QUEUED", requestHash,
         correlationId == null || correlationId.isBlank() ? request.correlationId() : correlationId, clock.instant(),
-        Map.of("source", "LOS", "stage", "accepted"));
+        progressSnapshot(request));
     jobsById.put(jobId, job);
     jobsByIdempotencyKey.put(idempotencyKey, job);
     return job.toResponse();
@@ -66,6 +66,19 @@ public class LosQuoteIntegrationService {
     if (request.quoteAddressDTO() == null || blank(request.quoteAddressDTO().state()) || blank(request.quoteAddressDTO().zip())) {
       throw new LosQuoteValidationException("LOS_QUOTE_ADDRESS_INVALID", "quoteAddressDTO.state and quoteAddressDTO.zip are required");
     }
+    if (!blank(request.productId()) || !blank(request.selectedProgramId()) || !blank(request.priceGroupId())) {
+      throw new LosQuoteValidationException("LOS_QUOTE_PRODUCT_AUTHORIZATION_UNAVAILABLE",
+          "Tenant product, selectedProgramId, and priceGroup authorization metadata is not configured; quote job was not started");
+    }
+    validateConfiguredEnum("transactionType", request.transactionType());
+    validateConfiguredEnum("propertyInformationType", request.propertyInformationType());
+    validateConfiguredEnum("occupancyType", request.occupancyType());
+    validateConfiguredEnum("incomeDocumentationType", request.incomeDocumentationType());
+    validateConfiguredEnum("mortgageType", request.mortgageType());
+    validateConfiguredEnum("amortizationType", request.amortizationType());
+    validateConfiguredEnum("loanTermType", request.loanTermType());
+    validateConfiguredEnum("lockPeriodType", request.lockPeriodType());
+    validateCreditApplicationEnumMappings(request.creditApplicationFields());
     if (request.creditApplicationFields().isEmpty()) {
       throw new LosQuoteValidationException("LOS_QUOTE_ENGINE_FIELDS_REQUIRED", "creditApplicationFields are required");
     }
@@ -76,6 +89,49 @@ public class LosQuoteIntegrationService {
 
   private boolean blank(String value) {
     return value == null || value.isBlank();
+  }
+
+  private Map<String, String> progressSnapshot(LosQuoteRequest request) {
+    java.util.LinkedHashMap<String, String> progress = new java.util.LinkedHashMap<>();
+    progress.put("source", "LOS");
+    progress.put("stage", "accepted");
+    progress.put("pipelineScenarioLinked", Boolean.toString(!blank(request.scenarioId())));
+    putIfPresent(progress, "scenarioRef", request.scenarioId());
+    if (request.scenarioVersion() > 0) {
+      progress.put("scenarioVersion", Integer.toString(request.scenarioVersion()));
+    }
+    putIfPresent(progress, "requestSnapshotRef", request.clientContext().get("requestSnapshotRef"));
+    putIfPresent(progress, "mappingConfigRef", request.clientContext().get("mappingConfigRef"));
+    return Map.copyOf(progress);
+  }
+
+  private void putIfPresent(Map<String, String> target, String key, String value) {
+    if (!blank(value)) {
+      target.put(key, value);
+    }
+  }
+
+  private void validateConfiguredEnum(String fieldName, String value) {
+    if (!blank(value) && value.trim().matches("\\d+")) {
+      throw new LosQuoteValidationException("LOS_QUOTE_ENUM_MAPPING_REQUIRED",
+          fieldName + " uses a numeric LoanPass code without configured mapping metadata");
+    }
+  }
+
+  private void validateCreditApplicationEnumMappings(java.util.List<LosQuoteModels.CreditApplicationField> fields) {
+    for (LosQuoteModels.CreditApplicationField field : fields == null ? java.util.List.<LosQuoteModels.CreditApplicationField>of() : fields) {
+      if (field == null || field.value() == null || !"enum".equals(field.value().type())) {
+        continue;
+      }
+      if (looksNumeric(field.value().value()) || looksNumeric(field.value().variantId())) {
+        throw new LosQuoteValidationException("LOS_QUOTE_ENUM_MAPPING_REQUIRED",
+            field.fieldId() + " uses a numeric LoanPass enum code without configured mapping metadata");
+      }
+    }
+  }
+
+  private boolean looksNumeric(Object value) {
+    return value != null && value.toString().trim().matches("\\d+");
   }
 
   private String hash(Object value) {

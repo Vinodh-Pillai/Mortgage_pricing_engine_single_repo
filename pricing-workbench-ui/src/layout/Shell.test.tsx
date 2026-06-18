@@ -73,9 +73,9 @@ describe('responsive layout shell', () => {
   it('builds navigation from registry modules and persona visibility', () => {
     const items = buildNavigationTree(modules, 'run-123', 'operations lead');
     expect(items).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Quote workspace', route: '/quote/run-123/offers', group: 'Quotes' })]));
-    expect(items).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Operations dashboard', group: 'Operations', badgeCount: 1 })]));
-    expect(items).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Quick Quote', group: 'Pipeline' })]));
-    expect(items).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Feature Flags', group: 'Admin' })]));
+    expect(items).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Operations dashboard', group: 'Operations', badgeCount: 2 })]));
+    expect(items).not.toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Quick Quote', group: 'Pipeline' })]));
+    expect(items).not.toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Feature Flags', group: 'Admin' })]));
   });
 
   it('renders header nav content footer and focusable skip link', () => {
@@ -126,7 +126,7 @@ describe('responsive layout shell', () => {
     window.localStorage.removeItem('loanweft:layout-shell:nav-rail-collapsed');
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1199 });
     renderShell(
-      <Shell activeModuleId="quote" activeRunId="run-123" breadcrumb="Quote" modules={modules} notifications={[]} onThemeToggle={vi.fn()} theme="dark" user={{ name: 'Alex Rivera', role: 'Pricing analyst' }}>
+      <Shell activeModuleId="quote" activeRunId="run-123" breadcrumb="Quote" modules={modules} notifications={[]} onThemeToggle={vi.fn()} theme="dark" user={{ name: 'Alex Rivera', role: 'Loan officer' }}>
         <section>Screen content</section>
       </Shell>,
     );
@@ -147,7 +147,7 @@ describe('responsive layout shell', () => {
     window.localStorage.removeItem('loanweft:layout-shell:nav-rail-collapsed');
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
     renderShell(
-      <Shell activeModuleId="quote" activeRunId="run-123" breadcrumb="Quote" modules={modules} notifications={[]} onThemeToggle={vi.fn()} theme="dark" user={{ name: 'Alex Rivera', role: 'Pricing analyst' }}>
+      <Shell activeModuleId="quote" activeRunId="run-123" breadcrumb="Quote" modules={modules} notifications={[]} onThemeToggle={vi.fn()} theme="dark" user={{ name: 'Alex Rivera', role: 'Loan officer' }}>
         <section>Screen content</section>
       </Shell>,
     );
@@ -206,7 +206,7 @@ describe('responsive layout shell', () => {
     installMatchMedia(false);
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
     renderShell(
-      <Shell activeModuleId="quote" activeRunId="run-123" breadcrumb="Quote" modules={modules} notifications={[]} onThemeToggle={vi.fn()} theme="dark" user={{ name: 'Alex Rivera', role: 'Pricing analyst' }}>
+      <Shell activeModuleId="quote" activeRunId="run-123" breadcrumb="Quote" modules={modules} notifications={[]} onThemeToggle={vi.fn()} theme="dark" user={{ name: 'Alex Rivera', role: 'Loan officer' }}>
         <section>Screen content</section>
       </Shell>,
     );

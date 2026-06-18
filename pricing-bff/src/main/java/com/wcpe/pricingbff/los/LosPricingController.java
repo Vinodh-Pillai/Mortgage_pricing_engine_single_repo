@@ -3,6 +3,9 @@ package com.wcpe.pricingbff.los;
 import com.wcpe.pricingbff.los.LosApiModels.ErrorResponse;
 import com.wcpe.pricingbff.los.LosApiModels.LosLockExtendRequest;
 import com.wcpe.pricingbff.los.LosApiModels.LosLockRequest;
+import com.wcpe.pricingbff.los.LosApiModels.LosProductCatalogResponse;
+import com.wcpe.pricingbff.los.LosApiModels.LosProductDetailResponse;
+import com.wcpe.pricingbff.los.LosApiModels.LosProductEligibilityRequest;
 import com.wcpe.pricingbff.los.LosApiModels.LosPricingRequest;
 import com.wcpe.pricingbff.los.LosApiModels.LosWebhookRegistrationRequest;
 import jakarta.servlet.http.HttpServletRequest;
@@ -16,6 +19,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -29,8 +33,11 @@ class LosPricingController {
 
   @PostMapping("/pricing-requests")
   ResponseEntity<?> createPricingRequest(@RequestBody LosPricingRequest request,
-      @RequestHeader("X-Request-ID") String idempotencyKey,
+      @RequestHeader(value = "Idempotency-Key", required = false) String loanPassIdempotencyKey,
+      @RequestHeader(value = "X-Request-ID", required = false) String requestId,
       @RequestHeader(value = "X-Correlation-ID", required = false) String correlationId) {
+    String idempotencyKey = loanPassIdempotencyKey == null || loanPassIdempotencyKey.isBlank()
+        ? requestId : loanPassIdempotencyKey;
     return ResponseEntity.status(HttpStatus.ACCEPTED).body(service.createPricingRequest(request, idempotencyKey, correlationId));
   }
 
@@ -44,10 +51,46 @@ class LosPricingController {
     return Map.of("pricingRequestId", id, "offers", service.getOffers(id));
   }
 
+  @GetMapping("/products")
+  LosProductCatalogResponse getProducts(
+      @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+      @RequestParam(required = false) String channel,
+      @RequestParam(required = false) String investor,
+      @RequestParam(required = false) String productFamily,
+      @RequestParam(required = false) Boolean active,
+      @RequestParam(required = false) String effectiveDate,
+      @RequestParam(required = false) Integer page,
+      @RequestParam(required = false) Integer pageSize) {
+    return service.getProductCatalog(tenantId, channel, investor, productFamily, active, effectiveDate, page, pageSize);
+  }
+
+  @GetMapping("/products/search")
+  LosProductCatalogResponse searchProducts(
+      @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+      @RequestParam Map<String, String> queryParameters) {
+    return service.searchProductCatalog(tenantId, queryParameters);
+  }
+
+  @GetMapping("/products/{productId}")
+  LosProductDetailResponse getProductDetail(
+      @PathVariable String productId,
+      @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId) {
+    return service.getProductDetail(productId, tenantId);
+  }
+
+  @PostMapping("/product-eligibility")
+  Object evaluateProductEligibility(@RequestBody LosProductEligibilityRequest request,
+      @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+      @RequestHeader(value = "X-Correlation-ID", required = false) String correlationId) {
+    return service.evaluateProductEligibility(request, tenantId, correlationId);
+  }
+
   @PostMapping("/locks")
   ResponseEntity<?> requestLock(@RequestBody LosLockRequest request,
-      @RequestHeader("X-Request-ID") String idempotencyKey,
+      @RequestHeader(value = "Idempotency-Key", required = false) String loanPassIdempotencyKey,
+      @RequestHeader(value = "X-Request-ID", required = false) String requestId,
       @RequestHeader(value = "X-Correlation-ID", required = false) String correlationId) {
+    String idempotencyKey = idempotencyKey(loanPassIdempotencyKey, requestId);
     return ResponseEntity.status(HttpStatus.ACCEPTED).body(service.requestLock(request, idempotencyKey, correlationId));
   }
 
@@ -59,8 +102,10 @@ class LosPricingController {
   @PostMapping("/locks/{id}/extend")
   Object extendLock(@PathVariable String id,
       @RequestBody LosLockExtendRequest request,
-      @RequestHeader("X-Request-ID") String idempotencyKey,
+      @RequestHeader(value = "Idempotency-Key", required = false) String loanPassIdempotencyKey,
+      @RequestHeader(value = "X-Request-ID", required = false) String requestId,
       @RequestHeader(value = "X-Correlation-ID", required = false) String correlationId) {
+    String idempotencyKey = idempotencyKey(loanPassIdempotencyKey, requestId);
     return service.extendLock(id, request, idempotencyKey, correlationId);
   }
 
@@ -72,7 +117,13 @@ class LosPricingController {
 
   @ExceptionHandler(LosValidationException.class)
   ResponseEntity<ErrorResponse> validationError(LosValidationException ex, HttpServletRequest request) {
-    HttpStatus status = ex.code().endsWith("NOT_FOUND") ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+    HttpStatus status = ex.code().endsWith("NOT_FOUND") ? HttpStatus.NOT_FOUND
+        : ex.code().endsWith("DISABLED") ? HttpStatus.FORBIDDEN
+        : HttpStatus.BAD_REQUEST;
     return ResponseEntity.status(status).body(new ErrorResponse(ex.code(), ex.getMessage(), request.getHeader("X-Correlation-ID")));
+  }
+
+  private String idempotencyKey(String loanPassIdempotencyKey, String requestId) {
+    return loanPassIdempotencyKey == null || loanPassIdempotencyKey.isBlank() ? requestId : loanPassIdempotencyKey;
   }
 }

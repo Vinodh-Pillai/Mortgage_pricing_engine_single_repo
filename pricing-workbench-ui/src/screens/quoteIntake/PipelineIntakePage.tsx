@@ -1,11 +1,11 @@
 import { type FocusEvent, type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
-import { loanPassQuoteIntakeFields, type BorrowerIntake, type LaunchState, type MetadataState, type ScenarioIntakeField } from '../../lib/api/quoteRuns';
+import { fetchTenantDropdownOptions, loanPassQuoteIntakeFields, type BorrowerIntake, type DropdownOption, type LaunchState, type MetadataState, type ScenarioIntakeField, type TenantDropdownOptions } from '../../lib/api/quoteRuns';
 import { availableFiltersFor, tenantHomePreviewProducts, type AuthorizedProduct, type TenantProductStatus } from '../../lib/api/tenantHome';
 import { createDraftScenario, getDraftScenario, loadDraftBackup, saveDraftBackup, updateDraftScenario, type DraftBackup, type DraftScenario } from './draft';
 import { launchQuoteRun } from './launch';
 import { fieldsForStep, normalizeMetadataState, quoteIntakeSteps, type QuoteIntakeStepDefinition } from './metadata';
 import { ResumeDraft, draftToBackup } from './ResumeDraft';
-import { StepFields } from './steps/StepFields';
+import { StepFields, type DropdownOptionsByField } from './steps/StepFields';
 import { errorsToValidation, firstInvalidField, validateFields, type IntakeFieldErrors } from './validation';
 import './QuoteIntake.css';
 
@@ -40,8 +40,14 @@ type ProductFilterState = {
   occupancy: string;
 };
 
+type DropdownConfigState =
+  | { kind: 'loading'; options: TenantDropdownOptions | null; message: string }
+  | { kind: 'ready'; options: TenantDropdownOptions; message: string }
+  | { kind: 'fallback'; options: TenantDropdownOptions; message: string };
+
 const tenantBoundaryPlaceholder = 'ui-preview-tenant';
 const localUnsyncedDraftId = 'local-unsynced-pipeline-draft';
+const tenantDropdownConfigCache = new Map<string, DropdownConfigState>();
 const minimumStartFields: Array<keyof BorrowerIntake> = ['borrowerLastName', 'loanNumber'];
 const minimumQuoteFields: Array<keyof BorrowerIntake> = ['borrowerLastName', 'loanNumber', 'mortgageType', 'channel', 'loanPurpose', 'decisionCreditScore', 'baseLoanAmount'];
 const emptyProductFilters: ProductFilterState = {
@@ -64,6 +70,8 @@ const emptyProductFilters: ProductFilterState = {
 
 const initialQuoteIntakeDefaults: Partial<Record<keyof BorrowerIntake, string>> = {
   channel: '',
+  channelCode: '',
+  channelType: '',
   loanNumber: '',
   borrowerFirstName: '',
   borrowerLastName: '',
@@ -86,6 +94,7 @@ const initialQuoteIntakeDefaults: Partial<Record<keyof BorrowerIntake, string>> 
   loanToValue: '',
   combinedLoanToValue: '',
   cashOutAmount: '',
+  transactionType: '',
   loanBalance: '',
   firstLoanBalance: '',
   secondLoanBalance: '',
@@ -94,6 +103,7 @@ const initialQuoteIntakeDefaults: Partial<Record<keyof BorrowerIntake, string>> 
   lienPosition: '',
   refinancingType: '',
   desiredLoanTerm: '',
+  loanTermType: '',
   desiredAmortizationType: '',
   desiredRateLockPeriod: '',
   lockPeriodType: '',
@@ -103,6 +113,7 @@ const initialQuoteIntakeDefaults: Partial<Record<keyof BorrowerIntake, string>> 
   waiveEscrows: '',
   interestOnly: '',
   mortgageType: '',
+  investorCode: '',
   loanQualificationType: '',
   mortgageInsuranceType: '',
   miOptionType: '',
@@ -122,6 +133,7 @@ const initialQuoteIntakeDefaults: Partial<Record<keyof BorrowerIntake, string>> 
   street: '',
   addressSearchString: '',
   propertyType: '',
+  propertyInformationType: '',
   occupancyType: '',
   numberOfUnits: '',
   propertyLocation: '',
@@ -153,6 +165,7 @@ const initialQuoteIntakeDefaults: Partial<Record<keyof BorrowerIntake, string>> 
   monthsOfReserves: '',
   liquidAssets: '',
   documentationType: '',
+  incomeDocumentationType: '',
   secondaryDocumentationType: '',
   documentationTypeTimeFrame: '',
   mortgageLatePayments: '',
@@ -243,6 +256,7 @@ export function PipelineIntakePage({
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [productFilters, setProductFilters] = useState<ProductFilterState>(emptyProductFilters);
   const [selectedProduct, setSelectedProduct] = useState<AuthorizedProduct | null>(null);
+  const [dropdownConfigState, setDropdownConfigState] = useState<DropdownConfigState>(() => tenantDropdownConfigCache.get(tenantId) ?? { kind: 'loading', options: fallbackTenantDropdownOptions(), message: 'Loading tenant dropdown options...' });
   const [retrieveOpen, setRetrieveOpen] = useState(false);
   const [retrieveKeys, setRetrieveKeys] = useState({ borrowerLastName: '', loanNumber: '' });
   const [retrieveError, setRetrieveError] = useState('');
@@ -258,7 +272,8 @@ export function PipelineIntakePage({
   const sections = useMemo(() => consolidateCanonicalFields(quoteIntakeSteps.map((step) => ({ step, fields: fieldsForStep(metadata, step.id).map(normalizePipelineRequirement) }))), [metadata]);
   const visibleErrors = useMemo(() => (submitAttempted || showProgressiveCompatibility ? mergedErrors : {}), [mergedErrors, showProgressiveCompatibility, submitAttempted]);
   const draftId = draftIdFromLocation();
-  const availableFilters = useMemo(() => availableFiltersFor(tenantHomePreviewProducts), []);
+  const fieldDropdownOptions = useMemo(() => dropdownOptionsForFields(dropdownConfigState.options), [dropdownConfigState.options]);
+  const availableFilters = useMemo(() => availableFiltersForDropdownConfig(dropdownConfigState.options), [dropdownConfigState.options]);
   const activeFilterCount = Object.values(productFilters).filter((value) => value.trim()).length;
   const filteredProducts = useMemo(() => filterProducts(tenantHomePreviewProducts, productFilters), [productFilters]);
   const startReady = minimumStartFields.every((field) => (values[field] ?? '').trim());
@@ -268,6 +283,30 @@ export function PipelineIntakePage({
   useEffect(() => {
     if (intake) setLocalIntake(intake);
   }, [intake]);
+
+  useEffect(() => {
+    const cached = tenantDropdownConfigCache.get(tenantId);
+    if (cached && cached.kind !== 'loading') {
+      setDropdownConfigState(cached);
+      return;
+    }
+
+    let cancelled = false;
+    setDropdownConfigState({ kind: 'loading', options: cached?.options ?? fallbackTenantDropdownOptions(), message: 'Loading tenant dropdown options...' });
+    fetchTenantDropdownOptions(tenantId)
+      .then((options) => {
+        const readyState: DropdownConfigState = { kind: 'ready', options: mergeTenantDropdownOptions(options), message: 'Tenant dropdown options loaded.' };
+        tenantDropdownConfigCache.set(tenantId, readyState);
+        if (!cancelled) setDropdownConfigState(readyState);
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : 'Tenant dropdown configuration is unavailable.';
+        const fallbackState = fallbackDropdownConfigState(`${message} LoanPass enum defaults are in use.`);
+        tenantDropdownConfigCache.set(tenantId, fallbackState);
+        if (!cancelled) setDropdownConfigState(fallbackState);
+      });
+    return () => { cancelled = true; };
+  }, [tenantId]);
 
   useEffect(() => {
     if (!draftId || resumeBackup || resumeDismissed) return;
@@ -300,8 +339,12 @@ export function PipelineIntakePage({
 
   function setFilter(key: keyof ProductFilterState, value: string) {
     setProductFilters((current) => ({ ...current, [key]: value }));
-    if (key === 'productType') changeField('mortgageType', value ? productTypeLabel(value) : '');
-    if (key === 'channel') changeField('channel', value ? channelLabel(value) : '');
+    if (key === 'productType') changeField('mortgageType', value);
+    if (key === 'investor') changeField('investorCode', value);
+    if (key === 'channel') {
+      changeField('channel', value);
+      changeField('channelCode', value);
+    }
     if (key === 'ltvMin' || key === 'ltvMax') changeField('loanToValue', value);
     if (key === 'ficoMin' || key === 'ficoMax') changeField('decisionCreditScore', value);
     if (key === 'loanAmountMin' || key === 'loanAmountMax') changeField('baseLoanAmount', value);
@@ -311,14 +354,16 @@ export function PipelineIntakePage({
   }
 
   function applyProduct(product: AuthorizedProduct) {
-    const channel = channelLabel(product.channelCode);
-    const mortgageType = productTypeLabel(product.productType);
+    const channel = product.channelCode;
+    const mortgageType = product.productType;
     changeField('channel', channel);
+    changeField('channelCode', product.channelCode);
+    changeField('investorCode', product.investorCode);
     changeField('mortgageType', mortgageType);
     setSelectedProduct(product);
     setProductFilters((current) => ({ ...current, productType: product.productType, investor: product.investorCode, channel: product.channelCode, status: product.status }));
     setStatusMessage(`${product.productName} selected.`);
-    capture('pipeline-product-selected', { productCode: product.productCode, investor: product.investorCode, channel });
+    capture('pipeline-product-selected', { productCode: product.productCode, investor: product.investorCode, channel: channelLabel(channel) });
   }
 
   function clearFilters() {
@@ -449,7 +494,7 @@ export function PipelineIntakePage({
     if (event) onSubmit?.(event);
     setSubmitAttempted(true);
     if (product) applyProduct(product);
-    const launchValues = product ? { ...values, channel: channelLabel(product.channelCode), mortgageType: productTypeLabel(product.productType) } : values;
+      const launchValues = product ? { ...values, channel: product.channelCode, channelCode: product.channelCode, investorCode: product.investorCode, mortgageType: product.productType } : values;
     const validationErrors = validateFields(quoteFields(), launchValues);
     if (Object.keys(validationErrors).length > 0) {
       setLocalErrors(validationErrors);
@@ -565,15 +610,17 @@ export function PipelineIntakePage({
       {showProgressiveCompatibility ? (
         <div className="quote-intake-fields quote-intake-fields--compatibility" aria-label="Quick quote identity fields">
           <label className="quote-intake-field">Quote intent<input name="quoteIntent" value={values.quoteIntent ?? ''} aria-invalid={Boolean(visibleErrors.quoteIntent)} onChange={(event) => changeField('quoteIntent', event.target.value)} type="text" />{visibleErrors.quoteIntent ? <p className="quote-intake-error" role="alert">{visibleErrors.quoteIntent}</p> : null}</label>
-          <label className="quote-intake-field">Channel<input name="channel" value={values.channel ?? ''} aria-invalid={Boolean(visibleErrors.channel)} onChange={(event) => changeField('channel', event.target.value)} type="text" />{visibleErrors.channel ? <p className="quote-intake-error" role="alert">{visibleErrors.channel}</p> : null}</label>
+          <InlineSelectField label="Channel" name="channel" value={values.channel ?? ''} error={visibleErrors.channel} options={fieldDropdownOptions.channel ?? []} loading={dropdownConfigState.kind === 'loading'} onChange={(value) => changeField('channel', value)} />
         </div>
       ) : null}
+      {dropdownConfigState.kind === 'loading' ? <p className="quote-intake-status" role="status">Loading tenant dropdown options...</p> : null}
+      {dropdownConfigState.kind === 'fallback' ? <p className="quote-intake-status" aria-live="polite">{dropdownConfigState.message}</p> : null}
       {statusMessage ? <p className="quote-intake-status" role="status">{statusMessage}</p> : null}
 
       <form id="pipeline-product-form" className="quote-intake-form quote-intake-form--product-finder quote-intake-form--single-page" onSubmit={(event) => void launch(event)} onBlur={handleBlur} noValidate>
         <aside className="quote-product-filter-panel" aria-label="Pipeline filters">
           <FilterCard title="Keys" eyebrow="Save" badge={startReady ? 'Ready' : '*'}>
-            <StepFields fields={startFields()} intake={values} errors={visibleErrors} onChange={changeField} />
+            <StepFields fields={startFields()} intake={values} errors={visibleErrors} onChange={changeField} dropdownOptions={fieldDropdownOptions} dropdownLoading={dropdownConfigState.kind === 'loading'} />
           </FilterCard>
 
           <FilterCard title="Filters" eyebrow="Products" badge={`${activeFilterCount} active`}>
@@ -586,13 +633,13 @@ export function PipelineIntakePage({
             <RangeFilter label="FICO" min={productFilters.ficoMin} max={productFilters.ficoMax} onMin={(value) => setFilter('ficoMin', value)} onMax={(value) => setFilter('ficoMax', value)} />
             <RangeFilter label="Loan amount" min={productFilters.loanAmountMin} max={productFilters.loanAmountMax} onMin={(value) => setFilter('loanAmountMin', value)} onMax={(value) => setFilter('loanAmountMax', value)} prefix="$" />
             <CompactField label="Term" value={productFilters.term} onChange={(value) => setFilter('term', value)} placeholder="Months" inputMode="numeric" />
-            <CompactField label="Property type" value={productFilters.propertyType} onChange={(value) => setFilter('propertyType', value)} />
-            <CompactField label="Occupancy" value={productFilters.occupancy} onChange={(value) => setFilter('occupancy', value)} />
+            <SelectFilter label="Property type" value={productFilters.propertyType} values={optionValues(fieldDropdownOptions.propertyType)} onChange={(value) => setFilter('propertyType', value)} formatter={friendlyLabel} />
+            <SelectFilter label="Occupancy" value={productFilters.occupancy} values={optionValues(fieldDropdownOptions.occupancyType)} onChange={(value) => setFilter('occupancy', value)} formatter={friendlyLabel} />
             <button type="button" className="quote-filter-clear" onClick={clearFilters}>Clear</button>
           </FilterCard>
 
           <FilterCard title="Quote" eyebrow="Launch" badge={quoteReady ? 'Ready' : '*'}>
-            <StepFields fields={quoteDetailFields()} intake={values} errors={visibleErrors} onChange={changeField} />
+            <StepFields fields={quoteDetailFields()} intake={values} errors={visibleErrors} onChange={changeField} dropdownOptions={fieldDropdownOptions} dropdownLoading={dropdownConfigState.kind === 'loading'} />
           </FilterCard>
         </aside>
 
@@ -660,6 +707,19 @@ function FilterCard({ title, eyebrow, badge, children }: { title: string; eyebro
       </div>
       {children}
     </section>
+  );
+}
+
+function InlineSelectField({ label, name, value, error, options, loading, onChange }: { label: string; name: keyof BorrowerIntake; value: string; error?: string; options: DropdownOption[]; loading: boolean; onChange: (value: string) => void }) {
+  const renderedOptions = loading ? [{ value: '', label: 'Loading options...' }] : withCurrentOption(withPlaceholder(options, `Select ${label.toLowerCase()}`), value);
+  return (
+    <label className="quote-intake-field">
+      {label}
+      <select name={name} value={value} aria-invalid={Boolean(error)} onChange={(event) => onChange(event.target.value)} disabled={loading}>
+        {renderedOptions.map((option) => <option key={option.value || 'empty'} value={option.value}>{option.label}</option>)}
+      </select>
+      {error ? <p className="quote-intake-error" role="alert">{error}</p> : null}
+    </label>
   );
 }
 
@@ -839,6 +899,100 @@ function hasAnyValue(values: BorrowerIntake) {
 
 function fieldForId(sections: Array<{ step: QuoteIntakeStepDefinition; fields: ScenarioIntakeField[] }>, fieldId: keyof BorrowerIntake) {
   return sections.flatMap(({ fields }) => fields).find((field) => field.fieldId === fieldId);
+}
+
+function fallbackDropdownConfigState(message: string): DropdownConfigState {
+  return { kind: 'fallback', options: fallbackTenantDropdownOptions(), message };
+}
+
+function fallbackTenantDropdownOptions(): TenantDropdownOptions {
+  const staticFilters = availableFiltersFor(tenantHomePreviewProducts);
+  return {
+    productTypes: toOptions(staticFilters.productTypes),
+    investors: toOptions(staticFilters.investors),
+    channels: toOptions(staticFilters.channels),
+    loanPassEnums: loanPassEnumDropdownOptions(),
+    source: 'fallback',
+  };
+}
+
+function mergeTenantDropdownOptions(options: TenantDropdownOptions): TenantDropdownOptions {
+  const fallback = fallbackTenantDropdownOptions();
+  return {
+    productTypes: options.productTypes.length > 0 ? options.productTypes : fallback.productTypes,
+    investors: options.investors.length > 0 ? options.investors : fallback.investors,
+    channels: options.channels.length > 0 ? options.channels : fallback.channels,
+    loanPassEnums: { ...fallback.loanPassEnums, ...options.loanPassEnums },
+    source: options.source,
+  };
+}
+
+function dropdownOptionsForFields(options: TenantDropdownOptions | null): DropdownOptionsByField {
+  const resolved = options ?? fallbackTenantDropdownOptions();
+  return {
+    mortgageType: withPlaceholder(resolved.productTypes, 'Select mortgage type'),
+    investorCode: withPlaceholder(resolved.investors, 'Select investor'),
+    channel: withPlaceholder(resolved.channels, 'Select channel'),
+    channelCode: withPlaceholder(resolved.channels, 'Select channel'),
+    propertyType: withPlaceholder(resolved.loanPassEnums.propertyType ?? [], 'Select property type'),
+    occupancyType: withPlaceholder(resolved.loanPassEnums.occupancyType ?? [], 'Select occupancy type'),
+    documentationType: withPlaceholder(resolved.loanPassEnums.documentationType ?? [], 'Select documentation type'),
+    incomeDocumentationType: withPlaceholder(resolved.loanPassEnums.incomeDocumentationType ?? [], 'Select income documentation type'),
+    citizenshipType: withPlaceholder(resolved.loanPassEnums.citizenshipType ?? [], 'Select citizenship type'),
+    desiredAmortizationType: withPlaceholder(resolved.loanPassEnums.desiredAmortizationType ?? [], 'Select amortization type'),
+    amortizationType: withPlaceholder(resolved.loanPassEnums.amortizationType ?? [], 'Select amortization type'),
+    loanTermType: withPlaceholder(resolved.loanPassEnums.loanTermType ?? [], 'Select loan term type'),
+    lockPeriodType: withPlaceholder(resolved.loanPassEnums.lockPeriodType ?? [], 'Select lock period'),
+    channelType: withPlaceholder(resolved.loanPassEnums.channelType ?? [], 'Select channel type'),
+    lienPosition: withPlaceholder(resolved.loanPassEnums.lienPosition ?? [], 'Select lien position'),
+    propertyInformationType: withPlaceholder(resolved.loanPassEnums.propertyInformationType ?? [], 'Select property information type'),
+    transactionType: withPlaceholder(resolved.loanPassEnums.transactionType ?? [], 'Select transaction type'),
+  };
+}
+
+function availableFiltersForDropdownConfig(options: TenantDropdownOptions | null) {
+  const fallback = availableFiltersFor(tenantHomePreviewProducts);
+  return {
+    productTypes: optionValues(options?.productTypes).length > 0 ? optionValues(options?.productTypes) : fallback.productTypes,
+    investors: optionValues(options?.investors).length > 0 ? optionValues(options?.investors) : fallback.investors,
+    channels: optionValues(options?.channels).length > 0 ? optionValues(options?.channels) : fallback.channels,
+  };
+}
+
+function loanPassEnumDropdownOptions(): Partial<Record<keyof BorrowerIntake, DropdownOption[]>> {
+  return {
+    propertyType: toOptions(['Single Family', 'Condominium', 'Condotel', 'Two to Four Family', 'Manufactured Home', 'PUD', 'Multi-Family', 'Cooperative', 'Townhouse', 'Modular Home', 'Mixed-Use']),
+    occupancyType: toOptions(['Investment', 'Primary Residence', 'Second Home']),
+    documentationType: toOptions(['DSCR', 'Full Documentation', 'Bank Statements', '1099', 'Profit and Loss', 'WVOE Only', 'Asset Utilization', 'ATR-In-Full', 'K-1 Only', 'W-2', 'VOE']),
+    incomeDocumentationType: toOptions(['DSCR', 'Full Documentation', 'Bank Statements', '1099', 'Profit and Loss', 'WVOE Only', 'Asset Utilization', 'ATR-In-Full', 'K-1 Only', 'W-2', 'VOE']),
+    citizenshipType: toOptions(['US Citizen', 'Permanent Resident', 'Non-Permanent Resident', 'Foreign National', 'ITIN', 'DACA']),
+    desiredAmortizationType: toOptions(['Fixed', 'Adjustable Rate']),
+    amortizationType: toOptions(['Fixed', 'Adjustable Rate']),
+    loanTermType: toOptions(['10 Year', '15 Year', '20 Year', '25 Year', '30 Year', '40 Year']),
+    lockPeriodType: toOptions(['15 Days', '30 Days', '45 Days', '60 Days', '90 Days']),
+    channelType: toOptions(['Retail', 'Wholesale', 'Correspondent', 'TPO', 'Consumer Direct']),
+    lienPosition: toOptions(['First', 'Second']),
+    propertyInformationType: toOptions(['Subject Property', 'Investment Property', 'Second Home']),
+    transactionType: toOptions(['Purchase', 'Rate/Term Refinance', 'Cash-Out Refinance']),
+  };
+}
+
+function toOptions(values: string[]): DropdownOption[] {
+  return values.filter(Boolean).map((value) => ({ value, label: friendlyLabel(value) }));
+}
+
+function withPlaceholder(options: DropdownOption[], label: string): DropdownOption[] {
+  const nonEmpty = options.filter((option) => option.value);
+  return [{ value: '', label }, ...nonEmpty];
+}
+
+function withCurrentOption(options: DropdownOption[], value: string): DropdownOption[] {
+  if (!value || options.some((option) => option.value === value)) return options;
+  return [...options, { value, label: friendlyLabel(value) }];
+}
+
+function optionValues(options: DropdownOption[] | undefined): string[] {
+  return (options ?? []).map((option) => option.value).filter(Boolean);
 }
 
 function filterProducts(products: AuthorizedProduct[], filters: ProductFilterState) {

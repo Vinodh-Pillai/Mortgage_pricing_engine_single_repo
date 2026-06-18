@@ -2,11 +2,9 @@ package com.wcpe.pricingbff.los;
 
 import com.wcpe.pricingbff.los.LosApiModels.LosPricingRequest;
 import com.wcpe.pricingbff.los.LosApiModels.LosScenario;
-import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -29,6 +27,8 @@ class LosScenarioAdapter {
     facts.put("totalMonthlyIncome", safeValue(request.totalMonthlyIncome()));
     facts.put("debtToIncomeRatio", safeValue(request.debtToIncomeRatio()));
     facts.put("desiredRateLockPeriod", safeValue(request.desiredRateLockPeriod()));
+    facts.put("requestSnapshotRef", requestSnapshotRef(request));
+    facts.put("mappingConfigRef", mappingConfigRef(request));
     if (request.quoteAddressDTO() != null) {
       facts.put("quoteAddressDTO.state", safe(request.quoteAddressDTO().state()));
       facts.put("quoteAddressDTO.zip", safe(request.quoteAddressDTO().zip()));
@@ -43,9 +43,22 @@ class LosScenarioAdapter {
       facts.put("quoteBorrowerInfo.loanNumber", safe(request.quoteBorrowerInfo().loanNumber()));
       facts.put("quoteBorrowerInfo.numberOfBorrowers", safeValue(request.quoteBorrowerInfo().numberOfBorrowers()));
     }
-    String scenarioId = UUID.nameUUIDFromBytes((request.tenantId() + ":" + request.requestId()).getBytes(StandardCharsets.UTF_8)).toString();
+    String scenarioId = blank(request.scenarioId()) ? null : request.scenarioId().trim();
+    int scenarioVersion = scenarioId == null ? 0 : Math.max(1, request.scenarioVersion() == null ? 1 : request.scenarioVersion());
     List<Integer> lockPeriods = request.desiredRateLockPeriod() == null ? List.of() : List.of(request.desiredRateLockPeriod());
-    return new LosScenario(scenarioId, request.tenantId(), 1, facts, lockPeriods);
+    return new LosScenario(scenarioId, request.tenantId(), scenarioVersion, facts, lockPeriods);
+  }
+
+  private boolean blank(String value) {
+    return value == null || value.isBlank();
+  }
+
+  private String requestSnapshotRef(LosPricingRequest request) {
+    return "los-request-snapshot:" + safe(request.tenantId()) + ":" + safe(request.requestId());
+  }
+
+  private String mappingConfigRef(LosPricingRequest request) {
+    return "los-mapping-config:" + safe(request.tenantId());
   }
 
   private String safe(String value) {

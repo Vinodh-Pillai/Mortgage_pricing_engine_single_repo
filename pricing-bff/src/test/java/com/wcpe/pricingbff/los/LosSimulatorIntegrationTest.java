@@ -27,6 +27,7 @@ class LosSimulatorIntegrationTest {
             .header("X-LOS-System", "BYTE")
             .header("X-LOS-Version", "24.1")
             .header("Authorization", "Bearer simulator-token")
+            .header("X-LOS-Scopes", "los:pricing-request:write los:pricing-request:read")
             .header("X-Request-ID", "sim-req-001")
             .header("X-Correlation-ID", "sim-corr-001")
             .contentType(MediaType.APPLICATION_JSON)
@@ -41,7 +42,8 @@ class LosSimulatorIntegrationTest {
     String pricingRequestId = body.path("pricingRequestId").asText();
     mockMvc.perform(get("/api/v1/los/pricing-requests/{id}/offers", pricingRequestId)
             .header("X-LOS-System", "BYTE")
-            .header("Authorization", "Bearer simulator-token"))
+            .header("Authorization", "Bearer simulator-token")
+            .header("X-LOS-Scopes", "los:pricing-request:read"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.pricingRequestId").value(pricingRequestId))
         .andExpect(jsonPath("$.offers").isArray());

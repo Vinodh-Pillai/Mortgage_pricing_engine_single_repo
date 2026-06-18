@@ -7,6 +7,27 @@ import java.util.*;
 enum CatalogStatus { DRAFT, VALIDATED, PENDING_APPROVAL, APPROVED, PUBLISHED, SUSPENDED, RETIRED, REJECTED, ROLLED_BACK }
 
 record ProductRequest(String productCode, String productName, String productFamily, List<String> allowedChannels, List<String> allowedStates, LocalDate effectiveFrom, LocalDate effectiveTo) {}
+record ProductCreationRequest(String productCode, String displayName, String productFamily, String productType,
+                              List<Integer> supportedTerms, List<String> amortizationTypes, List<String> loanPurposes,
+                              List<String> supportedChannels, List<String> allowedStates, Map<String, Object> metadataRefs,
+                              Instant effectiveStart, Instant effectiveEnd, String status) {}
+record ProductCreationDraft(String productCode, String displayName, String productFamily, String productType,
+                            List<Integer> supportedTerms, List<String> amortizationTypes, List<String> loanPurposes,
+                            List<String> supportedChannels, List<String> allowedStates, Map<String, Object> metadataRefs,
+                            Instant effectiveStart, Instant effectiveEnd, String status) {}
+record ProductCreationSnapshot(ProductDefinition product, String productType, List<Integer> supportedTerms,
+                               List<String> amortizationTypes, List<String> loanPurposes, Map<String, Object> metadataRefs,
+                               String status, Instant effectiveStart, Instant effectiveEnd) {}
+record ProductCreationPersistence(ProductDefinition product, UUID productVersionId, String status, Map<String, Object> metadataRefs) {}
+record ProductCreationResponse(UUID productId, UUID productVersionId, String productCode, String displayName, String status,
+                               List<ProductTaxonomyValidationMessage> validationMessages, String auditRef,
+                               Map<String, Object> metadataRefs) {}
+record PricingConfigReference(String refType, String refCode, UUID versionId) {}
+record ProductPricingConfigurationRequest(String productCode, Instant effectiveStart, Instant effectiveEnd, List<PricingConfigReference> refs) {
+  Instant effectiveAsOf() { return effectiveStart == null ? Instant.now() : effectiveStart; }
+}
+record ProductPricingConfigurationResponse(String productCode, UUID productVersionId, Instant effectiveStart, Instant effectiveEnd,
+                                           List<PricingConfigReference> refs, String auditRef) {}
 record InvestorRequest(String investorCode, String investorName, List<String> channels, List<String> productCodes, LocalDate effectiveFrom, LocalDate effectiveTo) {}
 record ReferenceCatalogRequest(String code, String label, String category, Map<String, Object> attributes, LocalDate effectiveFrom, LocalDate effectiveTo) {}
 record ProductTaxonomyDraftRequest(String code, String name, String level, String parentCode, String agencyCategory, Instant effectiveStart, Instant effectiveEnd, Integer displayOrder) {}
@@ -41,6 +62,7 @@ record ResolveCatalogRequest(Instant asOf, LocalDate asOfDate, String channelCod
   String requestedProductFamily() { return productFamilyCode != null && !productFamilyCode.isBlank() ? productFamilyCode : productFamily; }
   boolean includeInactiveRequested() { return Boolean.TRUE.equals(includeInactive); }
 }
+record LoanPassMappedCatalogRequest(String mappedTenantId, String mappedChannelCode, String mappedInvestorCode, String tenantMappingAuditRef, Instant asOf, String stateCode, String countyFips, String productFamilyCode, String loanPurpose, String propertyType, String occupancyType, Integer termMonths, String amortizationType, Boolean includeInactive) {}
 record CatalogResponse(UUID catalogId, int version, CatalogStatus status, List<ProductDefinition> products, List<InvestorProgram> investors, List<ReferenceEntry> references, List<MarketArea> markets, String replayHash) {}
 record ProductDefinition(UUID productId, String productCode, String productName, String productFamily, List<String> allowedChannels, List<String> allowedStates, LocalDate effectiveFrom, LocalDate effectiveTo) {}
 record InvestorProgram(UUID investorId, String investorCode, String investorName, List<String> channels, List<String> productCodes, LocalDate effectiveFrom, LocalDate effectiveTo) {}
@@ -48,7 +70,11 @@ record ReferenceEntry(UUID entryId, String catalogType, String code, String labe
 record MarketArea(UUID marketId, String stateCode, String stateName, String countyFips, String countyName, String marketStatus, String restrictionReasonCode, List<String> allowedChannels, List<String> allowedProducts, LocalDate effectiveFrom, LocalDate effectiveTo) {}
 record SnapshotChannel(String code, UUID versionId) {}
 record SnapshotTaxonomy(String code, UUID versionId) {}
-record SnapshotProduct(String productCode, UUID productVersionId, List<String> investorCodes, List<String> termProfileCodes) {}
+record SnapshotProduct(String productCode, UUID productVersionId, List<String> investorCodes, List<String> termProfileCodes, List<PricingConfigReference> pricingConfigRefs) {
+  SnapshotProduct(String productCode, UUID productVersionId, List<String> investorCodes, List<String> termProfileCodes) {
+    this(productCode, productVersionId, investorCodes, termProfileCodes, List.of());
+  }
+}
 record SnapshotInvestor(String code, UUID versionId, boolean requiresMiValidation) {}
 record ProductConfigSnapshot(UUID snapshotId, UUID tenantId, String snapshotHash, LocalDate asOfDate, List<ProductDefinition> products, List<InvestorProgram> investors, List<ReferenceEntry> references, List<MarketArea> markets, Instant asOf, SnapshotChannel channel, List<SnapshotTaxonomy> taxonomy, List<SnapshotProduct> productComponents, List<SnapshotInvestor> investorComponents, Map<String, List<String>> referenceVersions, List<String> warnings, String requestHash, String correlationId) {
   ProductConfigSnapshot(UUID snapshotId, UUID tenantId, String snapshotHash, LocalDate asOfDate, List<ProductDefinition> products, List<InvestorProgram> investors, List<ReferenceEntry> references, List<MarketArea> markets) {

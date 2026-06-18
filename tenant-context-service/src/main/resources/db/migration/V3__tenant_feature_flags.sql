@@ -24,7 +24,10 @@ INSERT INTO tenant.tenant_feature_catalog (feature_key, category, default_enable
   ('lock_management', 'Core Pricing', true),
   ('scenario_analysis', 'Advanced', true),
   ('partner_integrations', 'Advanced', false),
-  ('ml_advisory', 'Advanced', false)
+  ('ml_advisory', 'Advanced', false),
+  ('loanpass_compatibility', 'LoanPass Integration', false),
+  ('loanpass_strict_mapping', 'LoanPass Integration', true),
+  ('loanpass_callback_delivery', 'LoanPass Integration', false)
 ON CONFLICT (feature_key) DO UPDATE SET
   category = EXCLUDED.category,
   default_enabled = EXCLUDED.default_enabled;

@@ -17,6 +17,7 @@ import org.springframework.jdbc.core.RowMapper;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -24,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -81,6 +83,30 @@ class PublishWorkflowStateMachineTest {
     verify(jdbc, never()).update(anyString(), any(Object[].class));
   }
 
+  @Test
+  void publishSupersedesExistingActiveWindowAndRecordsBeforeRefs() throws Exception {
+    UUID previousActive = UUID.fromString("20000000-0000-0000-0000-000000000099");
+    mockSheet("APPROVED");
+    when(jdbc.queryForObject(eq("select submitted_by from rate_feed.rate_sheet where tenant_id=? and sheet_id=?"), eq(String.class), eq(TENANT), eq(VERSION)))
+        .thenReturn("submitter");
+    lenient().when(jdbc.queryForObject(startsWith("select count(*) from rate_feed.rate_sheet"), eq(Integer.class), eq(TENANT), any(), any(), anyString(), eq(VERSION), any(), any()))
+        .thenReturn(1);
+    when(jdbc.query(startsWith("select sheet_id from rate_feed.rate_sheet"), any(RowMapper.class), eq(TENANT), any(), any(), anyString(), eq(VERSION)))
+        .thenReturn(List.of(previousActive));
+    when(jdbc.queryForObject(startsWith("select sheet_id,status,approval_status"), any(RowMapper.class), eq(TENANT), eq(VERSION)))
+        .thenAnswer(inv -> {
+          RowMapper<RateFeedModels.PublishWorkflowStateResponse> mapper = inv.getArgument(1);
+          return mapper.mapRow(workflowStateResultSet("PUBLISHED"), 0);
+        });
+
+    RateFeedModels.PublishWorkflowStateResponse response = service.publishVersion(TENANT, VERSION,
+        new PublishRateSheetRequest(Instant.parse("2026-01-01T00:00:00Z"), GRID_HASH, VERSION_HASH), "idem-publish", "publisher", "corr-1");
+
+    assertEquals("PUBLISHED", response.status());
+    verify(jdbc).update(startsWith("update rate_feed.rate_sheet set status='SUPERSEDED'"), any(), eq(TENANT), any(), any(), anyString(), eq(VERSION));
+    verify(jdbc).update(startsWith("insert into rate_feed.published_rate_sheet_read_model"), eq(TENANT), eq(VERSION), any(), any(), any(), any(), eq("ACTIVE"), eq(GRID_HASH), eq("publisher"), anyString());
+  }
+
   private void mockSheet(String status) throws Exception {
     when(jdbc.queryForObject(eq("select * from rate_feed.rate_sheet where tenant_id=? and sheet_id=? for update"), any(Object[].class), any(RowMapper.class)))
         .thenAnswer(inv -> {
@@ -113,6 +139,19 @@ class PublishWorkflowStateMachineTest {
     when(rs.getString("rejected_by")).thenReturn(null);
     when(rs.getString("rejection_reason")).thenReturn(null);
     when(rs.getTimestamp("updated_at")).thenReturn(Timestamp.from(Instant.parse("2026-01-01T00:00:00Z")));
+    return rs;
+  }
+
+  private ResultSet workflowStateResultSet(String status) throws Exception {
+    ResultSet rs = mock(ResultSet.class);
+    when(rs.getObject("sheet_id", UUID.class)).thenReturn(VERSION);
+    when(rs.getString("status")).thenReturn(status);
+    when(rs.getString("approval_status")).thenReturn("APPROVE");
+    when(rs.getString("submitted_by")).thenReturn("submitter");
+    when(rs.getString("approved_by")).thenReturn("approver");
+    when(rs.getTimestamp("submitted_at")).thenReturn(Timestamp.from(Instant.parse("2026-01-01T00:00:00Z")));
+    when(rs.getTimestamp("approved_at")).thenReturn(Timestamp.from(Instant.parse("2026-01-01T00:00:01Z")));
+    when(rs.getTimestamp("activated_at")).thenReturn(Timestamp.from(Instant.parse("2026-01-01T00:00:02Z")));
     return rs;
   }
 }

@@ -58,6 +58,26 @@ public final class RateFeedModels {
   public record CompleteUploadRequest(String fileSha256, String storageObjectId, String scanResultId, String scanStatus) {}
   public record CompleteUploadResponse(UUID batchId, String status, UUID rawFileId, UUID parserCommandId, Map<String, String> links, String resultHash) {}
 
+  public record RatesheetUploadRequest(
+    UUID investorId,
+    UUID channelId,
+    UUID feedFormatId,
+    String sourceType,
+    Instant effectiveAt,
+    String timezone,
+    String fileName,
+    String contentType,
+    long contentLengthBytes,
+    String registeredFileReference,
+    String fileSha256,
+    String scanResultId,
+    String scanStatus,
+    String templateProfileId,
+    String productFamily,
+    String notes
+  ) {}
+  public record RatesheetUploadResponse(UUID uploadId, UUID intakeJobId, String status, String validationStatusUrl, String detectedTemplateStatus, String auditReference, String resultHash) {}
+
   public record BatchResponse(UUID batchId, UUID uploadSessionId, UUID investorId, UUID channelId, UUID feedFormatId, String sourceType, BatchStatus status, Instant effectiveAt, String timezone, UUID rawFileId, String fileSha256, String fileName, String contentType, long contentLengthBytes, UUID supersedesBatchId, String uploadedBy, String correlationId, String resultHash) {}
 
   // ── Domain records ──────────────────────────────────────────────────────────
@@ -304,7 +324,11 @@ public final class RateFeedModels {
 
   public record BatchListResponse(List<BatchListSummary> batches, int count) {}
 
-  public record ParseBatchRequest(String parseMode, String expectedFileSha256, String csvContent) {}
+  public record ParseBatchRequest(String parseMode, String expectedFileSha256, String csvContent, String templateProfileId) {
+    public ParseBatchRequest(String parseMode, String expectedFileSha256, String csvContent) {
+      this(parseMode, expectedFileSha256, csvContent, null);
+    }
+  }
   public record ParseBatchResponse(UUID parseJobId, UUID batchId, String status) {}
   public record ParsedFieldResult(int rowNumber, String fieldName, String rawValue, String normalizedCandidate, String severity, String errorCode, String message) {}
   public record ParseResultPage(List<ParsedFieldResult> rows, int page, int size, long total) {}

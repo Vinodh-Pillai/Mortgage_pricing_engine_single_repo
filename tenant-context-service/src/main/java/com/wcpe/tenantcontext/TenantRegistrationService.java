@@ -24,7 +24,10 @@ public class TenantRegistrationService {
         "lock_management",
         "scenario_analysis",
         "partner_integrations",
-        "ml_advisory"
+        "ml_advisory",
+        "loanpass_compatibility",
+        "loanpass_strict_mapping",
+        "loanpass_callback_delivery"
     );
 
     private final Map<String, TenantRecord> tenantsById = new LinkedHashMap<>();
@@ -212,7 +215,9 @@ public class TenantRegistrationService {
             if (!DEFAULT_FEATURE_KEYS.contains(featureKey)) {
                 throw new TenantRegistrationException(422, "UNKNOWN_FEATURE_FLAG", "Feature flag is not configured for tenant management.");
             }
-            existing.put(featureKey, new FeatureFlag(entry.getValue() != null && entry.getValue(), Map.of(), Instant.now(clock), optional(updatedBy)));
+            FeatureFlag previous = existing.get(featureKey);
+            int nextVersion = previous == null ? 1 : previous.version() + 1;
+            existing.put(featureKey, featureFlag(featureKey, entry.getValue() != null && entry.getValue(), nextVersion, optional(updatedBy)));
         }
         return new TenantFeatureFlags(normalizedTenantId, Map.copyOf(existing));
     }
@@ -287,12 +292,20 @@ public class TenantRegistrationService {
         LinkedHashMap<String, FeatureFlag> flags = new LinkedHashMap<>();
         for (String featureKey : DEFAULT_FEATURE_KEYS) {
             boolean enabled = switch (featureKey) {
-                case "non_qm_pricing", "heloc_pricing", "government_products", "mi_pricing", "quick_pricer", "lock_management", "scenario_analysis" -> true;
+                case "non_qm_pricing", "heloc_pricing", "government_products", "mi_pricing", "quick_pricer", "lock_management", "scenario_analysis", "loanpass_strict_mapping" -> true;
                 default -> false;
             };
-            flags.put(featureKey, new FeatureFlag(enabled, Map.of(), Instant.now(clock), optional(updatedBy)));
+            flags.put(featureKey, featureFlag(featureKey, enabled, 1, optional(updatedBy)));
         }
         return flags;
+    }
+
+    private FeatureFlag featureFlag(String featureKey, boolean enabled, int version, String updatedBy) {
+        String normalizedKey = required(featureKey, "featureKey");
+        int safeVersion = Math.max(1, version);
+        String configRef = "tenant-feature-flags:" + normalizedKey + ":v" + safeVersion;
+        String auditRef = "tenant-feature-flags:audit:" + normalizedKey + ":v" + safeVersion;
+        return new FeatureFlag(enabled, Map.of("configRef", configRef, "auditRef", auditRef, "version", safeVersion), Instant.now(clock), optional(updatedBy), safeVersion, configRef, auditRef);
     }
 
     private static String required(String value, String fieldName) {
@@ -447,7 +460,12 @@ public class TenantRegistrationService {
 
     public record TenantFilter(String search, String status) { }
 
-    public record FeatureFlag(boolean enabled, Map<String, Object> config, Instant updatedAt, String updatedBy) { }
+    public record FeatureFlag(boolean enabled, Map<String, Object> config, Instant updatedAt, String updatedBy,
+                              int version, String configRef, String auditRef) {
+        public FeatureFlag(boolean enabled, Map<String, Object> config, Instant updatedAt, String updatedBy) {
+            this(enabled, config, updatedAt, updatedBy, 1, "", "");
+        }
+    }
 
     public record TenantFeatureFlags(String tenantId, Map<String, FeatureFlag> flags) { }
 

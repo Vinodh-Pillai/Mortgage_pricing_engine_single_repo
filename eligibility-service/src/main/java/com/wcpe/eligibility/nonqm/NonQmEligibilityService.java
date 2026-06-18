@@ -8,6 +8,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -29,7 +30,7 @@ public class NonQmEligibilityService {
         if (ruleSet == null) {
             RuleOutcome missing = new RuleOutcome("NON_QM_RULE_SET_MISSING", EligibilityDecision.INELIGIBLE, false, EligibilitySeverity.HARD_STOP,
                 "NON_QM_RULE_SET_MISSING", "No active Non-QM eligibility rule set was supplied by catalog metadata.", List.of("nonQm.ruleSet"), Map.of());
-            return result(productCode, 0, Map.of(), List.of(missing), List.of("nonQm.ruleSet"));
+            return result(productCode, null, Map.of(), List.of(missing), List.of("nonQm.ruleSet"));
         }
 
         NonQmProductType productType = NonQmProductType.from(firstNonBlank(ruleSet.productType(), product == null ? null : product.productType()));
@@ -39,7 +40,7 @@ public class NonQmEligibilityService {
             outcomes = List.of(new RuleOutcome("NON_QM_RULES_EMPTY", EligibilityDecision.INELIGIBLE, false, EligibilitySeverity.HARD_STOP,
                 "NON_QM_RULES_EMPTY", "The active Non-QM rule set contains no rules.", List.of("nonQm.rules"), Map.of()));
         }
-        return result(firstNonBlank(productCode, ruleSet.productCode()), ruleSet.version(), facts.facts(), outcomes, facts.missingFacts());
+        return result(firstNonBlank(productCode, ruleSet.productCode()), ruleSet, facts.facts(), outcomes, facts.missingFacts());
     }
 
     public NonQmEligibilityRuleSet importRuleSet(PpeRuleSetImportRequest request) {
@@ -50,7 +51,7 @@ public class NonQmEligibilityService {
             .sorted(Comparator.comparingInt(EligibilityRule::priority))
             .toList();
         NonQmEligibilityRuleSet ruleSet = new NonQmEligibilityRuleSet(ruleSetId, request.productCode(), request.productType(), request.investorCode(),
-            request.channelCode(), request.version(), Instant.EPOCH, null, rules, source, request.sourceSystemRef());
+            request.channelCode(), request.version(), request.effectiveStart() == null ? Instant.EPOCH : request.effectiveStart(), request.effectiveEnd(), rules, source, request.sourceSystemRef());
         importedRuleSets.put(ruleSetId, ruleSet);
         return ruleSet;
     }
@@ -66,6 +67,8 @@ public class NonQmEligibilityService {
         payload.put("investorCode", ruleSet.investorCode());
         payload.put("channelCode", ruleSet.channelCode());
         payload.put("version", ruleSet.version());
+        payload.put("effectiveStart", ruleSet.effectiveStart());
+        payload.put("effectiveEnd", ruleSet.effectiveEnd());
         payload.put("rules", ruleSet.rules().stream().map(rule -> Map.of(
             "ruleId", rule.ruleId(),
             "priority", rule.priority(),
@@ -102,9 +105,30 @@ public class NonQmEligibilityService {
     }
 
     private NonQmEligibilityRuleSet resolveRuleSet(NonQmEligibilityRequest request, ProductDefinition product) {
-        if (request.ruleSet() != null) return request.ruleSet();
-        if (product != null && product.eligibilityRuleSet() != null) return product.eligibilityRuleSet();
-        return null;
+        Instant asOf = asOf(request.quoteDate());
+        if (request.ruleSet() != null) return activeAt(request.ruleSet(), asOf) ? request.ruleSet() : null;
+        if (product != null && product.eligibilityRuleSet() != null && activeAt(product.eligibilityRuleSet(), asOf)) return product.eligibilityRuleSet();
+        String productCode = firstNonBlank(request.productCode(), product == null ? null : product.productCode());
+        return importedRuleSets.values().stream()
+            .filter(ruleSet -> matches(ruleSet.productCode(), productCode))
+            .filter(ruleSet -> matches(ruleSet.investorCode(), request.investorCode()))
+            .filter(ruleSet -> matches(ruleSet.channelCode(), request.channelCode()))
+            .filter(ruleSet -> activeAt(ruleSet, asOf))
+            .max(Comparator.comparingInt(NonQmEligibilityRuleSet::version))
+            .orElse(null);
+    }
+
+    private static Instant asOf(LocalDate quoteDate) {
+        return (quoteDate == null ? LocalDate.now() : quoteDate).atStartOfDay(ZoneOffset.UTC).toInstant();
+    }
+
+    private static boolean activeAt(NonQmEligibilityRuleSet ruleSet, Instant asOf) {
+        Instant start = ruleSet.effectiveStart() == null ? Instant.EPOCH : ruleSet.effectiveStart();
+        return !asOf.isBefore(start) && (ruleSet.effectiveEnd() == null || asOf.isBefore(ruleSet.effectiveEnd()));
+    }
+
+    private static boolean matches(String configured, String requested) {
+        return configured == null || configured.isBlank() || requested == null || configured.equalsIgnoreCase(requested);
     }
 
     private FactAssembly assembleFacts(NonQmProductType productType, ScenarioFacts scenario, ProductDefinition product) {
@@ -220,14 +244,33 @@ public class NonQmEligibilityService {
         return outcomes;
     }
 
-    private NonQmEligibilityResult result(String productCode, int version, Map<String, Object> facts, List<RuleOutcome> outcomes, List<String> assembledMissing) {
+    private NonQmEligibilityResult result(String productCode, NonQmEligibilityRuleSet ruleSet, Map<String, Object> facts, List<RuleOutcome> outcomes, List<String> assembledMissing) {
         boolean hardStop = outcomes.stream().anyMatch(outcome -> !outcome.passed() && outcome.severity() == EligibilitySeverity.HARD_STOP);
         boolean refer = outcomes.stream().anyMatch(outcome -> outcome.decision() == EligibilityDecision.REFER || (!outcome.passed() && outcome.severity() == EligibilitySeverity.WARNING));
         EligibilityDecision decision = hardStop ? EligibilityDecision.INELIGIBLE : refer ? EligibilityDecision.REFER : EligibilityDecision.ELIGIBLE;
         List<String> missing = new ArrayList<>(assembledMissing == null ? List.of() : assembledMissing);
         outcomes.forEach(outcome -> missing.addAll(outcome.missingFacts()));
-        String auditHash = Hashing.sha256(productCode + "|" + version + "|" + facts + "|" + outcomes);
-        return new NonQmEligibilityResult(productCode, decision, decision != EligibilityDecision.INELIGIBLE, version, facts, outcomes, missing.stream().distinct().toList(), auditHash);
+        int version = ruleSet == null ? 0 : ruleSet.version();
+        List<RuleConfigRef> configRefs = ruleSet == null ? List.of() : outcomes.stream()
+            .map(outcome -> new RuleConfigRef(ruleSet.ruleSetId(), outcome.ruleId(), ruleSet.version(), ruleSet.source(), ruleSet.sourceSystemRef(), ruleSet.effectiveStart(), ruleSet.effectiveEnd(), outcome.ppeFieldRefs() == null ? Map.of() : outcome.ppeFieldRefs()))
+            .toList();
+        List<FieldMessage> fieldMessages = outcomes.stream()
+            .flatMap(outcome -> fieldMessages(outcome).stream())
+            .toList();
+        String auditHash = Hashing.sha256(productCode + "|" + version + "|" + facts + "|" + outcomes + "|" + configRefs + "|" + fieldMessages);
+        return new NonQmEligibilityResult(productCode, decision, decision != EligibilityDecision.INELIGIBLE, version, facts, outcomes, missing.stream().distinct().toList(), configRefs, fieldMessages, auditHash);
+    }
+
+    private static List<FieldMessage> fieldMessages(RuleOutcome outcome) {
+        Map<String, String> fieldRefs = outcome.ppeFieldRefs() == null ? Map.of() : outcome.ppeFieldRefs();
+        String message = firstNonBlank(outcome.displayMessage(), outcome.reasonCode());
+        if (outcome.missingFacts() != null && !outcome.missingFacts().isEmpty()) {
+            return outcome.missingFacts().stream()
+                .map(field -> new FieldMessage(field, outcome.reasonCode(), message, fieldRefs))
+                .toList();
+        }
+        String fieldPath = fieldRefs.values().stream().findFirst().orElse(outcome.ruleId());
+        return List.of(new FieldMessage(fieldPath, outcome.reasonCode(), message, fieldRefs));
     }
 
     private static List<EligibilityRule> safeRules(NonQmEligibilityRuleSet ruleSet) {

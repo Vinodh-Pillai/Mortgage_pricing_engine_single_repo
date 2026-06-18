@@ -1,5 +1,7 @@
 export type BorrowerIntake = {
   channel: string;
+  channelCode: string;
+  channelType: string;
   loanNumber: string;
   borrowerFirstName: string;
   borrowerLastName: string;
@@ -22,6 +24,7 @@ export type BorrowerIntake = {
   loanToValue: string;
   combinedLoanToValue: string;
   cashOutAmount: string;
+  transactionType: string;
   loanBalance: string;
   firstLoanBalance: string;
   secondLoanBalance: string;
@@ -30,6 +33,7 @@ export type BorrowerIntake = {
   lienPosition: string;
   refinancingType: string;
   desiredLoanTerm: string;
+  loanTermType: string;
   desiredAmortizationType: string;
   desiredRateLockPeriod: string;
   lockPeriodType: string;
@@ -39,6 +43,7 @@ export type BorrowerIntake = {
   waiveEscrows: string;
   interestOnly: string;
   mortgageType: string;
+  investorCode: string;
   loanQualificationType: string;
   mortgageInsuranceType: string;
   miOptionType: string;
@@ -58,6 +63,7 @@ export type BorrowerIntake = {
   street: string;
   addressSearchString: string;
   propertyType: string;
+  propertyInformationType: string;
   occupancyType: string;
   numberOfUnits: string;
   propertyLocation: string;
@@ -89,6 +95,7 @@ export type BorrowerIntake = {
   monthsOfReserves: string;
   liquidAssets: string;
   documentationType: string;
+  incomeDocumentationType: string;
   secondaryDocumentationType: string;
   documentationTypeTimeFrame: string;
   mortgageLatePayments: string;
@@ -153,12 +160,12 @@ export type BorrowerIntake = {
 };
 
 export const loanPassQuoteIntakeFields = [
-  'channel', 'loanNumber', 'borrowerFirstName', 'borrowerLastName', 'numberOfBorrowers', 'contactEmail', 'decisionCreditScore', 'creditScoreType', 'citizenshipType', 'professional', 'firstTimeHomeBuyer', 'firstTimeInvestor',
-  'loanPurpose', 'baseLoanAmount', 'purchasePrice', 'appraisedValue', 'downPayment', 'percentDownpayment', 'loanToValue', 'combinedLoanToValue', 'cashOutAmount', 'loanBalance', 'firstLoanBalance', 'secondLoanBalance', 'firstLienAmount', 'secondLienAmount', 'lienPosition', 'refinancingType',
-  'desiredLoanTerm', 'desiredAmortizationType', 'desiredRateLockPeriod', 'lockPeriodType', 'desiredInterestRate', 'prepaymentPenaltyTerm', 'prePaymentPenaltyStructureType', 'waiveEscrows', 'interestOnly', 'mortgageType', 'loanQualificationType', 'mortgageInsuranceType', 'miOptionType', 'gift', 'achPayment', 'wholesaleCompensation', 'compensationPaidType', 'vaLoanType', 'vaFundingFeeExemptionType', 'vaFirstTimeUse',
-  'state', 'zip', 'countyFips', 'countyCode', 'countyName', 'city', 'street', 'addressSearchString', 'propertyType', 'occupancyType', 'numberOfUnits', 'propertyLocation', 'numberOfLeasedUnits', 'shortTermRental', 'propertySquareFootage', 'propertyAcreageNumber', 'condoApprovalType', 'acquisitionDate',
+  'channel', 'channelCode', 'channelType', 'loanNumber', 'borrowerFirstName', 'borrowerLastName', 'numberOfBorrowers', 'contactEmail', 'decisionCreditScore', 'creditScoreType', 'citizenshipType', 'professional', 'firstTimeHomeBuyer', 'firstTimeInvestor',
+  'loanPurpose', 'baseLoanAmount', 'purchasePrice', 'appraisedValue', 'downPayment', 'percentDownpayment', 'loanToValue', 'combinedLoanToValue', 'cashOutAmount', 'transactionType', 'loanBalance', 'firstLoanBalance', 'secondLoanBalance', 'firstLienAmount', 'secondLienAmount', 'lienPosition', 'refinancingType',
+  'desiredLoanTerm', 'loanTermType', 'desiredAmortizationType', 'desiredRateLockPeriod', 'lockPeriodType', 'desiredInterestRate', 'prepaymentPenaltyTerm', 'prePaymentPenaltyStructureType', 'waiveEscrows', 'interestOnly', 'mortgageType', 'investorCode', 'loanQualificationType', 'mortgageInsuranceType', 'miOptionType', 'gift', 'achPayment', 'wholesaleCompensation', 'compensationPaidType', 'vaLoanType', 'vaFundingFeeExemptionType', 'vaFirstTimeUse',
+  'state', 'zip', 'countyFips', 'countyCode', 'countyName', 'city', 'street', 'addressSearchString', 'propertyType', 'propertyInformationType', 'occupancyType', 'numberOfUnits', 'propertyLocation', 'numberOfLeasedUnits', 'shortTermRental', 'propertySquareFootage', 'propertyAcreageNumber', 'condoApprovalType', 'acquisitionDate',
   'monthlyMarketRent', 'propertyRentalIncome', 'rentalIncomeMightBeUsed', 'investorExperience', 'additionalMonthlyHousingExpenses', 'additionalAnnualHousingExpenses', 'monthlyTaxes', 'monthlyInsurance', 'monthlyHOA', 'annualTaxes', 'annualInsurance', 'annualHOA',
-  'selfEmployed', 'selfEmployedTimeFrame', 'totalBorrowerIncome', 'monthlyDebt', 'totalLiabilityMonthlyPayment', 'estimatedDti', 'estimatedDSCR', 'monthsOfReserves', 'liquidAssets', 'documentationType', 'secondaryDocumentationType', 'documentationTypeTimeFrame', 'mortgageLatePayments', 'mortgageHistoryDesc', 'creditEvent', 'chapter7BankruptcyDate', 'chapter11BankruptcyDate', 'chapter13BankruptcyDate', 'deedInLieuDate', 'foreclosureDate', 'shortSaleDate', 'mortgageModificationDate', 'forbearanceDate',
+  'selfEmployed', 'selfEmployedTimeFrame', 'totalBorrowerIncome', 'monthlyDebt', 'totalLiabilityMonthlyPayment', 'estimatedDti', 'estimatedDSCR', 'monthsOfReserves', 'liquidAssets', 'documentationType', 'incomeDocumentationType', 'secondaryDocumentationType', 'documentationTypeTimeFrame', 'mortgageLatePayments', 'mortgageHistoryDesc', 'creditEvent', 'chapter7BankruptcyDate', 'chapter11BankruptcyDate', 'chapter13BankruptcyDate', 'deedInLieuDate', 'foreclosureDate', 'shortSaleDate', 'mortgageModificationDate', 'forbearanceDate',
   'lockExtension', 'lockExtension2', 'concession', 'secondaryAdjustment', 'aus', 'manualUnderwriting',
 ] as const satisfies ReadonlyArray<keyof BorrowerIntake>;
 
@@ -171,15 +178,20 @@ export function toLoanPassQuoteIntakePayload(intake: BorrowerIntake): LoanPassQu
     baseLoanAmount: intake.baseLoanAmount || intake.loanAmount || '',
     appraisedValue: intake.appraisedValue || intake.purchasePriceOrValue || '',
     desiredLoanTerm: intake.desiredLoanTerm || intake.termMonths || '',
+    loanTermType: intake.loanTermType || intake.termMonths || intake.desiredLoanTerm || '',
     desiredAmortizationType: intake.desiredAmortizationType || intake.amortizationType || '',
     desiredRateLockPeriod: intake.desiredRateLockPeriod || intake.requestedLockPeriodDays || '',
-    documentationType: intake.documentationType || intake.incomeType || '',
+    channelCode: intake.channelCode || intake.channel || '',
+    channelType: intake.channelType || intake.channelCode || intake.channel || '',
+    documentationType: intake.documentationType || intake.incomeDocumentationType || intake.incomeType || '',
+    incomeDocumentationType: intake.incomeDocumentationType || intake.documentationType || intake.incomeType || '',
     selfEmployed: intake.selfEmployed || (normalizedValue(intake.employmentType ?? '') === 'selfemployed' ? 'Yes' : intake.employmentType ? 'No' : ''),
     totalBorrowerIncome: intake.totalBorrowerIncome || intake.monthlyIncome || '',
     estimatedDti: intake.estimatedDti || intake.suppliedDti || '',
     monthsOfReserves: intake.monthsOfReserves || intake.reserveMonths || intake.reserves || '',
     decisionCreditScore: intake.decisionCreditScore || intake.creditScore || '',
     numberOfUnits: intake.numberOfUnits || intake.unitCount || '',
+    propertyInformationType: intake.propertyInformationType || intake.propertyType || '',
     mortgageType: intake.mortgageType || intake.productFamily || '',
     downPayment: intake.downPayment || intake.downPaymentOrEquity || '',
     secondLienAmount: intake.secondLienAmount || intake.subordinateFinancingAmount || '',
@@ -209,6 +221,19 @@ export type ScenarioIntakeField = {
   sourceRef: string;
   decisionQuality: 'VERIFIED' | 'UNKNOWN' | 'CONFLICTING';
   validationMessages: string[];
+};
+
+export type DropdownOption = {
+  value: string;
+  label: string;
+};
+
+export type TenantDropdownOptions = {
+  productTypes: DropdownOption[];
+  investors: DropdownOption[];
+  channels: DropdownOption[];
+  loanPassEnums: Partial<Record<keyof BorrowerIntake, DropdownOption[]>>;
+  source: 'tenant-config' | 'tenant-products' | 'fallback';
 };
 
 export type ScenarioIntakeFieldGroup = {
@@ -282,6 +307,114 @@ export type MetadataState =
   | { kind: 'loading' }
   | { kind: 'loaded'; metadata: ScenarioIntakeMetadata }
   | { kind: 'unreachable'; message: string };
+
+export async function fetchTenantDropdownOptions(
+  tenantId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<TenantDropdownOptions> {
+  try {
+    const productOptions = await fetchTenantProductDropdownOptions(tenantId, fetchImpl);
+    return {
+      ...productOptions,
+      loanPassEnums: {},
+    };
+  } catch {
+    const catalogOptions = await fetchCatalogDropdownOptions(tenantId, fetchImpl);
+    return {
+      ...catalogOptions,
+      loanPassEnums: {},
+    };
+  }
+}
+
+async function fetchTenantProductDropdownOptions(tenantId: string, fetchImpl: typeof fetch): Promise<Omit<TenantDropdownOptions, 'loanPassEnums'>> {
+  const response = await fetchImpl(`/api/v1/tenants/${encodeURIComponent(tenantId)}/products?page=1&pageSize=500`, {
+    headers: {
+      Accept: 'application/json',
+      'X-Ui-Trace-Id': 'pipeline-dropdown-config-trace',
+    },
+  });
+
+  return normalizeTenantProductDropdowns(await readPipelineJson<unknown>(response, {
+    endpointContext: 'tenant product dropdown configuration',
+    unavailableMessage: 'Tenant product dropdown configuration is temporarily unavailable.',
+  }));
+}
+
+function normalizeTenantProductDropdowns(payload: unknown): Omit<TenantDropdownOptions, 'loanPassEnums'> {
+  const record = asRecord(payload);
+  const filters = asRecord(record.availableFilters);
+  const products = Array.isArray(record.products) ? record.products.filter(isRecord) : [];
+  const productTypes = optionList(filters.productTypes, products.map((product) => product.productType));
+  const investors = optionList(filters.investors, products.map((product) => product.investorCode));
+  const channels = optionList(filters.channels, products.map((product) => product.channelCode));
+  if (productTypes.length === 0 && investors.length === 0 && channels.length === 0) throw new Error('Tenant product dropdown configuration returned no selectable options.');
+  return { productTypes, investors, channels, source: 'tenant-products' };
+}
+
+async function fetchCatalogDropdownOptions(tenantId: string, fetchImpl: typeof fetch): Promise<Omit<TenantDropdownOptions, 'loanPassEnums'>> {
+  const [products, investors, channels] = await Promise.all([
+    fetchCatalogPayload(`/api/v1/tenants/${encodeURIComponent(tenantId)}/product-catalog/products`, 'product catalog products', fetchImpl),
+    fetchCatalogPayload(`/api/v1/tenants/${encodeURIComponent(tenantId)}/product-catalog/investors`, 'product catalog investors', fetchImpl),
+    fetchCatalogPayload(`/api/v1/tenants/${encodeURIComponent(tenantId)}/product-catalog/channels`, 'product catalog channels', fetchImpl),
+  ]);
+
+  const productRecords = extractRecords(products, 'products');
+  const investorRecords = extractRecords(investors, 'investors');
+  const channelRecords = extractRecords(channels, 'channels');
+  const productTypes = optionList(productRecords.map((product) => product.productType ?? product.type ?? product.productFamily));
+  const investorOptions = optionList(investorRecords.map((investor) => investor.investorCode ?? investor.code ?? investor.id), productRecords.map((product) => product.investorCode));
+  const channelOptions = optionList(channelRecords.map((channel) => channel.channelCode ?? channel.code ?? channel.id), productRecords.map((product) => product.channelCode));
+  if (productTypes.length === 0 && investorOptions.length === 0 && channelOptions.length === 0) throw new Error('Catalog dropdown configuration returned no selectable options.');
+  return { productTypes, investors: investorOptions, channels: channelOptions, source: 'tenant-config' };
+}
+
+async function fetchCatalogPayload(path: string, endpointContext: string, fetchImpl: typeof fetch): Promise<unknown> {
+  const response = await fetchImpl(path, {
+    headers: {
+      Accept: 'application/json',
+      'X-Ui-Trace-Id': 'pipeline-dropdown-config-trace',
+    },
+  });
+  return readPipelineJson<unknown>(response, {
+    endpointContext,
+    unavailableMessage: `${endpointContext} is temporarily unavailable.`,
+  });
+}
+
+function extractRecords(payload: unknown, key: string): Record<string, unknown>[] {
+  if (Array.isArray(payload)) return payload.filter(isRecord);
+  const record = asRecord(payload);
+  const keyed = record[key];
+  if (Array.isArray(keyed)) return keyed.filter(isRecord);
+  const items = record.items;
+  if (Array.isArray(items)) return items.filter(isRecord);
+  return [];
+}
+
+function optionList(...sources: unknown[]): DropdownOption[] {
+  const values = sources.flatMap((source) => Array.isArray(source) ? source : []).map(optionValue).filter((value): value is string => Boolean(value));
+  return Array.from(new Set(values)).sort((left, right) => left.localeCompare(right)).map((value) => ({ value, label: friendlyOptionLabel(value) }));
+}
+
+function optionValue(value: unknown): string | null {
+  if (typeof value === 'string') return value;
+  const record = asRecord(value);
+  const candidate = record.value ?? record.code ?? record.id ?? record.productType ?? record.investorCode ?? record.channelCode;
+  return typeof candidate === 'string' ? candidate : null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {};
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function friendlyOptionLabel(value: string) {
+  return value.toLowerCase().split(/[_\s-]+/).filter(Boolean).map((part) => part[0].toUpperCase() + part.slice(1)).join(' ');
+}
 
 export type RedactedWaterfallValue = {
   value: string | null;

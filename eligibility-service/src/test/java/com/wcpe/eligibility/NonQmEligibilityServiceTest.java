@@ -4,6 +4,8 @@ import com.wcpe.eligibility.nonqm.NonQmEligibilityModels.*;
 import com.wcpe.eligibility.nonqm.NonQmEligibilityService;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
@@ -51,6 +53,30 @@ class NonQmEligibilityServiceTest {
 
         assertTrue(noRatio.eligible());
         assertTrue(ten99.eligible());
+    }
+
+    @Test
+    void importedLoanPassRuleSetSelectionUsesQuoteDateAndReturnsSafeConfigRefsAndFieldMessages() {
+        service.importRuleSet(new PpeRuleSetImportRequest(RuleSetSource.LOANPASS, "LP-MATRIX-OLD", "DSCR_30YR", "DSCR", "INV-A", "BROKER", 1,
+            Instant.parse("2026-01-01T00:00:00Z"), Instant.parse("2026-06-01T00:00:00Z"), List.of(Map.of(
+                "ruleId", "LP-OLD", "priority", 1, "factPath", "nonQm.dscr.ratio", "operator", "GTE", "value", "1.0",
+                "decision", "ELIGIBLE", "severity", "HARD_STOP", "reasonCode", "OLD_VERSION", "displayMessage", "Prior version",
+                "ppeFieldRefs", Map.of("loanpassField", "DSCR_RATIO")))));
+        service.importRuleSet(new PpeRuleSetImportRequest(RuleSetSource.LOANPASS, "LP-MATRIX-CURRENT", "DSCR_30YR", "DSCR", "INV-A", "BROKER", 2,
+            Instant.parse("2026-06-01T00:00:00Z"), null, List.of(Map.of(
+                "ruleId", "LP-CURRENT", "priority", 1, "factPath", "nonQm.dscr.ratio", "operator", "GTE", "value", "1.0",
+                "decision", "ELIGIBLE", "severity", "HARD_STOP", "reasonCode", "CURRENT_VERSION", "displayMessage", "DSCR ratio was evaluated.",
+                "ppeFieldRefs", Map.of("loanpassField", "DSCR_RATIO")))));
+
+        NonQmEligibilityResult result = service.evaluate(new NonQmEligibilityRequest("DSCR_30YR", "INV-A", "BROKER", LocalDate.of(2026, 6, 15),
+            new ScenarioFacts(new RentSchedule(com.wcpe.eligibility.DscrFactCalculatorTest.bd("2500.00")), new HousingExpense(com.wcpe.eligibility.DscrFactCalculatorTest.bd("2000.00")), null, null, null),
+            new ProductDefinition("DSCR_30YR", "DSCR", "INV-A", "BROKER", Map.of(), null), null));
+
+        assertTrue(result.eligible());
+        assertEquals(2, result.ruleSetVersion());
+        assertEquals("LP-MATRIX-CURRENT", result.ruleConfigRefs().get(0).sourceSystemRef());
+        assertEquals("DSCR_RATIO", result.fieldMessages().get(0).fieldPath());
+        assertFalse(result.ruleConfigRefs().toString().contains("configuredValue"));
     }
 
     private NonQmEligibilityRequest request(String code, String type, NonQmScenarioFacts facts, EligibilityRule rule) {

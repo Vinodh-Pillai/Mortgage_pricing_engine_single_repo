@@ -25,11 +25,14 @@ public record TenantProductAuthorization(
         status = normalizeRequired(status == null ? "ACTIVE" : status, "status");
     }
 
-    boolean isActiveAt(Instant now) {
-        return "ACTIVE".equals(status) && (expiresAt == null || expiresAt.isAfter(now));
+    public boolean isActiveAt(Instant asOf) {
+        Instant effectiveAsOf = asOf == null ? Instant.now() : asOf;
+        return "ACTIVE".equals(status)
+            && (authorizedAt == null || !authorizedAt.isAfter(effectiveAsOf))
+            && (expiresAt == null || expiresAt.isAfter(effectiveAsOf));
     }
 
-    boolean matches(String productCode, String investorCode, String channelCode) {
+    public boolean matches(String productCode, String investorCode, String channelCode) {
         return this.productCode.equals(normalizeRequired(productCode, "productCode"))
             && wildcardMatches(this.investorCode, normalizeOptional(investorCode))
             && wildcardMatches(this.channelCode, normalizeOptional(channelCode));

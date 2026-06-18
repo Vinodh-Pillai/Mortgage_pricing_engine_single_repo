@@ -44,7 +44,11 @@ public class TenantProductAuthorizationService {
     }
 
     public boolean isAuthorized(UUID tenantId, String productCode, String investorCode, String channelCode) {
-        return getAuthorizedRules(tenantId).stream()
+        return isAuthorized(tenantId, productCode, investorCode, channelCode, Instant.now());
+    }
+
+    public boolean isAuthorized(UUID tenantId, String productCode, String investorCode, String channelCode, Instant asOf) {
+        return getAuthorizedRulesAsOf(tenantId, asOf).stream()
             .anyMatch(authorization -> authorization.matches(productCode, investorCode, channelCode));
     }
 
@@ -57,6 +61,7 @@ public class TenantProductAuthorizationService {
             tenantId,
             candidates,
             channelCode,
+            Instant.now(),
             AuthorizedProductCandidate::productCode,
             AuthorizedProductCandidate::investorCode,
             AuthorizedProductCandidate::channelCode
@@ -67,6 +72,7 @@ public class TenantProductAuthorizationService {
         UUID tenantId,
         List<T> candidates,
         String channelCode,
+        Instant asOf,
         Function<T, String> productCode,
         Function<T, String> investorCode,
         Function<T, String> candidateChannelCode
@@ -77,10 +83,11 @@ public class TenantProductAuthorizationService {
         if (candidates == null || candidates.isEmpty()) {
             return List.of();
         }
+        List<TenantProductAuthorization> rules = getAuthorizedRulesAsOf(tenantId, asOf);
         String requestedChannel = TenantProductAuthorization.normalizeOptional(channelCode);
         return candidates.stream()
             .filter(candidate -> requestedChannel == null || requestedChannel.equals(TenantProductAuthorization.normalizeOptional(candidateChannelCode.apply(candidate))))
-            .filter(candidate -> isAuthorized(tenantId, productCode.apply(candidate), investorCode.apply(candidate), candidateChannelCode.apply(candidate)))
+            .filter(candidate -> rules.stream().anyMatch(authorization -> authorization.matches(productCode.apply(candidate), investorCode.apply(candidate), candidateChannelCode.apply(candidate))))
             .toList();
     }
 
@@ -89,6 +96,37 @@ public class TenantProductAuthorizationService {
             throw new IllegalArgumentException("tenantId is required");
         }
         return authCache.get(tenantId, loader);
+    }
+
+    public List<TenantProductAuthorization> getAuthorizedRulesAsOf(UUID tenantId, Instant asOf) {
+        if (tenantId == null) {
+            throw new IllegalArgumentException("tenantId is required");
+        }
+        Instant effectiveAsOf = asOf == null ? Instant.now() : asOf;
+        if (jdbc == null) {
+            return getAuthorizedRules(tenantId).stream()
+                .filter(authorization -> authorization.isActiveAt(effectiveAsOf))
+                .toList();
+        }
+        return jdbc.query("""
+            select tenant_id, product_code, investor_code, channel_code, status, authorized_at, authorized_by, expires_at, notes
+              from catalog.tenant_product_authorization
+             where tenant_id = ?
+               and status = 'ACTIVE'
+               and authorized_at <= ?
+               and (expires_at is null or expires_at > ?)
+             order by product_code, investor_code nulls first, channel_code nulls first, authorized_at desc
+            """, (rs, rowNum) -> new TenantProductAuthorization(
+                rs.getObject("tenant_id", UUID.class),
+                rs.getString("product_code"),
+                rs.getString("investor_code"),
+                rs.getString("channel_code"),
+                rs.getString("status"),
+                rs.getTimestamp("authorized_at").toInstant(),
+                rs.getString("authorized_by"),
+                rs.getTimestamp("expires_at") == null ? null : rs.getTimestamp("expires_at").toInstant(),
+                rs.getString("notes")
+            ), tenantId, Timestamp.from(effectiveAsOf), Timestamp.from(effectiveAsOf));
     }
 
     public List<TenantProductAuthorization> list(UUID tenantId, String productCode, String status) {

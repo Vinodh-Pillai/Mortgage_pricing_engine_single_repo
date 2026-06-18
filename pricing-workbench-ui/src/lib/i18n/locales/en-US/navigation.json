@@ -6,7 +6,7 @@
   "workspace": "Workspace",
   "expand": "Expand",
   "collapse": "Collapse",
-  "noAccessibleModules": "No accessible modules",
+  "noAccessibleModules": "Navigation is unavailable until role metadata is loaded. Sign in again or refresh your session; restricted workbench actions stay hidden.",
   "attentionItem": "{{count}} attention item",
   "connectionStatus": "Connection status",
   "notices": "Notices",

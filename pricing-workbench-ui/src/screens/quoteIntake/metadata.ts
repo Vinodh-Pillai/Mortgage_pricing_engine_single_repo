@@ -61,7 +61,18 @@ export const borrowerIntakeFields = [
   'channel', 'loanNumber', 'borrowerFirstName', 'borrowerLastName', 'numberOfBorrowers', 'contactEmail', 'decisionCreditScore', 'creditScoreType', 'citizenshipType', 'professional', 'firstTimeHomeBuyer', 'firstTimeInvestor', 'loanPurpose', 'baseLoanAmount', 'purchasePrice', 'appraisedValue', 'downPayment', 'percentDownpayment', 'loanToValue', 'combinedLoanToValue', 'cashOutAmount', 'loanBalance', 'firstLoanBalance', 'secondLoanBalance', 'firstLienAmount', 'secondLienAmount', 'lienPosition', 'refinancingType', 'desiredLoanTerm', 'desiredAmortizationType', 'desiredRateLockPeriod', 'lockPeriodType', 'desiredInterestRate', 'prepaymentPenaltyTerm', 'prePaymentPenaltyStructureType', 'waiveEscrows', 'interestOnly', 'mortgageType', 'loanQualificationType', 'mortgageInsuranceType', 'miOptionType', 'gift', 'achPayment', 'wholesaleCompensation', 'compensationPaidType', 'vaLoanType', 'vaFundingFeeExemptionType', 'vaFirstTimeUse', 'state', 'zip', 'countyFips', 'countyCode', 'countyName', 'city', 'street', 'addressSearchString', 'propertyType', 'occupancyType', 'numberOfUnits', 'propertyLocation', 'numberOfLeasedUnits', 'shortTermRental', 'propertySquareFootage', 'propertyAcreageNumber', 'condoApprovalType', 'acquisitionDate', 'monthlyMarketRent', 'propertyRentalIncome', 'rentalIncomeMightBeUsed', 'investorExperience', 'additionalMonthlyHousingExpenses', 'additionalAnnualHousingExpenses', 'monthlyTaxes', 'monthlyInsurance', 'monthlyHOA', 'annualTaxes', 'annualInsurance', 'annualHOA', 'selfEmployed', 'selfEmployedTimeFrame', 'totalBorrowerIncome', 'monthlyDebt', 'totalLiabilityMonthlyPayment', 'estimatedDti', 'estimatedDSCR', 'monthsOfReserves', 'liquidAssets', 'documentationType', 'secondaryDocumentationType', 'documentationTypeTimeFrame', 'mortgageLatePayments', 'mortgageHistoryDesc', 'creditEvent', 'chapter7BankruptcyDate', 'chapter11BankruptcyDate', 'chapter13BankruptcyDate', 'deedInLieuDate', 'foreclosureDate', 'shortSaleDate', 'mortgageModificationDate', 'forbearanceDate', 'lockExtension', 'lockExtension2', 'concession', 'secondaryAdjustment', 'aus', 'manualUnderwriting',
 ] as const satisfies ReadonlyArray<keyof BorrowerIntake>;
 
-const borrowerFieldSet = new Set<string>(borrowerIntakeFields);
+const configDropdownFieldAliases = [
+  'investorCode',
+  'channelCode',
+  'channelType',
+  'amortizationType',
+  'loanTermType',
+  'propertyInformationType',
+  'transactionType',
+  'incomeDocumentationType',
+] as const satisfies ReadonlyArray<keyof BorrowerIntake>;
+
+const borrowerFieldSet = new Set<string>([...borrowerIntakeFields, ...configDropdownFieldAliases]);
 
 const optionalTechnicalFields = new Set<keyof BorrowerIntake>();
 
@@ -77,10 +88,12 @@ const complexFieldHelpTooltips: Partial<Record<keyof BorrowerIntake, string>> = 
 
 const complexFieldIds = new Set<keyof BorrowerIntake>(Object.keys(complexFieldHelpTooltips) as Array<keyof BorrowerIntake>);
 
-const selectBackedFallbackFields = new Set<keyof BorrowerIntake>(['channel', 'documentationType', 'secondaryDocumentationType', 'documentationTypeTimeFrame', 'selfEmployedTimeFrame', 'state', 'propertyType', 'occupancyType', 'lienPosition', 'desiredAmortizationType', 'mortgageType', 'loanQualificationType', 'lockPeriodType', 'mortgageInsuranceType', 'miOptionType', 'selfEmployed', 'citizenshipType', 'propertyLocation', 'investorExperience', 'wholesaleCompensation', 'compensationPaidType', 'prepaymentPenaltyTerm', 'prePaymentPenaltyStructureType', 'waiveEscrows', 'gift', 'aus', 'manualUnderwriting', 'interestOnly', 'achPayment', 'mortgageLatePayments', 'creditEvent', 'concession', 'secondaryAdjustment', 'shortTermRental', 'professional', 'firstTimeHomeBuyer', 'firstTimeInvestor', 'rentalIncomeMightBeUsed', 'condoApprovalType', 'vaLoanType', 'vaFundingFeeExemptionType', 'vaFirstTimeUse', 'refinancingType']);
+const selectBackedFallbackFields = new Set<keyof BorrowerIntake>(['channel', 'channelCode', 'channelType', 'investorCode', 'documentationType', 'incomeDocumentationType', 'secondaryDocumentationType', 'documentationTypeTimeFrame', 'selfEmployedTimeFrame', 'state', 'propertyType', 'propertyInformationType', 'occupancyType', 'lienPosition', 'desiredAmortizationType', 'amortizationType', 'loanTermType', 'mortgageType', 'loanQualificationType', 'lockPeriodType', 'mortgageInsuranceType', 'miOptionType', 'selfEmployed', 'citizenshipType', 'propertyLocation', 'investorExperience', 'wholesaleCompensation', 'compensationPaidType', 'prepaymentPenaltyTerm', 'prePaymentPenaltyStructureType', 'waiveEscrows', 'gift', 'aus', 'manualUnderwriting', 'interestOnly', 'achPayment', 'mortgageLatePayments', 'creditEvent', 'concession', 'secondaryAdjustment', 'shortTermRental', 'professional', 'firstTimeHomeBuyer', 'firstTimeInvestor', 'rentalIncomeMightBeUsed', 'condoApprovalType', 'vaLoanType', 'vaFundingFeeExemptionType', 'vaFirstTimeUse', 'refinancingType', 'transactionType']);
 
 const fieldLabels: Partial<Record<keyof BorrowerIntake, string>> = {
   channel: 'Channel',
+  channelCode: 'Channel code',
+  channelType: 'Channel type',
   loanNumber: 'Loan Number',
   borrowerFirstName: 'Borrower first name',
   borrowerLastName: 'Borrower Last Name',
@@ -89,6 +102,7 @@ const fieldLabels: Partial<Record<keyof BorrowerIntake, string>> = {
   decisionCreditScore: 'Decision credit score',
   creditScoreType: 'Credit score type',
   citizenshipType: 'Citizenship type',
+  investorCode: 'Investor code',
   professional: 'Professional',
   firstTimeHomeBuyer: 'First-time home buyer',
   firstTimeInvestor: 'First-time investor',
@@ -105,9 +119,11 @@ const fieldLabels: Partial<Record<keyof BorrowerIntake, string>> = {
   firstLienAmount: 'First lien amount',
   secondLienAmount: 'Second lien amount',
   lienPosition: 'Lien position',
+  loanTermType: 'Loan term type',
   refinancingType: 'Refinancing type',
   desiredLoanTerm: 'Desired loan term',
   desiredAmortizationType: 'Desired amortization type',
+  amortizationType: 'Amortization type',
   desiredRateLockPeriod: 'Desired rate lock period',
   lockPeriodType: 'Lock period type',
   desiredInterestRate: 'Desired interest rate',
@@ -132,6 +148,7 @@ const fieldLabels: Partial<Record<keyof BorrowerIntake, string>> = {
   street: 'Street',
   addressSearchString: 'Address search string',
   propertyType: 'Property type',
+  propertyInformationType: 'Property information type',
   occupancyType: 'Occupancy type',
   numberOfUnits: 'Number of units',
   propertyLocation: 'Property location',
@@ -164,9 +181,11 @@ const fieldLabels: Partial<Record<keyof BorrowerIntake, string>> = {
   monthsOfReserves: 'Months of reserves',
   liquidAssets: 'Liquid assets',
   documentationType: 'Documentation type',
+  incomeDocumentationType: 'Income documentation type',
   secondaryDocumentationType: 'Secondary documentation type',
   documentationTypeTimeFrame: 'Documentation type time frame',
   estimatedDSCR: 'Estimated DSCR',
+  transactionType: 'Transaction type',
   gift: 'Gift',
   achPayment: 'ACH payment',
   mortgageLatePayments: 'Mortgage late payments',

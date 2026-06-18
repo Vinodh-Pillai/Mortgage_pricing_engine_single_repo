@@ -46,8 +46,14 @@ record NonQmProductRequest(
     String productType,
     Map<String, Object> attributes,
     Map<String, Object> pricingMetadata,
+    ProductEligibilityMetadata eligibility,
     List<NonQmInvestorChannelMapping> investorMappings,
-    String status) {}
+    String status) {
+  NonQmProductRequest(String productCode, String productName, String productType, Map<String, Object> attributes,
+      Map<String, Object> pricingMetadata, List<NonQmInvestorChannelMapping> investorMappings, String status) {
+    this(productCode, productName, productType, attributes, pricingMetadata, null, investorMappings, status);
+  }
+}
 
 record NonQmProductResponse(
     UUID productId,
@@ -57,11 +63,36 @@ record NonQmProductResponse(
     String productType,
     Map<String, Object> attributes,
     Map<String, Object> pricingMetadata,
+    ProductEligibilityMetadata eligibility,
     List<NonQmInvestorChannelMapping> investorMappings,
     List<String> channels,
     String status,
     Instant createdAt,
-    Instant updatedAt) {}
+    Instant updatedAt) {
+  NonQmProductResponse(UUID productId, String productCode, String productName, String productFamily, String productType,
+      Map<String, Object> attributes, Map<String, Object> pricingMetadata, List<NonQmInvestorChannelMapping> investorMappings,
+      List<String> channels, String status, Instant createdAt, Instant updatedAt) {
+    this(productId, productCode, productName, productFamily, productType, attributes, pricingMetadata, null, investorMappings, channels, status, createdAt, updatedAt);
+  }
+}
+
+record ProductEligibilityMetadata(
+    List<EligibilityRuleRef> ruleRefs,
+    List<EligibilityFieldMetadata> requiredFields,
+    List<EligibilityFieldMetadata> conditionalFields,
+    List<String> explainabilityRefs,
+    String readinessStatus,
+    List<NonQmValidationError> readinessMessages) {}
+
+record EligibilityRuleRef(
+    String ruleRef,
+    String ruleType,
+    String sourceSystem,
+    Integer effectiveVersion,
+    Instant effectiveStart,
+    Instant effectiveEnd) {}
+
+record EligibilityFieldMetadata(String fieldPath, String configRef, String message) {}
 
 record NonQmProductListResponse(List<NonQmProductResponse> products, int count) {}
 

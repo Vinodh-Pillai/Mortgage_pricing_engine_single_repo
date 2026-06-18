@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Repository
 class NonQmProductRepository {
   private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
+  private static final String ELIGIBILITY_METADATA_KEY = "eligibility";
   private final JdbcTemplate jdbc;
   private final ObjectMapper mapper;
   private final NonQmProductSchemaRegistry schemas;
@@ -74,7 +75,7 @@ class NonQmProductRepository {
     String code = requireCode(productCode);
     if (request == null) throw new CatalogException("NON_QM_PRODUCT_REQUIRED");
     if (find(tenantId, code).isEmpty()) throw new CatalogException("NON_QM_PRODUCT_NOT_FOUND");
-    ProductDraft draft = validateRequest(new NonQmProductRequest(code, request.productName(), request.productType(), request.attributes(), request.pricingMetadata(), request.investorMappings(), request.status()));
+    ProductDraft draft = validateRequest(updateRequest(code, request));
     jdbc.update("""
         update catalog.product
         set name = ?, type = 'NON_QM', product_family = 'NON_QM', product_type = ?, non_qm_attributes = ?::jsonb,
@@ -121,14 +122,108 @@ class NonQmProductRepository {
     String name = requireText(request.productName(), "PRODUCT_NAME_REQUIRED");
     String productType = NonQmProductType.fromExternal(request.productType()).externalCode();
     Map<String, Object> attributes = request.attributes() == null ? Map.of() : Map.copyOf(request.attributes());
-    Map<String, Object> pricingMetadata = request.pricingMetadata() == null ? Map.of() : Map.copyOf(request.pricingMetadata());
+    Map<String, Object> pricingMetadata = request.pricingMetadata() == null ? new LinkedHashMap<>() : new LinkedHashMap<>(request.pricingMetadata());
+    ProductEligibilityMetadata eligibility = normalizeEligibility(firstEligibility(request.eligibility(), pricingMetadata.get(ELIGIBILITY_METADATA_KEY)));
+    pricingMetadata.put(ELIGIBILITY_METADATA_KEY, eligibility);
     schemas.requireValid(productType, attributes);
     List<NonQmInvestorChannelMapping> mappings = request.investorMappings() == null ? List.of() : request.investorMappings();
     if (mappings.isEmpty()) throw new CatalogException("NON_QM_INVESTOR_MAPPING_REQUIRED");
     for (NonQmInvestorChannelMapping mapping : mappings) validateMapping(mapping);
     String status = request.status() == null || request.status().isBlank() ? "ACTIVE" : request.status().trim().toUpperCase(Locale.ROOT);
     if (!Set.of("ACTIVE", "SUSPENDED", "RETIRED").contains(status)) throw new CatalogException("INVALID_PRODUCT_STATUS");
-    return new ProductDraft(code, name, productType, attributes, pricingMetadata, List.copyOf(mappings), status);
+    return new ProductDraft(code, name, productType, attributes, Map.copyOf(pricingMetadata), List.copyOf(mappings), status);
+  }
+
+  private NonQmProductRequest updateRequest(String code, NonQmProductRequest request) {
+    return new NonQmProductRequest(code, request.productName(), request.productType(), request.attributes(), request.pricingMetadata(), request.eligibility(), request.investorMappings(), request.status());
+  }
+
+  private ProductEligibilityMetadata firstEligibility(ProductEligibilityMetadata requestEligibility, Object metadataEligibility) {
+    if (requestEligibility != null) return requestEligibility;
+    if (metadataEligibility == null) return null;
+    if (metadataEligibility instanceof ProductEligibilityMetadata eligibility) return eligibility;
+    if (metadataEligibility instanceof Map<?, ?> map) return eligibilityFromMap(map);
+    throw new CatalogException("INVALID_ELIGIBILITY_METADATA");
+  }
+
+  private ProductEligibilityMetadata eligibilityFromMap(Map<?, ?> map) {
+    return new ProductEligibilityMetadata(
+        ruleRefsFrom(map.get("ruleRefs")),
+        fieldsFrom(map.get("requiredFields")),
+        fieldsFrom(map.get("conditionalFields")),
+        stringsFrom(map.get("explainabilityRefs")),
+        stringOrNull(map.get("readinessStatus")),
+        List.of());
+  }
+
+  private List<EligibilityRuleRef> ruleRefsFrom(Object value) {
+    if (!(value instanceof List<?> refs)) return List.of();
+    List<EligibilityRuleRef> out = new ArrayList<>();
+    for (Object ref : refs) {
+      if (!(ref instanceof Map<?, ?> map)) throw new CatalogException("INVALID_ELIGIBILITY_METADATA");
+      out.add(new EligibilityRuleRef(stringOrNull(map.get("ruleRef")), stringOrNull(map.get("ruleType")), stringOrNull(map.get("sourceSystem")), integerOrNull(map.get("effectiveVersion")), instantOrNull(map.get("effectiveStart")), instantOrNull(map.get("effectiveEnd"))));
+    }
+    return out;
+  }
+
+  private List<EligibilityFieldMetadata> fieldsFrom(Object value) {
+    if (!(value instanceof List<?> fields)) return List.of();
+    List<EligibilityFieldMetadata> out = new ArrayList<>();
+    for (Object field : fields) {
+      if (!(field instanceof Map<?, ?> map)) throw new CatalogException("INVALID_ELIGIBILITY_METADATA");
+      out.add(new EligibilityFieldMetadata(stringOrNull(map.get("fieldPath")), stringOrNull(map.get("configRef")), stringOrNull(map.get("message"))));
+    }
+    return out;
+  }
+
+  private static List<String> stringsFrom(Object value) { return value instanceof List<?> values ? values.stream().filter(Objects::nonNull).map(Object::toString).toList() : List.of(); }
+  private static String stringOrNull(Object value) { return value == null ? null : value.toString(); }
+  private static Integer integerOrNull(Object value) { return value == null ? null : Integer.valueOf(value.toString()); }
+  private static Instant instantOrNull(Object value) { return value == null || value.toString().isBlank() ? null : Instant.parse(value.toString()); }
+
+  private ProductEligibilityMetadata normalizeEligibility(ProductEligibilityMetadata metadata) {
+    if (metadata == null) {
+      return new ProductEligibilityMetadata(List.of(), List.of(), List.of(), List.of(), "INCOMPLETE",
+          List.of(new NonQmValidationError("eligibility.ruleRefs", "ELIGIBILITY_RULE_REFS_REQUIRED", "Configure product eligibility rule refs before this product is ready for LOS eligibility evaluation.")));
+    }
+    List<EligibilityRuleRef> ruleRefs = safeRules(metadata.ruleRefs());
+    List<EligibilityFieldMetadata> requiredFields = safeFields(metadata.requiredFields(), "requiredFields");
+    List<EligibilityFieldMetadata> conditionalFields = safeFields(metadata.conditionalFields(), "conditionalFields");
+    List<String> explainabilityRefs = metadata.explainabilityRefs() == null ? List.of() : metadata.explainabilityRefs().stream()
+        .filter(Objects::nonNull).map(String::trim).filter(value -> !value.isBlank()).distinct().sorted().toList();
+    List<NonQmValidationError> messages = new ArrayList<>();
+    if (ruleRefs.isEmpty()) messages.add(new NonQmValidationError("eligibility.ruleRefs", "ELIGIBILITY_RULE_REFS_REQUIRED", "Configure at least one eligibility rule ref."));
+    if (requiredFields.isEmpty() && conditionalFields.isEmpty()) messages.add(new NonQmValidationError("eligibility.fields", "ELIGIBILITY_FIELD_METADATA_REQUIRED", "Configure required or conditional LOS field metadata."));
+    String readiness = messages.isEmpty() ? "COMPLETE" : "INCOMPLETE";
+    return new ProductEligibilityMetadata(ruleRefs, requiredFields, conditionalFields, explainabilityRefs, readiness, List.copyOf(messages));
+  }
+
+  private List<EligibilityRuleRef> safeRules(List<EligibilityRuleRef> refs) {
+    if (refs == null) return List.of();
+    List<EligibilityRuleRef> normalized = new ArrayList<>();
+    for (EligibilityRuleRef ref : refs) {
+      if (ref == null) throw new CatalogException("ELIGIBILITY_RULE_REF_REQUIRED");
+      String ruleRef = requireText(ref.ruleRef(), "ELIGIBILITY_RULE_REF_REQUIRED");
+      String ruleType = requireText(ref.ruleType(), "ELIGIBILITY_RULE_TYPE_REQUIRED").toUpperCase(Locale.ROOT);
+      String sourceSystem = requireText(ref.sourceSystem(), "ELIGIBILITY_RULE_SOURCE_REQUIRED").toUpperCase(Locale.ROOT);
+      if (ref.effectiveVersion() == null || ref.effectiveVersion() <= 0) throw new CatalogException("ELIGIBILITY_RULE_VERSION_REQUIRED");
+      if (ref.effectiveEnd() != null && ref.effectiveStart() != null && !ref.effectiveEnd().isAfter(ref.effectiveStart())) throw new CatalogException("ELIGIBILITY_RULE_EFFECTIVE_WINDOW_INVALID");
+      normalized.add(new EligibilityRuleRef(ruleRef, ruleType, sourceSystem, ref.effectiveVersion(), ref.effectiveStart(), ref.effectiveEnd()));
+    }
+    return normalized.stream().distinct().toList();
+  }
+
+  private List<EligibilityFieldMetadata> safeFields(List<EligibilityFieldMetadata> fields, String scope) {
+    if (fields == null) return List.of();
+    List<EligibilityFieldMetadata> normalized = new ArrayList<>();
+    for (EligibilityFieldMetadata field : fields) {
+      if (field == null) throw new CatalogException("ELIGIBILITY_FIELD_METADATA_REQUIRED");
+      normalized.add(new EligibilityFieldMetadata(
+          requireText(field.fieldPath(), "ELIGIBILITY_FIELD_PATH_REQUIRED"),
+          requireText(field.configRef(), "ELIGIBILITY_FIELD_CONFIG_REF_REQUIRED"),
+          requireText(field.message(), "ELIGIBILITY_FIELD_MESSAGE_REQUIRED")));
+    }
+    return normalized.stream().distinct().toList();
   }
 
   private void validateMapping(NonQmInvestorChannelMapping mapping) {
@@ -166,9 +261,11 @@ class NonQmProductRepository {
 
   private NonQmProductResponse toResponse(ResultSet rs, List<NonQmInvestorChannelMapping> mappings) throws SQLException {
     List<String> channels = mappings.stream().map(NonQmInvestorChannelMapping::channelCode).distinct().sorted().toList();
+    Map<String, Object> pricingMetadata = parseMap(rs.getString("pricing_metadata"));
+    ProductEligibilityMetadata eligibility = normalizeEligibility(firstEligibility(null, pricingMetadata.get(ELIGIBILITY_METADATA_KEY)));
     return new NonQmProductResponse(
         rs.getObject("product_id", UUID.class), rs.getString("code"), rs.getString("name"), "NON_QM", rs.getString("product_type"),
-        parseMap(rs.getString("non_qm_attributes")), parseMap(rs.getString("pricing_metadata")), mappings, channels,
+        parseMap(rs.getString("non_qm_attributes")), pricingMetadata, eligibility, mappings, channels,
         rs.getString("status"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant());
   }
 

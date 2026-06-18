@@ -45,6 +45,13 @@ class RateFeedController {
     return withAuthorizedHeaders(headers, RateFeedRoles.RATE_FEED_UPLOAD, () -> ResponseEntity.status(HttpStatus.CREATED).body(service.complete(tenantId, uploadSessionId, request, headers.idempotencyKey(), headers.actorId(), headers.correlationId())));
   }
 
+  @PostMapping("/ratesheets/uploads")
+  ResponseEntity<RateFeedModels.RatesheetUploadResponse> createRatesheetUpload(@PathVariable UUID tenantId, @RequestBody RateFeedModels.RatesheetUploadRequest request, HttpServletRequest http) {
+    Headers headers = headers(http);
+    return withAuthorizedHeaders(headers, RateFeedRoles.RATE_FEED_UPLOAD, () -> ResponseEntity.status(HttpStatus.CREATED).body(
+        service.createRatesheetUpload(tenantId, request, headers.idempotencyKey(), headers.actorId(), headers.correlationId())));
+  }
+
   @GetMapping("/rate-feed-batches/{batchId}")
   BatchResponse batch(@PathVariable UUID tenantId, @PathVariable UUID batchId, HttpServletRequest http) {
     return withAuthorizedHeaders(headers(http), RateFeedRoles.RATE_FEED_VIEW, () -> service.batch(tenantId, batchId));

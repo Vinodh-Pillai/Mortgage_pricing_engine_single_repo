@@ -116,7 +116,7 @@ import { WorkbenchModuleRail } from './screens/workbenchShell/WorkbenchShell';
 import { DiagnosticsDetails } from './components/DiagnosticsDetails';
 import { ThemeProvider, useTheme } from './design-system';
 import { Shell } from './layout';
-import { AuthProvider } from './lib/auth/AuthContext';
+import { AuthProvider, useAuth } from './lib/auth/AuthContext';
 import { RouteGuard } from './routing/RouteGuard';
 import { useCurrentRoute } from './routing/hooks';
 
@@ -200,7 +200,7 @@ function AppRoutes() {
             <Routes>
               <Route path="/" element={<Navigate to="/home" replace />} />
               <Route path="/login" element={<LoginScreen />} />
-              <Route path="/home" element={<HomeScreen userId="local-home-user" role="pricing_analyst" />} />
+              <Route path="/home" element={<HomeRoute />} />
               <Route path="/pipeline" element={<QuoteIntakeScreen tenantId={tenantBoundaryPlaceholder} />} />
               <Route path="/quote/start" element={<Navigate to="/pipeline" replace />} />
               <Route path="/quote/:runId">
@@ -274,6 +274,11 @@ function AppRoutes() {
 
 function requiredRouteParam(value: string | undefined, fallback: string) {
   return value ? decodeURIComponent(value) : fallback;
+}
+
+function HomeRoute() {
+  const { currentPersona, currentUser } = useAuth();
+  return <HomeScreen userId={currentUser?.id ?? 'local-home-user'} role={currentPersona?.role ?? 'metadata-unavailable'} />;
 }
 
 function QuoteOffersRoute() {

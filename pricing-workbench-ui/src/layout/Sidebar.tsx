@@ -12,16 +12,18 @@ type SidebarProps = {
   drawerOpen: boolean;
   mode: 'rail' | 'drawer';
   modules: WorkbenchScreenModule[];
+  fallbackPersona?: string;
   onCloseDrawer: () => void;
   onOpenDrawer: () => void;
   onToggleCollapsed: () => void;
 };
 
-export function Sidebar({ activeModuleId, activeRunId, collapsed, drawerOpen, mode, modules, onCloseDrawer, onOpenDrawer, onToggleCollapsed }: SidebarProps) {
+export function Sidebar({ activeModuleId, activeRunId, collapsed, drawerOpen, mode, modules, fallbackPersona, onCloseDrawer, onOpenDrawer, onToggleCollapsed }: SidebarProps) {
   const { t } = useTranslation('navigation');
   const auth = useOptionalAuth();
   const navRef = useRef<HTMLElement>(null);
-  const items = useMemo(() => buildNavigationTree(modules, activeRunId, auth?.currentPersona ?? undefined), [activeRunId, auth?.currentPersona, modules]);
+  const navigationPersona = auth ? auth.currentPersona : fallbackPersona;
+  const items = useMemo(() => buildNavigationTree(modules, activeRunId, navigationPersona), [activeRunId, navigationPersona, modules]);
   const groups = navigationGroups(items);
   const isCollapsed = mode === 'rail' && collapsed;
   const sidebarClassName = ['layout-sidebar', mode === 'drawer' ? 'layout-sidebar--drawer' : 'layout-sidebar--rail', isCollapsed ? 'layout-sidebar--collapsed' : 'layout-sidebar--expanded'].join(' ');

@@ -103,6 +103,39 @@ class UiShellControllerTest {
   }
 
   @Test
+  void roleBasedMenusUseConfiguredPersonasAndFailClosedWhenRoleMetadataIsMissing() throws Exception {
+    mvc.perform(get("/api/v1/ui/menus/loan-officer"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.persona").value("loan-officer"))
+        .andExpect(jsonPath("$.items[?(@.id == 'quick-quote')]", hasSize(1)))
+        .andExpect(jsonPath("$.items[?(@.id == 'product-catalog')]", empty()))
+        .andExpect(jsonPath("$.items[?(@.id == 'user-management')]", empty()));
+
+    mvc.perform(get("/api/v1/ui/menus/pricing-analyst"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items[?(@.id == 'product-catalog')]", hasSize(1)))
+        .andExpect(jsonPath("$.items[?(@.id == 'rate-sheet-intake')]", hasSize(1)))
+        .andExpect(jsonPath("$.items[?(@.id == 'tenant-management')]", empty()));
+
+    mvc.perform(get("/api/v1/ui/menus/admin"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items[?(@.id == 'tenant-management')]", hasSize(1)))
+        .andExpect(jsonPath("$.items[?(@.id == 'user-management')]", hasSize(1)));
+
+    mvc.perform(get("/api/v1/ui/menus/operations-lead"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items[?(@.id == 'ops-cases')]", hasSize(1)))
+        .andExpect(jsonPath("$.items[?(@.id == 'rate-feed-ops')]", hasSize(1)))
+        .andExpect(jsonPath("$.items[?(@.id == 'user-management')]", empty()));
+
+    mvc.perform(get("/api/v1/ui/menus/not-a-role"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.persona").value("metadata-unavailable"))
+        .andExpect(jsonPath("$.items", hasSize(1)))
+        .andExpect(jsonPath("$.items[0].id").value("role-metadata-unavailable"));
+  }
+
+  @Test
   void tenantWorkspacePlaceholderRecordsLocalSetupWithoutCredentialsOrUpstreams() throws Exception {
     mvc.perform(post("/api/v1/tenants/workspaces")
             .contentType(MediaType.APPLICATION_JSON)

@@ -18,6 +18,11 @@ import org.springframework.stereotype.Repository;
 class CatalogRepository {
   private static final TypeReference<List<String>> STRING_LIST = new TypeReference<>() {};
   private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
+  private static final Set<String> PRICING_CONFIG_REFERENCE_TYPES = Set.of(
+      "RATE_SHEET_PROFILE",
+      "ADJUSTMENT_POLICY",
+      "MARGIN_POLICY",
+      "SRP_POLICY");
   private final JdbcTemplate jdbc;
   private final ObjectMapper mapper;
 
@@ -66,6 +71,45 @@ class CatalogRepository {
     versionControl(tenantId, catalogId, "PRODUCT", p.productId(), p.productCode(), CatalogStatus.DRAFT, p, actorId);
     bump(tenantId, catalogId);
     return p;
+  }
+
+  ProductCreationPersistence addProductCreation(UUID tenantId, UUID catalogId, ProductCreationDraft draft, String actorId) {
+    requireEditable(tenantId, catalogId);
+    if (exists("catalog.product_definition", tenantId, "product_code", draft.productCode())) throw new CatalogException("PRODUCT_CODE_DUPLICATE");
+    LocalDate effectiveFrom = LocalDate.ofInstant(draft.effectiveStart(), ZoneOffset.UTC);
+    LocalDate effectiveTo = draft.effectiveEnd() == null ? null : LocalDate.ofInstant(draft.effectiveEnd(), ZoneOffset.UTC);
+    ProductDefinition product = new ProductDefinition(UUID.randomUUID(), draft.productCode(), draft.displayName(), draft.productFamily(), draft.supportedChannels(), draft.allowedStates(), effectiveFrom, effectiveTo);
+    jdbc.update("insert into catalog.product_definition(tenant_id,product_id,catalog_id,product_code,product_name,product_family,allowed_channels,allowed_states,effective_from,effective_to) values (?,?,?,?,?,?,?::jsonb,?::jsonb,?,?)",
+        tenantId, product.productId(), catalogId, product.productCode(), product.productName(), product.productFamily(), json(product.allowedChannels()), json(product.allowedStates()), java.sql.Date.valueOf(product.effectiveFrom()), date(product.effectiveTo()));
+    if (!draft.metadataRefs().isEmpty()) {
+      jdbc.update("insert into catalog.reference_entry(tenant_id,entry_id,catalog_id,catalog_type,code,label,category,attributes,effective_from,effective_to) values (?,?,?,?,?,?,?,?::jsonb,?,?)",
+          tenantId, UUID.randomUUID(), catalogId, "LOANPASS_MAPPING_METADATA", draft.productCode(), draft.displayName(), draft.productType(), json(draft.metadataRefs()), java.sql.Date.valueOf(product.effectiveFrom()), date(product.effectiveTo()));
+    }
+    ProductCreationSnapshot snapshot = new ProductCreationSnapshot(product, draft.productType(), draft.supportedTerms(), draft.amortizationTypes(), draft.loanPurposes(), draft.metadataRefs(), draft.status(), draft.effectiveStart(), draft.effectiveEnd());
+    UUID versionId = versionControl(tenantId, catalogId, "PRODUCT", product.productId(), product.productCode(), "ACTIVE".equals(draft.status()) ? CatalogStatus.PUBLISHED : CatalogStatus.DRAFT, snapshot, actorId);
+    bump(tenantId, catalogId);
+    return new ProductCreationPersistence(product, versionId, draft.status(), draft.metadataRefs());
+  }
+
+  ProductPricingConfigurationResponse attachProductPricingConfiguration(UUID tenantId, UUID catalogId, ProductPricingConfigurationRequest request, String actorId) {
+    requireEditable(tenantId, catalogId);
+    String productCode = required(request.productCode(), "PRODUCT_CODE_REQUIRED");
+    ProductDefinition product = productByCode(tenantId, catalogId, productCode).orElseThrow(() -> new CatalogException("PRODUCT_CODE_UNKNOWN"));
+    UUID productVersionId = versionIdForCode(tenantId, "PRODUCT", product.productCode()).orElse(product.productId());
+    Instant effectiveStart = request.effectiveAsOf();
+    Instant effectiveEnd = request.effectiveEnd();
+    if (effectiveEnd != null && !effectiveEnd.isAfter(effectiveStart)) throw new CatalogException("EFFECTIVE_WINDOW_INVALID");
+    List<PricingConfigReference> refs = pricingRefs(request.refs());
+    validatePricingConfigRefs(tenantId, effectiveStart, refs);
+    Map<String, Object> attributes = new LinkedHashMap<>();
+    attributes.put("productVersionId", productVersionId.toString());
+    attributes.put("pricingConfigRefs", refs);
+    ReferenceEntry entry = new ReferenceEntry(UUID.randomUUID(), "PRODUCT_PRICING_CONFIGURATION", product.productCode(), "Pricing configuration refs for " + product.productCode(), "PRICING_CONFIGURATION", attributes, LocalDate.ofInstant(effectiveStart, ZoneOffset.UTC), effectiveEnd == null ? null : LocalDate.ofInstant(effectiveEnd, ZoneOffset.UTC));
+    jdbc.update("insert into catalog.reference_entry(tenant_id,entry_id,catalog_id,catalog_type,code,label,category,attributes,effective_from,effective_to) values (?,?,?,?,?,?,?,?::jsonb,?,?)",
+        tenantId, entry.entryId(), catalogId, entry.catalogType(), entry.code(), entry.label(), entry.category(), json(entry.attributes()), java.sql.Date.valueOf(entry.effectiveFrom()), date(entry.effectiveTo()));
+    versionControl(tenantId, catalogId, "PRODUCT_PRICING_CONFIGURATION", entry.entryId(), product.productCode(), CatalogStatus.DRAFT, entry, actorId);
+    bump(tenantId, catalogId);
+    return new ProductPricingConfigurationResponse(product.productCode(), productVersionId, effectiveStart, effectiveEnd, refs, "catalog-audit:" + catalogId + ":pricing-config:" + product.productCode());
   }
 
   InvestorProgram addInvestor(UUID tenantId, UUID catalogId, InvestorRequest request, String actorId) {
@@ -454,7 +498,7 @@ class CatalogRepository {
     if (request.stateCode() != null && markets.isEmpty()) throw new CatalogException("MARKET_NOT_ENABLED");
     SnapshotChannel channelComponent = channel == null ? null : new SnapshotChannel(channel, referenceVersionId(tenantId, "CHANNEL", channel).orElse(null));
     List<SnapshotTaxonomy> taxonomy = refs.stream().filter(r -> "PRODUCT_TAXONOMY".equals(r.catalogType())).map(r -> new SnapshotTaxonomy(r.code(), referenceVersionId(tenantId, r.catalogType(), r.code()).orElse(r.entryId()))).toList();
-    List<SnapshotProduct> productComponents = products.stream().map(p -> new SnapshotProduct(p.productCode(), versionIdForCode(tenantId, "PRODUCT", p.productCode()).orElse(p.productId()), investors.stream().filter(i -> i.productCodes().contains(p.productCode())).map(InvestorProgram::investorCode).sorted().toList(), termProfileCodes(refs))).toList();
+    List<SnapshotProduct> productComponents = products.stream().map(p -> new SnapshotProduct(p.productCode(), versionIdForCode(tenantId, "PRODUCT", p.productCode()).orElse(p.productId()), investors.stream().filter(i -> i.productCodes().contains(p.productCode())).map(InvestorProgram::investorCode).sorted().toList(), termProfileCodes(refs), pricingConfigurationRefs(tenantId, activeCatalog.catalogId(), p.productCode(), asOf))).toList();
     List<SnapshotInvestor> investorComponents = investors.stream().map(i -> new SnapshotInvestor(i.investorCode(), versionIdForCode(tenantId, "INVESTOR", i.investorCode()).orElse(i.investorId()), false)).toList();
     Map<String, List<String>> referenceVersions = referenceVersions(tenantId, refs, markets);
     String requestHash = hash(json(canonicalRequest(request, tenantId, asOfInstant)));
@@ -546,6 +590,20 @@ class CatalogRepository {
     versions.put("termAmortization", refs.stream().filter(r -> "TERM_AMORTIZATION".equals(r.catalogType())).map(r -> referenceVersionId(tenantId, r.catalogType(), r.code()).orElse(r.entryId()).toString()).sorted().toList());
     versions.put("markets", markets.stream().map(m -> versionIdForMarket(tenantId, m).orElse(m.marketId()).toString()).sorted().toList());
     return versions;
+  }
+
+  List<PricingConfigReference> pricingConfigurationRefs(UUID tenantId, UUID catalogId, String productCode, LocalDate asOf) {
+    List<Map<String, Object>> rows = jdbc.queryForList("""
+        select r.attributes::text attributes
+        from catalog.reference_entry r
+        join catalog.catalog_version_control vc on vc.tenant_id=r.tenant_id and vc.artifact_type='PRODUCT_PRICING_CONFIGURATION' and vc.artifact_id=r.entry_id
+        where r.tenant_id=? and r.catalog_id=? and r.catalog_type='PRODUCT_PRICING_CONFIGURATION' and r.code=? and vc.status='PUBLISHED'
+          and r.effective_from <= ? and (r.effective_to is null or r.effective_to > ?)
+        order by r.effective_from desc, vc.updated_at desc limit 1
+        """, tenantId, catalogId, productCode, java.sql.Date.valueOf(asOf), java.sql.Date.valueOf(asOf));
+    if (rows.isEmpty()) return List.of();
+    Map<String, Object> attributes = map(Objects.toString(rows.get(0).get("attributes"), "{}"));
+    return convertList(attributes.get("pricingConfigRefs"), PricingConfigReference.class);
   }
 
   List<ProductTaxonomyResolvedEntry> resolveProductTaxonomy(UUID tenantId, UUID catalogId, Instant asOfInstant, List<String> codes) {
@@ -646,6 +704,16 @@ class CatalogRepository {
     }, tenantId, snapshotId);
     if (snapshots.isEmpty()) throw new CatalogException("SNAPSHOT_NOT_FOUND");
     return snapshots.get(0);
+  }
+
+  ProductPricingConfigurationResponse resolveProductPricingConfiguration(UUID tenantId, String productCode, Instant asOfInstant) {
+    UUID catalogId = activeCatalogId(tenantId);
+    Instant asOf = asOfInstant == null ? Instant.now() : asOfInstant;
+    ProductDefinition product = productByCode(tenantId, catalogId, productCode).orElseThrow(() -> new CatalogException("PRODUCT_CODE_UNKNOWN"));
+    UUID productVersionId = versionIdForCode(tenantId, "PRODUCT", product.productCode()).orElse(product.productId());
+    List<PricingConfigReference> refs = pricingConfigurationRefs(tenantId, catalogId, product.productCode(), LocalDate.ofInstant(asOf, ZoneOffset.UTC));
+    if (refs.isEmpty()) throw new CatalogException("PRODUCT_PRICING_CONFIGURATION_NOT_FOUND");
+    return new ProductPricingConfigurationResponse(product.productCode(), productVersionId, asOf, null, refs, "catalog-audit:" + catalogId + ":pricing-config:" + product.productCode());
   }
 
   ConventionalProductResolveResponse resolveConventionalProducts(UUID tenantId, ConventionalProductResolveRequest request) {
@@ -847,6 +915,7 @@ class CatalogRepository {
   }
 
   private static boolean matchesReferenceRequest(ReferenceEntry ref, ResolveCatalogRequest request) {
+    if ("PRODUCT_PRICING_CONFIGURATION".equals(ref.catalogType())) return false;
     if ("LOAN_PURPOSE".equals(ref.catalogType()) && request.loanPurpose() != null) return ref.code().equals(request.loanPurpose());
     if ("PROPERTY_TYPE".equals(ref.catalogType()) && request.propertyType() != null) return ref.code().equals(request.propertyType());
     if ("OCCUPANCY_TYPE".equals(ref.catalogType()) && request.occupancyType() != null) return ref.code().equals(request.occupancyType());
@@ -950,6 +1019,7 @@ class CatalogRepository {
   }
 
   private static java.sql.Date extractEffectiveStart(Object snapshot) {
+    if (snapshot instanceof ProductCreationSnapshot req) return date(req.effectiveStart());
     if (snapshot instanceof ProductTaxonomyDraftRequest req) return date(req.effectiveStart());
     if (snapshot instanceof ChannelTaxonomyDraftRequest req) return date(req.effectiveStart());
     if (snapshot instanceof ConventionalProductDraftRequest req) return date(req.effectiveStart());
@@ -962,6 +1032,7 @@ class CatalogRepository {
   }
 
   private static java.sql.Date extractEffectiveEnd(Object snapshot) {
+    if (snapshot instanceof ProductCreationSnapshot req) return date(req.effectiveEnd());
     if (snapshot instanceof ProductTaxonomyDraftRequest req) return date(req.effectiveEnd());
     if (snapshot instanceof ChannelTaxonomyDraftRequest req) return date(req.effectiveEnd());
     if (snapshot instanceof ConventionalProductDraftRequest req) return date(req.effectiveEnd());
@@ -1225,6 +1296,10 @@ class CatalogRepository {
   }
 
   private static List<String> safe(List<String> values) { return values == null ? List.of() : List.copyOf(values); }
+  private static List<PricingConfigReference> pricingRefs(List<PricingConfigReference> values) {
+    if (values == null || values.isEmpty()) throw new CatalogException("PRICING_CONFIG_REFS_REQUIRED");
+    return List.copyOf(values);
+  }
   private static List<Integer> safeInts(List<Integer> values) { return values == null ? List.of() : List.copyOf(values); }
   private static String required(String value, String code) { if (value == null || value.isBlank()) throw new CatalogException(code); return value; }
   private static LocalDate requiredDate(LocalDate value) { if (value == null) throw new CatalogException("EFFECTIVE_FROM_REQUIRED"); return value; }
@@ -1234,6 +1309,29 @@ class CatalogRepository {
   private static LocalDate localDate(java.sql.Date value) { return value == null ? null : value.toLocalDate(); }
 
   JdbcTemplate getJdbcTemplate() { return jdbc; }
+
+  private Optional<ProductDefinition> productByCode(UUID tenantId, UUID catalogId, String productCode) {
+    List<ProductDefinition> rows = jdbc.query("select * from catalog.product_definition where tenant_id=? and catalog_id=? and product_code=? order by effective_from desc limit 1",
+        (rs, row) -> new ProductDefinition(rs.getObject("product_id", UUID.class), rs.getString("product_code"), rs.getString("product_name"), rs.getString("product_family"), strings(rs.getString("allowed_channels")), strings(rs.getString("allowed_states")), rs.getDate("effective_from").toLocalDate(), localDate(rs.getDate("effective_to"))), tenantId, catalogId, productCode);
+    return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
+  }
+
+  void validatePricingConfigRefs(UUID tenantId, Instant asOfInstant, List<PricingConfigReference> refs) {
+    LocalDate asOf = LocalDate.ofInstant(asOfInstant, ZoneOffset.UTC);
+    for (PricingConfigReference ref : refs) {
+      if (ref == null || ref.refType() == null || ref.refType().isBlank()) throw new CatalogException("PRICING_CONFIG_REF_TYPE_REQUIRED");
+      if (!PRICING_CONFIG_REFERENCE_TYPES.contains(ref.refType())) throw new CatalogException("PRICING_CONFIG_REF_TYPE_UNSUPPORTED");
+      if (ref.refCode() == null || ref.refCode().isBlank()) throw new CatalogException("PRICING_CONFIG_REF_CODE_REQUIRED");
+      if (ref.versionId() == null) throw new CatalogException("PRICING_CONFIG_VERSION_REQUIRED");
+      Integer count = jdbc.queryForObject("""
+          select count(*) from catalog.catalog_version_control
+          where tenant_id=? and artifact_type=? and artifact_code=? and version_control_id=?
+            and effective_start <= ? and (effective_end is null or effective_end > ?)
+            and status in ('DRAFT','VALIDATED','PENDING_APPROVAL','APPROVED','PUBLISHED')
+          """, Integer.class, tenantId, ref.refType(), ref.refCode(), ref.versionId(), java.sql.Date.valueOf(asOf), java.sql.Date.valueOf(asOf));
+      if (count == null || count == 0) throw new CatalogException("PRICING_CONFIG_REFERENCE_NOT_ACTIVE");
+    }
+  }
 
   private String json(Object value) {
     try { return mapper.writeValueAsString(value); } catch (Exception ex) { throw new IllegalStateException(ex); }

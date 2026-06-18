@@ -55,6 +55,25 @@ class TenantProductAuthorizationServiceTest {
     }
 
     @Test
+    void effectiveDatedAuthorizationIsDeterministicAsOf() {
+        TenantProductAuthorizationService service = service(List.of(
+            new TenantProductAuthorization(TENANT, "CONF_30YR", "FNMA", "RETAIL", "ACTIVE", Instant.parse("2026-02-01T00:00:00Z"), "admin", Instant.parse("2026-04-01T00:00:00Z"), "windowed")
+        ));
+
+        assertThat(service.isAuthorized(TENANT, "CONF_30YR", "FNMA", "RETAIL", Instant.parse("2026-01-31T23:59:59Z"))).isFalse();
+        assertThat(service.isAuthorized(TENANT, "CONF_30YR", "FNMA", "RETAIL", Instant.parse("2026-03-01T00:00:00Z"))).isTrue();
+        assertThat(service.isAuthorized(TENANT, "CONF_30YR", "FNMA", "RETAIL", Instant.parse("2026-04-01T00:00:00Z"))).isFalse();
+    }
+
+    @Test
+    void missingAuthorizationSetFailsClosedForExplicitProductLookup() {
+        TenantProductAuthorizationService service = service(List.of());
+
+        assertThat(service.getAuthorizedRulesAsOf(TENANT, NOW)).isEmpty();
+        assertThat(service.isAuthorized(TENANT, "CONF_30YR", "FNMA", "RETAIL", NOW)).isFalse();
+    }
+
+    @Test
     void cacheInvalidationOnChange() {
         AtomicInteger loads = new AtomicInteger();
         Cache<UUID, List<TenantProductAuthorization>> cache = Caffeine.newBuilder()
@@ -81,10 +100,7 @@ class TenantProductAuthorizationServiceTest {
     }
 
     private static TenantProductAuthorizationService service(List<TenantProductAuthorization> authorizations) {
-        List<TenantProductAuthorization> activeOnly = authorizations.stream()
-            .filter(authorization -> authorization.isActiveAt(NOW))
-            .toList();
-        return new TenantProductAuthorizationService(null, Caffeine.newBuilder().expireAfterWrite(TenantProductAuthorizationService.AUTH_CACHE_TTL).build(), tenant -> activeOnly, null);
+        return new TenantProductAuthorizationService(null, Caffeine.newBuilder().expireAfterWrite(TenantProductAuthorizationService.AUTH_CACHE_TTL).build(), tenant -> authorizations, null);
     }
 
     private static TenantProductAuthorization active(String product, String investor, String channel, Instant expiresAt) {

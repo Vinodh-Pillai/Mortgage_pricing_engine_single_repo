@@ -26,10 +26,52 @@ class PricingBffUiFallbackAdapter {
 
   @GetMapping("/api/v1/ui/menus/{persona}")
   UiMenu menu(@PathVariable String persona) {
-    String normalizedPersona = persona == null || persona.isBlank() ? "default" : persona.toLowerCase(Locale.ROOT);
-    return new UiMenu(normalizedPersona, List.of(
-        new UiMenuItem("status", "Workbench status", "/", "main-content"),
-        new UiMenuItem("help", "Help", "#help", "help-panel")));
+    String normalizedPersona = normalizePersona(persona);
+    return new UiMenu(normalizedPersona, menuItemsForPersona(normalizedPersona));
+  }
+
+  private String normalizePersona(String persona) {
+    if (persona == null || persona.isBlank()) {
+      return "metadata-unavailable";
+    }
+    String normalized = persona.trim().toLowerCase(Locale.ROOT).replace('_', '-').replace(' ', '-');
+    return switch (normalized) {
+      case "lo", "loan-officer" -> "loan-officer";
+      case "pricing-analyst" -> "pricing-analyst";
+      case "operations", "operations-lead", "ops-lead" -> "operations-lead";
+      case "admin", "administrator" -> "admin";
+      case "borrower", "consumer" -> "borrower";
+      default -> "metadata-unavailable";
+    };
+  }
+
+  private List<UiMenuItem> menuItemsForPersona(String persona) {
+    return switch (persona) {
+      case "loan-officer" -> List.of(
+          new UiMenuItem("pipeline-intake", "Pipeline Intake", "/pipeline", "main-content"),
+          new UiMenuItem("quick-quote", "Quick Quote", "/quote/start", "main-content"),
+          new UiMenuItem("draft-scenarios", "Draft Scenarios", "/pipeline?view=drafts", "main-content"),
+          new UiMenuItem("lock-workflow", "Lock Workflow", "/quote/run-test/lock", "main-content"));
+      case "borrower" -> List.of(
+          new UiMenuItem("status", "Workbench status", "/", "main-content"),
+          new UiMenuItem("quick-quote", "Quick Quote", "/quote/start", "main-content"));
+      case "pricing-analyst" -> List.of(
+          new UiMenuItem("product-catalog", "Product Catalog", "/admin/products", "main-content"),
+          new UiMenuItem("product-management", "Product Management", "/admin/products/catalog", "main-content"),
+          new UiMenuItem("pricing-analysis", "Pricing Analysis", "/pricing/analysis", "main-content"),
+          new UiMenuItem("rate-sheet-intake", "Rate Sheet Intake", "/pricing/rate-sheets", "main-content"));
+      case "admin" -> List.of(
+          new UiMenuItem("product-catalog", "Product Catalog", "/admin/products", "main-content"),
+          new UiMenuItem("tenant-management", "Tenant Management", "/admin/tenants", "main-content"),
+          new UiMenuItem("user-management", "User Management", "/admin/users", "main-content"),
+          new UiMenuItem("feature-flags", "Feature Flags", "/admin/tenants?section=feature-flags", "main-content"));
+      case "operations-lead" -> List.of(
+          new UiMenuItem("ops-cases", "Ops Cases", "/ops/dashboard", "main-content"),
+          new UiMenuItem("rate-feed-ops", "Rate Feed Ops", "/ops/rate-feeds", "main-content"),
+          new UiMenuItem("lock-workflow", "Lock Workflow", "/quote/run-test/lock", "main-content"),
+          new UiMenuItem("partner-integrations", "Partner Integrations", "/partners/integrations", "main-content"));
+      default -> List.of(new UiMenuItem("role-metadata-unavailable", "Role metadata unavailable", "#role-metadata-unavailable", "role-metadata-unavailable"));
+    };
   }
 
   @GetMapping("/api/v1/ui/notices")

@@ -12,18 +12,29 @@ public final class HeaderDetector {
   private HeaderDetector() {}
 
   private static final Set<String> REQUIRED = Set.of("note_rate", "lock_period", "base_price");
-  private static final Set<String> CANONICAL = Set.of("note_rate", "lock_period", "base_price", "discount_points", "yield_index");
+  private static final Set<String> CANONICAL = Set.of(
+      "note_rate", "lock_period", "base_price", "discount_points", "yield_index",
+      "canonical_product_key", "program_key", "investor_id", "channel_id",
+      "adjustment_type", "adjustment_value", "adjustment_unit");
 
-  private static final Map<String, String> ALIASES = Map.of(
-      "rate", "note_rate",
-      "interest_rate", "note_rate",
-      "lock_period_days", "lock_period",
-      "price", "base_price",
-      "base_price_bp", "base_price",
-      "discount_pts", "discount_points",
-      "discount_points", "discount_points",
-      "yield", "yield_index",
-      "yield_index", "yield_index"
+  private static final Map<String, String> ALIASES = Map.ofEntries(
+      Map.entry("rate", "note_rate"),
+      Map.entry("interest_rate", "note_rate"),
+      Map.entry("lock_period_days", "lock_period"),
+      Map.entry("price", "base_price"),
+      Map.entry("base_price_bp", "base_price"),
+      Map.entry("discount_pts", "discount_points"),
+      Map.entry("discount_points", "discount_points"),
+      Map.entry("yield", "yield_index"),
+      Map.entry("yield_index", "yield_index"),
+      Map.entry("product", "canonical_product_key"),
+      Map.entry("product_code", "canonical_product_key"),
+      Map.entry("product_key", "canonical_product_key"),
+      Map.entry("program", "program_key"),
+      Map.entry("investor", "investor_id"),
+      Map.entry("channel", "channel_id"),
+      Map.entry("adjustment", "adjustment_value"),
+      Map.entry("adjustment_points", "adjustment_value")
   );
 
   /**

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { getPersonaById } from '../lib/auth/personas';
 import type { WorkbenchScreenModule } from '../screens/workbenchShell/WorkbenchShell';
+import { workbenchModules } from '../screens/workbenchShell/WorkbenchShell';
 import { buildNavigationTree, getVisibleModules } from './navigation';
 
 const modules: WorkbenchScreenModule[] = [
@@ -42,6 +43,35 @@ describe('navigation RBAC filtering', () => {
     const opsLead = getPersonaById('persona-operations-lead')!;
     const items = buildNavigationTree(modules, 'run-123', opsLead);
     expect(items).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Ops dashboard', route: '/ops/dashboard', group: 'Operations', badgeCount: 2 })]));
-    expect(items).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Quick Quote', group: 'Pipeline' })]));
+    expect(items).not.toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Quick Quote', group: 'Pipeline' })]));
+  });
+
+  it('NavigationTest.hidesRestrictedNavigationWhenMetadataIsUnavailable', () => {
+    expect(buildNavigationTree(modules, 'run-123', null)).toEqual([]);
+    expect(buildNavigationTree(modules, 'run-123', 'unknown-role')).toEqual([]);
+  });
+
+  it('NavigationTest.filtersLoanOfficerNavigationToQuoteActions', () => {
+    const loanOfficer = getPersonaById('persona-loan-officer')!;
+    const labels = buildNavigationTree(workbenchModules, 'run-123', loanOfficer).map((item) => item.label);
+    expect(labels).toEqual(expect.arrayContaining(['Pipeline Intake', 'Quick Quote', 'Draft Scenarios', 'Lock Workflow']));
+    expect(labels).not.toEqual(expect.arrayContaining(['Product Catalog', 'Rate Sheet Intake', 'Tenant Management', 'User Management']));
+  });
+
+  it('NavigationTest.filtersPricingAnalystNavigationToProductRatesheetAndPricingActions', () => {
+    const pricingAnalyst = getPersonaById('persona-pricing-analyst')!;
+    const labels = buildNavigationTree(workbenchModules, 'run-123', pricingAnalyst).map((item) => item.label);
+    expect(labels).toEqual(expect.arrayContaining(['Product Catalog', 'Product Management', 'Rate Sheet Intake', 'Pricing Analysis']));
+    expect(labels).not.toEqual(expect.arrayContaining(['Tenant Management', 'User Management']));
+  });
+
+  it('NavigationTest.filtersAdminAndOperationsNavigationByConfiguredScopes', () => {
+    const admin = getPersonaById('persona-admin')!;
+    const operations = getPersonaById('persona-operations-lead')!;
+    const adminLabels = buildNavigationTree(workbenchModules, 'run-123', admin).map((item) => item.label);
+    const operationLabels = buildNavigationTree(workbenchModules, 'run-123', operations).map((item) => item.label);
+    expect(adminLabels).toEqual(expect.arrayContaining(['Product Catalog', 'Tenant Management', 'User Management', 'Feature Flags']));
+    expect(operationLabels).toEqual(expect.arrayContaining(['Rate Feed Ops', 'Ops Cases', 'Partner Integrations']));
+    expect(operationLabels).not.toEqual(expect.arrayContaining(['User Management', 'Feature Flags']));
   });
 });

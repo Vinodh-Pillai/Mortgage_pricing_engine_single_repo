@@ -142,6 +142,8 @@ class TenantRegistrationServiceTest {
 
         assertThat(flags.flags()).containsKeys("quick_pricer", "ml_advisory");
         assertThat(flags.flags().get("quick_pricer").enabled()).isTrue();
+        assertThat(flags.flags().get("quick_pricer").version()).isEqualTo(2);
+        assertThat(flags.flags().get("quick_pricer").configRef()).isEqualTo("tenant-feature-flags:quick_pricer:v2");
         assertThat(service.getFeatureFlags(tenant.tenantId()).flags()).hasSize(TenantRegistrationService.DEFAULT_FEATURE_KEYS.size());
         assertThatThrownBy(() -> service.updateFeatureFlags(tenant.tenantId(), Map.of("invented_pricing_rule", true), "admin-user"))
             .isInstanceOf(TenantRegistrationException.class)
@@ -157,8 +159,10 @@ class TenantRegistrationServiceTest {
         assertThat(flags.flags()).hasSize(TenantRegistrationService.DEFAULT_FEATURE_KEYS.size());
         List.of("non_qm_pricing", "heloc_pricing", "government_products", "mi_pricing", "quick_pricer", "lock_management", "scenario_analysis")
             .forEach(featureKey -> assertThat(flags.flags().get(featureKey).enabled()).as(featureKey).isTrue());
-        List.of("reverse_mortgage", "partner_integrations", "ml_advisory")
+        List.of("reverse_mortgage", "partner_integrations", "ml_advisory", "loanpass_compatibility", "loanpass_callback_delivery")
             .forEach(featureKey -> assertThat(flags.flags().get(featureKey).enabled()).as(featureKey).isFalse());
+        assertThat(flags.flags().get("loanpass_strict_mapping").enabled()).isTrue();
+        assertThat(flags.flags().get("loanpass_strict_mapping").auditRef()).isEqualTo("tenant-feature-flags:audit:loanpass_strict_mapping:v1");
     }
 
     @Test

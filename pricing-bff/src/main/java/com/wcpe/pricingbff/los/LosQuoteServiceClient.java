@@ -32,7 +32,10 @@ class LosQuoteServiceClient {
           .retrieve()
           .body(QuoteServiceResponse.class);
     }
-    String jobId = UUID.nameUUIDFromBytes((request.tenantId() + ":" + request.scenarioId() + ":" + request.idempotencyKey()).getBytes(StandardCharsets.UTF_8)).toString();
+    String quoteIdentity = request.requestId() == null || request.requestId().isBlank()
+        ? request.idempotencyKey()
+        : request.requestId();
+    String jobId = UUID.nameUUIDFromBytes((request.tenantId() + ":" + quoteIdentity + ":" + request.idempotencyKey()).getBytes(StandardCharsets.UTF_8)).toString();
     return new QuoteServiceResponse(jobId, "QUEUED", "/api/v1/los/quote-requests/" + jobId, request.correlationId());
   }
 }

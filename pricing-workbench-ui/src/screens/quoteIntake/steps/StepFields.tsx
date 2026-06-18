@@ -1,8 +1,10 @@
-import type { BorrowerIntake, ScenarioIntakeField } from '../../../lib/api/quoteRuns';
+import type { BorrowerIntake, DropdownOption, ScenarioIntakeField } from '../../../lib/api/quoteRuns';
 import { HelpIcon } from '../../../design-system/icons';
 import type { IntakeFieldErrors } from '../validation';
 
-type SelectOption = { value: string; label: string };
+export type SelectOption = DropdownOption;
+
+export type DropdownOptionsByField = Partial<Record<keyof BorrowerIntake, SelectOption[]>>;
 
 const usStateOptions: SelectOption[] = [
   { value: '', label: 'Select state' },
@@ -29,6 +31,24 @@ const selectOptionsByField: Partial<Record<keyof BorrowerIntake, SelectOption[]>
     { value: 'Correspondent', label: 'Correspondent' },
     { value: 'Consumer Direct', label: 'Consumer Direct' },
   ],
+  channelCode: [
+    { value: '', label: 'Select channel' },
+    { value: 'RETAIL', label: 'Retail' },
+    { value: 'WHOLESALE', label: 'Wholesale' },
+    { value: 'CORRESPONDENT', label: 'Correspondent' },
+    { value: 'CONSUMER_DIRECT', label: 'Consumer Direct' },
+  ],
+  channelType: [
+    { value: '', label: 'Select channel type' },
+    { value: 'RETAIL', label: 'Retail' },
+    { value: 'WHOLESALE', label: 'Wholesale' },
+    { value: 'CORRESPONDENT', label: 'Correspondent' },
+    { value: 'TPO', label: 'TPO' },
+    { value: 'CONSUMER_DIRECT', label: 'Consumer Direct' },
+  ],
+  investorCode: [
+    { value: '', label: 'Select investor' },
+  ],
   documentationType: [
     { value: '', label: 'Select documentation type' },
     { value: 'DSCR', label: 'DSCR' },
@@ -40,6 +60,22 @@ const selectOptionsByField: Partial<Record<keyof BorrowerIntake, SelectOption[]>
     { value: 'Asset Utilization', label: 'Asset Utilization' },
     { value: 'ATR-In-Full', label: 'ATR-In-Full' },
     { value: 'K-1 Only', label: 'K-1 Only' },
+    { value: 'W-2', label: 'W-2' },
+    { value: 'VOE', label: 'VOE' },
+  ],
+  incomeDocumentationType: [
+    { value: '', label: 'Select income documentation type' },
+    { value: 'DSCR', label: 'DSCR' },
+    { value: 'Full Documentation', label: 'Full Documentation' },
+    { value: 'Bank Statements', label: 'Bank Statements' },
+    { value: '1099', label: '1099' },
+    { value: 'Profit and Loss', label: 'Profit and Loss' },
+    { value: 'WVOE Only', label: 'WVOE Only' },
+    { value: 'Asset Utilization', label: 'Asset Utilization' },
+    { value: 'ATR-In-Full', label: 'ATR-In-Full' },
+    { value: 'K-1 Only', label: 'K-1 Only' },
+    { value: 'W-2', label: 'W-2' },
+    { value: 'VOE', label: 'VOE' },
   ],
   secondaryDocumentationType: [
     { value: '', label: 'Select secondary documentation type' },
@@ -87,10 +123,30 @@ const selectOptionsByField: Partial<Record<keyof BorrowerIntake, SelectOption[]>
     { value: 'First', label: 'First' },
     { value: 'Second', label: 'Second' },
   ],
+  transactionType: [
+    { value: '', label: 'Select transaction type' },
+    { value: 'Purchase', label: 'Purchase' },
+    { value: 'Rate/Term Refinance', label: 'Rate/Term Refinance' },
+    { value: 'Cash-Out Refinance', label: 'Cash-Out Refinance' },
+  ],
   desiredAmortizationType: [
     { value: '', label: 'Select amortization type' },
     { value: 'Fixed', label: 'Fixed' },
     { value: 'Adjustable Rate', label: 'Adjustable Rate' },
+  ],
+  amortizationType: [
+    { value: '', label: 'Select amortization type' },
+    { value: 'Fixed', label: 'Fixed' },
+    { value: 'Adjustable Rate', label: 'Adjustable Rate' },
+  ],
+  loanTermType: [
+    { value: '', label: 'Select loan term type' },
+    { value: '10 Year', label: '10 Year' },
+    { value: '15 Year', label: '15 Year' },
+    { value: '20 Year', label: '20 Year' },
+    { value: '25 Year', label: '25 Year' },
+    { value: '30 Year', label: '30 Year' },
+    { value: '40 Year', label: '40 Year' },
   ],
   mortgageType: [
     { value: '', label: 'Select mortgage type' },
@@ -144,7 +200,17 @@ const selectOptionsByField: Partial<Record<keyof BorrowerIntake, SelectOption[]>
   ],
   lockPeriodType: [
     { value: '', label: 'Select lock period' },
+    { value: '15 Days', label: '15 Days' },
     { value: '30 Days', label: '30 Days' },
+    { value: '45 Days', label: '45 Days' },
+    { value: '60 Days', label: '60 Days' },
+    { value: '90 Days', label: '90 Days' },
+  ],
+  propertyInformationType: [
+    { value: '', label: 'Select property information type' },
+    { value: 'Subject Property', label: 'Subject Property' },
+    { value: 'Investment Property', label: 'Investment Property' },
+    { value: 'Second Home', label: 'Second Home' },
   ],
   loanQualificationType: [
     { value: '', label: 'Select loan qualification type' },
@@ -221,16 +287,18 @@ export type StepFieldsProps = {
   intake: BorrowerIntake;
   errors: IntakeFieldErrors;
   onChange: (field: keyof BorrowerIntake, value: string) => void;
+  dropdownOptions?: DropdownOptionsByField;
+  dropdownLoading?: boolean;
 };
 
-export function StepFields({ fields, intake, errors, onChange }: StepFieldsProps) {
+export function StepFields({ fields, intake, errors, onChange, dropdownOptions, dropdownLoading = false }: StepFieldsProps) {
   if (fields.length === 0) {
     return <p className="quote-intake-empty" role="status">No fields are configured for this step. Review intake metadata setup before launch.</p>;
   }
 
   return (
     <div className="quote-intake-fields">
-      {fields.map((field) => <MetadataDrivenField key={field.fieldId} field={field} value={intake[field.fieldId] ?? ''} error={errors[field.fieldId]} onChange={onChange} />)}
+      {fields.map((field) => <MetadataDrivenField key={field.fieldId} field={field} value={intake[field.fieldId] ?? ''} error={errors[field.fieldId]} onChange={onChange} dropdownOptions={dropdownOptions} dropdownLoading={dropdownLoading} />)}
     </div>
   );
 }
@@ -240,16 +308,20 @@ function MetadataDrivenField({
   value,
   error,
   onChange,
+  dropdownOptions,
+  dropdownLoading,
 }: {
   field: ScenarioIntakeField;
   value: string;
   error?: string;
   onChange: (field: keyof BorrowerIntake, value: string) => void;
+  dropdownOptions?: DropdownOptionsByField;
+  dropdownLoading: boolean;
 }) {
   const errorId = `${field.fieldId}-error`;
   const describedBy = error ? errorId : undefined;
   const helpTooltip = field.showHelpIcon ? field.helpTooltip : undefined;
-  const selectOptions = optionsForField(field.fieldId, value);
+  const selectOptions = optionsForField(field.fieldId, value, dropdownOptions, dropdownLoading);
   const renderedValue = displayValue(field.fieldId, value);
   const commonProps = {
     id: field.fieldId,
@@ -268,7 +340,7 @@ function MetadataDrivenField({
         {helpTooltip ? <button type="button" className="quote-intake-help-icon" aria-label={helpTooltip} title={helpTooltip}><HelpIcon size={16} /></button> : null}
       </div>
       {selectOptions ? (
-        <select {...commonProps}>
+        <select {...commonProps} disabled={dropdownLoading && isConfigBackedDropdown(field.fieldId)}>
           {selectOptions.map((option) => <option key={option.value || 'empty'} value={option.value}>{option.label}</option>)}
         </select>
       ) : field.dataType === 'textarea' ? (
@@ -290,11 +362,17 @@ function dateLikeField(fieldId: keyof BorrowerIntake) {
   return /Date$/.test(fieldId);
 }
 
-function optionsForField(fieldId: keyof BorrowerIntake, value: string): SelectOption[] | undefined {
-  const options = selectOptionsByField[fieldId];
+function optionsForField(fieldId: keyof BorrowerIntake, value: string, dropdownOptions?: DropdownOptionsByField, dropdownLoading = false): SelectOption[] | undefined {
+  if (dropdownLoading && isConfigBackedDropdown(fieldId)) return value ? [{ value, label: friendlyEnumLabel(value) }, { value: '', label: 'Loading options...' }] : [{ value: '', label: 'Loading options...' }];
+  const configuredOptions = dropdownOptions?.[fieldId];
+  const options = configuredOptions && configuredOptions.length > 0 ? configuredOptions : selectOptionsByField[fieldId];
   if (!options) return undefined;
   if (!value || options.some((option) => option.value === value)) return options;
   return [...options, { value, label: friendlyEnumLabel(value) }];
+}
+
+function isConfigBackedDropdown(fieldId: keyof BorrowerIntake) {
+  return ['mortgageType', 'investorCode', 'channel', 'channelCode'].includes(fieldId);
 }
 
 function displayValue(fieldId: keyof BorrowerIntake, value: string) {

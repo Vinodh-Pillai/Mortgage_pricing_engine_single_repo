@@ -9,16 +9,231 @@ security:
   - bearerAuth: []
   - apiKeyAuth: []
   - mutualTls: []
+x-los-permission-scopes:
+  - method: POST
+    path: /pricing-requests
+    requiredScope: los:pricing-request:write
+    clientType: interactive
+  - method: GET
+    path: /pricing-requests/{id}
+    requiredScope: los:pricing-request:read
+    clientType: interactive-or-service-account
+  - method: GET
+    path: /pricing-requests/{id}/offers
+    requiredScope: los:pricing-request:read
+    clientType: interactive-or-service-account
+  - method: GET
+    path: /products
+    requiredScope: los:product-catalog:read
+    clientType: interactive
+  - method: GET
+    path: /products/search
+    requiredScope: los:product-catalog:read
+    clientType: interactive
+  - method: GET
+    path: /products/{productId}
+    requiredScope: los:product-catalog:read
+    clientType: interactive
+  - method: POST
+    path: /product-eligibility
+    requiredScope: los:product-eligibility:write
+    clientType: interactive
+  - method: POST
+    path: /locks
+    requiredScope: los:lock:write
+    clientType: interactive
+  - method: GET
+    path: /locks/{id}
+    requiredScope: los:lock:read
+    clientType: interactive-or-service-account
+  - method: POST
+    path: /locks/{id}/extend
+    requiredScope: los:lock:write
+    clientType: interactive
+  - method: POST
+    path: /webhooks
+    requiredScope: los:webhook:write
+    clientType: interactive-or-service-account
 paths:
+  /products:
+    get:
+      operationId: listLosProducts
+      summary: List tenant-authorized product summaries for LOS/POS catalog compatibility.
+      description: Returns only configured active authorized product summaries. When tenant authorization, catalog data, or LoanPass mapping metadata is unavailable, the endpoint fails closed with an empty product list and blocked metadata instead of inventing product meanings.
+      parameters:
+        - $ref: '#/components/parameters/LosSystem'
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: X-Tenant-ID
+          in: header
+          required: false
+          schema: { type: string }
+          description: Tenant context used to authorize product visibility. Missing tenant context fails closed.
+        - name: channel
+          in: query
+          required: false
+          schema: { type: string }
+        - name: investor
+          in: query
+          required: false
+          schema: { type: string }
+        - name: productFamily
+          in: query
+          required: false
+          schema: { type: string }
+        - name: active
+          in: query
+          required: false
+          schema: { type: boolean }
+        - name: effectiveDate
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: pageSize
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Authorized product summaries or explicit fail-closed catalog metadata.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LosProductCatalogResponse' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /products/{productId}:
+    get:
+      operationId: getLosProductDetail
+      summary: Get one tenant-authorized product detail for LOS/POS quote preparation.
+      description: Returns product-specific field support, mapping metadata status, and quote compatibility refs only when tenant authorization and catalog metadata are configured. When metadata is unavailable, the endpoint fails closed and marks mapping metadata incomplete instead of inventing product rules or thresholds. Missing tenant context returns not found without exposing restricted internals.
+      parameters:
+        - $ref: '#/components/parameters/LosSystem'
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: X-Tenant-ID
+          in: header
+          required: false
+          schema: { type: string }
+          description: Tenant context used to authorize product detail visibility. Missing tenant context returns not found.
+        - name: productId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Authorized product detail or explicit fail-closed detail metadata.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LosProductDetailResponse' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Product was not visible for this tenant context.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /products/search:
+    get:
+      operationId: searchLosProducts
+      summary: Search tenant-authorized product summaries for LOS/POS catalog compatibility.
+      description: Applies only supported catalog metadata filters and text query to tenant-authorized product metadata. Unsupported filters return a consistent bad-request error. When tenant authorization, catalog data, or LoanPass mapping metadata is unavailable, the endpoint fails closed with an empty product list, applied filters, and warning metadata.
+      parameters:
+        - $ref: '#/components/parameters/LosSystem'
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: X-Tenant-ID
+          in: header
+          required: false
+          schema: { type: string }
+          description: Tenant context used to authorize product visibility. Missing tenant context fails closed.
+        - name: productFamily
+          in: query
+          required: false
+          schema: { type: string }
+        - name: channel
+          in: query
+          required: false
+          schema: { type: string }
+        - name: investor
+          in: query
+          required: false
+          schema: { type: string }
+        - name: loanPurpose
+          in: query
+          required: false
+          schema: { type: string }
+        - name: occupancy
+          in: query
+          required: false
+          schema: { type: string }
+        - name: propertyType
+          in: query
+          required: false
+          schema: { type: string }
+        - name: term
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1 }
+        - name: amortization
+          in: query
+          required: false
+          schema: { type: string }
+        - name: effectiveDate
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: q
+          in: query
+          required: false
+          schema: { type: string }
+          description: Bounded text query over catalog summary metadata only; restricted rule payloads are not exposed.
+        - name: query
+          in: query
+          required: false
+          schema: { type: string }
+          description: Alias for q.
+        - name: active
+          in: query
+          required: false
+          schema: { type: boolean }
+        - name: sort
+          in: query
+          required: false
+          schema: { type: string }
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: pageSize
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Authorized search results or explicit fail-closed catalog metadata.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LosProductCatalogResponse' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /pricing-requests:
     post:
       operationId: createLosPricingRequest
       summary: Submit a LOS loan scenario for async pricing.
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/RequestId'
         - $ref: '#/components/parameters/CorrelationId'
         - $ref: '#/components/parameters/LosSystem'
         - $ref: '#/components/parameters/LosVersion'
+        - $ref: '#/components/parameters/LosScopes'
       requestBody:
         required: true
         content:
@@ -32,6 +247,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LosPricingResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /product-eligibility:
+    post:
+      operationId: evaluateLosProductEligibility
+      summary: Evaluate tenant-authorized product eligibility for LOS/POS compatibility.
+      description: Returns explainable per-product eligibility statuses tied to tenant authorization, catalog, and eligibility rule configuration references. When authorization metadata or eligibility rules are unavailable, the endpoint fails closed with blocked/incomplete results instead of inventing thresholds, investor policy, or pricing rules.
+      parameters:
+        - $ref: '#/components/parameters/LosSystem'
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: X-Tenant-ID
+          in: header
+          required: false
+          schema: { type: string }
+          description: Tenant context used to authorize product visibility. Missing tenant mapping returns a validation error.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LosProductEligibilityRequest' }
+      responses:
+        '200':
+          description: Explainable eligibility results or explicit fail-closed metadata.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LosProductEligibilityResponse' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -161,9 +406,15 @@ components:
     RequestId:
       name: X-Request-ID
       in: header
-      required: true
+      required: false
       schema: { type: string, minLength: 1 }
-      description: Idempotency key for 24-hour replay protection.
+      description: Legacy idempotency key for 24-hour replay protection. Use Idempotency-Key for LoanPass-compatible clients.
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema: { type: string, minLength: 1 }
+      description: Preferred LoanPass-compatible idempotency key for mutating requests. Either Idempotency-Key or X-Request-ID is required.
     CorrelationId:
       name: X-Correlation-ID
       in: header
@@ -181,6 +432,12 @@ components:
       in: header
       required: false
       schema: { type: string }
+    LosScopes:
+      name: X-LOS-Scopes
+      in: header
+      required: true
+      schema: { type: string }
+      description: Space- or comma-separated interactive LOS API scopes. Service accounts must use X-LOS-Service-Scopes and are evaluated separately from interactive persona roles.
     PricingRequestId:
       name: id
       in: path
@@ -197,6 +454,11 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Forbidden:
+      description: Permission denied because a required LOS API scope is missing or no endpoint scope definition is configured; endpoints fail closed before mutation.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
   schemas:
     LosPricingRequest:
       type: object
@@ -205,6 +467,21 @@ components:
         requestId: { type: string }
         tenantId: { type: string }
         callbackUrl: { type: string, format: uri }
+        productId:
+          type: string
+          description: Product authorization reference. Fails closed when tenant authorization metadata is unavailable.
+        selectedProgramId:
+          type: string
+          description: Selected program authorization reference. Fails closed when tenant authorization metadata is unavailable.
+        priceGroupId:
+          type: string
+          description: Price group authorization reference. Fails closed when tenant authorization metadata is unavailable.
+        scenarioId:
+          type: string
+          description: Optional Pipeline scenario reference. LOS quote requests do not require this field; when supplied it is passed as a non-mutating reference only.
+        scenarioVersion:
+          type: integer
+          description: Optional Pipeline scenario version paired with scenarioId for non-mutating reference linkage.
         quoteBorrowerInfo: { $ref: '#/components/schemas/LoanPassBorrowerInfo' }
         quoteAddressDTO: { $ref: '#/components/schemas/LoanPassAddress' }
         requestedLoanAmount: { type: number }
@@ -299,6 +576,178 @@ components:
         loanPassProduct:
           type: object
           additionalProperties: true
+    LosProductCatalogResponse:
+      type: object
+      required: [products, count, page, pageSize, totalAvailable, authorizationStatus]
+      description: Product catalog list/search response. For search, metadata.appliedFilters records accepted filters and metadata.warnings records fail-closed gaps such as unavailable catalog or tenant authorization metadata.
+      properties:
+        products:
+          type: array
+          items: { $ref: '#/components/schemas/LosProductSummary' }
+        count: { type: integer }
+        page: { type: integer, minimum: 0 }
+        pageSize: { type: integer, minimum: 1, maximum: 100 }
+        totalAvailable: { type: integer }
+        authorizationStatus:
+          type: string
+          enum: [AUTHORIZED, BLOCKED]
+        blockedReason:
+          type: string
+          description: Present when product catalog data fails closed because required tenant authorization, catalog, or mapping metadata is unavailable.
+        metadata:
+          type: object
+          additionalProperties: true
+    LosProductSummary:
+      type: object
+      required: [productId, displayName, productFamily, productType, effectiveStatus, detailUrl]
+      properties:
+        productId: { type: string }
+        displayName: { type: string }
+        productFamily: { type: string }
+        productType: { type: string }
+        supportedPurposes:
+          type: array
+          items: { type: string }
+        supportedTerms:
+          type: array
+          items: { type: string }
+        amortizationRefs:
+          type: array
+          items: { type: string }
+        investorRefs:
+          type: array
+          items: { type: string }
+        channelRefs:
+          type: array
+          items: { type: string }
+        effectiveStatus: { type: string }
+        detailUrl: { type: string }
+        loanPassMappings:
+          type: object
+          additionalProperties: true
+    LosProductDetailResponse:
+      type: object
+      required: [productId, authorizationStatus, requiredFields, conditionalFields, supportedValues, mappingMetadataStatus, quoteCompatibility]
+      description: Product detail response for quote and eligibility preparation. Empty required/conditional field arrays with mappingMetadataStatus INCOMPLETE mean configured field metadata is unavailable and must not be inferred.
+      properties:
+        productId: { type: string }
+        summary:
+          $ref: '#/components/schemas/LosProductSummary'
+        authorizationStatus:
+          type: string
+          enum: [AUTHORIZED, BLOCKED]
+        blockedReason:
+          type: string
+        requiredFields:
+          type: array
+          items: { $ref: '#/components/schemas/LosProductFieldRequirement' }
+        conditionalFields:
+          type: array
+          items: { $ref: '#/components/schemas/LosProductFieldRequirement' }
+        supportedValues:
+          type: object
+          additionalProperties: true
+        mappingMetadataStatus:
+          type: string
+          enum: [COMPLETE, INCOMPLETE, UNAVAILABLE]
+        quoteCompatibility:
+          type: object
+          additionalProperties: true
+        metadata:
+          type: object
+          additionalProperties: true
+    LosProductFieldRequirement:
+      type: object
+      required: [fieldId, requirementType, mappingStatus]
+      properties:
+        fieldId: { type: string }
+        requirementType:
+          type: string
+          enum: [REQUIRED, CONDITIONAL]
+        mappingStatus:
+          type: string
+          enum: [MAPPED, INCOMPLETE, UNAVAILABLE]
+        metadataRef:
+          type: string
+        constraints:
+          type: object
+          additionalProperties: true
+    LosProductEligibilityRequest:
+      type: object
+      description: Product and product-family filters are optional. Clients may submit explicit productIds, productFamily-only filters, or mapped loan fields; unavailable authorization/rule metadata still fails closed.
+      properties:
+        tenantId:
+          type: string
+          description: Tenant mapping identifier. May also be supplied by X-Tenant-ID.
+        clientId: { type: string }
+        correlationId: { type: string }
+        productIds:
+          type: array
+          items: { type: string }
+          description: Optional explicit product candidates. Explicit products fail closed when authorization metadata is unavailable.
+        productFamily:
+          type: string
+          description: Optional product-family filter when explicit productIds are not supplied.
+        channel: { type: string }
+        investor: { type: string }
+        loanFields:
+          type: object
+          additionalProperties: true
+          description: Already-mapped loan/property/borrower fields. The service does not infer missing mapping metadata.
+        creditApplicationFields:
+          type: array
+          items: { $ref: '#/components/schemas/CreditApplicationField' }
+    LosProductEligibilityResponse:
+      type: object
+      required: [status, results, reasonCodes, metadata]
+      properties:
+        status:
+          type: string
+          enum: [COMPLETE, INCOMPLETE, BLOCKED]
+        correlationId: { type: string }
+        results:
+          type: array
+          items: { $ref: '#/components/schemas/LosProductEligibilityResult' }
+        reasonCodes:
+          type: array
+          items: { type: string }
+        metadata:
+          type: object
+          additionalProperties: true
+    LosProductEligibilityResult:
+      type: object
+      required: [productId, eligibility, reasonCodes, fieldMessages, ruleConfigRefs]
+      properties:
+        productId: { type: string }
+        eligibility:
+          type: string
+          enum: [eligible, ineligible, requires_more_information]
+        reasonCodes:
+          type: array
+          items: { type: string }
+        fieldMessages:
+          type: array
+          items: { $ref: '#/components/schemas/LosProductEligibilityFieldMessage' }
+        ruleConfigRefs:
+          type: array
+          items: { $ref: '#/components/schemas/LosProductEligibilityRuleRef' }
+        productSummaryRef:
+          type: string
+    LosProductEligibilityFieldMessage:
+      type: object
+      required: [requestPath, reasonCode, message]
+      properties:
+        requestPath: { type: string }
+        fieldId: { type: string }
+        reasonCode: { type: string }
+        message: { type: string }
+    LosProductEligibilityRuleRef:
+      type: object
+      required: [source, ref, status]
+      properties:
+        source: { type: string }
+        ref: { type: string }
+        status: { type: string }
     WaterfallStep:
       type: object
       properties:
@@ -348,8 +797,11 @@ components:
           type: array
           items:
             type: string
-            enum: [pricing.completed, pricing.failed, lock.confirmed, lock.expired, lock.extended, rate.changed]
+            enum: [pricing.completed, pricing.failed, quote.completed, quote.failed, quote.requires_more_information, product.ineligible, callback.delivery_failed, lock.confirmed, lock.expired, lock.extended, rate.changed]
         secret: { type: string, writeOnly: true }
+        signingCredentialRef:
+          type: string
+          description: Optional tenant credential reference for webhook signing. Raw secret values must not be returned or logged.
         tenantId: { type: string }
     LosWebhookRegistrationResponse:
       type: object
@@ -362,6 +814,46 @@ components:
           items: { type: string }
         status: { type: string }
         registeredAt: { type: string, format: date-time }
+    LosWebhookCallbackPayload:
+      type: object
+      required: [pricingRequestId, quoteJobId, status, productResultRefs, validationMessages, correlationId, timestamp]
+      description: Payload posted to registered LOS webhook endpoints only after async pricing reaches a terminal completion boundary.
+      properties:
+        pricingRequestId: { type: string }
+        quoteJobId: { type: string }
+        status:
+          type: string
+          enum: [COMPLETED, FAILED]
+        productResultRefs:
+          type: array
+          items: { type: string }
+        validationMessages:
+          type: array
+          items: { type: string }
+        correlationId: { type: string }
+        timestamp: { type: string, format: date-time }
+    LosWebhookDeliveryStatus:
+      type: string
+      description: Local delivery transition state. BLOCKED means signing configuration is missing; QUEUED means local/dev delivery is disabled; DELIVERED means the endpoint returned 2xx; DEAD means retry attempts were exhausted.
+      enum: [BLOCKED, QUEUED, DELIVERED, DEAD]
+    LosWebhookDeliveryReceipt:
+      type: object
+      required: [deliveryId, webhookId, eventType, status, attemptCount, idempotencyKey, auditRef]
+      properties:
+        deliveryId: { type: string }
+        webhookId: { type: string }
+        eventType:
+          type: string
+          enum: [pricing.completed, pricing.failed, quote.completed, quote.failed, quote.requires_more_information, product.ineligible, callback.delivery_failed, lock.confirmed, lock.expired, lock.extended, rate.changed]
+        status: { $ref: '#/components/schemas/LosWebhookDeliveryStatus' }
+        attemptCount: { type: integer, minimum: 0 }
+        nextRetryAt: { type: string, format: date-time }
+        lastError: { type: string }
+        idempotencyKey: { type: string }
+        signatureHeader:
+          type: string
+          description: HMAC signature header value. Raw signing secrets and credential references are never returned.
+        auditRef: { type: string }
     ErrorResponse:
       type: object
       required: [code, message]
