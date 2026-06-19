@@ -209,10 +209,30 @@
 }
 
 .quote-intake-section-header small,
-.quote-form-builder__copy,
 .quote-form-builder__fields em {
   color: var(--ds-color-text-muted);
   font-size: var(--ds-font-size-sm);
+}
+
+.quote-form-builder__states,
+.quote-intake-data-required__state {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2);
+}
+
+.quote-form-builder__states span,
+.quote-intake-data-required__state {
+  align-items: center;
+  background: color-mix(in srgb, var(--ds-color-primary) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ds-color-primary) 32%, transparent);
+  border-radius: var(--ds-radius-full);
+  color: var(--ds-color-text);
+  display: inline-flex;
+  font-size: var(--ds-font-size-sm);
+  font-weight: 800;
+  min-block-size: 2rem;
+  padding: 0.25rem 0.65rem;
 }
 
 .quote-form-builder {
@@ -513,6 +533,75 @@
 .quote-intake-banner--info { border-color: var(--ds-color-info); }
 .quote-intake-status { color: var(--ds-color-text-muted); }
 
+.quote-launch-details {
+  display: grid;
+  gap: var(--ds-space-2);
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  margin: 0;
+}
+
+.quote-launch-details div {
+  display: grid;
+  gap: var(--ds-space-1);
+}
+
+.quote-launch-details dt {
+  color: var(--ds-color-text-muted);
+  font-size: var(--ds-font-size-sm);
+  font-weight: 700;
+}
+
+.quote-launch-details dd {
+  margin: 0;
+}
+
+.quote-validation-top-banner {
+  align-items: center;
+  background: color-mix(in srgb, var(--ds-color-error) 10%, var(--ds-color-surface) 90%);
+  border: 1px solid var(--ds-color-error);
+  border-radius: var(--ds-radius-xl);
+  box-shadow: var(--ds-shadow-3);
+  display: flex;
+  gap: var(--ds-space-4);
+  justify-content: space-between;
+  padding: var(--ds-space-4);
+  position: sticky;
+  top: var(--ds-space-3);
+  z-index: var(--ds-z-sticky, 10);
+}
+
+.quote-validation-top-banner h3,
+.quote-validation-top-banner p {
+  margin-block: 0;
+}
+
+.quote-validation-top-banner h3 {
+  color: var(--ds-color-error);
+}
+
+.quote-validation-top-banner__actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2);
+  justify-content: flex-end;
+}
+
+.quote-validation-top-banner__close {
+  align-items: center;
+  background: color-mix(in srgb, var(--ds-color-error) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ds-color-error) 52%, transparent);
+  border-radius: var(--ds-radius-full);
+  color: var(--ds-color-text);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 1.35rem;
+  font-weight: 900;
+  justify-content: center;
+  min-block-size: 2.5rem;
+  min-inline-size: 2.5rem;
+}
+
 .quote-intake-shell--product-finder {
   inline-size: min(100%, 96rem);
   position: relative;
@@ -682,6 +771,7 @@
 }
 
 .quote-filter-card__heading > span,
+.quote-product-count-summary,
 .quote-live-indicator,
 .quote-status-pill {
   align-items: center;
@@ -696,6 +786,11 @@
   min-block-size: 2rem;
   padding: 0.25rem 0.65rem;
   white-space: nowrap;
+}
+
+.quote-product-count-summary {
+  background: color-mix(in srgb, var(--ds-color-background-raised) 82%, transparent);
+  border-color: color-mix(in srgb, var(--ds-color-border) 72%, transparent);
 }
 
 .quote-filter-card__heading > span:not(:empty) {
@@ -1587,6 +1682,12 @@
 }
 
 .quote-pipeline-modal__header h3 {
+  margin: 0;
+}
+
+.quote-pipeline-modal__copy {
+  color: var(--ds-color-text-muted);
+  font-size: var(--ds-font-size-sm);
   margin: 0;
 }
 

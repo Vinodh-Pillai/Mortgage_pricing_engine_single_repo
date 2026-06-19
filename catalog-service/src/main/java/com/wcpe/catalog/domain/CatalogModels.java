@@ -36,23 +36,46 @@ record EnumerationVariantInput(String variantId, String oldId, String label) {}
 record EnumerationCatalogImportResponse(List<EnumerationTypeResponse> enumerations, int importedTypeCount, int importedVariantCount) {}
 record EnumerationTypeResponse(String enumTypeId, String name, List<EnumerationVariantResponse> variants, String source, String overrideScope) {}
 record EnumerationVariantResponse(String variantId, String oldId, String label) {}
+record EnumerationCatalogUpdateRequest(String name, List<EnumerationVariantInput> variants, LocalDate effectiveFrom, String changeReason) {}
+record EnumerationCatalogUpdateResponse(EnumerationTypeResponse enumeration, boolean tenantOverride, LocalDate effectiveFrom, int variantCount) {}
 record FieldMetadataImportRequest(String sourceName, List<FieldMetadataInput> productFields, List<FieldMetadataInput> creditApplicationFields, List<FieldMetadataInput> pipelineOnlyFields, List<FieldMetadataInput> rawFields) {}
 record FieldMetadataInput(String id, String oldId, String name, String description, String category, String valueType, String sourceGroup, Map<String, Object> conditions, String disposition) {}
 record FieldMetadataImportResponse(List<FieldMetadataResponse> fields, int importedFieldCount) {}
 record FieldMetadataResponse(String id, String oldId, String name, String description, String category, String valueType, String sourceGroup, Map<String, Object> conditions, String disposition, String source) {}
 record FieldLibraryQueryResponse(String category, String sourceScope, boolean tenantSpecific, List<FieldLibraryFieldResponse> fields,
                                   List<EnumerationTypeResponse> enumerations, int payloadFieldCount) {}
-record FieldLibraryFieldResponse(String id, String oldId, String name, String description, String category, String valueType,
-                                  String sourceGroup, Map<String, Object> conditions, List<String> parentFieldReferences,
-                                  String disposition, String source, String enumTypeId, String enumLink, EnumerationTypeResponse enumeration) {}
+record FieldLibraryFieldResponse(String id, String stableApiKey, String oldId, String name, String description, String category, String valueType,
+                                   String sourceGroup, String sourceChip, String typeChip, int displayOrder, boolean draggable,
+                                   Map<String, Object> conditions, List<String> parentFieldReferences,
+                                   String disposition, String source, String enumTypeId, String enumLink, EnumerationTypeResponse enumeration) {}
+record FieldConsumerMappingRequest(String consumer, String mappingScope, String activeVersion,
+                                   List<FieldConsumerMappingItem> fields, Map<String, Object> metadata) {}
+record FieldConsumerMappingItem(String fieldId, String consumerFieldKey, String dataTableKey, String usageType,
+                                Map<String, Object> attributes) {}
+record FieldConsumerMappingResponse(String consumer, String mappingScope, String activeVersion, String sourceScope,
+                                    List<FieldConsumerMappedFieldResponse> fields, int fieldCount, String auditRef,
+                                    Map<String, Object> metadata) {}
+record FieldConsumerMappedFieldResponse(String fieldId, String stableApiKey, String name, String description, String category,
+                                        String valueType, String sourceGroup, String consumerFieldKey, String dataTableKey,
+                                        String usageType, Map<String, Object> attributes) {}
+record FieldConsumerReferenceResponse(String fieldId, List<FieldConsumerReference> references, int referenceCount) {}
+record FieldConsumerReference(String consumer, String mappingScope, String activeVersion, String consumerFieldKey,
+                              String dataTableKey, String usageType) {}
 record ProductSpecificationFieldListResponse(String sourceScope, boolean tenantSpecific, List<ProductSpecificationFieldResponse> fields, int payloadFieldCount) {}
-record ProductSpecificationFieldResponse(String fieldId, String name, List<String> aliases, String description, String valueType,
-                                          String sourceCategory, String status, String provenanceBadge, int displayOrder,
+record ProductSpecificationFieldResponse(String fieldId, String stableApiKey, String name, List<String> aliases, String description, String valueType,
+                                          String sourceCategory, String status, String provenanceBadge, String sourceChip, String typeChip,
+                                          int displayOrder, boolean draggable, String migrationStatus,
                                           Map<String, Object> conditions, String conditionSummary) {}
 record ProductSpecificationFieldOrderDraftRequest(List<String> fieldIds) {}
 record ProductSpecificationFieldOrderDraft(String draftStatus, List<String> fieldIds, Instant savedAt, String actorId) {}
 record ProductSpecificationFieldOrderDraftResponse(String draftStatus, List<String> fieldIds, boolean systemDefaultsChanged) {}
-record ProductSpecificationFieldAliasEdit(String fieldId, String nameAlias, String descriptionAlias) {}
+record ProductSpecificationFieldAliasEdit(String fieldId, String nameAlias, String descriptionAlias,
+                                         String baseName, String baseDescription, String baseValueType,
+                                         String baseSourceGroup, Map<String, Object> baseConditions) {
+  ProductSpecificationFieldAliasEdit(String fieldId, String nameAlias, String descriptionAlias) {
+    this(fieldId, nameAlias, descriptionAlias, null, null, null, null, Map.of());
+  }
+}
 record ProductSpecificationNativeFieldEdit(String fieldId, String name, String description, String category, String valueType,
                                            String sourceGroup, Map<String, Object> conditions) {}
 record ProductSpecificationTenantFieldDraftRequest(List<ProductSpecificationFieldAliasEdit> aliases,
@@ -61,7 +84,8 @@ record ProductSpecificationTenantFieldDraft(String draftStatus, List<ProductSpec
                                              List<ProductSpecificationNativeFieldEdit> nativeFields, Instant savedAt, String actorId) {}
 record ProductSpecificationTenantFieldDraftResponse(String draftStatus, int aliasCount, int nativeFieldCount, boolean systemDefaultsChanged) {}
 record ProductSpecificationConditionRuleEdit(String fieldId, String conditionId, String operator, String parentFieldId,
-                                             String enumTypeId, List<String> variantIds, Object value) {}
+                                             String enumTypeId, List<String> variantIds, Object value,
+                                             String readableExpression) {}
 record ProductSpecificationConditionDraftRequest(List<ProductSpecificationConditionRuleEdit> includeConditions,
                                                  List<ProductSpecificationConditionRuleEdit> additionalConditions) {}
 record ProductSpecificationConditionDraft(String draftStatus, List<ProductSpecificationConditionRuleEdit> includeConditions,

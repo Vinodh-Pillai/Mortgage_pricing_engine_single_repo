@@ -1,5 +1,5 @@
-import { type CSSProperties, type FocusEvent, type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
-import { fetchActiveApplicationFormVersion, fetchTenantDropdownOptions, loanPassQuoteIntakeFields, type ApplicationFormRuntimeState, type BorrowerIntake, type DropdownOption, type LaunchState, type MetadataState, type ScenarioIntakeField, type ScenarioIntakeMetadata, type TenantDropdownOptions } from '../../lib/api/quoteRuns';
+import { type CSSProperties, type FocusEvent, type FormEvent, type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { fetchActiveApplicationFormVersion, fetchTenantDropdownOptions, loanPassQuoteIntakeFields, type ApplicationFormRuntimeState, type BorrowerIntake, type DropdownOption, type LaunchState, type MetadataState, type QuoteLaunchSelectedProduct, type ScenarioIntakeField, type ScenarioIntakeMetadata, type TenantDropdownOptions } from '../../lib/api/quoteRuns';
 import { availableFiltersFor, tenantHomePreviewProducts, type AuthorizedProduct, type TenantProductStatus } from '../../lib/api/tenantHome';
 import { createDraftScenario, getDraftScenario, loadDraftBackup, saveDraftBackup, updateDraftScenario, type DraftBackup, type DraftScenario } from './draft';
 import { emptyFieldEditorDraft, fieldEditorDataTypeLabel, fieldEditorDataTypes, serializeFieldEditorDraft, validateFieldEditorDraft, type FieldEditorDraft, type FieldEditorSerializedDraft } from './fieldEditorDataTypes';
@@ -81,13 +81,15 @@ type VisibilityConditionDraft = {
 };
 
 type PipelineRequiredField = ScenarioIntakeField & { fieldId: keyof BorrowerIntake; pipelineRequired?: boolean };
+type SaveRetrieveIdentifierField = 'borrowerLastName' | 'loanNumber';
 
 
 const tenantBoundaryPlaceholder = 'ui-preview-tenant';
 const localUnsyncedDraftId = 'local-unsynced-pipeline-draft';
 const tenantDropdownConfigCache = new Map<string, DropdownConfigState>();
-const minimumStartFields: Array<keyof BorrowerIntake> = ['borrowerLastName', 'loanNumber'];
-const minimumQuoteFields: Array<keyof BorrowerIntake> = ['borrowerLastName', 'loanNumber', 'mortgageType', 'channel', 'loanPurpose', 'decisionCreditScore', 'baseLoanAmount'];
+const saveRetrieveIdentifierFields: SaveRetrieveIdentifierField[] = ['borrowerLastName', 'loanNumber'];
+const minimumStartFields: Array<keyof BorrowerIntake> = [];
+const minimumQuoteFields: Array<keyof BorrowerIntake> = ['mortgageType', 'channel', 'loanPurpose', 'decisionCreditScore', 'baseLoanAmount'];
 const defaultPriceScenarioColumns: PriceScenarioColumn[] = [
   { key: 'product', label: 'Product' },
   { key: 'investor', label: 'Investor' },
@@ -307,6 +309,10 @@ export function PipelineIntakePage({
   const [selectedProduct, setSelectedProduct] = useState<AuthorizedProduct | null>(null);
   const [rowActionState, setRowActionState] = useState<ProductRowActionState | null>(null);
   const [dropdownConfigState, setDropdownConfigState] = useState<DropdownConfigState>(() => tenantDropdownConfigCache.get(tenantId) ?? { kind: 'loading', options: fallbackTenantDropdownOptions(), message: 'Loading tenant dropdown options...' });
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saveKeys, setSaveKeys] = useState({ borrowerLastName: '', loanNumber: '' });
+  const [saveError, setSaveError] = useState('');
+  const [saveMissingFields, setSaveMissingFields] = useState<SaveRetrieveIdentifierField[]>([]);
   const [retrieveOpen, setRetrieveOpen] = useState(false);
   const [retrieveKeys, setRetrieveKeys] = useState({ borrowerLastName: '', loanNumber: '' });
   const [retrieveError, setRetrieveError] = useState('');
@@ -318,9 +324,12 @@ export function PipelineIntakePage({
   const [fieldEditorValidationMessage, setFieldEditorValidationMessage] = useState('');
   const [fieldEditorSavedSummary, setFieldEditorSavedSummary] = useState('');
   const [applicationFormRuntimeState, setApplicationFormRuntimeState] = useState<ApplicationFormRuntimeState | { kind: 'loading'; message: string }>(() => ({ kind: 'loading', message: 'Loading tenant application form configuration...' }));
+  const [validationBannerDismissed, setValidationBannerDismissed] = useState(false);
   const savingRef = useRef(false);
   const savePromiseRef = useRef<Promise<DraftScenario | null> | null>(null);
   const firstEntryDraftRef = useRef(false);
+  const validationBannerSignatureRef = useRef('');
+  const validationBannerFocusKeyRef = useRef('');
   const values = useMemo(() => normalizeDisplayedIntake(intake ?? localIntake), [intake, localIntake]);
   const mergedErrors = { ...errors, ...localErrors };
   const { metadata } = normalizeMetadataState(metadataState);
@@ -330,19 +339,32 @@ export function PipelineIntakePage({
   const showProgressiveCompatibility = compatibilityStartFieldIds.some((fieldId) => fieldId === 'quoteIntent');
   const sections = useMemo(() => applyBuilderDraftOrder(consolidateCanonicalFields(orderedSteps.map((step) => ({ step, fields: fieldsForStep(runtimeMetadata, step.id).map(normalizePipelineRequirement) }))), builderDraftOrder), [builderDraftOrder, orderedSteps, runtimeMetadata]);
   const runtimeSections = useMemo(() => applyRuntimeFieldVisibility(sections, values, builderVisibilityDrafts), [builderVisibilityDrafts, sections, values]);
-  const visibleErrors = useMemo(() => (submitAttempted || showProgressiveCompatibility ? mergedErrors : {}), [mergedErrors, showProgressiveCompatibility, submitAttempted]);
   const draftId = draftIdFromLocation();
   const fieldDropdownOptions = useMemo(() => dropdownOptionsForFields(dropdownConfigState.options), [dropdownConfigState.options]);
   const availableFilters = useMemo(() => availableFiltersForDropdownConfig(dropdownConfigState.options), [dropdownConfigState.options]);
   const activeFilterCount = Object.values(productFilters).filter((value) => value.trim()).length;
   const filteredProducts = useMemo(() => filterProducts(tenantHomePreviewProducts, productFilters), [productFilters]);
+  const productGridStatusCounts = useMemo(() => {
+    const counts: Record<TenantProductStatus, number> = { ACTIVE: 0, PENDING: 0, INACTIVE: 0 };
+    filteredProducts.forEach((product) => { counts[product.status] += 1; });
+    return counts;
+  }, [filteredProducts]);
+  const productGridCountSummary = `${filteredProducts.length} filtered of ${tenantHomePreviewProducts.length} total · ${productGridStatusCounts.ACTIVE} active · ${productGridStatusCounts.PENDING} pending · ${productGridStatusCounts.INACTIVE} inactive`;
   const priceScenarioColumns = useMemo(() => priceScenarioColumnsForMetadata(runtimeMetadata), [runtimeMetadata]);
   const lockFieldBindings = useMemo(() => lockFieldBindingsForMetadata(runtimeMetadata, values), [runtimeMetadata, values]);
   const autoConfirmationApproval = useMemo(() => autoConfirmationApprovalForMetadata(runtimeMetadata), [runtimeMetadata]);
   const requiredPricingFields = useMemo(() => visibleConfiguredRequiredFields(runtimeSections), [runtimeSections]);
   const missingRequiredFields = useMemo(() => missingConfiguredRequiredFields(requiredPricingFields, values), [requiredPricingFields, values]);
+  const actionableMissingRequiredFields = useMemo(() => (selectedProduct || submitAttempted ? missingRequiredFields : []), [missingRequiredFields, selectedProduct, submitAttempted]);
+  const pipelineValidationErrors = useMemo<IntakeFieldErrors>(() => actionableMissingRequiredFields.reduce((acc, field) => {
+    acc[field.fieldId] = `${field.label} needs attention.`;
+    return acc;
+  }, {} as IntakeFieldErrors), [actionableMissingRequiredFields]);
+  const visibleErrors = useMemo(() => (submitAttempted || showProgressiveCompatibility || actionableMissingRequiredFields.length > 0 ? { ...pipelineValidationErrors, ...mergedErrors } : {}), [actionableMissingRequiredFields.length, mergedErrors, pipelineValidationErrors, showProgressiveCompatibility, submitAttempted]);
+  const validationBannerSignature = actionableMissingRequiredFields.map((field) => String(field.fieldId)).join('|');
+  const validationBannerVisible = validationBannerSignature.length > 0 && !validationBannerDismissed;
   const productGridStyle = { '--quote-product-grid-template': priceScenarioGridTemplate(priceScenarioColumns) } as CSSProperties;
-  const startReady = minimumStartFields.every((field) => (values[field] ?? '').trim());
+  const startReady = true;
   const quoteReady = missingRequiredFields.length === 0 && Boolean(selectedProduct);
   const launchDisabled = flowState.kind === 'submitting' || !quoteReady;
   const launchStatus = quoteReady ? 'Ready to launch quote' : selectedProduct && missingRequiredFields.length > 0 ? 'Data required before pricing refresh' : 'Select a product and complete required fields';
@@ -360,6 +382,30 @@ export function PipelineIntakePage({
     setFieldEditorValidationMessage('');
     setFieldEditorSavedSummary('');
   }, [tenantId]);
+
+  useEffect(() => {
+    if (!validationBannerSignature) {
+      validationBannerSignatureRef.current = '';
+      validationBannerFocusKeyRef.current = '';
+      setValidationBannerDismissed(false);
+      return;
+    }
+    if (validationBannerSignatureRef.current !== validationBannerSignature) {
+      validationBannerSignatureRef.current = validationBannerSignature;
+      setValidationBannerDismissed(false);
+    }
+  }, [validationBannerSignature]);
+
+  useLayoutEffect(() => {
+    if (!validationBannerVisible) return;
+    const firstField = actionableMissingRequiredFields[0];
+    if (!firstField || validationBannerFocusKeyRef.current === validationBannerSignature) return;
+    const tryFocus = () => {
+      if (focusPipelineField(firstField.fieldId)) validationBannerFocusKeyRef.current = validationBannerSignature;
+    };
+    tryFocus();
+    window.setTimeout(tryFocus, 0);
+  }, [actionableMissingRequiredFields, dropdownConfigState.kind, validationBannerSignature, validationBannerVisible]);
 
   useEffect(() => {
     let cancelled = false;
@@ -431,6 +477,13 @@ export function PipelineIntakePage({
       firstEntryDraftRef.current = true;
       void saveDraft('first-field-entry', nextValues);
     }
+  }
+
+  function focusPipelineField(fieldId: keyof BorrowerIntake) {
+    const control = document.getElementById(String(fieldId)) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null;
+    if (!control || control.disabled) return false;
+    control.focus();
+    return document.activeElement === control;
   }
 
   function changeBuilderCondition(fieldId: string, patch: Partial<VisibilityConditionDraft>) {
@@ -580,23 +633,42 @@ export function PipelineIntakePage({
     capture('form-builder-draft-order-saved', { tenantId, sections: Object.keys(order), conditionalFields: Object.keys(builderVisibilityDrafts), storageScope: 'tenant-draft-only' });
   }
 
-  async function savePipeline() {
-    setSubmitAttempted(true);
-    const validationErrors = validateFields(startFields(), values);
-    if (Object.keys(validationErrors).length > 0) {
-      setLocalErrors(validationErrors);
-      setFlowState({ kind: 'blocked', validation: errorsToValidation(validationErrors, 'Borrower Last Name and Loan Number are required.') });
-      focusFirstInvalid(validationErrors);
+  function openSavePipelineModal() {
+    const nextKeys = identifierKeysFromValues(values);
+    const missingFields = saveRetrieveIdentifierFields.filter((field) => !nextKeys[field].trim());
+    setSaveKeys(nextKeys);
+    setSaveMissingFields(missingFields);
+    setSaveError('');
+    if (missingFields.length > 0) {
+      setSaveOpen(true);
+      window.setTimeout(() => focusModalIdentifierField('save', missingFields[0]), 0);
       return;
     }
-    let saved = await saveDraft('manual-save');
+    void savePipeline({ ...values, ...nextKeys });
+  }
+
+  function submitSaveIdentifiers() {
+    const validationError = firstMissingIdentifierError(saveKeys, saveMissingFields);
+    if (validationError) {
+      setSaveError(validationError.message);
+      window.setTimeout(() => focusModalIdentifierField('save', validationError.field), 0);
+      return;
+    }
+    const nextValues = { ...values, ...saveKeys };
+    setSaveOpen(false);
+    setSaveError('');
+    void savePipeline(nextValues);
+  }
+
+  async function savePipeline(saveValues: BorrowerIntake) {
+    let saved = await saveDraft('manual-save', saveValues);
     if (!saved) return;
     try {
       const loanBasics = sectionForStep(1);
-      saved = await updateDraftScenario(tenantId, saved.scenarioId, saved.scenarioVersion, 'scenario-identity', backendDraftPayload(values, loanBasics?.fields ?? []));
+      saved = await updateDraftScenario(tenantId, saved.scenarioId, saved.scenarioVersion, 'scenario-identity', backendDraftPayload(saveValues, loanBasics?.fields ?? []));
       setScenarioId(saved.scenarioId);
       setScenarioVersion(saved.scenarioVersion);
-      saveDraftBackup(saved.scenarioId, saved.scenarioVersion, 1, values);
+      saveDraftBackup(saved.scenarioId, saved.scenarioVersion, 1, saveValues);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Draft scenario save is temporarily unavailable.';
       setFlowState({ kind: 'outage', message });
@@ -604,7 +676,7 @@ export function PipelineIntakePage({
       capture('pipeline-save-failed', { message });
       return;
     }
-    savePipelineLookup(values, saved.scenarioId, saved.scenarioVersion);
+    savePipelineLookup(saveValues, saved.scenarioId, saved.scenarioVersion);
     setStatusMessage('Saved.');
   }
 
@@ -613,6 +685,7 @@ export function PipelineIntakePage({
     const loanNumber = retrieveKeys.loanNumber.trim();
     if (!borrowerLastName || !loanNumber) {
       setRetrieveError('Borrower Last Name and Loan Number are required.');
+      window.setTimeout(() => focusModalIdentifierField('retrieve', borrowerLastName ? 'loanNumber' : 'borrowerLastName'), 0);
       return;
     }
     setRetrieveError('');
@@ -702,8 +775,9 @@ export function PipelineIntakePage({
     event?.preventDefault();
     if (event) onSubmit?.(event);
     setSubmitAttempted(true);
+    const productForLaunch = product ?? selectedProduct;
     if (product) applyProduct(product);
-      const launchValues = product ? { ...values, channel: product.channelCode, channelCode: product.channelCode, investorCode: product.investorCode, mortgageType: product.productType } : values;
+    const launchValues = productForLaunch ? { ...values, channel: productForLaunch.channelCode, channelCode: productForLaunch.channelCode, investorCode: productForLaunch.investorCode, mortgageType: productForLaunch.productType } : values;
     const validationErrors = validateFields(requiredPricingFields, launchValues);
     if (Object.keys(validationErrors).length > 0) {
       setLocalErrors(validationErrors);
@@ -732,8 +806,8 @@ export function PipelineIntakePage({
         capture('quote-launch-needs-attention', { blockers: launched.blockers });
         return;
       }
-      setFlowState({ kind: 'created', launch: launched.launch });
-      capture('quote-launch-created', { runId: launched.launch.runId, nextRoute: launched.launch.nextRoute, productCode: product?.productCode });
+      setFlowState({ kind: 'created', launch: launched.launch, selectedProduct: productForLaunch ? quoteLaunchSelectedProduct(productForLaunch) : undefined });
+      capture('quote-launch-created', { runId: launched.launch.runId, nextRoute: launched.launch.nextRoute, productCode: productForLaunch?.productCode, uiTraceId: launched.launch.uiTraceId });
       if (launched.launch.nextRoute) onNavigate?.(launched.launch.nextRoute);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Quote launch is temporarily unavailable.';
@@ -795,14 +869,15 @@ export function PipelineIntakePage({
   }
 
   function quoteDetailFields() {
-    return fieldsById(['loanPurpose', 'documentationType', 'decisionCreditScore', 'baseLoanAmount', 'state', 'zip']).map((field) => ({
+    const detailFieldIds = Array.from(new Set<keyof BorrowerIntake>([...minimumQuoteFields, 'documentationType', 'state', 'zip']));
+    return fieldsById(detailFieldIds).map((field) => ({
       ...field,
       required: minimumQuoteFields.includes(field.fieldId),
     }));
   }
 
   function capture(action: string, detail: Record<string, unknown>) {
-    onEvidenceCapture?.({ action, storyId: 'PIPE-PII-59-S04', ...detail });
+    onEvidenceCapture?.({ action, storyId: 'PII-72-S04', ...detail });
   }
 
   return (
@@ -812,7 +887,6 @@ export function PipelineIntakePage({
           <p className="eyebrow">Pipeline</p>
           {showProgressiveCompatibility ? <h1>New prospect intake</h1> : null}
           <h2 id="intake-heading">Intake</h2>
-          {showProgressiveCompatibility ? <p>Capture the borrower and loan facts needed to start a pricing run.</p> : null}
         </div>
         <div className="quote-pipeline-topbar__stats" aria-label="Pipeline status">
           <MetricCard label="Products" value={String(filteredProducts.length)} detail={`${tenantHomePreviewProducts.length} total`} />
@@ -820,8 +894,8 @@ export function PipelineIntakePage({
           <MetricCard label="Profile" value={`${completionPercent}%`} detail="complete" tone={quoteReady ? 'ready' : startReady ? 'attention' : undefined} />
         </div>
         <div className="quote-pipeline-topbar__actions" aria-label="Pipeline actions">
-          <button type="button" onClick={() => void savePipeline()}>Save Pipeline</button>
-          <button type="button" onClick={() => setRetrieveOpen(true)}>Retrieve Pipeline</button>
+          <button type="button" onClick={openSavePipelineModal}>Save Pipeline</button>
+          <button type="button" onClick={() => { setRetrieveKeys(identifierKeysFromValues(values)); setRetrieveError(''); setRetrieveOpen(true); window.setTimeout(() => focusModalIdentifierField('retrieve', 'borrowerLastName'), 0); }}>Retrieve Pipeline</button>
         </div>
       </div>
 
@@ -829,8 +903,8 @@ export function PipelineIntakePage({
       <LaunchBanner state={flowState} onRetry={() => { setFlowState({ kind: 'idle' }); onRetry?.(); }} />
       {showProgressiveCompatibility ? <ProgressiveCompatibilityNav errors={visibleErrors} /> : null}
       {showProgressiveCompatibility ? (
-        <div className="quote-intake-fields quote-intake-fields--compatibility" aria-label="Quick quote identity fields">
-          <label className="quote-intake-field">Quote intent<input name="quoteIntent" value={values.quoteIntent ?? ''} aria-invalid={Boolean(visibleErrors.quoteIntent)} onChange={(event) => changeField('quoteIntent', event.target.value)} type="text" />{visibleErrors.quoteIntent ? <p className="quote-intake-error" role="alert">{visibleErrors.quoteIntent}</p> : null}</label>
+        <div className="quote-intake-fields quote-intake-fields--compatibility" aria-label="Pipeline identity fields">
+          <label className={`quote-intake-field${visibleErrors.quoteIntent ? ' quote-intake-field--error' : ''}`}>Quote intent<input name="quoteIntent" value={values.quoteIntent ?? ''} aria-invalid={Boolean(visibleErrors.quoteIntent)} onChange={(event) => changeField('quoteIntent', event.target.value)} type="text" /></label>
           <InlineSelectField label="Channel" name="channel" value={values.channel ?? ''} error={visibleErrors.channel} options={fieldDropdownOptions.channel ?? []} loading={dropdownConfigState.kind === 'loading'} onChange={(value) => changeField('channel', value)} />
         </div>
       ) : null}
@@ -840,7 +914,8 @@ export function PipelineIntakePage({
       {applicationFormRuntimeState.kind === 'loaded' ? <p className="quote-intake-status" aria-live="polite">Published application form version {applicationFormRuntimeState.versionLabel} loaded for {tenantId}.</p> : null}
       {applicationFormRuntimeState.kind === 'missing' || applicationFormRuntimeState.kind === 'unreachable' ? <p className="quote-intake-status" role="alert">Application form configuration blocker: {applicationFormRuntimeState.message}</p> : null}
       {statusMessage ? <p className="quote-intake-status" role="status">{statusMessage}</p> : null}
-      <DataRequiredPanel fields={missingRequiredFields} onNextField={focusNextRequiredField} />
+      {validationBannerVisible ? <ValidationTopBanner fields={actionableMissingRequiredFields} onClose={() => setValidationBannerDismissed(true)} onFocusField={focusPipelineField} /> : null}
+      <DataRequiredPanel fields={actionableMissingRequiredFields} onNextField={focusNextRequiredField} />
 
       <form id="pipeline-product-form" className="quote-intake-form quote-intake-form--product-finder quote-intake-form--single-page" onSubmit={(event) => void launch(event)} onBlur={handleBlur} noValidate>
         <aside className="quote-product-filter-panel" aria-label="Pipeline filters">
@@ -848,9 +923,11 @@ export function PipelineIntakePage({
 
           {applicationFormRuntimeState.kind === 'loading' ? null : <ApplicationFormRuntimeRenderer sections={applicationFormRuntimeState.kind === 'loaded' ? runtimeSections : []} values={values} errors={visibleErrors} dropdownOptions={fieldDropdownOptions} dropdownLoading={dropdownConfigState.kind === 'loading'} onChange={changeField} />}
 
-          <FilterCard title="Keys" eyebrow="Save" badge={startReady ? 'Ready' : 'Required fields'}>
-            <StepFields fields={startFields()} intake={values} errors={visibleErrors} onChange={changeField} dropdownOptions={fieldDropdownOptions} dropdownLoading={dropdownConfigState.kind === 'loading'} />
-          </FilterCard>
+          {startFields().length > 0 ? (
+            <FilterCard title="Keys" eyebrow="Save" badge={startReady ? 'Ready' : 'Required fields'}>
+              <StepFields fields={startFields()} intake={values} errors={visibleErrors} onChange={changeField} dropdownOptions={fieldDropdownOptions} dropdownLoading={dropdownConfigState.kind === 'loading'} />
+            </FilterCard>
+          ) : null}
 
           <FilterCard title="Filters" eyebrow="Products" badge={`${activeFilterCount} active`}>
             <SelectFilter label="Mortgage type" value={productFilters.productType} values={availableFilters.productTypes} onChange={(value) => setFilter('productType', value)} formatter={productTypeLabel} />
@@ -879,6 +956,7 @@ export function PipelineIntakePage({
               <h3 id="product-results-heading">Products</h3>
             </div>
             <div className="quote-results-toolbar__actions">
+              <span className="quote-product-count-summary" aria-live="polite">{productGridCountSummary}</span>
               <span className="quote-live-indicator"><span aria-hidden="true" />Live</span>
             </div>
           </div>
@@ -909,6 +987,24 @@ export function PipelineIntakePage({
       </form>
 
       {selectedProduct ? <ProductDetailPanel product={selectedProduct} values={values} onBack={() => setSelectedProduct(null)} onUse={applyProduct} /> : null}
+      {saveOpen ? (
+        <div className="quote-pipeline-modal" role="dialog" aria-modal="true" aria-labelledby="save-pipeline-heading">
+          <div className="quote-pipeline-modal__card">
+            <div className="quote-pipeline-modal__header">
+              <h3 id="save-pipeline-heading">Save Pipeline</h3>
+              <button type="button" onClick={() => setSaveOpen(false)} aria-label="Close">×</button>
+            </div>
+            <p className="quote-pipeline-modal__copy">Add only the missing identifiers needed to save this pipeline.</p>
+            {saveMissingFields.includes('borrowerLastName') ? <CompactField id="pipeline-save-borrowerLastName" label="Borrower Last Name" value={saveKeys.borrowerLastName} onChange={(value) => setSaveKeys((current) => ({ ...current, borrowerLastName: value }))} required /> : null}
+            {saveMissingFields.includes('loanNumber') ? <CompactField id="pipeline-save-loanNumber" label="Loan Number" value={saveKeys.loanNumber} onChange={(value) => setSaveKeys((current) => ({ ...current, loanNumber: value }))} required /> : null}
+            {saveError ? <p className="quote-intake-error" role="alert">{saveError}</p> : null}
+            <div className="quote-pipeline-modal__actions">
+              <button type="button" className="quote-filter-clear" onClick={() => setSaveOpen(false)}>Back</button>
+              <button type="button" className="quote-intake-primary" onClick={submitSaveIdentifiers}>Save</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {retrieveOpen ? (
         <div className="quote-pipeline-modal" role="dialog" aria-modal="true" aria-labelledby="retrieve-pipeline-heading">
           <div className="quote-pipeline-modal__card">
@@ -916,8 +1012,9 @@ export function PipelineIntakePage({
               <h3 id="retrieve-pipeline-heading">Retrieve Pipeline</h3>
               <button type="button" onClick={() => setRetrieveOpen(false)} aria-label="Close">×</button>
             </div>
-            <CompactField label="Borrower Last Name" value={retrieveKeys.borrowerLastName} onChange={(value) => setRetrieveKeys((current) => ({ ...current, borrowerLastName: value }))} required />
-            <CompactField label="Loan Number" value={retrieveKeys.loanNumber} onChange={(value) => setRetrieveKeys((current) => ({ ...current, loanNumber: value }))} required />
+            <p className="quote-pipeline-modal__copy">Enter identifiers here to retrieve a saved pipeline without adding required keys back to the intake form.</p>
+            <CompactField id="pipeline-retrieve-borrowerLastName" label="Borrower Last Name" value={retrieveKeys.borrowerLastName} onChange={(value) => setRetrieveKeys((current) => ({ ...current, borrowerLastName: value }))} required />
+            <CompactField id="pipeline-retrieve-loanNumber" label="Loan Number" value={retrieveKeys.loanNumber} onChange={(value) => setRetrieveKeys((current) => ({ ...current, loanNumber: value }))} required />
             {retrieveError ? <p className="quote-intake-error" role="alert">{retrieveError}</p> : null}
             <div className="quote-pipeline-modal__actions">
               <button type="button" className="quote-filter-clear" onClick={() => setRetrieveOpen(false)}>Back</button>
@@ -979,6 +1076,25 @@ function ApplicationFormRuntimeRenderer({
   );
 }
 
+function ValidationTopBanner({ fields, onClose, onFocusField }: { fields: PipelineRequiredField[]; onClose: () => void; onFocusField: (fieldId: keyof BorrowerIntake) => void }) {
+  if (fields.length === 0) return null;
+  const firstField = fields[0];
+  const remainingCount = fields.length - 1;
+  return (
+    <section className="quote-validation-top-banner" role="alert" aria-labelledby="quote-validation-top-banner-heading" data-first-invalid-field={String(firstField.fieldId)}>
+      <div>
+        <p className="eyebrow">Needs attention</p>
+        <h3 id="quote-validation-top-banner-heading">{firstField.label} needs attention.</h3>
+        {remainingCount > 0 ? <p>{remainingCount} more fields need attention.</p> : null}
+      </div>
+      <div className="quote-validation-top-banner__actions">
+        <button type="button" className="quote-filter-clear" onClick={() => onFocusField(firstField.fieldId)}>Review field</button>
+        <button type="button" className="quote-validation-top-banner__close" onClick={onClose} aria-label="Close validation banner">×</button>
+      </div>
+    </section>
+  );
+}
+
 function DataRequiredPanel({ fields, onNextField }: { fields: PipelineRequiredField[]; onNextField: () => void }) {
   if (fields.length === 0) return null;
   const fieldIds = fields.map((field) => String(field.fieldId));
@@ -987,7 +1103,7 @@ function DataRequiredPanel({ fields, onNextField }: { fields: PipelineRequiredFi
       <div>
         <p className="eyebrow">Data required</p>
         <h3 id="data-required-heading">Complete required fields</h3>
-        <p>Pricing refresh is waiting on {fields.length} visible configured required {fields.length === 1 ? 'field' : 'fields'}.</p>
+        <span className="quote-intake-data-required__state" aria-label="Required field count">{fields.length} {fields.length === 1 ? 'field' : 'fields'} missing</span>
       </div>
       <ul aria-label="Missing configured required fields">
         {fields.map((field) => <li key={String(field.fieldId)} data-field-id={String(field.fieldId)}>{field.label}<code>{String(field.fieldId)}</code></li>)}
@@ -1036,11 +1152,19 @@ function ApplicationFormBuilderPanel({
         </div>
         <span>Tenant draft</span>
       </div>
-      <p className="quote-form-builder__copy">Headers separate runtime sections and never require borrower input. Field order and conditional visibility rules are saved to this tenant draft only.</p>
+      <div className="quote-form-builder__states" aria-label="Application form builder states">
+        <span>Headers: section only</span>
+        <span>Order: tenant draft</span>
+        <span>Visibility: rules</span>
+      </div>
       {validationMessage ? <p className="quote-intake-error" role="alert">{validationMessage}</p> : null}
       <fieldset className="quote-form-builder__field-editor" aria-label="Custom field editor data types">
         <legend>Field editor</legend>
-        <p className="quote-form-builder__copy">Configure field-library data types without creating pricing formulas. Enum values remain owned by approved enum workflows.</p>
+        <div className="quote-form-builder__states" aria-label="Field editor states">
+          <span>Data type</span>
+          <span>No formulas</span>
+          <span>Approved enums</span>
+        </div>
         {fieldEditorValidationMessage ? <p className="quote-intake-error" role="alert">{fieldEditorValidationMessage}</p> : null}
         {fieldEditorSavedSummary ? <p className="quote-intake-status" role="status">{fieldEditorSavedSummary}</p> : null}
         <label>Field Name<input required value={fieldEditorDraft.fieldName} onChange={(event) => onFieldEditorDraftChange({ ...fieldEditorDraft, fieldName: event.target.value })} /></label>
@@ -1074,7 +1198,7 @@ function ApplicationFormBuilderPanel({
                 const operators = parentField ? visibilityOperatorsForParent(parentField, dropdownOptions) : [];
                 const valueOptions = condition?.parentFieldId ? conditionValueOptions(condition.parentFieldId, dropdownOptions) : [];
                 return (
-                  <li key={fieldId} data-field-id={fieldId} data-value-type={header ? 'header' : 'input'}>
+                  <li key={`${step.section}-${fieldId}-${index}`} data-field-id={fieldId} data-value-type={header ? 'header' : 'input'}>
                     <span>{field.label}</span>
                     {header ? <em>section header</em> : null}
                     <div aria-label={`${field.label} order controls`}>
@@ -1159,12 +1283,11 @@ function durationConstraintText(draft: FieldEditorDraft) {
 function InlineSelectField({ label, name, value, error, options, loading, onChange }: { label: string; name: keyof BorrowerIntake; value: string; error?: string; options: DropdownOption[]; loading: boolean; onChange: (value: string) => void }) {
   const renderedOptions = loading ? [{ value: '', label: 'Loading options...' }] : withCurrentOption(withPlaceholder(options, `Select ${label.toLowerCase()}`), value);
   return (
-    <label className="quote-intake-field">
+    <label className={`quote-intake-field${error ? ' quote-intake-field--error' : ''}`}>
       {label}
       <select name={name} value={value} aria-invalid={Boolean(error)} onChange={(event) => onChange(event.target.value)} disabled={loading}>
         {renderedOptions.map((option) => <option key={option.value || 'empty'} value={option.value}>{option.label}</option>)}
       </select>
-      {error ? <p className="quote-intake-error" role="alert">{error}</p> : null}
     </label>
   );
 }
@@ -1181,11 +1304,11 @@ function SelectFilter({ label, values, value, onChange, formatter = (candidate) 
   );
 }
 
-function CompactField({ label, value, onChange, placeholder, required, inputMode }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; required?: boolean; inputMode?: 'numeric' | 'decimal' }) {
+function CompactField({ id, label, value, onChange, placeholder, required, inputMode }: { id?: string; label: string; value: string; onChange: (value: string) => void; placeholder?: string; required?: boolean; inputMode?: 'numeric' | 'decimal' }) {
   return (
-    <label className="quote-compact-filter-row">
+    <label className="quote-compact-filter-row" htmlFor={id}>
       <span>{label}{required ? <em aria-hidden="true"> *</em> : null}</span>
-      <input value={value} placeholder={placeholder} inputMode={inputMode} onChange={(event) => onChange(event.target.value)} required={required} />
+      <input id={id} value={value} placeholder={placeholder} inputMode={inputMode} onChange={(event) => onChange(event.target.value)} required={required} />
     </label>
   );
 }
@@ -1286,6 +1409,16 @@ function ProductDetailPanel({ product, values, onBack, onUse }: { product: Autho
       <button type="button" className="quote-intake-primary" onClick={() => onUse(product)}>Use Product</button>
     </aside>
   );
+}
+
+function quoteLaunchSelectedProduct(product: AuthorizedProduct): QuoteLaunchSelectedProduct {
+  return {
+    productCode: product.productCode,
+    productName: product.productName,
+    investorCode: product.investorCode,
+    channelCode: product.channelCode,
+    productType: product.productType,
+  };
 }
 
 function MetricCard({ label, value, detail, tone }: { label: string; value: string; detail: string; tone?: 'ready' | 'attention' }) {
@@ -1416,9 +1549,15 @@ function validateBuilderVisibilityDrafts(sections: Array<{ step: QuoteIntakeStep
 }
 
 function builderParentFields(sections: Array<{ step: QuoteIntakeStepDefinition; fields: ScenarioIntakeField[] }>, fieldId: string) {
+  const seen = new Set<string>();
   return sections
     .flatMap(({ fields }) => fields)
-    .filter((field) => String(field.fieldId) !== fieldId && !isHeaderMetadataField(field) && configuredBuilderParentActive(field));
+    .filter((field) => {
+      const candidateId = String(field.fieldId);
+      if (candidateId === fieldId || seen.has(candidateId) || isHeaderMetadataField(field) || !configuredBuilderParentActive(field)) return false;
+      seen.add(candidateId);
+      return true;
+    });
 }
 
 function parentFieldForCondition(sections: Array<{ step: QuoteIntakeStepDefinition; fields: ScenarioIntakeField[] }>, fieldId: keyof BorrowerIntake) {
@@ -1488,8 +1627,30 @@ function missingConfiguredRequiredFields(fields: PipelineRequiredField[], values
 }
 
 function fieldPipelineRequired(field: ScenarioIntakeField) {
+  if (isSaveRetrieveIdentifierField(String(field.fieldId))) return false;
   const record = field as ScenarioIntakeField & { pipelineRequired?: boolean };
   return record.pipelineRequired ?? field.required;
+}
+
+function isSaveRetrieveIdentifierField(fieldId: string): fieldId is SaveRetrieveIdentifierField {
+  return (saveRetrieveIdentifierFields as string[]).includes(fieldId);
+}
+
+function identifierKeysFromValues(values: BorrowerIntake) {
+  return {
+    borrowerLastName: values.borrowerLastName ?? '',
+    loanNumber: values.loanNumber ?? '',
+  };
+}
+
+function firstMissingIdentifierError(keys: { borrowerLastName: string; loanNumber: string }, fields: SaveRetrieveIdentifierField[]) {
+  const field = fields.find((candidate) => !keys[candidate].trim());
+  if (!field) return null;
+  return { field, message: `${minimumStartFieldLabel(field)} is required to save this pipeline.` };
+}
+
+function focusModalIdentifierField(action: 'save' | 'retrieve', field: SaveRetrieveIdentifierField) {
+  document.getElementById(`pipeline-${action}-${String(field)}`)?.focus();
 }
 
 function isBorrowerIntakeField(fieldId: string): fieldId is keyof BorrowerIntake {
@@ -1998,7 +2159,18 @@ function LaunchBanner({ state, onRetry }: { state: LaunchState; onRetry: () => v
   if (state.kind === 'blocked') {
     return <div className="quote-intake-banner quote-intake-banner--blocked" role="alert"><strong>Pipeline intake blocked</strong><span>{state.validation.message}</span></div>;
   }
-  return <div className="quote-intake-banner quote-intake-banner--success" role="status"><strong>Pipeline run created</strong><span>Run ID: {state.launch.runId}</span><span>Next step: {state.launch.nextRoute ?? 'Review offers'}</span></div>;
+  return (
+    <div className="quote-intake-banner quote-intake-banner--success" role="status" aria-label="Pipeline quote launch details">
+      <strong>Pipeline run created</strong>
+      <span>Run ID: {state.launch.runId}</span>
+      <span>Next step: {state.launch.nextRoute ?? 'Review offers'}</span>
+      <dl className="quote-launch-details">
+        {state.selectedProduct ? <><div><dt>Selected product</dt><dd>{state.selectedProduct.productName} ({state.selectedProduct.productCode})</dd></div><div><dt>Investor</dt><dd>{state.selectedProduct.investorCode}</dd></div><div><dt>Channel</dt><dd>{channelLabel(state.selectedProduct.channelCode)}</dd></div></> : null}
+        <div><dt>Evaluation trace</dt><dd>{state.launch.uiTraceId || state.launch.replayHashRef || 'Trace pending from pricing response'}</dd></div>
+        {state.launch.auditPackageId ? <div><dt>Audit package</dt><dd>{state.launch.auditPackageId}</dd></div> : null}
+      </dl>
+    </div>
+  );
 }
 
 export default PipelineIntakePage;

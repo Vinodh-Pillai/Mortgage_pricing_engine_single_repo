@@ -45,6 +45,12 @@ class CatalogController {
     Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.importEnumerations(tenantId, request, h.idempotencyKey, h.actorId, h.correlationId));
   }
 
+  @PutMapping("/enumerations/{enumTypeId}")
+  EnumerationCatalogUpdateResponse updateEnumeration(@PathVariable UUID tenantId, @PathVariable String enumTypeId,
+                                                     @RequestBody EnumerationCatalogUpdateRequest request, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.updateEnumeration(tenantId, enumTypeId, request, h.idempotencyKey, h.actorId, h.correlationId));
+  }
+
   @PostMapping("/field-metadata/imports")
   @ResponseStatus(HttpStatus.ACCEPTED)
   FieldMetadataImportResponse importFieldMetadata(@PathVariable UUID tenantId, @RequestBody FieldMetadataImportRequest request, HttpServletRequest http) {
@@ -74,6 +80,25 @@ class CatalogController {
   @GetMapping("/product-specification/fields")
   ProductSpecificationFieldListResponse productSpecificationFields(@PathVariable UUID tenantId, HttpServletRequest http) {
     Headers h = headers(http); authorizationService.authorize("READ_CATALOG", h.roles); return service.productSpecificationFields(tenantId, h.actorId, h.correlationId);
+  }
+
+  @PutMapping("/field-consumer-mappings/{consumer}")
+  FieldConsumerMappingResponse saveFieldConsumerMapping(@PathVariable UUID tenantId, @PathVariable String consumer,
+                                                        @RequestBody FieldConsumerMappingRequest request,
+                                                        HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.saveFieldConsumerMapping(tenantId, consumer, request, h.idempotencyKey, h.actorId, h.correlationId));
+  }
+
+  @GetMapping("/field-consumer-mappings/{consumer}")
+  FieldConsumerMappingResponse resolveFieldConsumerMapping(@PathVariable UUID tenantId, @PathVariable String consumer,
+                                                           @RequestParam(defaultValue = "tenant-active") String mappingScope,
+                                                           HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("READ_CATALOG", h.roles); return service.resolveFieldConsumerMapping(tenantId, consumer, mappingScope, h.actorId, h.correlationId);
+  }
+
+  @GetMapping("/field-metadata/{fieldId}/consumer-references")
+  FieldConsumerReferenceResponse fieldConsumerReferences(@PathVariable UUID tenantId, @PathVariable String fieldId, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("READ_CATALOG", h.roles); return service.fieldConsumerReferences(tenantId, fieldId, h.actorId, h.correlationId);
   }
 
   @PutMapping("/product-specification/fields/order-draft")
@@ -111,8 +136,9 @@ class CatalogController {
   }
 
   @GetMapping("/enumerations/{enumTypeId}")
-  EnumerationTypeResponse getEnumeration(@PathVariable UUID tenantId, @PathVariable String enumTypeId, HttpServletRequest http) {
-    Headers h = headers(http); authorizationService.authorize("READ_CATALOG", h.roles); return service.resolveEnumeration(tenantId, enumTypeId, h.actorId, h.correlationId);
+  EnumerationTypeResponse getEnumeration(@PathVariable UUID tenantId, @PathVariable String enumTypeId,
+                                         @RequestParam(required = false) java.time.LocalDate asOf, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("READ_CATALOG", h.roles); return service.resolveEnumeration(tenantId, enumTypeId, asOf, h.actorId, h.correlationId);
   }
 
   @PostMapping("/products")
@@ -482,11 +508,13 @@ class CatalogController {
           "code", errorCode,
           "message", fieldMetadataMessage(errorCode)));
     }
-    if (errorCode.startsWith("PRODUCT_SPEC_CONDITION_")) {
+    if (errorCode.startsWith("PRODUCT_SPEC_")) {
       return List.of(Map.of(
-          "field", "productSpecification.conditions",
+          "field", errorCode.startsWith("PRODUCT_SPEC_CONDITION_") ? "productSpecification.conditions" : "productSpecification.fields",
           "code", errorCode,
-          "message", "Fix product specification include/additional condition rules before publishing."));
+          "message", "PRODUCT_SPEC_TYPE_BREAKING_EDIT_REQUIRES_MIGRATION".equals(errorCode)
+              ? "Create a migration-controlled field version before changing the value type of a mapped field."
+              : "Fix product specification field builder values before publishing."));
     }
     if ("INVALID_COUNTY_FIPS".equals(errorCode)) {
       return List.of(Map.of(
@@ -534,6 +562,7 @@ class CatalogController {
     return switch (errorCode) {
       case "ENUM_TYPE_NOT_FOUND" -> "Enumeration type was not found in the system/default catalog.";
       case "ENUM_TYPE_DUPLICATE" -> "Enumeration type already exists; use a versioned update workflow instead of inventing replacement variants.";
+      case "ENUM_VARIANT_DELETE_BLOCKED" -> "Enumeration variants referenced by fields or conditions cannot be deleted; create an additive tenant override or versioned replacement.";
       default -> "Provide LoanPass enumeration types and variants from the approved field library source.";
     };
   }
@@ -551,7 +580,7 @@ class CatalogController {
   private static String fieldMetadataMessage(String errorCode) {
     return switch (errorCode) {
       case "FIELD_ID_DUPLICATE" -> "Field metadata import contains a duplicate field id for this tenant.";
-      case "FIELD_VALUE_TYPE_UNSUPPORTED" -> "Use a supported field value type such as header, enum, number, string, date, time, duration, US state, or US county.";
+      case "FIELD_VALUE_TYPE_UNSUPPORTED" -> "Use a supported field value type such as header, enum, number, string, text, date, time, duration, boolean, US state, or US county.";
       case "FIELD_METADATA_NOT_FOUND" -> "Field metadata id was not found in the tenant catalog.";
       default -> "Provide complete field metadata from the approved ReferenceFormfields source.";
     };
@@ -611,6 +640,7 @@ class CatalogController {
 
   static HttpStatus catalogErrorStatus(String errorCode) {
     if ("ENUM_TYPE_NOT_FOUND".equals(errorCode)) return HttpStatus.NOT_FOUND;
+    if ("FIELD_CONSUMER_MAPPING_NOT_FOUND".equals(errorCode)) return HttpStatus.NOT_FOUND;
     if ("SEPARATION_OF_DUTIES_VIOLATION".equals(errorCode) || "INCLUDE_INACTIVE_REQUIRES_DEBUG_PERMISSION".equals(errorCode)) return HttpStatus.FORBIDDEN;
     if ("IDEMPOTENCY_CONFLICT".equals(errorCode) || "VERSION_CONFLICT".equals(errorCode) || "CATALOG_VERSION_CONFLICT".equals(errorCode) || "IMPORT_ALREADY_PROCESSED".equals(errorCode)) return HttpStatus.CONFLICT;
     return HttpStatus.UNPROCESSABLE_ENTITY;

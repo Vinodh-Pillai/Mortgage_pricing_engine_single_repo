@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.wcpe.adjustment.FeeCalculationService.FeeCalculationConfiguration;
+import com.wcpe.adjustment.FeeCalculationService.CalculationOutputSnapshot;
+import com.wcpe.adjustment.FeeCalculationService.ConfigurationBlockerException;
 import com.wcpe.adjustment.FeeCalculationService.FeeCalculationRequest;
 import com.wcpe.adjustment.FeeCalculationService.FeeCalculationResult;
 import com.wcpe.adjustment.FeeCalculationService.ManualFeeInput;
@@ -61,6 +63,34 @@ class FeeCalculationServiceTest {
         assertThat(result.event().eventType()).isEqualTo("QuoteFeesCalculated.v1");
         assertThat(result.audit().action()).isEqualTo("FEE_CALCULATION_COMPLETED");
         assertThat(result.audit().resultHash()).hasSize(64).isEqualTo(replay.audit().resultHash());
+    }
+
+    @Test
+    void consumesCalculationEngineOutputsAndTracesInputFieldsVersionsAndOutputAmounts() {
+        FeeCatalogVersion catalog = publishedCatalog(List.of(
+            fee("CALC_ENGINE_FEE", CalculationMethod.FIXED_AMOUNT, Map.of(
+                "amountCalculationOutputRef", "calc@fee.amount"
+            ), "BORROWER")
+        ));
+        CalculationOutputSnapshot outputs = new CalculationOutputSnapshot(
+            "runtime-eval-PII-74-S01",
+            List.of("calc-version-PII-71-S04"),
+            Map.of("calc@fee.amount", new BigDecimal("42.125")),
+            Map.of("loanAmount", "100000.00", "ltv", "72.50")
+        );
+
+        FeeCalculationResult result = service.calculate(request(catalog, FeeCalculationConfiguration.empty(), outputs));
+
+        assertThat(result.feeLines()).hasSize(1);
+        assertThat(result.feeLines().get(0).roundedAmount()).isEqualByComparingTo("42.13");
+        assertThat(result.feeLines().get(0).formulaInputs())
+            .containsEntry("amountCalculationOutputRef", "calc@fee.amount")
+            .containsEntry("calculationVersionIds", "calc-version-PII-71-S04")
+            .containsEntry("calculationEvaluationId", "runtime-eval-PII-74-S01")
+            .containsEntry("inputFieldRefs", "loanAmount,ltv");
+        assertThat(result.audit().calculationVersionIds()).containsExactly("calc-version-PII-71-S04");
+        assertThat(result.audit().inputFieldRefs()).containsExactly("loanAmount", "ltv");
+        assertThat(result.audit().outputAmountSummary()).containsEntry("CALC_ENGINE_FEE", "42.13");
     }
 
     @Test
@@ -180,12 +210,39 @@ class FeeCalculationServiceTest {
 
         FeeCatalogVersion published = draft.publish("approver-1", Instant.parse("2026-01-02T00:00:00Z"), List.of());
         assertThatThrownBy(() -> service.calculate(request(published, FeeCalculationConfiguration.empty())))
-            .isInstanceOf(IllegalArgumentException.class)
+            .isInstanceOf(ConfigurationBlockerException.class)
             .hasMessageContaining("missing configured numeric value");
     }
 
     private FeeCalculationRequest request(FeeCatalogVersion catalog, FeeCalculationConfiguration configuration) {
         return request(catalog, configuration, Map.of(), Map.of(), Set.of());
+    }
+
+    private FeeCalculationRequest request(
+        FeeCatalogVersion catalog,
+        FeeCalculationConfiguration configuration,
+        CalculationOutputSnapshot outputs
+    ) {
+        return new FeeCalculationRequest(
+            TENANT_ID,
+            CALCULATION_ID,
+            "quote-PII-74-S01",
+            "scenario-PII-74-S01",
+            "actor-1",
+            catalog,
+            context(),
+            new BigDecimal("100000.00"),
+            2,
+            configuration,
+            Map.of(),
+            Map.of(),
+            Set.of(),
+            outputs,
+            null,
+            Instant.parse("2026-04-01T00:00:01Z"),
+            "correlation-PII-74-S01",
+            "idem-PII-74-S01"
+        );
     }
 
     private FeeCalculationRequest request(

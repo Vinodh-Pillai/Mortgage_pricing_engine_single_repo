@@ -37,6 +37,35 @@ class EnumerationCatalogPolicyTest {
   }
 
   @Test
+  void blocksUnsafeVariantDeletionWhenEnumerationIsReferenced() {
+    EnumerationTypeResponse existing = new EnumerationTypeResponse("product-channel", "Product Channel", List.of(
+        new EnumerationVariantResponse("retail", "101", "Retail"),
+        new EnumerationVariantResponse("wholesale", "102", "Wholesale")),
+        "ReferenceFormfields.json", "system/default");
+    EnumerationCatalogUpdateRequest request = new EnumerationCatalogUpdateRequest("Product Channel", List.of(
+        new EnumerationVariantInput("retail", "101", "Retail")), null, "remove wholesale");
+
+    assertThatThrownBy(() -> EnumerationCatalogPolicy.revise(existing, request, true))
+        .isInstanceOf(CatalogException.class)
+        .hasMessage("ENUM_VARIANT_DELETE_BLOCKED");
+  }
+
+  @Test
+  void allowsAdditiveTenantOverrideWithoutHardcodedPipelineValues() {
+    EnumerationTypeResponse existing = new EnumerationTypeResponse("product-channel", "Product Channel", List.of(
+        new EnumerationVariantResponse("retail", "101", "Retail")),
+        "ReferenceFormfields.json", "system/default");
+    EnumerationCatalogUpdateRequest request = new EnumerationCatalogUpdateRequest("Product Channel", List.of(
+        new EnumerationVariantInput("retail", "101", "Retail"),
+        new EnumerationVariantInput("wholesale", "102", "Wholesale")), null, "approved ReferenceFormfields tenant override");
+
+    EnumerationTypeResponse revised = EnumerationCatalogPolicy.revise(existing, request, true);
+
+    assertThat(revised.overrideScope()).isEqualTo("tenant");
+    assertThat(revised.variants()).extracting(EnumerationVariantResponse::variantId).containsExactly("retail", "wholesale");
+  }
+
+  @Test
   void mapsUnknownEnumTypeToNotFoundStatus() {
     assertThat(CatalogController.catalogErrorStatus("ENUM_TYPE_NOT_FOUND"))
         .isEqualTo(org.springframework.http.HttpStatus.NOT_FOUND);

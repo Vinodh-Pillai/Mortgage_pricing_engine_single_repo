@@ -528,7 +528,7 @@ class CatalogServiceIntegrationTest {
   }
 
   @Test
-  void CatalogVersioningIT_rejectsOverlappingPublishedWindow() {
+  void CatalogVersioningIT_supersedesPriorPublishedWindowForAsOfReplay() {
     UUID tenantId = UUID.randomUUID();
     CatalogVersionControlRecord draft = draftTaxonomyVersion(tenantId, "OVERLAP_PRODUCT");
     service.getRepository().getJdbcTemplate().update("update catalog.catalog_version_control set status='PUBLISHED', effective_start=? where tenant_id=? and version_control_id=?",
@@ -539,10 +539,12 @@ class CatalogServiceIntegrationTest {
         values (?,?,?,?,?,?,?,?,?,?,?::jsonb,0)
         """, tenantId, overlapping, draft.catalogId(), draft.artifactType(), draft.artifactId(), draft.artifactCode(), 2, CatalogStatus.APPROVED.name(), java.sql.Date.valueOf(LocalDate.of(2026, 2, 1)), "sha256:overlap", "{}");
 
-    assertThatThrownBy(() -> service.applyVersionAction(tenantId, draft.artifactType(), draft.artifactId(),
-        new CatalogVersionActionRequest("PUBLISH", overlapping, 0L, Instant.parse("2026-02-01T00:00:00Z"), "overlap"), "overlap-pub-" + tenantId, "actor-3", "corr-0205"))
-        .isInstanceOf(CatalogException.class)
-        .hasMessage("EFFECTIVE_WINDOW_OVERLAP");
+    CatalogVersionActionResponse published = service.applyVersionAction(tenantId, draft.artifactType(), draft.artifactId(),
+        new CatalogVersionActionRequest("PUBLISH", overlapping, 0L, Instant.parse("2026-02-01T00:00:00Z"), "replacement"), "overlap-pub-" + tenantId, "actor-3", "corr-0205");
+
+    assertThat(published.status()).isEqualTo(CatalogStatus.PUBLISHED);
+    assertThat(service.resolveVersionAsOf(tenantId, draft.artifactType(), "OVERLAP_PRODUCT", Instant.parse("2026-01-15T00:00:00Z")).versionId()).isEqualTo(draft.versionControlId());
+    assertThat(service.resolveVersionAsOf(tenantId, draft.artifactType(), "OVERLAP_PRODUCT", Instant.parse("2026-02-15T00:00:00Z")).versionId()).isEqualTo(overlapping);
   }
 
   @Test
@@ -600,6 +602,72 @@ class CatalogServiceIntegrationTest {
     assertThat(service.active(tenantId).references()).extracting(ReferenceEntry::catalogType).contains("PRODUCT_SPECIFICATION");
     assertThat(snapshot.referenceVersions()).containsKey("productSpecifications");
     assertThat(snapshot.referenceVersions().get("productSpecifications")).isNotEmpty();
+  }
+
+  @Test
+  void tenantFieldAliasDraftSaveCreatesAndAdvancesVersionControlEvidence() {
+    UUID tenantId = UUID.randomUUID();
+    UUID systemTenantId = new UUID(0L, 0L);
+    seedSystemProductSpecificationFields(systemTenantId);
+    service.importProductSpecificationFieldsFromSystem(tenantId,
+        new ProductSpecificationSystemFieldImportRequest(List.of("field@product-channel")),
+        "product-spec-import-alias-" + tenantId, "actor-1", "corr-7002");
+
+    ProductSpecificationTenantFieldDraftResponse first = service.saveProductSpecificationTenantFieldDraft(tenantId,
+        new ProductSpecificationTenantFieldDraftRequest(List.of(
+            new ProductSpecificationFieldAliasEdit("field@product-channel", "Tenant Channel", "Tenant channel description")), List.of()),
+        "product-spec-alias-first-" + tenantId, "actor-1", "corr-7002");
+    ProductSpecificationTenantFieldDraftResponse second = service.saveProductSpecificationTenantFieldDraft(tenantId,
+        new ProductSpecificationTenantFieldDraftRequest(List.of(
+            new ProductSpecificationFieldAliasEdit("field@product-channel", "Tenant Channel Updated", "Updated tenant channel description")), List.of()),
+        "product-spec-alias-second-" + tenantId, "actor-1", "corr-7002");
+
+    List<CatalogVersionControlRecord> tenantDraftVersions = service.versions(tenantId).stream()
+        .filter(version -> "PRODUCT_SPEC_TENANT_FIELD_DRAFT".equals(version.artifactType()))
+        .toList();
+
+    assertThat(first.systemDefaultsChanged()).isFalse();
+    assertThat(second.systemDefaultsChanged()).isFalse();
+    assertThat(first.aliasCount()).isEqualTo(1);
+    assertThat(second.aliasCount()).isEqualTo(1);
+    assertThat(tenantDraftVersions).hasSize(2);
+    assertThat(tenantDraftVersions).extracting(CatalogVersionControlRecord::artifactCode)
+        .containsOnly("product-spec-tenant-field:draft");
+    assertThat(tenantDraftVersions).extracting(CatalogVersionControlRecord::versionNumber)
+        .containsExactly(1, 2);
+    assertThat(tenantDraftVersions).extracting(CatalogVersionControlRecord::status)
+        .containsOnly(CatalogStatus.DRAFT);
+  }
+
+  @Test
+  void tenantFieldOverrideConflictDetectedBeforeActivationWhenBaseMetadataChanges() {
+    UUID tenantId = UUID.randomUUID();
+    UUID systemTenantId = new UUID(0L, 0L);
+    seedSystemProductSpecificationFields(systemTenantId);
+    service.importProductSpecificationFieldsFromSystem(tenantId,
+        new ProductSpecificationSystemFieldImportRequest(List.of("field@product-channel")),
+        "product-spec-import-conflict-" + tenantId, "actor-1", "corr-7005");
+    service.saveProductSpecificationTenantFieldDraft(tenantId,
+        new ProductSpecificationTenantFieldDraftRequest(List.of(
+            new ProductSpecificationFieldAliasEdit("field@product-channel", "Tenant Channel", "Tenant channel description")), List.of()),
+        "product-spec-alias-conflict-" + tenantId, "actor-1", "corr-7005");
+    service.getRepository().getJdbcTemplate().update("""
+        update catalog.reference_entry
+        set label='Product Channel Updated',
+            attributes=jsonb_set(jsonb_set(jsonb_set(jsonb_set(attributes,
+              '{valueType}', '"string"'::jsonb),
+              '{sourceGroup}', '"changedProductFields"'::jsonb),
+              '{description}', '"Changed channel selector"'::jsonb),
+              '{conditions}', '{"enumTypeId":"product-channel-v2"}'::jsonb)
+        where tenant_id=? and catalog_type='LOANPASS_FIELD_METADATA' and code='field@product-channel'
+        """, tenantId);
+    service.validate(tenantId, new LifecycleActionRequest("product spec valid"), "ps-conflict-val-" + tenantId, "actor-1", "corr-7005");
+    service.submitApproval(tenantId, new LifecycleActionRequest("product spec submit"), "ps-conflict-sub-" + tenantId, "actor-1", "corr-7005");
+    service.approve(tenantId, new LifecycleActionRequest("product spec approve"), "ps-conflict-app-" + tenantId, "actor-2", "corr-7005");
+
+    assertThatThrownBy(() -> service.publish(tenantId, new PublishCatalogRequest("product spec publish", LocalDate.now()), "ps-conflict-pub-" + tenantId, "actor-3", "corr-7005"))
+        .isInstanceOf(CatalogException.class)
+        .hasMessage("PRODUCT_SPEC_TENANT_OVERRIDE_CONFLICT");
   }
 
   private void publishResolvableCatalog(UUID tenantId) {

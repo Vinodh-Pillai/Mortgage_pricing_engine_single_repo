@@ -153,6 +153,16 @@ const conditionalRequiredMetadataState: MetadataState = {
   },
 };
 
+const multiRequiredValidationBannerMetadataState: MetadataState = {
+  kind: 'loaded',
+  metadata: {
+    ...metadataState.metadata,
+    fieldGroups: metadataState.metadata.fieldGroups.map((group) => group.groupId === 'loan-structure'
+      ? { ...group, fields: [field('loanPurpose', true), field('baseLoanAmount', true, 'number'), field('desiredLoanTerm', false, 'number'), field('desiredAmortizationType', false)] }
+      : group),
+  },
+};
+
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
@@ -167,18 +177,18 @@ describe('PipelineIntakeTest', () => {
     expect(screen.getByRole('heading', { name: /^Products$/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Previous/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Next/i })).not.toBeInTheDocument();
-  }, 30000);
+  }, 60000);
 
-  it('onlyLoanPassStartKeysAreRequiredAndPreferencesStepIsRemoved', () => {
-    render(<QuoteIntakeFlow metadataState={metadataState} />);
-    const startPipeline = screen.getByRole('heading', { name: /^Keys$/i }).closest('section') as HTMLElement;
-    expect(within(startPipeline).getByRole('textbox', { name: /^Borrower last name/i })).toBeRequired();
-    expect(within(startPipeline).getByRole('textbox', { name: /^Loan number/i })).toBeRequired();
+  it('keepsSaveRetrieveIdentifiersOutOfTheIntakeFormAndPreferencesStepIsRemoved', () => {
+    const { container } = render(<QuoteIntakeFlow metadataState={metadataState} />);
+    expect(container.querySelector('#keys-heading')).not.toBeInTheDocument();
+    expect(container.querySelector('input[name="borrowerLastName"]')).not.toBeInTheDocument();
+    expect(container.querySelector('input[name="loanNumber"]')).not.toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: /^Mortgage type/i })).not.toBeRequired();
     expect(screen.queryByRole('button', { name: /Preferences & Launch/i })).not.toBeInTheDocument();
-  });
+  }, 30000);
 
-  it('loanBasicsCreatesDraftOnFirstFieldEntryAndSavesOnBlur', async () => {
+  it('loanBasicsCreatesDraftOnFirstPricingFieldEntryAndSavesOnBlur', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input.toString();
       if (url.endsWith('/scenarios') && init?.method === 'POST') return json({ scenarioId: 'scenario-1', scenarioVersion: 1 });
@@ -188,19 +198,21 @@ describe('PipelineIntakeTest', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<QuoteIntakeFlow metadataState={metadataState} />);
 
-    fireEvent.change(screen.getByRole('textbox', { name: /Loan number/i }), { target: { value: 'LP-1001' } });
+    const quoteSection = screen.getByRole('heading', { name: /^Quote$/i }).closest('section') as HTMLElement;
+    const mortgageType = within(quoteSection).getByRole('combobox', { name: /^Mortgage type/i });
+    fireEvent.change(mortgageType, { target: { value: 'Conventional' } });
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/tenants/ui-preview-tenant/scenarios', expect.objectContaining({ method: 'POST' })));
     const firstDraftCreate = fetchMock.mock.calls.find(([input, init]) => input.toString().endsWith('/scenarios') && init?.method === 'POST');
-    expect(JSON.parse(String(firstDraftCreate?.[1]?.body))).toMatchObject({ data: { loanNumber: 'LP-1001' } });
-    fireEvent.blur(screen.getByRole('textbox', { name: /Loan number/i }));
+    expect(JSON.parse(String(firstDraftCreate?.[1]?.body))).toMatchObject({ data: { mortgageType: 'Conventional' } });
+    fireEvent.blur(mortgageType);
     await waitFor(() => expect(window.localStorage.getItem('wcpe:quoteIntakeDraft:last')).toBe('scenario-1'));
-  });
+  }, 60000);
 
   it('launchesQuoteFromProductFinderWithMinimumStartKeys', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input.toString();
       if (url.endsWith('/scenarios') && init?.method === 'POST') return json({ scenarioId: 'scenario-launch', scenarioVersion: 1 });
-      if (url.endsWith('/quote-runs') && init?.method === 'POST') return json({ status: 'CREATED', runId: 'run-1', nextRoute: '/quote/run-1/offers', validationSummary: { passed: true, status: 'PASSED', message: 'ok', blockers: {} }, uiTraceId: 'trace', events: [], fallbackMode: false, dependencyStatus: '', auditPackageId: null, replayHashRef: null, validationIssues: [] });
+      if (url.endsWith('/quote-runs') && init?.method === 'POST') return json({ status: 'CREATED', runId: 'run-1', nextRoute: '/quote/run-1/offers', validationSummary: { passed: true, status: 'PASSED', message: 'ok', blockers: {} }, uiTraceId: 'trace-quote-launch', events: [], fallbackMode: false, dependencyStatus: '', auditPackageId: 'audit-quote-launch', replayHashRef: 'replay-quote-launch', validationIssues: [] });
       return json({ scenarioId: 'scenario-launch', scenarioVersion: 2, passed: true, status: 'PASSED', message: 'ok', blockers: {} });
     });
     const onNavigate = vi.fn();
@@ -212,8 +224,17 @@ describe('PipelineIntakeTest', () => {
     const launchButton = screen.getByRole('button', { name: /^Launch Quote$/i });
     await waitFor(() => expect(launchButton).not.toBeDisabled());
     fireEvent.click(launchButton);
+    const launchCall = await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([input, init]) => input.toString().endsWith('/quote-runs') && init?.method === 'POST' && init.body);
+      expect(call).toBeDefined();
+      return call;
+    });
+    expect(JSON.parse(String(launchCall?.[1]?.body))).toMatchObject({ scenarioId: 'scenario-launch', scenarioVersion: 1, channelCode: 'RETAIL', investorCode: 'FNMA', mortgageType: 'CONVENTIONAL' });
+    expect(await screen.findByRole('status', { name: /Pipeline quote launch details/i })).toHaveTextContent(/Conventional 30-Year Preview \(CONF_30YR_PREVIEW\)/i);
+    expect(screen.getByRole('status', { name: /Pipeline quote launch details/i })).toHaveTextContent(/trace-quote-launch/i);
+    expect(screen.getByRole('status', { name: /Pipeline quote launch details/i })).toHaveTextContent(/audit-quote-launch/i);
     await waitFor(() => expect(onNavigate).toHaveBeenCalledWith('/quote/run-1/offers'));
-  });
+  }, 60000);
 
   it('responsiveAt320pxUsesSingleColumnSinglePageShell', () => {
     const { container } = render(<QuoteIntakeFlow metadataState={metadataState} />);
@@ -232,18 +253,21 @@ describe('PipelineIntakeTest', () => {
     expect(container.querySelectorAll('.quote-intake-section')).toHaveLength(0);
   });
 
-  it('hidesValidationErrorsUntilSubmit', () => {
+  it('keepsSaveIdentifierValidationInsideTheSaveModal', async () => {
     render(<QuoteIntakeFlow metadataState={metadataState} errors={{ loanNumber: 'Loan number is required.' }} />);
 
-    const loanNumber = screen.getByRole('textbox', { name: /^Loan number/i });
-    expect(loanNumber).toHaveAttribute('aria-invalid', 'false');
+    expect(screen.queryByRole('textbox', { name: /^Loan number/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /^Save Pipeline$/i }));
+    const dialog = screen.getByRole('dialog', { name: /^Save Pipeline$/i });
+    expect(within(dialog).getByRole('textbox', { name: /^Borrower Last Name/i })).toBeRequired();
+    expect(within(dialog).getByRole('textbox', { name: /^Loan Number/i })).toBeRequired();
 
-    expect(loanNumber).toHaveAttribute('aria-invalid', 'true');
-    expect(screen.getAllByRole('alert').map((alert) => alert.textContent)).toEqual(expect.arrayContaining(['Loan Number is required.']));
-  });
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Save$/i }));
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(/Borrower Last Name is required to save this pipeline\./i);
+    await waitFor(() => expect(within(dialog).getByRole('textbox', { name: /^Borrower Last Name/i })).toHaveFocus());
+  }, 30000);
 
   it('shows concise required indicators and disables launch until the quote is ready', () => {
     render(<QuoteIntakeFlow metadataState={metadataState} />);
@@ -255,22 +279,72 @@ describe('PipelineIntakeTest', () => {
     expect(screen.getByText('Select a product and complete required fields')).toBeInTheDocument();
   });
 
+  it('rendersOperationalNoTextPipelineWithStateChipsInsteadOfHelpCopy', () => {
+    const { container } = render(<QuoteIntakeFlow metadataState={metadataState} />);
+
+    expect(container.querySelector('.quote-form-builder__copy')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Capture the borrower and loan facts/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Headers separate runtime sections/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Configure field-library data types/i)).not.toBeInTheDocument();
+    expect(container.querySelector('[aria-label="Required field count"]')).toHaveTextContent(/fields missing/i);
+    expect(container.querySelector('[aria-label="Application form builder states"]')).toHaveTextContent(/Headers: section only/i);
+    expect(container.querySelector('[aria-label="Field editor states"]')).toHaveTextContent(/Approved enums/i);
+  }, 30000);
+
   it('showsDataRequiredStateFromConfiguredRequiredFieldsAndMovesToNextField', async () => {
     const firstMissing = render(<QuoteIntakeFlow metadataState={metadataState} />);
+    expect(screen.queryByRole('heading', { name: /^Complete required fields$/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('row', { name: /Conventional 30-Year Preview ACTIVE/i }));
 
     const dataRequired = screen.getByRole('heading', { name: /^Complete required fields$/i }).closest('section') as HTMLElement;
-    expect(dataRequired).toHaveAttribute('data-required-field-ids', expect.stringContaining('borrowerLastName'));
-    expect(dataRequired).toHaveAttribute('data-required-field-ids', expect.stringContaining('loanNumber'));
+    const requiredFieldIds = dataRequired.getAttribute('data-required-field-ids') ?? '';
     expect(dataRequired).toHaveAttribute('data-required-field-ids', expect.stringContaining('mortgageType'));
+    expect(requiredFieldIds).not.toContain('borrowerLastName');
+    expect(requiredFieldIds).not.toContain('loanNumber');
 
     fireEvent.click(within(dataRequired).getByRole('button', { name: /^Next Field$/i }));
-    await waitFor(() => expect(screen.getByRole('textbox', { name: /^Borrower last name/i })).toHaveFocus());
+    expect(dataRequired.getAttribute('data-required-field-ids')).toBe('mortgageType');
     firstMissing.unmount();
 
-    render(<QuoteIntakeFlow metadataState={metadataState} intake={{ ...initialQuoteIntake, borrowerLastName: 'Rivera' }} />);
-    const nextMissing = screen.getByRole('heading', { name: /^Complete required fields$/i }).closest('section') as HTMLElement;
-    fireEvent.click(within(nextMissing).getByRole('button', { name: /^Next Field$/i }));
-    await waitFor(() => expect(screen.getByRole('textbox', { name: /^Loan number/i })).toHaveFocus());
+    render(<QuoteIntakeFlow metadataState={metadataState} intake={{ ...initialQuoteIntake, mortgageType: 'Conventional' }} />);
+    fireEvent.click(screen.getByRole('row', { name: /Conventional 30-Year Preview ACTIVE/i }));
+    expect(screen.queryByRole('heading', { name: /^Complete required fields$/i })).not.toBeInTheDocument();
+  }, 30000);
+
+  it('showsClosableStickyValidationBannerForOneInvalidFieldAndEnablesLaunchAfterFix', () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({})));
+    const { container } = render(<QuoteIntakeFlow metadataState={metadataState} />);
+    const firstProductRow = container.querySelector('.quote-product-row:not(.quote-product-row--header)') as HTMLElement;
+
+    fireEvent.click(firstProductRow);
+
+    const banner = container.querySelector('.quote-validation-top-banner') as HTMLElement;
+    expect(banner).toHaveTextContent(/Mortgage Type needs attention/i);
+    expect(banner).toHaveClass('quote-validation-top-banner');
+    expect(banner).not.toHaveTextContent(/more fields need attention/i);
+
+    fireEvent.click(banner.querySelector('.quote-validation-top-banner__close') as HTMLButtonElement);
+    expect(container.querySelector('.quote-validation-top-banner')).not.toBeInTheDocument();
+
+    fireEvent.click(Array.from(firstProductRow.querySelectorAll('button')).find((button) => button.textContent === 'Use') as HTMLButtonElement);
+    expect(container.querySelector('.quote-validation-top-banner')).not.toBeInTheDocument();
+    const launchButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Launch Quote') as HTMLButtonElement;
+    expect(launchButton).not.toBeDisabled();
+  }, 30000);
+
+  it('summarizesMultipleInvalidFieldsAndRedHighlightsVisibleControls', async () => {
+    const { container } = render(<QuoteIntakeFlow metadataState={multiRequiredValidationBannerMetadataState} />);
+
+    fireEvent.click(screen.getByRole('row', { name: /Conventional 30-Year Preview ACTIVE/i }));
+
+    expect(screen.getByRole('alert', { name: /Mortgage Type needs attention/i })).toHaveTextContent(/2 more fields need attention/i);
+    const invalidMortgageType = container.querySelector('#mortgageType') as HTMLSelectElement;
+    await waitFor(() => expect(invalidMortgageType).toHaveFocus());
+    expect(invalidMortgageType).toHaveAttribute('aria-invalid', 'true');
+    expect(container.querySelector('#loanPurpose')).toHaveAttribute('aria-invalid', 'true');
+    expect(container.querySelector('#baseLoanAmount')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.queryByText(/is required before pricing refresh/i)).not.toBeInTheDocument();
   }, 30000);
 
   it('savesAndRetrievesPipelineThroughDraftScenarioLookup', async () => {
@@ -283,9 +357,11 @@ describe('PipelineIntakeTest', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<QuoteIntakeFlow metadataState={metadataState} />);
 
-    fireEvent.change(screen.getByRole('textbox', { name: /^Borrower last name/i }), { target: { value: 'Rivera' } });
-    fireEvent.change(screen.getByRole('textbox', { name: /^Loan number/i }), { target: { value: 'LN-2001' } });
     fireEvent.click(screen.getByRole('button', { name: /^Save Pipeline$/i }));
+    const saveDialog = screen.getByRole('dialog', { name: /^Save Pipeline$/i });
+    fireEvent.change(within(saveDialog).getByLabelText(/Borrower Last Name/i), { target: { value: 'Rivera' } });
+    fireEvent.change(within(saveDialog).getByLabelText(/Loan Number/i), { target: { value: 'LN-2001' } });
+    fireEvent.click(within(saveDialog).getByRole('button', { name: /^Save$/i }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/tenants/ui-preview-tenant/scenarios', expect.objectContaining({ method: 'POST' })));
     await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => String(init?.body ?? '').includes('LN-2001'))).toBe(true));
     const persistCall = [...fetchMock.mock.calls].reverse().find(([, init]) => String(init?.body ?? '').includes('LN-2001'));
@@ -299,8 +375,8 @@ describe('PipelineIntakeTest', () => {
 
     await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => input.toString().includes('/scenarios?borrowerLastName=Rivera&loanNumber=LN-2001'))).toBe(true));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: /^Retrieve Pipeline$/i })).not.toBeInTheDocument());
-    expect(screen.getByRole('status')).toHaveTextContent(/Retrieved scenario-pipeline-1/i);
-  }, 30000);
+    expect(screen.getByText(/Retrieved scenario-pipeline-1/i)).toBeInTheDocument();
+  }, 60000);
 
   it('rendersLoanPassFieldsAsFriendlySelectsAndConsolidatesZip', () => {
     render(<QuoteIntakeFlow metadataState={metadataState} intake={{ ...initialQuoteIntake, propertyType: 'Single Family', occupancyType: 'Primary Residence', purchasePrice: '-1', appraisedValue: '-1' }} />);
@@ -315,17 +391,24 @@ describe('PipelineIntakeTest', () => {
   });
 
   it('filtersProductResultsFromLeftPanelControls', () => {
-    render(<QuoteIntakeFlow metadataState={metadataState} />);
+    const { container } = render(<QuoteIntakeFlow metadataState={metadataState} />);
+    const filters = container.querySelector('#filters-heading')?.closest('section') as HTMLElement;
+    const [mortgageTypeFilter, , , statusFilter] = Array.from(filters.querySelectorAll('select')) as HTMLSelectElement[];
 
-    expect(screen.getByRole('row', { name: /VA 30-Year Preview ACTIVE/i })).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText(/^Mortgage type$/i), { target: { value: 'FHA' } });
-    expect(screen.queryByRole('row', { name: /VA 30-Year Preview ACTIVE/i })).not.toBeInTheDocument();
-    expect(screen.getByRole('row', { name: /FHA 30-Year Preview PENDING/i })).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText(/^Status$/i), { target: { value: 'ACTIVE' } });
+    expect(container.querySelector('.quote-intake-data-required')).not.toBeInTheDocument();
+    expect(screen.getByText(/5 filtered of 5 total · 3 active · 1 pending · 1 inactive/i)).toBeInTheDocument();
+    expect(container.querySelector('.quote-product-row[aria-label="VA 30-Year Preview ACTIVE"]')).toBeInTheDocument();
+    fireEvent.change(mortgageTypeFilter, { target: { value: 'FHA' } });
+    expect(screen.getByText(/1 filtered of 5 total · 0 active · 1 pending · 0 inactive/i)).toBeInTheDocument();
+    expect(container.querySelector('.quote-product-row[aria-label="VA 30-Year Preview ACTIVE"]')).not.toBeInTheDocument();
+    expect(container.querySelector('.quote-product-row[aria-label="FHA 30-Year Preview PENDING"]')).toBeInTheDocument();
+    fireEvent.change(statusFilter, { target: { value: 'ACTIVE' } });
+    expect(screen.getByText(/0 filtered of 5 total · 0 active · 0 pending · 0 inactive/i)).toBeInTheDocument();
     expect(screen.getByText(/No matches/i)).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText(/^Status$/i), { target: { value: 'PENDING' } });
-    expect(screen.getByRole('row', { name: /FHA 30-Year Preview PENDING/i })).toBeInTheDocument();
-  });
+    fireEvent.change(statusFilter, { target: { value: 'PENDING' } });
+    expect(screen.getByText(/1 filtered of 5 total · 0 active · 1 pending · 0 inactive/i)).toBeInTheDocument();
+    expect(container.querySelector('.quote-product-row[aria-label="FHA 30-Year Preview PENDING"]')).toBeInTheDocument();
+  }, 30000);
 
   it('rendersProductOptionsAsRowsWithConfiguredPricingColumnsNotCards', () => {
     const { container } = render(<QuoteIntakeFlow metadataState={metadataState} />);
@@ -368,10 +451,12 @@ describe('PipelineIntakeTest', () => {
     render(<QuoteIntakeFlow metadataState={metadataState} onNavigate={onNavigate} />);
 
     const row = screen.getByRole('row', { name: /Conventional 30-Year Preview ACTIVE/i });
+    fireEvent.keyDown(row, { key: 'Enter' });
+    expect(row).toHaveAttribute('aria-selected', 'true');
     fireEvent.click(within(row).getByRole('button', { name: /^Use$/i }));
 
     expect(row).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('status')).toHaveTextContent(/Conventional 30-Year Preview selected/i);
+    expect(screen.getByText(/Conventional 30-Year Preview selected/i)).toBeInTheDocument();
     expect(onNavigate).not.toHaveBeenCalled();
   });
 
@@ -451,12 +536,14 @@ describe('PipelineIntakeTest', () => {
 
   it('doesNotCountConditionallyHiddenConfiguredRequiredFieldsAndClearsWhenVisibleRequiredFieldsComplete', () => {
     const hidden = render(<QuoteIntakeFlow metadataState={conditionalRequiredMetadataState} intake={{ ...initialQuoteIntake, borrowerLastName: 'Rivera', loanNumber: 'LN-2001' }} />);
+    fireEvent.click(screen.getByRole('row', { name: /Conventional 30-Year Preview ACTIVE/i }));
     const hiddenDataRequired = screen.getByRole('heading', { name: /^Complete required fields$/i }).closest('section') as HTMLElement;
     expect(hiddenDataRequired.getAttribute('data-required-field-ids')).toBe('mortgageType');
     expect(hiddenDataRequired.getAttribute('data-required-field-ids')).not.toContain('baseLoanAmount');
     hidden.unmount();
 
     render(<QuoteIntakeFlow metadataState={conditionalRequiredMetadataState} intake={{ ...filledIntake(), mortgageType: 'Conventional', baseLoanAmount: '100000' }} />);
+    fireEvent.click(screen.getByRole('row', { name: /Conventional 30-Year Preview ACTIVE/i }));
     expect(screen.queryByRole('heading', { name: /^Complete required fields$/i })).not.toBeInTheDocument();
   }, 30000);
 

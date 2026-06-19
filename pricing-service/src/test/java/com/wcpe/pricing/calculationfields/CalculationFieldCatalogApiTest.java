@@ -10,6 +10,7 @@ import com.wcpe.pricing.calculationfields.CalculationFieldCatalogApi.Calculation
 import com.wcpe.pricing.calculationfields.CalculationFieldCatalogApi.CalculationFieldImport;
 import com.wcpe.pricing.calculationfields.CalculationFieldCatalogApi.CalculationFieldImportValidationResult;
 import com.wcpe.pricing.calculationfields.CalculationFieldCatalogApi.CalculationFieldCatalogResponse;
+import com.wcpe.pricing.calculationfields.CalculationFieldCatalogApi.SourceFieldDependency;
 import com.wcpe.pricing.calculationfields.CalculationFieldCatalogApi.ImportedCalculationField;
 import com.wcpe.pricing.calculationfields.CalculationFieldCatalogApi.TenantCalculationFieldConfig;
 import com.wcpe.pricing.calculationfields.CalculationFieldCatalogApi.UnavailableHandling;
@@ -41,6 +42,24 @@ class CalculationFieldCatalogApiTest {
     }
 
     @Test
+    void catalogEntriesExposeSourceDependenciesAndKnownConsumers() {
+        CalculationFieldCatalogResponse response = api.catalogFields(
+                "tenant-a",
+                headers(),
+                referenceImport(),
+                TenantCalculationFieldConfig.allowAll());
+
+        var ltv = response.fields().stream()
+                .filter(field -> "calc@ltv".equals(field.id()))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(List.of(new SourceFieldDependency("field@loan-to-value", "field-library-v3")),
+                ltv.sourceDependencies());
+        assertEquals(List.of("adjustments", "margins", "pipeline", "pricing"), ltv.consumers());
+    }
+
+    @Test
     void settingsOptionsComeFromAvailableCatalogFields() {
         CalculationFieldCatalogResponse response = api.catalogFields(
                 "tenant-a",
@@ -52,6 +71,27 @@ class CalculationFieldCatalogApiTest {
                 .map(CalculationFieldCatalogApi.CalculationFieldSettingsOption::id)
                 .toList());
         assertFalse(response.settingsOptions().stream().anyMatch(option -> "calc@ltv".equals(option.id())));
+    }
+
+    @Test
+    void inactiveDefinitionsAreExcludedFromCatalogAndSettings() {
+        CalculationFieldImport importWithInactiveDefinition = new CalculationFieldImport("ReferenceFormfields.json", List.of(
+                new ImportedCalculationField("ledger-calc@ltv", "Ledger LTV", "number",
+                        "Last active ledger value for LTV"),
+                new ImportedCalculationField("calc@retired-output", "Retired Output", "number",
+                        "Inactive source metadata definition", null, List.of(), Set.of("pricing"), false)));
+
+        CalculationFieldCatalogResponse response = api.catalogFields(
+                "tenant-a",
+                headers(),
+                importWithInactiveDefinition,
+                TenantCalculationFieldConfig.allowAll());
+
+        assertEquals(List.of("calc@ltv"), response.fields().stream()
+                .map(CalculationFieldCatalogApi.CalculationFieldCatalogEntry::id)
+                .toList());
+        assertFalse(response.settingsOptions().stream()
+                .anyMatch(option -> "calc@retired-output".equals(option.id())));
     }
 
     @Test
@@ -100,6 +140,15 @@ class CalculationFieldCatalogApiTest {
                         referenceImport(), TenantCalculationFieldConfig.allowAll()));
     }
 
+    @Test
+    void evaluationRequestWithoutSourceConfigurationReturnsBlockerInsteadOfValue() {
+        var result = api.evaluationAvailability("tenant-a", headers(), "calc@missing", referenceImport());
+
+        assertEquals("calc@missing", result.fieldId());
+        assertEquals("BLOCKED_MISSING_SOURCE_CONFIGURATION", result.status());
+        assertTrue(result.blockerReason().contains("values were not invented"));
+    }
+
     private static CalculationFieldHeaders headers() {
         return new CalculationFieldHeaders(Set.of(CalculationFieldCatalogApi.CALCULATION_FIELD_READ_PERMISSION),
                 "actor-1", "corr-calc-fields");
@@ -108,7 +157,9 @@ class CalculationFieldCatalogApiTest {
     private static CalculationFieldImport referenceImport() {
         return new CalculationFieldImport("ReferenceFormfields.json", List.of(
                 new ImportedCalculationField("ledger-calc@ltv", "Ledger LTV", "number",
-                        "Last active ledger value for LTV"),
+                        "Last active ledger value for LTV", "ledger-v1",
+                        List.of(new SourceFieldDependency("field@loan-to-value", "field-library-v3")),
+                        Set.of("pipeline", "adjustments", "margins", "pricing")),
                 new ImportedCalculationField("calc@adjusted-price", "Adjusted Price", "number",
                         "Calculation output for adjusted price"),
                 new ImportedCalculationField("ledger-calc-field@fha-1st-premium", "Ledger FHA 1st Premium", "number",

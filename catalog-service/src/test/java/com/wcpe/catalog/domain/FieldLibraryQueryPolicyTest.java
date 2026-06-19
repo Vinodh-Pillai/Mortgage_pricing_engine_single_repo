@@ -19,6 +19,11 @@ class FieldLibraryQueryPolicyTest {
     FieldLibraryQueryResponse pricingNotification = FieldLibraryQueryPolicy.query("pricing-notification", fields(), enumerations(), false, true);
 
     assertThat(product.fields()).extracting(FieldLibraryFieldResponse::id).containsExactly("field@product-channel", "field@pricing-calculation-mode");
+    assertThat(product.fields()).extracting(FieldLibraryFieldResponse::stableApiKey).containsExactly("field@product-channel", "field@pricing-calculation-mode");
+    assertThat(product.fields()).extracting(FieldLibraryFieldResponse::sourceChip).containsExactly("product:inherited", "product:inherited");
+    assertThat(product.fields()).extracting(FieldLibraryFieldResponse::typeChip).containsExactly("type:enum", "type:enum");
+    assertThat(product.fields()).extracting(FieldLibraryFieldResponse::displayOrder).containsExactly(1, 2);
+    assertThat(product.fields()).extracting(FieldLibraryFieldResponse::draggable).containsOnly(true);
     assertThat(application.fields()).extracting(FieldLibraryFieldResponse::id).containsExactly("field@borrower-state");
     assertThat(pipeline.fields()).extracting(FieldLibraryFieldResponse::id).containsExactly("field@pipeline-status");
     assertThat(clientSettings.fields()).extracting(FieldLibraryFieldResponse::id).containsExactly("field@client-theme");
@@ -62,7 +67,7 @@ class FieldLibraryQueryPolicyTest {
     CatalogRepository repository = mock(CatalogRepository.class);
     CatalogService service = new CatalogService(repository, mock(AuthorizationService.class));
     when(repository.listFieldMetadata(tenantId)).thenReturn(fields());
-    when(repository.listEnumerations(tenantId)).thenReturn(enumerations());
+    when(repository.listEnumerationsForTenant(eq(tenantId), any())).thenReturn(enumerations());
     when(repository.currentCatalogId(tenantId)).thenReturn(catalogId);
     when(repository.listFieldMetadata(systemTenantId)).thenReturn(fields());
     when(repository.listEnumerations(systemTenantId)).thenReturn(enumerations());

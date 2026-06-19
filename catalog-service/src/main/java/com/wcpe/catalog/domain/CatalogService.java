@@ -3,7 +3,7 @@ package com.wcpe.catalog.domain;
 import com.wcpe.catalog.auth.AuthorizationService;
 import com.wcpe.catalog.auth.TenantProductAuthorization;
 import com.wcpe.catalog.auth.TenantProductAuthorizationService;
-import java.time.Instant;
+import java.time.*;
 import java.util.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -135,6 +135,24 @@ class CatalogService {
   }
 
   @Transactional
+  EnumerationCatalogUpdateResponse updateEnumeration(UUID tenantId, String enumTypeId, EnumerationCatalogUpdateRequest request, String idempotencyKey, String actorId, String correlationId) {
+    requireRole("CATALOG_WRITER", WRITER_ROLES);
+    requireIdempotencyKey(idempotencyKey);
+    LocalDate effectiveFrom = request == null || request.effectiveFrom() == null ? LocalDate.now() : request.effectiveFrom();
+    Object idempotentPayload = request == null ? Map.of("enumTypeId", enumTypeId) : Map.of("enumTypeId", enumTypeId, "request", request);
+    return repository.idempotent(tenantId, idempotencyKey, idempotentPayload, EnumerationCatalogUpdateResponse.class, () -> {
+      UUID catalogId = repository.currentCatalogId(tenantId);
+      EnumerationTypeResponse existing = repository.resolveEnumeration(tenantId, enumTypeId, effectiveFrom);
+      boolean referenced = enumReferencedByFieldLibrary(tenantId, existing.enumTypeId());
+      EnumerationTypeResponse revised = EnumerationCatalogPolicy.revise(existing, request, referenced);
+      EnumerationTypeResponse saved = repository.saveEnumerationOverride(tenantId, catalogId, revised, effectiveFrom, actorId);
+      emit(tenantId, catalogId, "EnumerationCatalogUpdated.v1", Map.of("enumTypeId", saved.enumTypeId(), "variantCount", saved.variants().size(), "effectiveFrom", effectiveFrom.toString()));
+      audit(tenantId, catalogId, "ENUMERATION_CATALOG_UPDATED", existing, saved, Map.of("enumTypeId", saved.enumTypeId(), "variantCount", saved.variants().size()), actorId, correlationId, idempotencyKey);
+      return new EnumerationCatalogUpdateResponse(saved, true, effectiveFrom, saved.variants().size());
+    });
+  }
+
+  @Transactional
   FieldMetadataImportResponse importFieldMetadata(UUID tenantId, FieldMetadataImportRequest request, String idempotencyKey, String actorId, String correlationId) {
     requireRole("CATALOG_WRITER", WRITER_ROLES);
     requireIdempotencyKey(idempotencyKey);
@@ -180,7 +198,7 @@ class CatalogService {
 
   FieldLibraryQueryResponse queryFieldLibrary(UUID tenantId, String category, boolean includeEnums, String actorId, String correlationId) {
     List<FieldMetadataResponse> fields = repository.listFieldMetadata(tenantId);
-    List<EnumerationTypeResponse> enumerations = repository.listEnumerations(tenantId);
+    List<EnumerationTypeResponse> enumerations = repository.listEnumerationsForTenant(tenantId, LocalDate.now());
     FieldLibraryQueryResponse response = FieldLibraryQueryPolicy.query(category, fields, enumerations, includeEnums, true);
     UUID catalogId = repository.currentCatalogId(tenantId);
     audit(tenantId, catalogId, "FIELD_LIBRARY_QUERIED", null, response,
@@ -201,6 +219,43 @@ class CatalogService {
     UUID catalogId = repository.currentCatalogId(tenantId);
     audit(tenantId, catalogId, "PRODUCT_SPECIFICATION_FIELDS_LISTED", null, response,
         Map.of("fieldCount", response.payloadFieldCount(), "sourceScope", response.sourceScope()), actorId, correlationId, null);
+    return response;
+  }
+
+  @Transactional
+  FieldConsumerMappingResponse saveFieldConsumerMapping(UUID tenantId, String consumer, FieldConsumerMappingRequest request,
+                                                        String idempotencyKey, String actorId, String correlationId) {
+    requireRole("CATALOG_WRITER", WRITER_ROLES);
+    requireIdempotencyKey(idempotencyKey);
+    Object idempotentPayload = Map.of("consumer", consumer, "request", request == null ? Map.of() : request);
+    return repository.idempotent(tenantId, idempotencyKey, idempotentPayload, FieldConsumerMappingResponse.class, () -> {
+      UUID catalogId = repository.currentCatalogId(tenantId);
+      List<FieldMetadataResponse> fields = repository.listFieldMetadata(tenantId);
+      String activeVersion = "catalog-version-" + repository.version(tenantId, catalogId);
+      FieldConsumerMappingResponse normalized = FieldConsumerMappingPolicy.normalize(consumer, request, fields, activeVersion);
+      FieldConsumerMappingResponse saved = repository.saveFieldConsumerMapping(tenantId, catalogId, normalized, actorId);
+      emit(tenantId, catalogId, "FieldConsumerMappingChanged.v1", Map.of("consumer", saved.consumer(), "mappingScope", saved.mappingScope(), "fieldCount", saved.fieldCount(), "activeVersion", saved.activeVersion()));
+      audit(tenantId, catalogId, "FIELD_CONSUMER_MAPPING_CHANGED", null, saved,
+          Map.of("consumer", saved.consumer(), "mappingScope", saved.mappingScope(), "fieldCount", saved.fieldCount(), "activeVersion", saved.activeVersion()), actorId, correlationId, idempotencyKey);
+      return saved;
+    });
+  }
+
+  FieldConsumerMappingResponse resolveFieldConsumerMapping(UUID tenantId, String consumer, String mappingScope, String actorId, String correlationId) {
+    FieldConsumerMappingResponse response = repository.fieldConsumerMapping(tenantId, consumer, mappingScope)
+        .orElseThrow(() -> new CatalogException("FIELD_CONSUMER_MAPPING_NOT_FOUND"));
+    UUID catalogId = repository.currentCatalogId(tenantId);
+    audit(tenantId, catalogId, "FIELD_CONSUMER_MAPPING_RESOLVED", null, response,
+        Map.of("consumer", response.consumer(), "mappingScope", response.mappingScope(), "fieldCount", response.fieldCount(), "activeVersion", response.activeVersion()), actorId, correlationId, null);
+    return response;
+  }
+
+  FieldConsumerReferenceResponse fieldConsumerReferences(UUID tenantId, String fieldId, String actorId, String correlationId) {
+    repository.resolveFieldMetadata(tenantId, fieldId);
+    FieldConsumerReferenceResponse response = FieldConsumerMappingPolicy.references(fieldId, repository.fieldConsumerMappings(tenantId));
+    UUID catalogId = repository.currentCatalogId(tenantId);
+    audit(tenantId, catalogId, "FIELD_CONSUMER_REFERENCES_LISTED", null, response,
+        Map.of("fieldId", response.fieldId(), "referenceCount", response.referenceCount()), actorId, correlationId, null);
     return response;
   }
 
@@ -231,9 +286,23 @@ class CatalogService {
     return repository.idempotent(tenantId, idempotencyKey, request, ProductSpecificationTenantFieldDraftResponse.class, () -> {
       UUID catalogId = repository.currentCatalogId(tenantId);
       ProductSpecificationTenantFieldDraft saved = repository.saveProductSpecificationTenantFieldDraft(tenantId, catalogId, draft);
-      emit(tenantId, catalogId, "ProductSpecificationTenantFieldDraftSaved.v1", Map.of("aliasCount", saved.aliases().size(), "nativeFieldCount", saved.nativeFields().size(), "draftStatus", saved.draftStatus()));
+      List<String> changedFields = new ArrayList<>();
+      saved.aliases().forEach(alias -> changedFields.add(alias.fieldId()));
+      saved.nativeFields().forEach(nativeField -> changedFields.add(nativeField.fieldId()));
+      Map<String, Object> lineage = new LinkedHashMap<>();
+      lineage.put("baseFieldCount", fields.size());
+      lineage.put("dependency", "tenant-field-draft->product-specification-version");
+      Map<String, Object> payload = new LinkedHashMap<>();
+      payload.put("aliasCount", saved.aliases().size());
+      payload.put("nativeFieldCount", saved.nativeFields().size());
+      payload.put("draftStatus", saved.draftStatus());
+      payload.put("actorId", Objects.toString(actorId, ""));
+      payload.put("savedAt", saved.savedAt().toString());
+      payload.put("changedFields", changedFields);
+      payload.put("dependencyLineage", lineage);
+      emit(tenantId, catalogId, "ProductSpecificationTenantFieldDraftSaved.v1", payload);
       audit(tenantId, catalogId, "PRODUCT_SPECIFICATION_TENANT_FIELD_DRAFT_SAVED", null, saved,
-          Map.of("aliasCount", saved.aliases().size(), "nativeFieldCount", saved.nativeFields().size(), "draftStatus", saved.draftStatus(), "systemDefaultsChanged", false), actorId, correlationId, idempotencyKey);
+          payload, actorId, correlationId, idempotencyKey);
       return new ProductSpecificationTenantFieldDraftResponse(saved.draftStatus(), saved.aliases().size(), saved.nativeFields().size(), false);
     });
   }
@@ -277,11 +346,47 @@ class CatalogService {
     return response;
   }
 
-  EnumerationTypeResponse resolveEnumeration(UUID tenantId, String enumTypeId, String actorId, String correlationId) {
-    EnumerationTypeResponse response = repository.resolveEnumeration(tenantId, enumTypeId);
+  EnumerationTypeResponse resolveEnumeration(UUID tenantId, String enumTypeId, LocalDate asOf, String actorId, String correlationId) {
+    LocalDate effectiveDate = asOf == null ? LocalDate.now() : asOf;
+    EnumerationTypeResponse response = repository.resolveEnumeration(tenantId, enumTypeId, effectiveDate);
     UUID catalogId = repository.currentCatalogId(tenantId);
-    audit(tenantId, catalogId, "ENUMERATION_CATALOG_RESOLVED", null, response, Map.of("enumTypeId", response.enumTypeId(), "variantCount", response.variants().size()), actorId, correlationId, null);
+    audit(tenantId, catalogId, "ENUMERATION_CATALOG_RESOLVED", null, response, Map.of("enumTypeId", response.enumTypeId(), "variantCount", response.variants().size(), "asOf", effectiveDate.toString()), actorId, correlationId, null);
     return response;
+  }
+
+  EnumerationTypeResponse resolveEnumeration(UUID tenantId, String enumTypeId, String actorId, String correlationId) {
+    return resolveEnumeration(tenantId, enumTypeId, null, actorId, correlationId);
+  }
+
+  private boolean enumReferencedByFieldLibrary(UUID tenantId, String enumTypeId) {
+    String normalized = enumTypeId == null ? "" : enumTypeId.trim().toLowerCase(Locale.ROOT).replace('_', '-');
+    List<FieldMetadataResponse> fields = new ArrayList<>(repository.listFieldMetadata(tenantId));
+    fields.addAll(repository.listFieldMetadata(new UUID(0L, 0L)));
+    for (FieldMetadataResponse field : fields) {
+      Map<String, Object> conditions = field.conditions() == null ? Map.of() : field.conditions();
+      if (normalized.equals(normalizeEnumReference(conditions.get("enumTypeId"))) || normalized.equals(normalizeEnumReference(conditions.get("enumType")))) return true;
+      if ("enum".equals(field.valueType()) && normalized.equals(normalizeEnumReference(field.id().replace("field@", "")))) return true;
+      if (conditionsContainEnumReference(conditions, normalized)) return true;
+    }
+    return false;
+  }
+
+  @SuppressWarnings("unchecked")
+  private boolean conditionsContainEnumReference(Object value, String enumTypeId) {
+    if (value instanceof Map<?, ?> map) {
+      for (Map.Entry<?, ?> entry : map.entrySet()) {
+        String key = Objects.toString(entry.getKey(), "");
+        if (("enumTypeId".equals(key) || "enumType".equals(key)) && enumTypeId.equals(normalizeEnumReference(entry.getValue()))) return true;
+        if (conditionsContainEnumReference(entry.getValue(), enumTypeId)) return true;
+      }
+    } else if (value instanceof List<?> list) {
+      for (Object nested : list) if (conditionsContainEnumReference(nested, enumTypeId)) return true;
+    }
+    return false;
+  }
+
+  private String normalizeEnumReference(Object value) {
+    return value == null ? "" : value.toString().trim().toLowerCase(Locale.ROOT).replace('_', '-').replace(' ', '-');
   }
 
   @Transactional
@@ -560,6 +665,9 @@ class CatalogService {
       payload.put("versionNumber", response.versionNumber());
       payload.put("configHash", response.configHash());
       payload.put("reason", request.reason());
+      payload.put("actorId", Objects.toString(actorId, ""));
+      payload.put("changedFields", List.of("status", "effective_start", "effective_end"));
+      payload.put("dependencyLineage", Map.of("artifactCode", response.artifactType() + ":" + response.artifactId(), "versionId", response.versionId().toString()));
       UUID catalogId = repository.currentCatalogId(tenantId);
       emit(tenantId, catalogId, "CatalogVersionStatusChanged.v1", payload);
       audit(tenantId, catalogId, "CATALOG_VERSION_STATUS_CHANGED", Map.of("status", response.oldStatus().name()), Map.of("status", response.status().name()), payload, actorId, correlationId, idempotencyKey);

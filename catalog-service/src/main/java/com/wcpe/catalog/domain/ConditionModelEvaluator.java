@@ -66,6 +66,8 @@ final class ConditionModelEvaluator {
       case "parent-field-is-one-of" -> evaluateOneOf(conditionId, operator, parentFieldId, parentValue, condition, enumByType, false);
       case "parent-field-is-not-one-of" -> evaluateOneOf(conditionId, operator, parentFieldId, parentValue, condition, enumByType, true);
       case "parent-field-has-value" -> evaluateHasValue(conditionId, operator, parentFieldId, parentValue, condition);
+      case "parent-field-is-not-blank" -> evaluateBlank(conditionId, operator, parentFieldId, parentValue, false);
+      case "parent-field-is-blank" -> evaluateBlank(conditionId, operator, parentFieldId, parentValue, true);
       default -> explanation(conditionId, operator, parentFieldId, false, INVALID, "Unsupported condition operator.");
     };
   }
@@ -105,6 +107,18 @@ final class ConditionModelEvaluator {
     boolean matched = Objects.equals(stringValue(parentValue), stringValue(requiredValue));
     return explanation(conditionId, operator, parentFieldId, matched, matched ? APPLICABLE : NOT_APPLICABLE,
         matched ? "Parent field has the configured value." : "Parent field does not have the configured value.");
+  }
+
+  private static ConditionEvaluationExplanation evaluateBlank(String conditionId,
+                                                              String operator,
+                                                              String parentFieldId,
+                                                              Object parentValue,
+                                                              boolean blankExpected) {
+    boolean blank = blank(stringValue(parentValue));
+    boolean matched = blankExpected ? blank : !blank;
+    return explanation(conditionId, operator, parentFieldId, matched, matched ? APPLICABLE : NOT_APPLICABLE,
+        matched ? (blankExpected ? "Parent field is blank." : "Parent field is not blank.")
+            : (blankExpected ? "Parent field is not blank." : "Parent field is blank."));
   }
 
   @SuppressWarnings("unchecked")

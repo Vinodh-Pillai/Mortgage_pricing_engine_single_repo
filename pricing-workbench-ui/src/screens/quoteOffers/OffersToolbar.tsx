@@ -73,7 +73,9 @@ export function OffersToolbar({ sort, filters, productFamilies, investors, lockP
         <button type="button" aria-pressed={viewMode === 'table'} onClick={() => onViewModeChange('table')}>Table</button>
         <button type="button" aria-pressed={viewMode === 'cards'} onClick={() => onViewModeChange('cards')}>Cards</button>
       </div>
-      <button type="button" onClick={onReset}>Reset filters ({activeFilterCount})</button>
+      <button type="button" onClick={onReset}>
+        Reset filters <span aria-label="Active filter count" className="offer-toolbar__count-badge" style={{ display: 'inline-flex', justifyContent: 'center', minWidth: '2ch' }}>{activeFilterCount}</span>
+      </button>
     </div>
   );
 }

@@ -27,6 +27,34 @@ describe('PII-24-S10 offer comparison screen', () => {
     expect(screen.getByText('pricing-service quote price')).toBeInTheDocument();
   });
 
+  it('keeps the desktop offer table wide with sticky header and action state instead of card layout', () => {
+    render(<QuoteOffersScreen comparison={deterministicOfferComparison} />);
+
+    const table = screen.getByRole('table', { name: /Ranked quote offers/i });
+    expect(table).toHaveStyle({ minWidth: '1180px', width: '100%' });
+    expect(table.parentElement).toHaveStyle({ overflowX: 'auto', maxWidth: '100%' });
+    expect(screen.queryByRole('list', { name: /Offer cards/i })).not.toBeInTheDocument();
+
+    const headerRow = screen.getAllByRole('row')[0];
+    expect(headerRow).toHaveStyle({ position: 'sticky', top: '0px' });
+    expect(screen.getByRole('columnheader', { name: /Actions/i })).toHaveStyle({ position: 'sticky', right: '0px' });
+  });
+
+  it('keeps selected row and filter count badge state stable as filters change', () => {
+    render(<QuoteOffersScreen comparison={deterministicOfferComparison} />);
+
+    fireEvent.click(screen.getAllByLabelText(/Select/i)[0]);
+    expect(screen.getAllByRole('row')[1]).toHaveAttribute('aria-selected', 'true');
+
+    const activeFilterCount = screen.getByLabelText(/Active filter count/i);
+    expect(activeFilterCount).toHaveStyle({ minWidth: '2ch' });
+    expect(activeFilterCount).toHaveTextContent('0');
+
+    fireEvent.change(screen.getByLabelText(/Product family/i), { target: { value: 'FHA' } });
+    expect(activeFilterCount).toHaveTextContent('1');
+    expect(screen.getByText('FHA fixed')).toBeInTheDocument();
+  });
+
   it('enables detail and lock navigation for an unblocked selected offer', () => {
     const onNavigate = vi.fn();
     render(<QuoteOffersScreen comparison={deterministicOfferComparison} onNavigate={onNavigate} />);

@@ -32,8 +32,17 @@ final class ProductSpecificationConditionRulePolicy {
       normalizeRules(conditionDraft.get().includeConditions(), "include", productSpecFieldsById(availableFields), enumerationsByType(enumerations));
       normalizeRules(conditionDraft.get().additionalConditions(), "additional", productSpecFieldsById(availableFields), enumerationsByType(enumerations));
     } catch (CatalogException ex) {
+      if (isConcreteDependencyError(ex)) throw ex;
       throw new CatalogException("PRODUCT_SPEC_CONDITION_RULE_INVALID");
     }
+  }
+
+  private static boolean isConcreteDependencyError(CatalogException ex) {
+    return Set.of(
+        "PRODUCT_SPEC_CONDITION_PARENT_FIELD_NOT_AVAILABLE",
+        "PRODUCT_SPEC_CONDITION_ENUM_TYPE_NOT_AVAILABLE",
+        "PRODUCT_SPEC_CONDITION_VARIANT_NOT_AVAILABLE")
+        .contains(ex.getMessage());
   }
 
   static ProductSpecificationFieldConditionEvaluationResponse evaluateField(String fieldId,
@@ -47,6 +56,10 @@ final class ProductSpecificationConditionRulePolicy {
     List<Map<String, Object>> includeConditions = new ArrayList<>();
     collectExistingConditions(field.conditions(), includeConditions);
     conditionDraft.ifPresent(draft -> draft.includeConditions().stream()
+        .filter(rule -> normalizedFieldId.equals(rule.fieldId()))
+        .map(ProductSpecificationConditionRulePolicy::conditionMap)
+        .forEach(includeConditions::add));
+    conditionDraft.ifPresent(draft -> draft.additionalConditions().stream()
         .filter(rule -> normalizedFieldId.equals(rule.fieldId()))
         .map(ProductSpecificationConditionRulePolicy::conditionMap)
         .forEach(includeConditions::add));
@@ -104,11 +117,14 @@ final class ProductSpecificationConditionRulePolicy {
         if (!availableVariants.containsAll(variantIds)) throw new CatalogException("PRODUCT_SPEC_CONDITION_VARIANT_NOT_AVAILABLE");
       } else if ("parent-field-has-value".equals(operator)) {
         if (value == null || value.toString().isBlank()) throw new CatalogException("PRODUCT_SPEC_CONDITION_VALUE_REQUIRED");
+      } else if ("parent-field-is-not-blank".equals(operator) || "parent-field-is-blank".equals(operator)) {
+        value = null;
       } else {
         throw new CatalogException("PRODUCT_SPEC_CONDITION_OPERATOR_UNSUPPORTED");
       }
       ProductSpecificationConditionRuleEdit normalizedRule = new ProductSpecificationConditionRuleEdit(
-          fieldId, conditionId, operator, parentFieldId, enumTypeId, variantIds, value);
+          fieldId, conditionId, operator, parentFieldId, enumTypeId, variantIds, value,
+          readableExpression(operator, parentFieldId, enumTypeId, variantIds, value));
       validateEvaluatorShape(normalizedRule, enumByType);
       normalized.add(normalizedRule);
     }
@@ -116,9 +132,16 @@ final class ProductSpecificationConditionRulePolicy {
   }
 
   private static void validateEvaluatorShape(ProductSpecificationConditionRuleEdit rule, Map<String, EnumerationTypeResponse> enumByType) {
-    Object sampleParentValue = ENUM_OPERATORS.contains(rule.operator()) ? rule.variantIds().get(0) : rule.value();
+    Object sampleParentValue = sampleParentValue(rule);
     ConditionEvaluationResponse response = ConditionModelEvaluator.evaluate(conditionMap(rule), Map.of(rule.parentFieldId(), sampleParentValue), List.copyOf(enumByType.values()));
     if ("INVALID".equals(response.status())) throw new CatalogException("PRODUCT_SPEC_CONDITION_RULE_INVALID");
+  }
+
+  private static Object sampleParentValue(ProductSpecificationConditionRuleEdit rule) {
+    if (ENUM_OPERATORS.contains(rule.operator())) return rule.variantIds().get(0);
+    if ("parent-field-is-blank".equals(rule.operator())) return "";
+    if ("parent-field-is-not-blank".equals(rule.operator())) return "sample-value";
+    return rule.value();
   }
 
   private static Map<String, Object> conditionMap(ProductSpecificationConditionRuleEdit rule) {
@@ -129,7 +152,23 @@ final class ProductSpecificationConditionRulePolicy {
     if (rule.enumTypeId() != null) map.put("enumTypeId", rule.enumTypeId());
     if (rule.variantIds() != null && !rule.variantIds().isEmpty()) map.put("variantIds", rule.variantIds());
     if (rule.value() != null) map.put("value", rule.value());
+    if (rule.readableExpression() != null) map.put("readableExpression", rule.readableExpression());
     return Collections.unmodifiableMap(map);
+  }
+
+  private static String readableExpression(String operator,
+                                           String parentFieldId,
+                                           String enumTypeId,
+                                           List<String> variantIds,
+                                           Object value) {
+    return switch (operator) {
+      case "parent-field-is-one-of" -> parentFieldId + " is one of " + variantIds;
+      case "parent-field-is-not-one-of" -> parentFieldId + " is not one of " + variantIds;
+      case "parent-field-has-value" -> parentFieldId + " has value " + Objects.toString(value, "");
+      case "parent-field-is-not-blank" -> parentFieldId + " is not blank";
+      case "parent-field-is-blank" -> parentFieldId + " is blank";
+      default -> enumTypeId == null ? parentFieldId + " " + operator : parentFieldId + " " + operator + " " + enumTypeId;
+    };
   }
 
   @SuppressWarnings("unchecked")

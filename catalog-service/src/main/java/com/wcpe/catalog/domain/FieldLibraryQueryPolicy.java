@@ -12,8 +12,10 @@ final class FieldLibraryQueryPolicy {
       Map.entry("pipeline", "pipeline"),
       Map.entry("pipelineonly", "pipeline"),
       Map.entry("pipelineonlyfields", "pipeline"),
+      Map.entry("client", "client"),
       Map.entry("clientsettings", "client-settings"),
       Map.entry("settings", "client-settings"),
+      Map.entry("pricing", "pricing"),
       Map.entry("pricingnotification", "pricing-notification"),
       Map.entry("notification", "pricing-notification"),
       Map.entry("calculation", "calculation"),
@@ -39,8 +41,9 @@ final class FieldLibraryQueryPolicy {
       String enumTypeId = enumTypeId(field, conditions);
       EnumerationTypeResponse enumeration = enumByType.get(normalizeKey(enumTypeId));
       if (enumeration != null) usedEnums.put(enumeration.enumTypeId(), enumeration);
-      boundedFields.add(new FieldLibraryFieldResponse(field.id(), field.oldId(), field.name(), field.description(), category,
-          field.valueType(), field.sourceGroup(), conditions, parentRefs, field.disposition(), field.source(), enumTypeId,
+      boundedFields.add(new FieldLibraryFieldResponse(field.id(), stableApiKey(field), field.oldId(), field.name(), field.description(), category,
+          field.valueType(), field.sourceGroup(), sourceChip(field), typeChip(field.valueType()), boundedFields.size() + 1, true,
+          conditions, parentRefs, field.disposition(), field.source(), enumTypeId,
           enumTypeId == null ? null : "/api/v1/product-catalog/enumerations/" + enumTypeId, includeEnums ? enumeration : null));
     }
     return new FieldLibraryQueryResponse(category, tenantSpecific ? "tenant" : "system/default", tenantSpecific,
@@ -132,6 +135,21 @@ final class FieldLibraryQueryPolicy {
 
   private static String normalizeEnumType(String value) {
     return value == null ? null : value.trim().toLowerCase(Locale.ROOT).replace('_', '-').replace(' ', '-');
+  }
+
+  private static String stableApiKey(FieldMetadataResponse field) {
+    return field.id() == null ? "" : field.id().trim();
+  }
+
+  private static String sourceChip(FieldMetadataResponse field) {
+    String status = field.disposition() == null || field.disposition().isBlank() ? "native" : field.disposition().trim().toLowerCase(Locale.ROOT);
+    String category = categoryFor(field);
+    return category + ":" + status;
+  }
+
+  private static String typeChip(String valueType) {
+    String value = valueType == null || valueType.isBlank() ? "unknown" : valueType.trim().toLowerCase(Locale.ROOT);
+    return "type:" + value;
   }
 
   private static String normalizeKey(String value) {

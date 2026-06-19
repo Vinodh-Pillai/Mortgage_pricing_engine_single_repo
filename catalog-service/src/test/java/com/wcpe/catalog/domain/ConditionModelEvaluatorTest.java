@@ -54,6 +54,27 @@ class ConditionModelEvaluatorTest {
   }
 
   @Test
+  void blankOperatorsEvaluateParentPresenceWithoutConfiguredValues() {
+    ConditionEvaluationResponse notBlank = ConditionModelEvaluator.evaluate(
+        Map.of("conditionId", "has-aus", "operator", "parent-field-is-not-blank", "parentFieldId", "field@aus-result"),
+        Map.of("field@aus-result", "approve-eligible"),
+        List.of(enumeration()));
+    ConditionEvaluationResponse blank = ConditionModelEvaluator.evaluate(
+        Map.of("conditionId", "missing-aus", "operator", "parent-field-is-blank", "parentFieldId", "field@aus-result"),
+        Map.of("field@aus-result", ""),
+        List.of(enumeration()));
+
+    assertThat(notBlank.applicable()).isTrue();
+    assertThat(blank.applicable()).isTrue();
+    assertThat(notBlank.explanations()).singleElement()
+        .extracting(ConditionEvaluationExplanation::message)
+        .isEqualTo("Parent field is not blank.");
+    assertThat(blank.explanations()).singleElement()
+        .extracting(ConditionEvaluationExplanation::message)
+        .isEqualTo("Parent field is blank.");
+  }
+
+  @Test
   void multipleConditionsUseAllSemanticsAndExplainEachResult() {
     ConditionEvaluationResponse response = ConditionModelEvaluator.evaluate(Map.of(
             "combination", "all",

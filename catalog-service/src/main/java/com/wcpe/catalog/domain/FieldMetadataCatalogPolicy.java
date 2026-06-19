@@ -4,7 +4,7 @@ import java.util.*;
 
 final class FieldMetadataCatalogPolicy {
   private static final Set<String> SUPPORTED_VALUE_TYPES = Set.of(
-      "header", "enum", "number", "string", "date", "time", "duration", "us-state", "us-county");
+      "header", "enum", "number", "string", "text", "date", "time", "duration", "boolean", "us-state", "us-county");
 
   private FieldMetadataCatalogPolicy() {}
 

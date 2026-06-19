@@ -383,11 +383,19 @@ export type QuoteRunLaunch = {
   quickQuoteState?: ProgressiveQuickQuoteState | null;
 };
 
+export type QuoteLaunchSelectedProduct = {
+  productCode: string;
+  productName: string;
+  investorCode: string;
+  channelCode: string;
+  productType: string;
+};
+
 export type LaunchState =
   | { kind: 'idle' }
   | { kind: 'submitting' }
   | { kind: 'blocked'; validation: IntakeValidation }
-  | { kind: 'created'; launch: QuoteRunLaunch }
+  | { kind: 'created'; launch: QuoteRunLaunch; selectedProduct?: QuoteLaunchSelectedProduct }
   | { kind: 'outage'; message: string };
 
 export type MetadataState =

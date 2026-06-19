@@ -117,6 +117,22 @@ public final class CalculationDataTableLookupApi {
                 headers.correlationId());
     }
 
+    public LookupPublishResponse deactivateLookupTable(String tenantId, LookupHeaders headers, String tableId) {
+        requireTenant(tenantId);
+        requirePermission(headers, LOOKUP_ADMIN_PUBLISH_PERMISSION);
+        tableId = requireNonBlank(tableId, "lookup table_id is required");
+        CalculationDataTableVersion published = repository.findLatestPublishedVersion(tenantId, tableId)
+                .orElseThrow(() -> new CalculationDataTableLookupException("LOOKUP_PUBLISHED_VERSION_NOT_FOUND"));
+
+        CalculationDataTableVersion inactive = published.withStatus(LookupVersionStatus.INACTIVE, headers.actorId(), Instant.now());
+        repository.replaceVersion(inactive);
+        saveEvent(tenantId, tableId, inactive.versionId(), "pricing.calculation-lookup-deactivated.v1", headers,
+                Map.of("versionNumber", String.valueOf(inactive.versionNumber()),
+                        "optionCount", String.valueOf(inactive.options().size())));
+        return new LookupPublishResponse(tableId, inactive.versionId(), inactive.versionNumber(), LookupVersionStatus.INACTIVE,
+                inactive.options().size(), "audit:" + inactive.versionId(), headers.correlationId());
+    }
+
     public LookupReferenceValidationResult validateCalculationReferences(String tenantId, LookupHeaders headers,
             CalculationLookupValidationRequest request) {
         requireTenant(tenantId);
@@ -128,7 +144,11 @@ public final class CalculationDataTableLookupApi {
             String tableId = requireNonBlank(reference.tableId(), "lookup reference table_id is required");
             Optional<CalculationDataTableVersion> published = repository.findLatestPublishedVersion(tenantId, tableId);
             if (published.isEmpty()) {
-                errors.add("TABLE_NOT_FOUND:" + tableId);
+                if (repository.findLatestVersion(tenantId, tableId).isPresent()) {
+                    errors.add("LOOKUP_DEPENDENCY_ERROR:TABLE_INACTIVE_OR_UNPUBLISHED:" + tableId);
+                } else {
+                    errors.add("TABLE_NOT_FOUND:" + tableId);
+                }
                 continue;
             }
             Set<String> suppliedKeys = normalizedKeySet(reference.requiredKeyFields());
@@ -137,7 +157,7 @@ public final class CalculationDataTableLookupApi {
                     .sorted()
                     .toList();
             if (!missingKeys.isEmpty()) {
-                errors.add("MISSING_REQUIRED_KEYS:" + tableId + ":" + String.join(",", missingKeys));
+                errors.add("LOOKUP_DEPENDENCY_ERROR:MISSING_REQUIRED_KEYS:" + tableId + ":" + String.join(",", missingKeys));
             }
         }
         LookupReferenceValidationStatus status = errors.isEmpty()
@@ -153,26 +173,86 @@ public final class CalculationDataTableLookupApi {
         String tableId = requireNonBlank(request.tableId(), "lookup table_id is required");
         Optional<CalculationDataTableVersion> published = repository.findLatestPublishedVersion(tenantId, tableId);
         if (published.isEmpty()) {
-            return LookupRuntimeResult.missing(tableId, null, "LOOKUP_TABLE_NOT_FOUND", headers.correlationId());
+            String reason = repository.findLatestVersion(tenantId, tableId).isPresent()
+                    ? "LOOKUP_DEPENDENCY_ERROR:TABLE_INACTIVE_OR_UNPUBLISHED"
+                    : "LOOKUP_TABLE_NOT_FOUND";
+            LookupRuntimeResult result = LookupRuntimeResult.missing(tableId, null, reason, headers.correlationId());
+            auditLookupIfEnabled(tenantId, tableId, null, request.keyValues(), null, result, request.auditEnabled(), headers,
+                    "pricing.calculation-lookup-executed.v1");
+            return result;
         }
 
-        CalculationDataTableVersion version = published.get();
+        return lookupAgainstVersion(tenantId, headers, tableId, published.get(), request.keyValues(), request.auditEnabled(),
+                "pricing.calculation-lookup-executed.v1");
+    }
+
+    public LookupRuntimeResult lookupHistoricalValue(String tenantId, LookupHeaders headers, HistoricalLookupValueRequest request) {
+        requireTenant(tenantId);
+        requirePermission(headers, LOOKUP_READ_PERMISSION);
+        Objects.requireNonNull(request, "historical lookup value request is required");
+        String tableId = requireNonBlank(request.tableId(), "lookup table_id is required");
+        CalculationDataTableVersion version = repository.findVersion(tenantId, request.versionId())
+                .orElseThrow(() -> new CalculationDataTableLookupException("LOOKUP_VERSION_NOT_FOUND"));
+        if (!version.tableId().equals(tableId)) {
+            throw new CalculationDataTableLookupException("LOOKUP_VERSION_TABLE_MISMATCH");
+        }
+        if (version.status() == LookupVersionStatus.DRAFT) {
+            LookupRuntimeResult result = LookupRuntimeResult.missing(tableId, version.versionId(),
+                    "LOOKUP_DEPENDENCY_ERROR:VERSION_NOT_PUBLISHED", headers.correlationId());
+            auditLookupIfEnabled(tenantId, tableId, version.versionId(), request.keyValues(), null, result,
+                    request.auditEnabled(), headers, "pricing.calculation-lookup-historical-replayed.v1");
+            return result;
+        }
+
+        return lookupAgainstVersion(tenantId, headers, tableId, version, request.keyValues(), request.auditEnabled(),
+                "pricing.calculation-lookup-historical-replayed.v1");
+    }
+
+    private LookupRuntimeResult lookupAgainstVersion(String tenantId, LookupHeaders headers, String tableId,
+            CalculationDataTableVersion version, Map<String, String> keyValues, boolean auditEnabled, String auditEventType) {
         List<String> missingRequestKeys = version.keyFields().stream()
-                .filter(key -> request.keyValues() == null || !request.keyValues().containsKey(key)
-                        || request.keyValues().get(key) == null || request.keyValues().get(key).isBlank())
+                .filter(key -> keyValues == null || !keyValues.containsKey(key)
+                        || keyValues.get(key) == null || keyValues.get(key).isBlank())
                 .toList();
         if (!missingRequestKeys.isEmpty()) {
-            return LookupRuntimeResult.missing(tableId, version.versionId(),
-                    "LOOKUP_REQUEST_MISSING_KEYS:" + String.join(",", missingRequestKeys), headers.correlationId());
+            LookupRuntimeResult result = LookupRuntimeResult.missing(tableId, version.versionId(),
+                    "LOOKUP_DEPENDENCY_ERROR:MISSING_REQUIRED_KEYS:" + String.join(",", missingRequestKeys),
+                    headers.correlationId());
+            auditLookupIfEnabled(tenantId, tableId, version.versionId(), keyValues, null, result, auditEnabled, headers,
+                    auditEventType);
+            return result;
         }
 
-        String optionKey = optionKey(version.keyFields(), request.keyValues());
+        String optionKey = optionKey(version.keyFields(), keyValues);
         LookupOption option = version.options().get(optionKey);
         if (option == null) {
-            return LookupRuntimeResult.missing(tableId, version.versionId(), "LOOKUP_VALUE_MISSING", headers.correlationId());
+            LookupRuntimeResult result = LookupRuntimeResult.missing(tableId, version.versionId(), "LOOKUP_VALUE_MISSING",
+                    headers.correlationId());
+            auditLookupIfEnabled(tenantId, tableId, version.versionId(), keyValues, null, result, auditEnabled, headers,
+                    auditEventType);
+            return result;
         }
-        return new LookupRuntimeResult(tableId, version.versionId(), LookupRuntimeStatus.FOUND, option.value(), null,
+        LookupRuntimeResult result = new LookupRuntimeResult(tableId, version.versionId(), LookupRuntimeStatus.FOUND, option.value(), null,
                 headers.correlationId());
+        auditLookupIfEnabled(tenantId, tableId, version.versionId(), keyValues, optionKey, result, auditEnabled, headers,
+                auditEventType);
+        return result;
+    }
+
+    private void auditLookupIfEnabled(String tenantId, String tableId, UUID versionId, Map<String, String> keyValues,
+            String matchedRow, LookupRuntimeResult result, boolean auditEnabled, LookupHeaders headers, String eventType) {
+        if (!auditEnabled) {
+            return;
+        }
+        Map<String, String> details = new LinkedHashMap<>();
+        details.put("keyInputs", new TreeMap<>(keyValues == null ? Map.of() : keyValues).toString());
+        details.put("matchedRow", matchedRow == null ? "" : matchedRow);
+        details.put("tableVersion", versionId == null ? "" : versionId.toString());
+        details.put("result", result.status().name());
+        if (result.missingReason() != null) {
+            details.put("missingReason", result.missingReason());
+        }
+        saveEvent(tenantId, tableId, versionId, eventType, headers, details);
     }
 
     private void saveEvent(String tenantId, String tableId, UUID versionId, String eventType, LookupHeaders headers,
@@ -414,8 +494,19 @@ public final class CalculationDataTableLookupApi {
         }
     }
 
-    public record LookupValueRequest(String tableId, Map<String, String> keyValues) {
+    public record LookupValueRequest(String tableId, Map<String, String> keyValues, boolean auditEnabled) {
+        public LookupValueRequest(String tableId, Map<String, String> keyValues) {
+            this(tableId, keyValues, false);
+        }
+
         public LookupValueRequest {
+            keyValues = keyValues == null ? Map.of() : Map.copyOf(keyValues);
+        }
+    }
+
+    public record HistoricalLookupValueRequest(UUID versionId, String tableId, Map<String, String> keyValues,
+            boolean auditEnabled) {
+        public HistoricalLookupValueRequest {
             keyValues = keyValues == null ? Map.of() : Map.copyOf(keyValues);
         }
     }
@@ -445,11 +536,17 @@ public final class CalculationDataTableLookupApi {
                     versionNumber, LookupVersionStatus.PUBLISHED, options, description, createdBy, actorId, createdAt,
                     publishedAt);
         }
+
+        CalculationDataTableVersion withStatus(LookupVersionStatus nextStatus, String actorId, Instant updatedAt) {
+            return new CalculationDataTableVersion(versionId, tenantId, tableId, displayName, tenantScope, keyFields,
+                    versionNumber, nextStatus, options, description, createdBy, actorId, createdAt, updatedAt);
+        }
     }
 
     public enum LookupVersionStatus {
         DRAFT,
-        PUBLISHED
+        PUBLISHED,
+        INACTIVE
     }
 
     public enum LookupReferenceValidationStatus {

@@ -33,9 +33,10 @@ final class ProductSpecificationFieldListPolicy {
       ProductSpecificationFieldAliasEdit alias = aliases.get(field.id());
       String sourceCategory = sourceCategory(field);
       String status = status(field);
-      responseFields.add(new ProductSpecificationFieldResponse(field.id(), displayName(field, alias), aliases(field), displayDescription(field, alias),
-          field.valueType(), sourceCategory, status, sourceCategory + ":" + status, i + 1,
-          sortedConditions(field.conditions()), conditionSummary(field.conditions())));
+      Map<String, Object> conditions = sortedConditions(field.conditions());
+      responseFields.add(new ProductSpecificationFieldResponse(field.id(), stableApiKey(field.id()), displayName(field, alias), aliases(field), displayDescription(field, alias),
+          field.valueType(), sourceCategory, status, sourceCategory + ":" + status, sourceCategory + ":" + status, typeChip(field.valueType()), i + 1, true,
+          migrationStatus(conditions), conditions, conditionSummary(conditions)));
     }
     return new ProductSpecificationFieldListResponse(tenantSpecific ? "tenant-draft" : "system/default", tenantSpecific,
         List.copyOf(responseFields), responseFields.size());
@@ -77,13 +78,21 @@ final class ProductSpecificationFieldListPolicy {
       if (field == null) throw new CatalogException("PRODUCT_SPEC_FIELD_NOT_FOUND");
       if (!"inherited".equals(status(field))) throw new CatalogException("PRODUCT_SPEC_ALIAS_INHERITED_FIELD_REQUIRED");
       if (!aliasIds.add(fieldId)) throw new CatalogException("PRODUCT_SPEC_FIELD_ALIAS_DUPLICATE");
-      normalizedAliases.add(new ProductSpecificationFieldAliasEdit(fieldId, trimToNull(alias.nameAlias()), trimToNull(alias.descriptionAlias())));
+      normalizedAliases.add(new ProductSpecificationFieldAliasEdit(fieldId, trimToNull(alias.nameAlias()), trimToNull(alias.descriptionAlias()),
+          field.name(), field.description(), field.valueType(), field.sourceGroup(), sortedConditions(field.conditions())));
     }
     LinkedHashSet<String> nativeIds = new LinkedHashSet<>();
     List<ProductSpecificationNativeFieldEdit> normalizedNative = new ArrayList<>();
     for (ProductSpecificationNativeFieldEdit nativeField : nativeFields) {
-      String fieldId = required(nativeField.fieldId(), "PRODUCT_SPEC_NATIVE_FIELD_ID_REQUIRED");
-      if (available.containsKey(fieldId)) throw new CatalogException("PRODUCT_SPEC_NATIVE_FIELD_CONFLICT");
+      String fieldId = stableApiKey(required(nativeField.fieldId(), "PRODUCT_SPEC_NATIVE_FIELD_ID_REQUIRED"));
+      FieldMetadataResponse existingField = available.get(fieldId);
+      if (existingField != null) {
+        String requestedValueType = canonicalNativeValueType(nativeField);
+        if (isConsumerMapped(existingField.conditions()) && !Objects.equals(existingField.valueType(), requestedValueType)) {
+          throw new CatalogException("PRODUCT_SPEC_TYPE_BREAKING_EDIT_REQUIRES_MIGRATION");
+        }
+        throw new CatalogException("PRODUCT_SPEC_NATIVE_FIELD_CONFLICT");
+      }
       if (!nativeIds.add(fieldId)) throw new CatalogException("PRODUCT_SPEC_NATIVE_FIELD_DUPLICATE");
       FieldMetadataResponse normalized = FieldMetadataCatalogPolicy.normalize(new FieldMetadataImportRequest("tenant-product-specification",
           List.of(new FieldMetadataInput(fieldId, null, nativeField.name(), nativeField.description(), nativeField.category(), nativeField.valueType(), nativeField.sourceGroup(), nativeField.conditions(), "native")),
@@ -92,6 +101,25 @@ final class ProductSpecificationFieldListPolicy {
           normalized.valueType(), normalized.sourceGroup(), normalized.conditions()));
     }
     return new ProductSpecificationTenantFieldDraft("DRAFT", List.copyOf(normalizedAliases), List.copyOf(normalizedNative), java.time.Instant.now(), actorId);
+  }
+
+  static void validateTenantDraftAgainstBase(ProductSpecificationTenantFieldDraft draft,
+                                             List<FieldMetadataResponse> availableFields) {
+    if (draft == null) return;
+    Map<String, FieldMetadataResponse> available = (availableFields == null ? List.<FieldMetadataResponse>of() : availableFields).stream()
+        .filter(ProductSpecificationFieldListPolicy::isProductSpecificationField)
+        .collect(Collectors.toMap(FieldMetadataResponse::id, field -> field, (a, b) -> a, LinkedHashMap::new));
+    for (ProductSpecificationFieldAliasEdit alias : safeAliases(draft.aliases())) {
+      String fieldId = required(alias.fieldId(), "PRODUCT_SPEC_FIELD_ID_REQUIRED");
+      FieldMetadataResponse field = available.get(fieldId);
+      if (field == null || !"inherited".equals(status(field))) throw new CatalogException("PRODUCT_SPEC_TENANT_OVERRIDE_CONFLICT");
+      if (baseMetadataChanged(alias, field)) throw new CatalogException("PRODUCT_SPEC_TENANT_OVERRIDE_CONFLICT");
+    }
+    for (ProductSpecificationNativeFieldEdit nativeField : safeNativeFields(draft.nativeFields())) {
+      String fieldId = stableApiKey(required(nativeField.fieldId(), "PRODUCT_SPEC_NATIVE_FIELD_ID_REQUIRED"));
+      FieldMetadataResponse field = available.get(fieldId);
+      if (field != null) throw new CatalogException("PRODUCT_SPEC_TENANT_OVERRIDE_CONFLICT");
+    }
   }
 
   static List<FieldMetadataResponse> normalizeSystemImport(ProductSpecificationSystemFieldImportRequest request,
@@ -208,6 +236,23 @@ final class ProductSpecificationFieldListPolicy {
     return aliases == null ? List.of() : aliases.stream().filter(Objects::nonNull).toList();
   }
 
+  private static boolean baseMetadataChanged(ProductSpecificationFieldAliasEdit alias, FieldMetadataResponse current) {
+    if (!hasBaseSnapshot(alias)) return false;
+    return !Objects.equals(alias.baseName(), current.name())
+        || !Objects.equals(alias.baseDescription(), current.description())
+        || !Objects.equals(alias.baseValueType(), current.valueType())
+        || !Objects.equals(alias.baseSourceGroup(), current.sourceGroup())
+        || !Objects.equals(sortedConditions(alias.baseConditions()), sortedConditions(current.conditions()));
+  }
+
+  private static boolean hasBaseSnapshot(ProductSpecificationFieldAliasEdit alias) {
+    return alias.baseName() != null
+        || alias.baseDescription() != null
+        || alias.baseValueType() != null
+        || alias.baseSourceGroup() != null
+        || (alias.baseConditions() != null && !alias.baseConditions().isEmpty());
+  }
+
   private static List<ProductSpecificationNativeFieldEdit> safeNativeFields(List<ProductSpecificationNativeFieldEdit> fields) {
     return fields == null ? List.of() : fields.stream().filter(Objects::nonNull).toList();
   }
@@ -219,5 +264,42 @@ final class ProductSpecificationFieldListPolicy {
 
   private static String trimToNull(String value) {
     return value == null || value.isBlank() ? null : value.trim();
+  }
+
+  private static String stableApiKey(String value) {
+    String normalized = required(value, "PRODUCT_SPEC_NATIVE_FIELD_ID_REQUIRED").toLowerCase(Locale.ROOT).trim()
+        .replace('_', '-').replace(' ', '-');
+    if (normalized.startsWith("field@")) return "field@" + normalized.substring("field@".length()).replaceAll("[^a-z0-9@._-]", "-");
+    return "field@" + normalized.replaceAll("[^a-z0-9._-]", "-");
+  }
+
+  private static String typeChip(String valueType) {
+    String value = valueType == null || valueType.isBlank() ? "unknown" : valueType.trim().toLowerCase(Locale.ROOT);
+    return "type:" + value;
+  }
+
+  private static String migrationStatus(Map<String, Object> conditions) {
+    return isConsumerMapped(conditions) ? "migration-controlled" : "editable";
+  }
+
+  private static String canonicalNativeValueType(ProductSpecificationNativeFieldEdit nativeField) {
+    return FieldMetadataCatalogPolicy.normalize(new FieldMetadataImportRequest("tenant-product-specification",
+        List.of(new FieldMetadataInput("field@type-check", null, "Type Check", "Type check", blankToCustom(nativeField.category()), nativeField.valueType(), nativeField.sourceGroup(), Map.of(), "native")),
+        List.of(), List.of(), List.of())).get(0).valueType();
+  }
+
+  private static String blankToCustom(String value) {
+    return value == null || value.isBlank() ? "custom" : value;
+  }
+
+  private static boolean isConsumerMapped(Map<String, Object> conditions) {
+    if (conditions == null || conditions.isEmpty()) return false;
+    for (String key : List.of("consumerMapping", "consumerMappings", "mappedConsumers", "mappingConsumers", "usedByConsumerMapping")) {
+      Object value = conditions.get(key);
+      if (Boolean.TRUE.equals(value)) return true;
+      if (value instanceof Collection<?> collection && !collection.isEmpty()) return true;
+      if (value instanceof String text && !text.isBlank()) return true;
+    }
+    return false;
   }
 }

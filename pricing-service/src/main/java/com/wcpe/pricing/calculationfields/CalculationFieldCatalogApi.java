@@ -38,6 +38,9 @@ public final class CalculationFieldCatalogApi {
             if (canonicalId == null) {
                 continue;
             }
+            if (!field.active()) {
+                continue;
+            }
             boolean unavailable = effectiveConfig.unavailableFieldIds().contains(canonicalId);
             if (unavailable && effectiveConfig.unavailableHandling() == UnavailableHandling.HIDE_UNAVAILABLE) {
                 continue;
@@ -50,7 +53,9 @@ public final class CalculationFieldCatalogApi {
                     field.description(),
                     !unavailable,
                     unavailable ? "UNAVAILABLE_FOR_TENANT" : "AVAILABLE",
-                    field.id());
+                    field.id(),
+                    sourceDependencies(field),
+                    field.consumers().stream().sorted().toList());
             entries.putIfAbsent(canonicalId, entry);
         }
 
@@ -62,6 +67,39 @@ public final class CalculationFieldCatalogApi {
                 sortedEntries,
                 sortedEntries.stream().map(CalculationFieldCatalogApi::toSettingsOption).toList(),
                 headers.correlationId());
+    }
+
+    public CalculationFieldEvaluationAvailability evaluationAvailability(
+            String tenantId,
+            CalculationFieldHeaders headers,
+            String fieldId,
+            CalculationFieldImport importPayload) {
+        requireTenant(tenantId);
+        requirePermission(headers, CALCULATION_FIELD_READ_PERMISSION);
+        String canonicalId = canonicalCalculationFieldId(fieldId);
+        if (canonicalId == null) {
+            return CalculationFieldEvaluationAvailability.blocked(
+                    fieldId,
+                    "BLOCKED_MISSING_SOURCE_CONFIGURATION",
+                    "Calculation field source configuration is unavailable; values were not invented.");
+        }
+        if (importPayload == null) {
+            return CalculationFieldEvaluationAvailability.blocked(
+                    canonicalId,
+                    "BLOCKED_MISSING_SOURCE_CONFIGURATION",
+                    "ReferenceFormfields source configuration is required before evaluation.");
+        }
+        boolean configured = importPayload.fields().stream()
+                .map(ImportedCalculationField::id)
+                .map(CalculationFieldCatalogApi::canonicalCalculationFieldId)
+                .anyMatch(canonicalId::equals);
+        if (!configured) {
+            return CalculationFieldEvaluationAvailability.blocked(
+                    canonicalId,
+                    "BLOCKED_MISSING_SOURCE_CONFIGURATION",
+                    "Calculation field source configuration is missing; values were not invented.");
+        }
+        return new CalculationFieldEvaluationAvailability(canonicalId, "METADATA_AVAILABLE", "Evaluation value not computed by catalog.");
     }
 
     public CalculationFieldImportValidationResult validateImportedFields(CalculationFieldImport importPayload) {
@@ -114,6 +152,15 @@ public final class CalculationFieldCatalogApi {
                 entry.tenantAvailability());
     }
 
+    private static List<SourceFieldDependency> sourceDependencies(ImportedCalculationField field) {
+        if (!field.sourceDependencies().isEmpty()) {
+            return field.sourceDependencies().stream()
+                    .sorted(Comparator.comparing(SourceFieldDependency::sourceFieldId))
+                    .toList();
+        }
+        return List.of(new SourceFieldDependency(field.id(), field.sourceVersion()));
+    }
+
     private static void requireTenant(String tenantId) {
         requireNonBlank(tenantId, "tenant_id is required");
     }
@@ -146,7 +193,40 @@ public final class CalculationFieldCatalogApi {
         }
     }
 
-    public record ImportedCalculationField(String id, String name, String valueType, String description) {
+    public record ImportedCalculationField(
+            String id,
+            String name,
+            String valueType,
+            String description,
+            String sourceVersion,
+            List<SourceFieldDependency> sourceDependencies,
+            Set<String> consumers,
+            boolean active) {
+        public ImportedCalculationField(String id, String name, String valueType, String description) {
+            this(id, name, valueType, description, null, List.of(), Set.of(), true);
+        }
+
+        public ImportedCalculationField(
+                String id,
+                String name,
+                String valueType,
+                String description,
+                String sourceVersion,
+                List<SourceFieldDependency> sourceDependencies,
+                Set<String> consumers) {
+            this(id, name, valueType, description, sourceVersion, sourceDependencies, consumers, true);
+        }
+
+        public ImportedCalculationField {
+            sourceDependencies = sourceDependencies == null ? List.of() : List.copyOf(sourceDependencies);
+            consumers = consumers == null ? Set.of() : Set.copyOf(consumers);
+        }
+    }
+
+    public record SourceFieldDependency(String sourceFieldId, String sourceFieldVersion) {
+        public SourceFieldDependency {
+            sourceFieldId = requireNonBlank(sourceFieldId, "source field id is required");
+        }
     }
 
     public record TenantCalculationFieldConfig(Set<String> unavailableFieldIds, UnavailableHandling unavailableHandling) {
@@ -173,7 +253,13 @@ public final class CalculationFieldCatalogApi {
             String description,
             boolean tenantAvailable,
             String tenantAvailability,
-            String sourceFieldId) {
+            String sourceFieldId,
+            List<SourceFieldDependency> sourceDependencies,
+            List<String> consumers) {
+        public CalculationFieldCatalogEntry {
+            sourceDependencies = sourceDependencies == null ? List.of() : List.copyOf(sourceDependencies);
+            consumers = consumers == null ? List.of() : List.copyOf(consumers);
+        }
     }
 
     public record CalculationFieldSettingsOption(
@@ -195,6 +281,12 @@ public final class CalculationFieldCatalogApi {
             String source,
             List<String> calculationFieldIds,
             List<String> unsupportedFieldIds) {
+    }
+
+    public record CalculationFieldEvaluationAvailability(String fieldId, String status, String blockerReason) {
+        public static CalculationFieldEvaluationAvailability blocked(String fieldId, String status, String blockerReason) {
+            return new CalculationFieldEvaluationAvailability(fieldId, status, blockerReason);
+        }
     }
 
     public static final class CalculationFieldCatalogException extends RuntimeException {

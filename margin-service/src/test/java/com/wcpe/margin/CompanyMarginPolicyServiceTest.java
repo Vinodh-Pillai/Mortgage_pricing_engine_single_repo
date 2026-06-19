@@ -13,8 +13,10 @@ import com.wcpe.margin.CompanyMarginPolicyService.BranchOverlayContext;
 import com.wcpe.margin.CompanyMarginPolicyService.MarginPolicyException;
 import com.wcpe.margin.CompanyMarginPolicyService.MarginPolicyVersion;
 import com.wcpe.margin.CompanyMarginPolicyService.MarginRule;
+import com.wcpe.margin.CompanyMarginPolicyService.MarginRuleEvaluationResult;
 import com.wcpe.margin.CompanyMarginPolicyService.MarginScope;
 import com.wcpe.margin.CompanyMarginPolicyService.MarginUnit;
+import com.wcpe.margin.CompanyMarginPolicyService.RuleEvaluationContext;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -237,6 +239,69 @@ class CompanyMarginPolicyServiceTest {
     assertEquals(0, service.marginVisibilityRedactionTotal.get());
   }
 
+  @Test
+  void marginRulesConsumeApprovedFieldsAndCalculationOutputsWithTraceableDetails() {
+    CommandReceipt published = publish(command("tenant-a", "admin-a", "idem-14", "hash-14",
+        runtimeVersion("v-runtime-1", List.of(new MarginRule(1, MarginUnit.BPS, "calc.marginTargetBps",
+            "field.marginMinBps", "field.marginMaxBps", 3, "MARGIN_RULE", scope())))), "approver-b");
+
+    MarginRuleEvaluationResult result = service.evaluateActiveMarginRules("tenant-a", scope(),
+        Instant.parse("2026-01-02T00:00:00Z"), new RuleEvaluationContext("tenant-a", "quote-1", "corr-runtime-1",
+            Map.of("field.marginMinBps", new BigDecimal("10"), "field.marginMaxBps", new BigDecimal("30")),
+            Map.of("calc.marginTargetBps", new BigDecimal("22")),
+            List.of("calc.marginTargetBps", "field.marginMinBps", "field.marginMaxBps")),
+        new BigDecimal("100.000"));
+
+    assertEquals("MARGIN_RULES_EVALUATED", result.status());
+    assertEquals(published.policyId(), result.policyId());
+    assertEquals(new BigDecimal("99.780"), result.priceAfterMargin());
+    assertEquals("MARGIN_RULE", result.steps().get(0).stepType());
+    assertEquals("v-runtime-1", result.steps().get(0).sourceVersionId());
+    assertEquals(List.of("calc.marginTargetBps", "field.marginMinBps", "field.marginMaxBps"), result.metadataRefs());
+    assertTrue(result.dependencyErrors().isEmpty());
+    assertEquals("MARGIN_RULES_EVALUATED", service.auditRecords().get(service.auditRecords().size() - 1).action());
+    assertEquals(1, service.activeRules("tenant-a", scope(), Instant.parse("2026-01-02T00:00:00Z")).size());
+    assertTrue(service.activeRules("tenant-b", scope(), Instant.parse("2026-01-02T00:00:00Z")).isEmpty());
+  }
+
+  @Test
+  void recordsDependencyErrorWhenMarginRuleReferenceIsMissing() {
+    publish(command("tenant-a", "admin-a", "idem-15", "hash-15",
+        runtimeVersion("v-runtime-2", List.of(new MarginRule(1, MarginUnit.BPS, "calc.marginTargetBps",
+            "field.marginMinBps", "table.marginMaxBps", 3, "MARGIN_RULE", scope())))), "approver-b");
+
+    MarginRuleEvaluationResult result = service.evaluateActiveMarginRules("tenant-a", scope(),
+        Instant.parse("2026-01-02T00:00:00Z"), new RuleEvaluationContext("tenant-a", "quote-2", "corr-runtime-2",
+            Map.of("field.marginMinBps", new BigDecimal("10")),
+            Map.of("calc.marginTargetBps", new BigDecimal("22")),
+            List.of("calc.marginTargetBps", "field.marginMinBps", "table.marginMaxBps")),
+        new BigDecimal("100.000"));
+
+    assertEquals("DEPENDENCY_ERROR", result.status());
+    assertEquals(new BigDecimal("100.000"), result.priceAfterMargin());
+    assertTrue(result.steps().isEmpty());
+    assertEquals(1, result.dependencyErrors().size());
+    assertEquals("table.marginMaxBps", result.dependencyErrors().get(0).ref());
+    assertEquals("MARGIN_DEPENDENCY_MISSING", result.dependencyErrors().get(0).errorCode());
+    assertEquals("MARGIN_RULE_DEPENDENCY_ERROR", service.auditRecords().get(service.auditRecords().size() - 1).action());
+  }
+
+  @Test
+  void marginRuleEvaluationEnforcesTenantContextBoundary() {
+    publish(command("tenant-a", "admin-a", "idem-16", "hash-16", runtimeVersion("v-runtime-3",
+        List.of(new MarginRule(1, MarginUnit.BPS, "calc.marginTargetBps", "field.marginMinBps",
+            "field.marginMaxBps", 3, "MARGIN_RULE", scope())))), "approver-b");
+
+    RuleEvaluationContext otherTenantContext = new RuleEvaluationContext("tenant-b", "quote-3", "corr-runtime-3",
+        Map.of("field.marginMinBps", new BigDecimal("10"), "field.marginMaxBps", new BigDecimal("30")),
+        Map.of("calc.marginTargetBps", new BigDecimal("22")),
+        List.of("calc.marginTargetBps", "field.marginMinBps", "field.marginMaxBps"));
+
+    assertEquals("TENANT_ACCESS_DENIED", assertThrows(MarginPolicyException.class,
+        () -> service.evaluateActiveMarginRules("tenant-a", scope(), Instant.parse("2026-01-02T00:00:00Z"),
+            otherTenantContext, new BigDecimal("100.000"))).getMessage());
+  }
+
   private CommandReceipt publish(CreatePolicyCommand command, String approver) {
     CommandReceipt created = service.createDraft(command);
     service.submit(command.tenantId(), created.policyId(), command.actorId(), "corr-2");
@@ -266,6 +331,11 @@ class CompanyMarginPolicyServiceTest {
   private static MarginPolicyVersion branchVersion(String versionId, List<MarginRule> rules) {
     return new MarginPolicyVersion(versionId, 1, scope(),
         new EffectiveWindow(Instant.parse("2026-01-01T00:00:00Z"), null), rules, "cfg-branch-hash-1");
+  }
+
+  private static MarginPolicyVersion runtimeVersion(String versionId, List<MarginRule> rules) {
+    return new MarginPolicyVersion(versionId, 1, scope(),
+        new EffectiveWindow(Instant.parse("2026-01-01T00:00:00Z"), null), rules, "cfg-runtime-hash-1");
   }
 
   private static MarginRule branchRule(int priority, String amountRef, String branchId, String regionId) {

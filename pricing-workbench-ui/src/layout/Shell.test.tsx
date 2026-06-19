@@ -1,5 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
 import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -34,6 +35,8 @@ const modules: WorkbenchScreenModule[] = [
     match: () => false,
   },
 ];
+
+const layoutCss = readFileSync('src/layout/layout.css', 'utf8');
 
 function installMatchMedia(matches = false) {
   Object.defineProperty(window, 'matchMedia', {
@@ -113,12 +116,19 @@ describe('responsive layout shell', () => {
     expect(document.querySelector('.layout-frame')).toHaveClass('layout-frame--popup-navigation');
     expect(screen.getByRole('main')).toHaveClass('layout-content--workspace');
     expect(document.querySelector('.layout-content__panel')).toHaveClass('layout-content__panel--workspace');
+    expect(layoutCss).toMatch(/\.layout-shell--workspace\s+\.layout-sidebar--drawer\s*\{[\s\S]*?position:\s*fixed;[\s\S]*?top:\s*4rem;[\s\S]*?z-index:\s*var\(--layout-z-drawer\);/);
     expect(screen.queryByRole('contentinfo')).not.toBeInTheDocument();
     expect(screen.queryByRole('navigation', { name: 'Main navigation' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open navigation menu' }));
     expect(screen.getByRole('dialog', { name: 'Primary navigation drawer' })).toBeInTheDocument();
-    expect(document.querySelector('.layout-sidebar-backdrop')).toBeInTheDocument();
+    const backdrop = document.querySelector('.layout-sidebar-backdrop') as HTMLElement;
+    expect(backdrop).toBeInTheDocument();
+    fireEvent.click(backdrop);
+    expect(screen.queryByRole('dialog', { name: 'Primary navigation drawer' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open navigation menu' }));
+    expect(screen.getByRole('dialog', { name: 'Primary navigation drawer' })).toBeInTheDocument();
     fireEvent.keyDown(screen.getByRole('dialog', { name: 'Primary navigation drawer' }), { key: 'Escape' });
     expect(screen.queryByRole('dialog', { name: 'Primary navigation drawer' })).not.toBeInTheDocument();
     expect(screen.getByRole('main')).toHaveFocus();

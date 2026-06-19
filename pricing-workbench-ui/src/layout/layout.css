@@ -394,7 +394,7 @@
 
 .layout-nav-backdrop,
 .layout-sidebar-backdrop {
-  background: rgb(7 17 31 / 58%);
+  background: rgb(64 64 64 / 58%);
   border: 0;
   cursor: pointer;
   inset: 0;
@@ -416,6 +416,28 @@
 
 .layout-shell--workspace .layout-frame {
   min-height: calc(100dvh - 4rem);
+}
+
+@media (min-width: 768px) {
+  .layout-shell--workspace .layout-sidebar--drawer {
+    backdrop-filter: var(--ds-glass-blur-strong);
+    background: var(--ds-glass-background);
+    bottom: 0;
+    left: 0;
+    max-height: none;
+    min-height: calc(100dvh - 4rem);
+    overflow: hidden;
+    position: fixed;
+    top: 4rem;
+    transform: translateX(0);
+    transition: transform 250ms var(--ds-ease-standard);
+    width: min(20rem, calc(100vw - 2rem));
+    z-index: var(--layout-z-drawer);
+  }
+
+  .layout-shell--workspace .layout-sidebar--drawer .layout-sidebar__groups {
+    max-height: calc(100dvh - 11.5rem);
+  }
 }
 
 .layout-shell--workspace .layout-sidebar__mobile-trigger {

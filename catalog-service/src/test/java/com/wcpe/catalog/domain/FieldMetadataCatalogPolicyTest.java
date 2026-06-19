@@ -32,9 +32,11 @@ class FieldMetadataCatalogPolicyTest {
             supportedValueTypeInput("fixture.enum", "Enum", "enum"),
             supportedValueTypeInput("fixture.number", "Number", "number"),
             supportedValueTypeInput("fixture.string", "String", "string"),
+            supportedValueTypeInput("fixture.text", "Text", "text"),
             supportedValueTypeInput("fixture.date", "Date", "date"),
             supportedValueTypeInput("fixture.time", "Time", "time"),
             supportedValueTypeInput("fixture.duration", "Duration", "duration"),
+            supportedValueTypeInput("fixture.boolean", "Boolean", "boolean"),
             supportedValueTypeInput("fixture.us-state", "State", "US_STATE"),
             supportedValueTypeInput("fixture.us-county", "County", "US county")),
         List.of(), List.of(), List.of());
@@ -42,7 +44,7 @@ class FieldMetadataCatalogPolicyTest {
     List<FieldMetadataResponse> normalized = FieldMetadataCatalogPolicy.normalize(request);
 
     assertThat(normalized).extracting(FieldMetadataResponse::valueType)
-        .containsExactly("header", "enum", "number", "string", "date", "time", "duration", "us-state", "us-county");
+        .containsExactly("header", "enum", "number", "string", "text", "date", "time", "duration", "boolean", "us-state", "us-county");
     assertThat(normalized).extracting(FieldMetadataResponse::source)
         .containsOnly("ReferenceFormfields.json");
   }

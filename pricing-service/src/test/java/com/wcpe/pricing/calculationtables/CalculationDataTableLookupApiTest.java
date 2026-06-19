@@ -9,6 +9,7 @@ import com.wcpe.pricing.calculationtables.CalculationDataTableLookupApi.Calculat
 import com.wcpe.pricing.calculationtables.CalculationDataTableLookupApi.CalculationLookupValidationRequest;
 import com.wcpe.pricing.calculationtables.CalculationDataTableLookupApi.CreateLookupRequest;
 import com.wcpe.pricing.calculationtables.CalculationDataTableLookupApi.EditLookupOptionsRequest;
+import com.wcpe.pricing.calculationtables.CalculationDataTableLookupApi.HistoricalLookupValueRequest;
 import com.wcpe.pricing.calculationtables.CalculationDataTableLookupApi.InMemoryCalculationDataTableLookupRepository;
 import com.wcpe.pricing.calculationtables.CalculationDataTableLookupApi.LookupCreateResponse;
 import com.wcpe.pricing.calculationtables.CalculationDataTableLookupApi.LookupHeaders;
@@ -81,8 +82,31 @@ class CalculationDataTableLookupApiTest {
                         new CalculationLookupReference("missing-table", Set.of("state", "county")))));
 
         assertEquals(LookupReferenceValidationStatus.INVALID, result.status());
-        assertEquals(List.of("MISSING_REQUIRED_KEYS:county-adjustment-table:county", "TABLE_NOT_FOUND:missing-table"),
-                result.errors());
+        assertEquals(List.of("LOOKUP_DEPENDENCY_ERROR:MISSING_REQUIRED_KEYS:county-adjustment-table:county",
+                "TABLE_NOT_FOUND:missing-table"), result.errors());
+    }
+
+    @Test
+    void validationAndRuntimeBlockWhenReferencedTableIsInactiveOrUnpublished() {
+        LookupCreateResponse draft = api.createLookup(TENANT, writeHeaders(), lookupCreateRequest("factor-a"));
+
+        var draftValidation = api.validateCalculationReferences(TENANT, readHeaders(), new CalculationLookupValidationRequest(
+                "calc@manual-factor", List.of(new CalculationLookupReference(TABLE_ID, Set.of("state", "county")))));
+        assertEquals(List.of("LOOKUP_DEPENDENCY_ERROR:TABLE_INACTIVE_OR_UNPUBLISHED:" + TABLE_ID),
+                draftValidation.errors());
+
+        api.publishLookupOptions(TENANT, publishHeaders(), draft.versionId());
+        api.deactivateLookupTable(TENANT, publishHeaders(), TABLE_ID);
+
+        var inactiveValidation = api.validateCalculationReferences(TENANT, readHeaders(), new CalculationLookupValidationRequest(
+                "calc@manual-factor", List.of(new CalculationLookupReference(TABLE_ID, Set.of("state", "county")))));
+        assertEquals(List.of("LOOKUP_DEPENDENCY_ERROR:TABLE_INACTIVE_OR_UNPUBLISHED:" + TABLE_ID),
+                inactiveValidation.errors());
+
+        var runtime = api.lookupValue(TENANT, readHeaders(),
+                new LookupValueRequest(TABLE_ID, Map.of("state", "IL", "county", "COOK")));
+        assertEquals(LookupRuntimeStatus.BLOCKED_MISSING_DATA, runtime.status());
+        assertEquals("LOOKUP_DEPENDENCY_ERROR:TABLE_INACTIVE_OR_UNPUBLISHED", runtime.missingReason());
     }
 
     @Test
@@ -99,6 +123,18 @@ class CalculationDataTableLookupApiTest {
     }
 
     @Test
+    void runtimeMissingRequiredKeysReturnDependencyError() {
+        LookupCreateResponse created = api.createLookup(TENANT, writeHeaders(), lookupCreateRequest("factor-a"));
+        api.publishLookupOptions(TENANT, publishHeaders(), created.versionId());
+
+        var result = api.lookupValue(TENANT, readHeaders(), new LookupValueRequest(TABLE_ID, Map.of("state", "IL")));
+
+        assertEquals(LookupRuntimeStatus.BLOCKED_MISSING_DATA, result.status());
+        assertEquals("LOOKUP_DEPENDENCY_ERROR:MISSING_REQUIRED_KEYS:county", result.missingReason());
+        assertNull(result.value());
+    }
+
+    @Test
     void publishedLookupReturnsCallerSuppliedOptionOnlyOnExactKeyMatch() {
         LookupCreateResponse created = api.createLookup(TENANT, writeHeaders(), lookupCreateRequest("factor-a"));
         api.publishLookupOptions(TENANT, publishHeaders(), created.versionId());
@@ -108,6 +144,43 @@ class CalculationDataTableLookupApiTest {
 
         assertEquals(LookupRuntimeStatus.FOUND, result.status());
         assertEquals("factor-a", result.value());
+    }
+
+    @Test
+    void auditEnabledLookupRecordsInputsMatchedRowVersionAndResult() {
+        LookupCreateResponse created = api.createLookup(TENANT, writeHeaders(), lookupCreateRequest("factor-a"));
+        api.publishLookupOptions(TENANT, publishHeaders(), created.versionId());
+
+        api.lookupValue(TENANT, readHeaders(),
+                new LookupValueRequest(TABLE_ID, Map.of("state", "IL", "county", "COOK"), true));
+
+        var audit = repository.events().get(repository.events().size() - 1);
+        assertEquals("pricing.calculation-lookup-executed.v1", audit.eventType());
+        assertEquals(created.versionId().toString(), audit.details().get("tableVersion"));
+        assertEquals("state=IL|county=COOK", audit.details().get("matchedRow"));
+        assertEquals("FOUND", audit.details().get("result"));
+        assertTrue(audit.details().get("keyInputs").contains("county=COOK"));
+        assertTrue(audit.details().get("keyInputs").contains("state=IL"));
+    }
+
+    @Test
+    void historicalLookupCanUsePriorVersionAfterTableChanges() {
+        LookupCreateResponse first = api.createLookup(TENANT, writeHeaders(), lookupCreateRequest("factor-a"));
+        api.publishLookupOptions(TENANT, publishHeaders(), first.versionId());
+        var edited = api.editLookupOptions(TENANT, writeHeaders(), TABLE_ID,
+                new EditLookupOptionsRequest(List.of(option("IL", "COOK", "factor-b")), "caller-supplied update"));
+        api.publishLookupOptions(TENANT, publishHeaders(), edited.versionId());
+
+        var latest = api.lookupValue(TENANT, readHeaders(),
+                new LookupValueRequest(TABLE_ID, Map.of("state", "IL", "county", "COOK")));
+        var historical = api.lookupHistoricalValue(TENANT, readHeaders(),
+                new HistoricalLookupValueRequest(first.versionId(), TABLE_ID, Map.of("state", "IL", "county", "COOK"), true));
+
+        assertEquals("factor-b", latest.value());
+        assertEquals("factor-a", historical.value());
+        assertEquals(first.versionId(), historical.versionId());
+        assertEquals("pricing.calculation-lookup-historical-replayed.v1",
+                repository.events().get(repository.events().size() - 1).eventType());
     }
 
     private static CreateLookupRequest lookupCreateRequest(String value) {

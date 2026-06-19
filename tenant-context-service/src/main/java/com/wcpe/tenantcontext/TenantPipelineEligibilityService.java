@@ -2,6 +2,7 @@ package com.wcpe.tenantcontext;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -14,9 +15,12 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class TenantPipelineEligibilityService {
+    private static final String METADATA_READ_SCOPE = TenantAccessPolicy.DEFAULT_CONTEXT_READ_SCOPE;
+
     private final TenantFieldConfigurationStoreService fieldConfigurationStore;
     private final Map<String, TenantPipelineConfiguration> configurationsByTenant = new ConcurrentHashMap<>();
     private final Map<String, UserTenantAssignment> userAssignments = new ConcurrentHashMap<>();
+    private final List<TenantPipelineAccessAuditRecord> accessAuditRecords = Collections.synchronizedList(new ArrayList<>());
 
     public TenantPipelineEligibilityService(TenantFieldConfigurationStoreService fieldConfigurationStore) {
         this.fieldConfigurationStore = Objects.requireNonNull(fieldConfigurationStore, "fieldConfigurationStore is required");
@@ -57,19 +61,24 @@ public class TenantPipelineEligibilityService {
     }
 
     public TenantPipelineEligibility eligibleForUser(TenantPipelineEligibilityRequest request) {
+        throw new TenantContextValidationException("TENANT_CONTEXT_MISSING", "tenant context is required for tenant metadata queries");
+    }
+
+    public TenantPipelineEligibility eligibleForUser(TenantContext tenantContext, TenantPipelineEligibilityRequest request) {
         if (request == null) {
             throw pipelineError("TENANT_PIPELINE_REQUEST_REQUIRED", "request", "Tenant pipeline eligibility request is required.");
         }
+        requireTenantMetadataContext(tenantContext, request);
         String tenantId = required(request.tenantId(), "tenantId");
         String userId = required(request.userId(), "userId");
         String actorTenantId = required(request.actorTenantId(), "actorTenantId");
         if (!same(tenantId, actorTenantId)) {
-            throw pipelineError("TENANT_PIPELINE_ACCESS_DENIED", "tenantId", "Actor tenant cannot query another tenant's pipeline configuration.");
+            throwDeniedWithAudit(tenantContext, request, "TENANT_PIPELINE_ACCESS_DENIED", "tenantId", "Actor tenant cannot query another tenant's pipeline configuration.", "tenant", actorTenantId);
         }
         UserTenantAssignment assignment = Optional.ofNullable(userAssignments.get(key(userId)))
             .orElseThrow(() -> pipelineError("TENANT_PIPELINE_USER_NOT_ASSIGNED", "userId", "User must be assigned to the tenant before querying pipeline configuration."));
         if (!same(assignment.tenantId(), tenantId)) {
-            throw pipelineError("TENANT_PIPELINE_ACCESS_DENIED", "userId", "User cannot query another tenant's products or investors.");
+            throwDeniedWithAudit(tenantContext, request, "TENANT_PIPELINE_ACCESS_DENIED", "userId", "User cannot query another tenant's products or investors.", "user", userId);
         }
 
         TenantPipelineConfiguration configuration = Optional.ofNullable(configurationsByTenant.get(key(tenantId)))
@@ -78,10 +87,10 @@ public class TenantPipelineEligibilityService {
         List<TenantInvestorOption> activeInvestors = configuration.investors().stream().filter(TenantInvestorOption::enabled).toList();
 
         if (hasText(request.requestedProductId()) && activeProducts.stream().noneMatch(product -> same(product.productId(), request.requestedProductId()))) {
-            throw pipelineError("TENANT_PIPELINE_PRODUCT_DENIED", "productId", "Product is not authorized for this tenant.");
+            throwDeniedWithAudit(tenantContext, request, "TENANT_PIPELINE_PRODUCT_DENIED", "productId", "Product is not authorized for this tenant.", "product", request.requestedProductId());
         }
         if (hasText(request.requestedInvestorId()) && activeInvestors.stream().noneMatch(investor -> same(investor.investorId(), request.requestedInvestorId()))) {
-            throw pipelineError("TENANT_PIPELINE_INVESTOR_DENIED", "investorId", "Investor is not authorized for this tenant.");
+            throwDeniedWithAudit(tenantContext, request, "TENANT_PIPELINE_INVESTOR_DENIED", "investorId", "Investor is not authorized for this tenant.", "investor", request.requestedInvestorId());
         }
 
         Map<String, String> userSettings = configuration.userSettings().stream()
@@ -89,7 +98,7 @@ public class TenantPipelineEligibilityService {
             .findFirst()
             .map(TenantUserSettings::settings)
             .orElse(Map.of());
-        return new TenantPipelineEligibility(
+        TenantPipelineEligibility eligibility = new TenantPipelineEligibility(
             tenantId,
             userId,
             activeProducts.stream().map(TenantProductOption::productId).toList(),
@@ -97,6 +106,63 @@ public class TenantPipelineEligibilityService {
             configuration.companySettings(),
             userSettings
         );
+        recordMetadataEvaluation(tenantContext, request);
+        return eligibility;
+    }
+
+    public List<TenantPipelineAccessAuditRecord> accessAuditRecordsForTenant(String tenantId) {
+        String normalizedTenantId = required(tenantId, "tenantId");
+        synchronized (accessAuditRecords) {
+            return accessAuditRecords.stream()
+                .filter(record -> same(record.tenantId(), normalizedTenantId))
+                .toList();
+        }
+    }
+
+    private void requireTenantMetadataContext(TenantContext tenantContext, TenantPipelineEligibilityRequest request) {
+        if (tenantContext == null) {
+            throw new TenantContextValidationException("TENANT_CONTEXT_MISSING", "tenant context is required for tenant metadata queries");
+        }
+        String requestTenantId = required(request.tenantId(), "tenantId");
+        if (!same(tenantContext.tenantId(), requestTenantId)) {
+            recordDeniedAccess(tenantContext, request, "TENANT_ACCESS_DENIED", "tenant", requestTenantId);
+            throw new TenantContextValidationException("TENANT_ACCESS_DENIED", "tenant context does not match requested tenant metadata");
+        }
+        if (tenantContext.scopes() == null || !tenantContext.scopes().contains(METADATA_READ_SCOPE)) {
+            recordDeniedAccess(tenantContext, request, "TENANT_ACCESS_DENIED", "scope", METADATA_READ_SCOPE);
+            throw new TenantContextValidationException("TENANT_ACCESS_DENIED", "tenant metadata read scope is required");
+        }
+        if (tenantContext.actor() == null || !hasText(tenantContext.actor().actorId()) || !hasText(tenantContext.actor().actorType())) {
+            recordDeniedAccess(tenantContext, request, "TENANT_CONTEXT_MISSING", "actor", "");
+            throw new TenantContextValidationException("TENANT_CONTEXT_MISSING", "actor context is required for tenant metadata queries");
+        }
+    }
+
+    private void throwDeniedWithAudit(TenantContext tenantContext, TenantPipelineEligibilityRequest request, String code, String field, String message, String entityType, String entityId) {
+        recordDeniedAccess(tenantContext, request, code, entityType, entityId);
+        throw pipelineError(code, field, message);
+    }
+
+    private void recordDeniedAccess(TenantContext tenantContext, TenantPipelineEligibilityRequest request, String code, String entityType, String entityId) {
+        String tenantId = request == null || !hasText(request.tenantId())
+            ? tenantContext == null ? "UNKNOWN" : tenantContext.tenantId()
+            : request.tenantId().trim();
+        String userId = request == null || !hasText(request.userId()) ? "" : request.userId().trim();
+        String actorId = tenantContext == null || tenantContext.actor() == null ? "" : optional(tenantContext.actor().actorId());
+        String actorType = tenantContext == null || tenantContext.actor() == null ? "" : optional(tenantContext.actor().actorType());
+        accessAuditRecords.add(new TenantPipelineAccessAuditRecord(tenantId, userId, actorId, actorType, code, optional(entityType), optional(entityId)));
+    }
+
+    private void recordMetadataEvaluation(TenantContext tenantContext, TenantPipelineEligibilityRequest request) {
+        accessAuditRecords.add(new TenantPipelineAccessAuditRecord(
+            required(request.tenantId(), "tenantId"),
+            required(request.userId(), "userId"),
+            optional(tenantContext.actor().actorId()),
+            optional(tenantContext.actor().actorType()),
+            "TENANT_PIPELINE_METADATA_EVALUATED",
+            "tenant",
+            required(request.tenantId(), "tenantId")
+        ));
     }
 
     private TenantProductOption validatedProduct(String tenantId, TenantProductOption product) {
@@ -211,6 +277,8 @@ public class TenantPipelineEligibilityService {
     public record UserTenantAssignment(String userId, String tenantId) { }
 
     public record TenantPipelineEligibilityRequest(String tenantId, String userId, String actorTenantId, String requestedProductId, String requestedInvestorId) { }
+
+    public record TenantPipelineAccessAuditRecord(String tenantId, String userId, String actorId, String actorType, String code, String entityType, String entityId) { }
 
     public record TenantPipelineEligibility(
         String tenantId,

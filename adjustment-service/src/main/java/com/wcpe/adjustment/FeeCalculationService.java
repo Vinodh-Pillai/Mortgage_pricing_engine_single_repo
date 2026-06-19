@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -69,7 +70,8 @@ public final class FeeCalculationService {
             : List.of();
         String inputSnapshotHash = hashOf(
             request.tenantId(), request.quoteId(), request.scenarioId(), request.catalog().catalogVersionId(),
-            request.loanAmount(), request.unitCount(), request.configuration(), request.passThroughFees(), request.manualFeeInputs()
+            request.loanAmount(), request.unitCount(), request.configuration(), request.calculationOutputs(),
+            request.passThroughFees(), request.manualFeeInputs()
         );
         String lineHash = hashOf(lines);
         FeeCalculationEvent event = new FeeCalculationEvent(
@@ -104,7 +106,10 @@ public final class FeeCalculationService {
             request.correlationId(),
             request.catalog().contentHash(),
             inputSnapshotHash,
-            lineHash
+            lineHash,
+            request.calculationOutputs().calculationVersionIds(),
+            request.calculationOutputs().inputFieldRefs(),
+            outputAmountSummary(lines)
         );
         return new FeeCalculationResult(
             request.feeCalculationId(),
@@ -124,22 +129,24 @@ public final class FeeCalculationService {
     private FormulaResult evaluateFormula(FeeDefinition definition, FeeCalculationRequest request, MathContext mathContext) {
         return switch (definition.calculationMethod()) {
             case FIXED_AMOUNT -> new FormulaResult(
-                numericConfig(definition, request, "amountConfigRef"),
-                Map.of("amountConfigRef", definition.formulaParameters().get("amountConfigRef"))
+                numericInput(definition, request, "amountConfigRef", "amountCalculationOutputRef").value(),
+                numericInput(definition, request, "amountConfigRef", "amountCalculationOutputRef").trace()
             );
             case PERCENT_OF_LOAN_AMOUNT -> {
-                BigDecimal percent = request.precisionPolicy().normalizeRate(numericConfig(definition, request, "percentConfigRef"));
+                FormulaInput input = numericInput(definition, request, "percentConfigRef", "percentCalculationOutputRef");
+                BigDecimal percent = request.precisionPolicy().normalizeRate(input.value());
                 yield new FormulaResult(request.loanAmount().multiply(percent, mathContext).divide(ONE_HUNDRED, mathContext),
-                    Map.of("percentConfigRef", definition.formulaParameters().get("percentConfigRef"), "loanAmount", request.loanAmount().toPlainString()));
+                    traceWith(input.trace(), "loanAmount", request.loanAmount().toPlainString()));
             }
             case BPS_OF_LOAN_AMOUNT -> {
-                BigDecimal bps = request.precisionPolicy().normalizeRate(numericConfig(definition, request, "bpsConfigRef"));
+                FormulaInput input = numericInput(definition, request, "bpsConfigRef", "bpsCalculationOutputRef");
+                BigDecimal bps = request.precisionPolicy().normalizeRate(input.value());
                 yield new FormulaResult(request.loanAmount().multiply(bps, mathContext).divide(TEN_THOUSAND, mathContext),
-                    Map.of("bpsConfigRef", definition.formulaParameters().get("bpsConfigRef"), "loanAmount", request.loanAmount().toPlainString()));
+                    traceWith(input.trace(), "loanAmount", request.loanAmount().toPlainString()));
             }
             case PER_UNIT -> new FormulaResult(
-                numericConfig(definition, request, "unitAmountConfigRef").multiply(new BigDecimal(request.unitCount()), mathContext),
-                Map.of("unitAmountConfigRef", definition.formulaParameters().get("unitAmountConfigRef"), "unitCount", String.valueOf(request.unitCount()))
+                numericInput(definition, request, "unitAmountConfigRef", "unitCalculationOutputRef").value().multiply(new BigDecimal(request.unitCount()), mathContext),
+                traceWith(numericInput(definition, request, "unitAmountConfigRef", "unitCalculationOutputRef").trace(), "unitCount", String.valueOf(request.unitCount()))
             );
             case PASS_THROUGH -> evaluatePassThrough(definition, request);
             case MANUAL_INPUT_ALLOWED -> evaluateManualInput(definition, request);
@@ -234,9 +241,41 @@ public final class FeeCalculationService {
         }
         BigDecimal value = request.configuration().numericValues().get(configRef);
         if (value == null) {
-            throw new IllegalArgumentException("missing configured numeric value for " + configRef);
+            throw configurationBlocker("MISSING_FEE_CONFIGURATION", "missing configured numeric value for " + configRef);
         }
         return value;
+    }
+
+    private static FormulaInput numericInput(
+        FeeDefinition definition,
+        FeeCalculationRequest request,
+        String configParameterKey,
+        String calculationOutputParameterKey
+    ) {
+        String calculationOutputRef = definition.formulaParameters().get(calculationOutputParameterKey);
+        if (calculationOutputRef != null && !calculationOutputRef.isBlank()) {
+            BigDecimal value = request.calculationOutputs().numericOutputs().get(calculationOutputRef);
+            if (value == null) {
+                throw configurationBlocker("MISSING_CALCULATION_OUTPUT", "missing calculation output value for " + calculationOutputRef);
+            }
+            Map<String, String> trace = new LinkedHashMap<>();
+            trace.put(calculationOutputParameterKey, calculationOutputRef);
+            trace.put("calculationVersionIds", String.join(",", request.calculationOutputs().calculationVersionIds()));
+            trace.put("calculationEvaluationId", request.calculationOutputs().evaluationId());
+            trace.put("inputFieldRefs", String.join(",", request.calculationOutputs().inputFieldRefs()));
+            return new FormulaInput(value, trace);
+        }
+
+        String configRef = definition.formulaParameters().get(configParameterKey);
+        if (configRef == null || configRef.isBlank()) {
+            throw new IllegalArgumentException(definition.calculationMethod() + " requires formula parameter "
+                + configParameterKey + " or " + calculationOutputParameterKey);
+        }
+        BigDecimal value = request.configuration().numericValues().get(configRef);
+        if (value == null) {
+            throw configurationBlocker("MISSING_FEE_CONFIGURATION", "missing configured numeric value for " + configRef);
+        }
+        return new FormulaInput(value, Map.of(configParameterKey, configRef));
     }
 
     private static BigDecimal optionalNumericConfig(FeeDefinition definition, FeeCalculationRequest request, String parameterKey) {
@@ -246,9 +285,27 @@ public final class FeeCalculationService {
         }
         BigDecimal value = request.configuration().numericValues().get(configRef);
         if (value == null) {
-            throw new IllegalArgumentException("missing configured numeric value for " + configRef);
+            throw configurationBlocker("MISSING_FEE_CONFIGURATION", "missing configured numeric value for " + configRef);
         }
         return value;
+    }
+
+    private static Map<String, String> traceWith(Map<String, String> trace, String key, String value) {
+        Map<String, String> copy = new LinkedHashMap<>(trace);
+        copy.put(key, value);
+        return copy;
+    }
+
+    private static Map<String, String> outputAmountSummary(List<FeeLine> lines) {
+        Map<String, String> summary = new LinkedHashMap<>();
+        for (FeeLine line : lines) {
+            summary.put(line.feeCode(), line.roundedAmount().toPlainString());
+        }
+        return summary;
+    }
+
+    private static ConfigurationBlockerException configurationBlocker(String code, String message) {
+        return new ConfigurationBlockerException(code, message);
     }
 
     private static BigDecimal sumByPayer(List<FeeLine> lines, String payer) {
@@ -284,6 +341,26 @@ public final class FeeCalculationService {
         }
     }
 
+    private record FormulaInput(BigDecimal value, Map<String, String> trace) {
+        private FormulaInput {
+            Objects.requireNonNull(value, "formula input value is required");
+            trace = Map.copyOf(new TreeMap<>(trace == null ? Map.of() : trace));
+        }
+    }
+
+    public static final class ConfigurationBlockerException extends IllegalArgumentException {
+        private final String blockerCode;
+
+        private ConfigurationBlockerException(String blockerCode, String message) {
+            super("configuration blocker [" + blockerCode + "]: " + message);
+            this.blockerCode = blockerCode;
+        }
+
+        public String blockerCode() {
+            return blockerCode;
+        }
+    }
+
     public record FeeCalculationRequest(
         UUID tenantId,
         UUID feeCalculationId,
@@ -298,6 +375,7 @@ public final class FeeCalculationService {
         Map<String, PassThroughFeeSource> passThroughFees,
         Map<String, ManualFeeInput> manualFeeInputs,
         Set<String> permissions,
+        CalculationOutputSnapshot calculationOutputs,
         FeePrecisionPolicy precisionPolicy,
         Instant occurredAt,
         String correlationId,
@@ -322,10 +400,35 @@ public final class FeeCalculationService {
             passThroughFees = Map.copyOf(new TreeMap<>(passThroughFees == null ? Map.of() : passThroughFees));
             manualFeeInputs = Map.copyOf(new TreeMap<>(manualFeeInputs == null ? Map.of() : manualFeeInputs));
             permissions = Set.copyOf(permissions == null ? Set.of() : permissions);
+            calculationOutputs = calculationOutputs == null ? CalculationOutputSnapshot.empty() : calculationOutputs;
             precisionPolicy = precisionPolicy == null ? FeePrecisionPolicy.defaultPolicy() : precisionPolicy;
             occurredAt = occurredAt == null ? Instant.now() : occurredAt;
             requireText(correlationId, "correlationId is required");
             requireText(idempotencyKey, "idempotencyKey is required");
+        }
+
+        public FeeCalculationRequest(
+            UUID tenantId,
+            UUID feeCalculationId,
+            String quoteId,
+            String scenarioId,
+            String actorId,
+            FeeCatalogVersion catalog,
+            FeeCatalogRequestContext catalogContext,
+            BigDecimal loanAmount,
+            int unitCount,
+            FeeCalculationConfiguration configuration,
+            Map<String, PassThroughFeeSource> passThroughFees,
+            Map<String, ManualFeeInput> manualFeeInputs,
+            Set<String> permissions,
+            FeePrecisionPolicy precisionPolicy,
+            Instant occurredAt,
+            String correlationId,
+            String idempotencyKey
+        ) {
+            this(tenantId, feeCalculationId, quoteId, scenarioId, actorId, catalog, catalogContext, loanAmount, unitCount,
+                configuration, passThroughFees, manualFeeInputs, permissions, CalculationOutputSnapshot.empty(),
+                precisionPolicy, occurredAt, correlationId, idempotencyKey);
         }
 
         private void validate() {
@@ -354,6 +457,28 @@ public final class FeeCalculationService {
         public PassThroughFeeSource {
             Objects.requireNonNull(amount, "pass-through amount is required");
             requireText(sourceRef, "pass-through sourceRef is required");
+        }
+    }
+
+    public record CalculationOutputSnapshot(
+        String evaluationId,
+        List<String> calculationVersionIds,
+        Map<String, BigDecimal> numericOutputs,
+        Map<String, String> inputFieldValues
+    ) {
+        public CalculationOutputSnapshot {
+            requireText(evaluationId, "calculation evaluationId is required");
+            calculationVersionIds = List.copyOf(calculationVersionIds == null ? List.of() : calculationVersionIds);
+            numericOutputs = Map.copyOf(new TreeMap<>(numericOutputs == null ? Map.of() : numericOutputs));
+            inputFieldValues = Map.copyOf(new TreeMap<>(inputFieldValues == null ? Map.of() : inputFieldValues));
+        }
+
+        public static CalculationOutputSnapshot empty() {
+            return new CalculationOutputSnapshot("not-supplied", List.of(), Map.of(), Map.of());
+        }
+
+        public List<String> inputFieldRefs() {
+            return inputFieldValues.keySet().stream().sorted().toList();
         }
     }
 
@@ -522,7 +647,10 @@ public final class FeeCalculationService {
         String correlationId,
         String catalogVersionHash,
         String inputSnapshotHash,
-        String resultHash
+        String resultHash,
+        List<String> calculationVersionIds,
+        List<String> inputFieldRefs,
+        Map<String, String> outputAmountSummary
     ) {
         public FeeCalculationAudit {
             Objects.requireNonNull(tenantId, "tenantId is required");
@@ -533,6 +661,9 @@ public final class FeeCalculationService {
             requireText(catalogVersionHash, "catalogVersionHash is required");
             requireText(inputSnapshotHash, "inputSnapshotHash is required");
             requireText(resultHash, "resultHash is required");
+            calculationVersionIds = List.copyOf(calculationVersionIds == null ? List.of() : calculationVersionIds);
+            inputFieldRefs = List.copyOf(inputFieldRefs == null ? List.of() : inputFieldRefs);
+            outputAmountSummary = Map.copyOf(new TreeMap<>(outputAmountSummary == null ? Map.of() : outputAmountSummary));
         }
     }
 }

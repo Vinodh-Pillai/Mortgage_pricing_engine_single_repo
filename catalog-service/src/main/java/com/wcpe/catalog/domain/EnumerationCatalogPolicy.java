@@ -15,6 +15,28 @@ final class EnumerationCatalogPolicy {
     return byType.values().stream().map(acc -> acc.toResponse(source)).toList();
   }
 
+  static EnumerationTypeResponse revise(EnumerationTypeResponse existing, EnumerationCatalogUpdateRequest request, boolean referencedByFields) {
+    if (existing == null) throw new CatalogException("ENUM_TYPE_NOT_FOUND");
+    if (request == null) throw new CatalogException("ENUMERATION_UPDATE_REQUEST_REQUIRED");
+    List<EnumerationVariantInput> requested = request.variants() == null ? List.of() : request.variants();
+    if (requested.isEmpty()) throw new CatalogException("ENUMERATION_VARIANTS_REQUIRED");
+    EnumerationAccumulator acc = new EnumerationAccumulator(existing.enumTypeId(), label(request.name(), existing.name()));
+    for (EnumerationVariantInput variant : requested) {
+      String variantId = normalizeId(variant == null ? null : variant.variantId(), "ENUM_VARIANT_ID_REQUIRED");
+      String variantLabel = required(variant == null ? null : variant.label(), "ENUM_VARIANT_LABEL_REQUIRED");
+      String oldId = trimToNull(variant.oldId());
+      acc.addVariant(new EnumerationVariantResponse(variantId, oldId, variantLabel));
+    }
+    Set<String> existingIds = new LinkedHashSet<>();
+    for (EnumerationVariantResponse variant : existing.variants() == null ? List.<EnumerationVariantResponse>of() : existing.variants()) {
+      existingIds.add(normalizeId(variant.variantId(), "ENUM_VARIANT_ID_REQUIRED"));
+    }
+    Set<String> revisedIds = new LinkedHashSet<>(acc.variants.keySet());
+    existingIds.removeAll(revisedIds);
+    if (referencedByFields && !existingIds.isEmpty()) throw new CatalogException("ENUM_VARIANT_DELETE_BLOCKED");
+    return new EnumerationTypeResponse(existing.enumTypeId(), acc.name, List.copyOf(acc.variants.values()), existing.source(), "tenant");
+  }
+
   private static void merge(Map<String, EnumerationAccumulator> byType, List<EnumerationTypeInput> inputs) {
     for (EnumerationTypeInput input : inputs == null ? List.<EnumerationTypeInput>of() : inputs) {
       String enumTypeId = normalizeId(input == null ? null : input.enumTypeId(), "ENUM_TYPE_ID_REQUIRED");

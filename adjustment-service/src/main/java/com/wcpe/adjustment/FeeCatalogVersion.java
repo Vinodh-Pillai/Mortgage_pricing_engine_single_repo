@@ -430,10 +430,10 @@ public record FeeCatalogVersion(
 
         private List<String> validateFormulaParameters() {
             return switch (calculationMethod) {
-                case FIXED_AMOUNT -> requireParameter("amountConfigRef");
-                case PERCENT_OF_LOAN_AMOUNT -> requireParameter("percentConfigRef");
-                case BPS_OF_LOAN_AMOUNT -> requireParameter("bpsConfigRef");
-                case PER_UNIT -> requireParameter("unitAmountConfigRef");
+                case FIXED_AMOUNT -> requireAnyParameter("amountConfigRef", "amountCalculationOutputRef");
+                case PERCENT_OF_LOAN_AMOUNT -> requireAnyParameter("percentConfigRef", "percentCalculationOutputRef");
+                case BPS_OF_LOAN_AMOUNT -> requireAnyParameter("bpsConfigRef", "bpsCalculationOutputRef");
+                case PER_UNIT -> requireAnyParameter("unitAmountConfigRef", "unitCalculationOutputRef");
                 case PASS_THROUGH -> requireParameter("trustedSourceRef");
                 case MANUAL_INPUT_ALLOWED -> requireParameters("manualInputPermissionRef", "auditReasonRequired");
                 case WAIVED -> requireParameter("waiverPolicyRef");
@@ -455,6 +455,15 @@ public record FeeCatalogVersion(
 
         private List<String> requireParameter(String key) {
             return requireParameters(key);
+        }
+
+        private List<String> requireAnyParameter(String primaryKey, String alternateKey) {
+            String primary = formulaParameters.get(primaryKey);
+            String alternate = formulaParameters.get(alternateKey);
+            if ((primary == null || primary.isBlank()) && (alternate == null || alternate.isBlank())) {
+                return List.of(calculationMethod + " requires formula parameter " + primaryKey + " or " + alternateKey);
+            }
+            return List.of();
         }
 
         private List<String> requireParameters(String... keys) {

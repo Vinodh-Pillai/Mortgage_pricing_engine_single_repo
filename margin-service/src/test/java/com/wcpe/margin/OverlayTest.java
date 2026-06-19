@@ -1,6 +1,7 @@
 package com.wcpe.margin;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.wcpe.margin.CompanyMarginPolicyService.CommandReceipt;
 import com.wcpe.margin.CompanyMarginPolicyService.CreatePolicyCommand;
@@ -88,6 +89,52 @@ class OverlayTest {
     assertEquals(new BigDecimal("99.100"), overlayResult.priceAfterMargin());
   }
 
+  @Test
+  void evaluatesConfiguredProfitabilityOverlaysWithMetadataAndDownstreamConsumers() {
+    CompanyMarginPolicyService service = service(List.of(rule("50.000", "25.000", "75.000", 10, null)));
+    CommandReceipt created = service.createOverlayDraft(command("tenant-overlay-profitability", version("v-overlay-5")));
+
+    var result = service.evaluateProfitabilityOverlays(TENANT_ID.toString(), created.policyId(), new BigDecimal("99.750"),
+        inputs(true), List.of("pricing-service/final-quote", "pricing-bff/quote-response"));
+
+    assertEquals("OVERLAYS_EVALUATED", result.status());
+    assertEquals(new BigDecimal("99.250"), result.simulationResult().priceAfterMargin());
+    assertEquals("MARGIN_COMPONENT", result.simulationResult().steps().get(0).stepType());
+    assertTrue(result.metadataRefs().stream().anyMatch(ref -> ref.startsWith("overlayRuleBook:")));
+    assertTrue(result.metadataRefs().stream().anyMatch(ref -> ref.startsWith("overlayRule:")));
+    assertEquals(List.of("pricing-service/final-quote", "pricing-bff/quote-response"), result.downstreamConsumers());
+  }
+
+  @Test
+  void reportsMissingDataWhenOverlayInputsAreAbsent() {
+    CompanyMarginPolicyService service = service(List.of(rule("50.000", "25.000", "75.000", 10, null)));
+    CommandReceipt created = service.createOverlayDraft(command("tenant-overlay-missing-inputs", version("v-overlay-6")));
+
+    var result = service.evaluateProfitabilityOverlays(TENANT_ID.toString(), created.policyId(), new BigDecimal("99.750"),
+        null, List.of("pricing-service/final-quote"));
+
+    assertEquals("MISSING_DATA", result.status());
+    assertEquals(new BigDecimal("99.750"), result.simulationResult().priceAfterMargin());
+    assertTrue(result.simulationResult().steps().isEmpty());
+    assertEquals("OVERLAY_INPUTS_MISSING", result.dependencyErrors().get(0).errorCode());
+    assertEquals(List.of("pricing-service/final-quote"), result.downstreamConsumers());
+  }
+
+  @Test
+  void historicalQuoteUsesOverlayActiveAtQuoteTime() {
+    CompanyMarginPolicyService service = service(List.of(
+        rule("25.000", "25.000", "75.000", 10, null, Instant.parse("2026-01-01T00:00:00Z"), Instant.parse("2026-02-01T00:00:00Z")),
+        rule("60.000", "25.000", "75.000", 10, null, Instant.parse("2026-02-01T00:00:00Z"), null)));
+    CommandReceipt created = service.createOverlayDraft(command("tenant-overlay-versioned", version("v-overlay-7")));
+
+    var result = service.evaluateProfitabilityOverlays(TENANT_ID.toString(), created.policyId(), new BigDecimal("99.750"),
+        inputs(true, Instant.parse("2026-01-15T00:00:00Z")), List.of());
+
+    assertEquals("OVERLAYS_EVALUATED", result.status());
+    assertEquals(new BigDecimal("99.500"), result.simulationResult().priceAfterMargin());
+    assertEquals(0, new BigDecimal("0.25").compareTo(result.simulationResult().steps().get(0).marginPoints()));
+  }
+
   private static CompanyMarginPolicyService service(List<OverlayRule> rules) {
     return new CompanyMarginPolicyService(Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC),
         new SrpCalculationService(), new InMemoryOverlayRuleRepository(rules));
@@ -109,15 +156,24 @@ class OverlayTest {
   }
 
   private static OverlayInputs inputs(boolean jumbo) {
+    return inputs(jumbo, Instant.parse("2026-06-13T00:00:00Z"));
+  }
+
+  private static OverlayInputs inputs(boolean jumbo, Instant quoteDate) {
     return new OverlayInputs(TENANT_ID, "FNMA", "RETAIL", "CONVENTIONAL", "PURCHASE", "PRIMARY", "SFR",
         "CA", "06037", new BigDecimal("900000"), false, null, null, false, jumbo, 360,
-        Instant.parse("2026-06-13T00:00:00Z"));
+        quoteDate);
   }
 
   private static OverlayRule rule(String bps, String min, String max, int priority, String exclusivityGroup) {
+    return rule(bps, min, max, priority, exclusivityGroup, Instant.parse("2026-01-01T00:00:00Z"), null);
+  }
+
+  private static OverlayRule rule(String bps, String min, String max, int priority, String exclusivityGroup,
+      Instant effectiveStart, Instant effectiveEnd) {
     return new OverlayRule(TENANT_ID, RULE_BOOK_ID, UUID.randomUUID(), OverlayPolicyType.JUMBO, "FNMA", "RETAIL", "CONVENTIONAL",
         "PURCHASE", "PRIMARY", "SFR", "CA", "06037", new BigDecimal(bps), new BigDecimal(min), new BigDecimal(max),
-        priority, exclusivityGroup, "JUMBO_MARGIN_OVERLAY", Instant.parse("2026-01-01T00:00:00Z"), null, true);
+        priority, exclusivityGroup, "JUMBO_MARGIN_OVERLAY", effectiveStart, effectiveEnd, true);
   }
 
   private static MarginScope scope() {

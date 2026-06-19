@@ -1,6 +1,6 @@
 import { ChipList } from '../../components/ChipList';
 import type { OfferSummary } from '../../lib/api/offers';
-import type { KeyboardEvent } from 'react';
+import type { CSSProperties, KeyboardEvent } from 'react';
 import type { OfferSortField } from './offerComparison';
 import { valueText } from './offerComparison';
 
@@ -16,44 +16,81 @@ type OffersTableProps = {
 
 const boundedRenderCount = 100;
 
+const tableShellStyle: CSSProperties = {
+  maxWidth: '100%',
+  overflowX: 'auto',
+  overscrollBehaviorInline: 'contain',
+};
+
+const tableGridStyle: CSSProperties = {
+  display: 'grid',
+  minWidth: '1180px',
+  width: '100%',
+};
+
+const rowStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'minmax(4rem, 0.45fr) minmax(14rem, 2fr) repeat(5, minmax(7rem, 0.85fr)) minmax(16rem, 1.6fr) minmax(12rem, 1.15fr) minmax(16rem, 1.5fr)',
+};
+
+const headerRowStyle: CSSProperties = {
+  ...rowStyle,
+  position: 'sticky',
+  top: 0,
+  zIndex: 2,
+};
+
+const actionCellStyle: CSSProperties = {
+  position: 'sticky',
+  right: 0,
+  zIndex: 1,
+};
+
+const actionHeaderStyle: CSSProperties = {
+  ...actionCellStyle,
+  zIndex: 3,
+};
+
 export function OffersTable({ offers, selectedOfferId, compareOfferIds, onInspect, onSelect, onCompareToggle, onSortField }: OffersTableProps) {
   const visible = offers.slice(0, boundedRenderCount);
   return (
-    <div className="quote-table" role="table" aria-label="Ranked quote offers" aria-rowcount={offers.length}>
-      <div role="row" className="quote-table__row quote-table__row--head">
-        <SortableHeader label="Rank" field="rank" onSortField={onSortField} />
-        <span role="columnheader">Product</span>
-        <SortableHeader label="Rate" field="rate" onSortField={onSortField} />
-        <SortableHeader label="APR" field="apr" onSortField={onSortField} />
-        <SortableHeader label="Payment" field="payment" onSortField={onSortField} />
-        <SortableHeader label="Confidence" field="confidence" onSortField={onSortField} />
-        <SortableHeader label="Rank score" field="rankScore" onSortField={onSortField} />
-        <span role="columnheader">Rationale</span>
-        <span role="columnheader">Flags</span>
-        <span role="columnheader">Actions</span>
+    <div className="quote-table-shell" style={tableShellStyle} aria-label="Responsive quote offer table region">
+      <div className="quote-table" role="table" aria-label="Ranked quote offers" aria-rowcount={offers.length} style={tableGridStyle}>
+        <div role="row" className="quote-table__row quote-table__row--head" style={headerRowStyle}>
+          <SortableHeader label="Rank" field="rank" onSortField={onSortField} />
+          <span role="columnheader">Product</span>
+          <SortableHeader label="Rate" field="rate" onSortField={onSortField} />
+          <SortableHeader label="APR" field="apr" onSortField={onSortField} />
+          <SortableHeader label="Payment" field="payment" onSortField={onSortField} />
+          <SortableHeader label="Confidence" field="confidence" onSortField={onSortField} />
+          <SortableHeader label="Rank score" field="rankScore" onSortField={onSortField} />
+          <span role="columnheader">Rationale</span>
+          <span role="columnheader">Flags</span>
+          <span role="columnheader" className="quote-table__actions-cell" style={actionHeaderStyle}>Actions</span>
+        </div>
+        {visible.map((offer) => {
+          const selected = selectedOfferId === offer.offerId;
+          return (
+            <div key={offer.offerId} role="row" className={selected ? 'quote-table__row quote-table__row--selected' : 'quote-table__row'} aria-selected={selected} tabIndex={0} onKeyDown={(event) => handleRowKey(event, offer, onSelect, onCompareToggle)} style={rowStyle}>
+              <span role="cell">#{offer.rank}</span>
+              <span role="cell">{offer.productLabel ?? offer.offerId}</span>
+              <span role="cell">{valueText(offer.rate)}</span>
+              <span role="cell">{valueText(offer.apr)}</span>
+              <span role="cell">{valueText(offer.payment)}</span>
+              <span role="cell">{valueText(offer.confidence)}</span>
+              <span role="cell">{valueText(offer.rankScore)}</span>
+              <span role="cell"><ChipList label={`${offer.offerId} rationale`} values={offer.rationaleChips} /></span>
+              <span role="cell"><ChipList label={`${offer.offerId} flags`} values={offer.scenarioFlags} /></span>
+              <span role="cell" className="quick-quote-state quote-table__actions-cell" style={actionCellStyle}>
+                <label><input type="radio" name="selected-offer" checked={selected} onChange={() => onSelect(offer)} /> Select</label>
+                <label><input type="checkbox" checked={compareOfferIds.includes(offer.offerId)} onChange={() => onCompareToggle(offer.offerId)} /> Compare</label>
+                <button type="button" onMouseEnter={() => onInspect(offer)} onFocus={() => onInspect(offer)} onClick={() => onInspect(offer)}>Preview</button>
+              </span>
+            </div>
+          );
+        })}
+        {offers.length > boundedRenderCount ? <p role="status">Showing first {boundedRenderCount} offers from a {offers.length} offer result set.</p> : null}
       </div>
-      {visible.map((offer) => {
-        const selected = selectedOfferId === offer.offerId;
-        return (
-          <div key={offer.offerId} role="row" className={selected ? 'quote-table__row quote-table__row--selected' : 'quote-table__row'} aria-selected={selected} tabIndex={0} onKeyDown={(event) => handleRowKey(event, offer, onSelect, onCompareToggle)}>
-            <span role="cell">#{offer.rank}</span>
-            <span role="cell">{offer.productLabel ?? offer.offerId}</span>
-            <span role="cell">{valueText(offer.rate)}</span>
-            <span role="cell">{valueText(offer.apr)}</span>
-            <span role="cell">{valueText(offer.payment)}</span>
-            <span role="cell">{valueText(offer.confidence)}</span>
-            <span role="cell">{valueText(offer.rankScore)}</span>
-            <span role="cell"><ChipList label={`${offer.offerId} rationale`} values={offer.rationaleChips} /></span>
-            <span role="cell"><ChipList label={`${offer.offerId} flags`} values={offer.scenarioFlags} /></span>
-            <span role="cell" className="quick-quote-state">
-              <label><input type="radio" name="selected-offer" checked={selected} onChange={() => onSelect(offer)} /> Select</label>
-              <label><input type="checkbox" checked={compareOfferIds.includes(offer.offerId)} onChange={() => onCompareToggle(offer.offerId)} /> Compare</label>
-              <button type="button" onMouseEnter={() => onInspect(offer)} onFocus={() => onInspect(offer)} onClick={() => onInspect(offer)}>Preview</button>
-            </span>
-          </div>
-        );
-      })}
-      {offers.length > boundedRenderCount ? <p role="status">Showing first {boundedRenderCount} offers from a {offers.length} offer result set.</p> : null}
     </div>
   );
 }

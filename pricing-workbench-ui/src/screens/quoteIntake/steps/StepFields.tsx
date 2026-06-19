@@ -334,8 +334,6 @@ function MetadataDrivenField({
   dropdownOptions?: DropdownOptionsByField;
   dropdownLoading: boolean;
 }) {
-  const errorId = `${field.fieldId}-error`;
-  const describedBy = error ? errorId : undefined;
   const helpTooltip = field.showHelpIcon ? field.helpTooltip : undefined;
   const selectOptions = optionsForField(field, value, dropdownOptions, dropdownLoading);
   const renderedValue = displayValue(field.fieldId, value);
@@ -346,7 +344,6 @@ function MetadataDrivenField({
     value: renderedValue,
     required: field.required,
     'aria-invalid': Boolean(error),
-    'aria-describedby': describedBy,
     onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => onChange(field.fieldId, event.target.value),
   };
 
@@ -370,7 +367,6 @@ function MetadataDrivenField({
           {validationMessages.map((message) => <li key={message}>{message}</li>)}
         </ul>
       ) : null}
-      {error ? <p id={errorId} className="quote-intake-error" role="alert">{error}</p> : null}
     </div>
   );
 }

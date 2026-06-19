@@ -173,12 +173,26 @@ public final class CompanyMarginPolicyService {
 
   public SimulationResult simulateOverlay(String tenantId, String policyId, ConfigResolver configResolver,
       BigDecimal priceBeforeOverlay, OverlayInputs inputs) {
-    Objects.requireNonNull(inputs, "inputs are required");
     Objects.requireNonNull(configResolver, "configResolver is required");
+    return evaluateProfitabilityOverlays(tenantId, policyId, priceBeforeOverlay, inputs, List.of()).simulationResult();
+  }
+
+  public ProfitabilityOverlayEvaluationResult evaluateProfitabilityOverlays(String tenantId, String policyId,
+      BigDecimal priceBeforeOverlay, OverlayInputs inputs, List<String> downstreamConsumers) {
+    requireText(tenantId, "tenantId");
+    requireText(policyId, "policyId");
+    Objects.requireNonNull(priceBeforeOverlay, "priceBeforeOverlay is required");
+    MarginPolicy policy = findById(tenantId, policyId);
+    List<String> consumerRefs = List.copyOf(downstreamConsumers == null ? List.of() : downstreamConsumers);
+    List<DependencyError> inputErrors = overlayInputErrors(inputs);
+    if (!inputErrors.isEmpty()) {
+      SimulationResult simulation = new SimulationResult(policyId, policy.currentVersion().versionId(), priceBeforeOverlay,
+          List.of());
+      return new ProfitabilityOverlayEvaluationResult("MISSING_DATA", simulation, inputErrors, List.of(), consumerRefs);
+    }
     if (!tenantId.equals(inputs.tenantId().toString())) {
       throw new MarginPolicyException("TENANT_ACCESS_DENIED");
     }
-    MarginPolicy policy = findById(tenantId, policyId);
     List<OverlayRule> overlays = overlayRuleRepository.findApplicable(inputs).stream()
         .filter(rule -> rule.type().waterfallPosition() == OverlayPolicyType.WaterfallPosition.MARGIN_COMPONENT)
         .toList();
@@ -189,7 +203,62 @@ public final class CompanyMarginPolicyService {
       steps.add(step);
       runningPrice = step.priceAfterMargin();
     }
-    return new SimulationResult(policyId, policy.currentVersion().versionId(), runningPrice, steps);
+    SimulationResult simulation = new SimulationResult(policyId, policy.currentVersion().versionId(), runningPrice, steps);
+    String status = overlays.isEmpty() ? "NO_APPLICABLE_OVERLAYS" : "OVERLAYS_EVALUATED";
+    return new ProfitabilityOverlayEvaluationResult(status, simulation, List.of(), overlayMetadataRefs(overlays), consumerRefs);
+  }
+
+  public MarginRuleEvaluationResult evaluateActiveMarginRules(String tenantId, MarginScope quoteScope,
+      Instant pricedAtUtc, RuleEvaluationContext context, BigDecimal priceBeforeMargin) {
+    requireText(tenantId, "tenantId");
+    Objects.requireNonNull(quoteScope, "quoteScope is required");
+    Objects.requireNonNull(pricedAtUtc, "pricedAtUtc is required");
+    Objects.requireNonNull(context, "context is required");
+    Objects.requireNonNull(priceBeforeMargin, "priceBeforeMargin is required");
+    if (!tenantId.equals(context.tenantId())) {
+      throw new MarginPolicyException("TENANT_ACCESS_DENIED");
+    }
+    MarginPolicy policy = resolvePublishedRulePolicy(tenantId, quoteScope, pricedAtUtc)
+        .orElseThrow(() -> new MarginPolicyException("MARGIN_RULES_NOT_CONFIGURED"));
+    MarginPolicyVersion version = policy.currentVersion();
+    List<MarginRule> rules = activeMarginRules(version, quoteScope);
+    if (rules.isEmpty()) {
+      throw new MarginPolicyException("MARGIN_RULES_NOT_CONFIGURED");
+    }
+    List<DependencyError> dependencyErrors = dependencyErrors(rules, context);
+    if (!dependencyErrors.isEmpty()) {
+      auditRecords.add(AuditRecord.completed(tenantId, policy.policyId(), "system", context.correlationId(),
+          "MARGIN_RULE_DEPENDENCY_ERROR"));
+      return new MarginRuleEvaluationResult(tenantId, context.quoteId(), policy.policyId(), version.versionId(),
+          "DEPENDENCY_ERROR", priceBeforeMargin, priceBeforeMargin, List.of(), dependencyErrors,
+          referencedMetadataRefs(rules), "audit:" + policy.policyId());
+    }
+    List<MarginCalculationStep> steps = new ArrayList<>();
+    BigDecimal runningPrice = priceBeforeMargin;
+    for (MarginRule rule : rules) {
+      MarginCalculationStep step = calculate(rule, context::resolve, runningPrice, version.versionId(), "MARGIN_RULE");
+      steps.add(step);
+      runningPrice = step.priceAfterMargin();
+    }
+    auditRecords.add(AuditRecord.completed(tenantId, policy.policyId(), "system", context.correlationId(),
+        "MARGIN_RULES_EVALUATED"));
+    return new MarginRuleEvaluationResult(tenantId, context.quoteId(), policy.policyId(), version.versionId(),
+        "MARGIN_RULES_EVALUATED", priceBeforeMargin, runningPrice, steps, List.of(), referencedMetadataRefs(rules),
+        "audit:" + policy.policyId());
+  }
+
+  public List<MarginRule> activeRules(String tenantId, MarginScope quoteScope, Instant pricedAtUtc) {
+    requireText(tenantId, "tenantId");
+    Objects.requireNonNull(quoteScope, "quoteScope is required");
+    Objects.requireNonNull(pricedAtUtc, "pricedAtUtc is required");
+    return policies.values().stream()
+        .filter(policy -> policy.tenantId().equals(tenantId))
+        .filter(policy -> COMPANY_POLICY_TYPE.equals(policy.policyType()))
+        .filter(policy -> policy.status() == PolicyStatus.PUBLISHED)
+        .filter(policy -> policy.currentVersion().effectiveWindow().contains(pricedAtUtc))
+        .filter(policy -> policy.currentVersion().scope().matches(quoteScope))
+        .flatMap(policy -> activeMarginRules(policy.currentVersion(), quoteScope).stream())
+        .toList();
   }
 
   public SimulationResult applyVisibility(String viewerPermission, SimulationResult result) {
@@ -405,6 +474,83 @@ public final class CompanyMarginPolicyService {
     return hierarchyMatch && comparable.matches(quoteScope);
   }
 
+  private static List<MarginRule> activeMarginRules(MarginPolicyVersion version, MarginScope quoteScope) {
+    return version.rules().stream()
+        .filter(rule -> rule.scope().matches(quoteScope))
+        .sorted(Comparator.comparingInt(MarginRule::priority))
+        .toList();
+  }
+
+  private Optional<MarginPolicy> resolvePublishedRulePolicy(String tenantId, MarginScope scope, Instant pricedAtUtc) {
+    List<MarginPolicy> matches = policies.values().stream()
+        .filter(policy -> policy.tenantId().equals(tenantId))
+        .filter(policy -> COMPANY_POLICY_TYPE.equals(policy.policyType()))
+        .filter(policy -> policy.status() == PolicyStatus.PUBLISHED)
+        .filter(policy -> policy.currentVersion().scope().matches(scope))
+        .filter(policy -> policy.currentVersion().effectiveWindow().contains(pricedAtUtc))
+        .toList();
+    if (matches.size() > 1) {
+      throw new MarginPolicyException("MARGIN_CONFIG_UNAVAILABLE");
+    }
+    return matches.stream().findFirst();
+  }
+
+  private static List<DependencyError> dependencyErrors(List<MarginRule> rules, RuleEvaluationContext context) {
+    List<DependencyError> errors = new ArrayList<>();
+    for (MarginRule rule : rules) {
+      for (String ref : List.of(rule.amountRef(), rule.minRef(), rule.maxRef())) {
+        if (!context.isApproved(ref)) {
+          errors.add(new DependencyError(ref, context.sourceType(ref), "MARGIN_METADATA_NOT_APPROVED"));
+        } else if (context.resolve(ref).isEmpty()) {
+          errors.add(new DependencyError(ref, context.sourceType(ref), "MARGIN_DEPENDENCY_MISSING"));
+        }
+      }
+    }
+    return errors;
+  }
+
+  private static List<String> referencedMetadataRefs(List<MarginRule> rules) {
+    List<String> refs = new ArrayList<>();
+    for (MarginRule rule : rules) {
+      for (String ref : List.of(rule.amountRef(), rule.minRef(), rule.maxRef())) {
+        if (!refs.contains(ref)) {
+          refs.add(ref);
+        }
+      }
+    }
+    return refs;
+  }
+
+  private static List<DependencyError> overlayInputErrors(OverlayInputs inputs) {
+    List<DependencyError> errors = new ArrayList<>();
+    if (inputs == null) {
+      errors.add(new DependencyError("overlayInputs", "MISSING", "OVERLAY_INPUTS_MISSING"));
+      return errors;
+    }
+    if (inputs.tenantId() == null) {
+      errors.add(new DependencyError("tenantId", "MISSING", "OVERLAY_TENANT_MISSING"));
+    }
+    if (inputs.quoteDate() == null) {
+      errors.add(new DependencyError("quoteDate", "MISSING", "OVERLAY_QUOTE_DATE_MISSING"));
+    }
+    return errors;
+  }
+
+  private static List<String> overlayMetadataRefs(List<OverlayRule> overlays) {
+    List<String> refs = new ArrayList<>();
+    for (OverlayRule overlay : overlays) {
+      String ruleBookRef = "overlayRuleBook:" + overlay.ruleBookId();
+      String ruleRef = "overlayRule:" + overlay.ruleId();
+      if (!refs.contains(ruleBookRef)) {
+        refs.add(ruleBookRef);
+      }
+      if (!refs.contains(ruleRef)) {
+        refs.add(ruleRef);
+      }
+    }
+    return refs;
+  }
+
   private BigDecimal resolveRequired(ConfigResolver configResolver, String ref) {
     return configResolver.resolve(ref).orElseThrow(() -> new MarginPolicyException("MARGIN_CONFIG_UNAVAILABLE"));
   }
@@ -602,6 +748,64 @@ public final class CompanyMarginPolicyService {
 
   public record SimulationResult(String policyId, String versionId, BigDecimal priceAfterMargin,
       List<MarginCalculationStep> steps) {}
+
+  public record RuleEvaluationContext(String tenantId, String quoteId, String correlationId,
+      Map<String, BigDecimal> tenantFieldValues, Map<String, BigDecimal> calculationOutputs,
+      List<String> approvedMetadataRefs) {
+    public RuleEvaluationContext {
+      requireText(tenantId, "tenantId");
+      requireText(quoteId, "quoteId");
+      requireText(correlationId, "correlationId");
+      tenantFieldValues = Map.copyOf(Objects.requireNonNull(tenantFieldValues, "tenantFieldValues is required"));
+      calculationOutputs = Map.copyOf(Objects.requireNonNull(calculationOutputs, "calculationOutputs is required"));
+      approvedMetadataRefs = List.copyOf(Objects.requireNonNull(approvedMetadataRefs, "approvedMetadataRefs is required"));
+    }
+
+    Optional<BigDecimal> resolve(String ref) {
+      BigDecimal fieldValue = tenantFieldValues.get(ref);
+      if (fieldValue != null) {
+        return Optional.of(fieldValue);
+      }
+      return Optional.ofNullable(calculationOutputs.get(ref));
+    }
+
+    boolean isApproved(String ref) {
+      return approvedMetadataRefs.contains(ref);
+    }
+
+    String sourceType(String ref) {
+      if (tenantFieldValues.containsKey(ref)) {
+        return "TENANT_FIELD";
+      }
+      if (calculationOutputs.containsKey(ref)) {
+        return "CALCULATION_OUTPUT";
+      }
+      return "MISSING";
+    }
+  }
+
+  public record MarginRuleEvaluationResult(String tenantId, String quoteId, String policyId, String versionId,
+      String status, BigDecimal priceBeforeMargin, BigDecimal priceAfterMargin, List<MarginCalculationStep> steps,
+      List<DependencyError> dependencyErrors, List<String> metadataRefs, String auditRef) {
+    public MarginRuleEvaluationResult {
+      steps = List.copyOf(Objects.requireNonNull(steps, "steps is required"));
+      dependencyErrors = List.copyOf(Objects.requireNonNull(dependencyErrors, "dependencyErrors is required"));
+      metadataRefs = List.copyOf(Objects.requireNonNull(metadataRefs, "metadataRefs is required"));
+    }
+  }
+
+  public record ProfitabilityOverlayEvaluationResult(String status, SimulationResult simulationResult,
+      List<DependencyError> dependencyErrors, List<String> metadataRefs, List<String> downstreamConsumers) {
+    public ProfitabilityOverlayEvaluationResult {
+      requireText(status, "status");
+      simulationResult = Objects.requireNonNull(simulationResult, "simulationResult is required");
+      dependencyErrors = List.copyOf(Objects.requireNonNull(dependencyErrors, "dependencyErrors is required"));
+      metadataRefs = List.copyOf(Objects.requireNonNull(metadataRefs, "metadataRefs is required"));
+      downstreamConsumers = List.copyOf(Objects.requireNonNull(downstreamConsumers, "downstreamConsumers is required"));
+    }
+  }
+
+  public record DependencyError(String ref, String sourceType, String errorCode) {}
 
   public record BranchOverlayContext(String tenantId, String branchId, String regionId, List<String> branchAncestorIds,
       String hierarchyVersionId, String enterpriseLimitRef, List<String> authorizedBranchIds, boolean hierarchyStale,
