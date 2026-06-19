@@ -3,7 +3,9 @@ package com.wcpe.tenantcontext;
 import com.wcpe.tenantcontext.observability.CorrelationIdGenerator;
 
 import java.util.regex.Pattern;
+import org.springframework.stereotype.Service;
 
+@Service
 public class TenantContextService {
     private static final Pattern TENANT_ID_PATTERN = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._-]{1,63}$");
     private static final Pattern TRACE_ID_PATTERN = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._:-]{1,127}$");

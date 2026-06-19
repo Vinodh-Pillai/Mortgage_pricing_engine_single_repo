@@ -97,6 +97,64 @@ describe('responsive layout shell', () => {
     expect(screen.getByRole('link', { name: 'Quote workspace' })).toHaveClass('layout-sidebar__link--active');
   });
 
+  it('activates full-screen workspace navigation as a popup overlay', () => {
+    installMatchMedia(false);
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+    renderShell(
+      <Shell activeModuleId="quote" activeRunId="run-123" breadcrumb="Pipeline" fullScreenWorkspace modules={modules} notifications={[]} onThemeToggle={vi.fn()} theme="light" user={{ name: 'Alex Rivera', role: 'Pricing analyst' }}>
+        <section aria-label="Pipeline workspace">Dense workspace</section>
+      </Shell>,
+      '/pipeline',
+    );
+
+    const shell = document.querySelector('.layout-shell');
+    expect(shell).toHaveClass('layout-shell--workspace');
+    expect(shell).toHaveAttribute('data-full-screen-workspace', 'true');
+    expect(document.querySelector('.layout-frame')).toHaveClass('layout-frame--popup-navigation');
+    expect(screen.getByRole('main')).toHaveClass('layout-content--workspace');
+    expect(document.querySelector('.layout-content__panel')).toHaveClass('layout-content__panel--workspace');
+    expect(screen.queryByRole('contentinfo')).not.toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: 'Main navigation' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open navigation menu' }));
+    expect(screen.getByRole('dialog', { name: 'Primary navigation drawer' })).toBeInTheDocument();
+    expect(document.querySelector('.layout-sidebar-backdrop')).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole('dialog', { name: 'Primary navigation drawer' }), { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Primary navigation drawer' })).not.toBeInTheDocument();
+    expect(screen.getByRole('main')).toHaveFocus();
+  });
+
+  it('traps keyboard tab focus inside the popup navigation drawer', () => {
+    installMatchMedia(false);
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+    renderShell(
+      <Shell activeModuleId="quote" activeRunId="run-123" breadcrumb="Pipeline" fullScreenWorkspace modules={modules} notifications={[]} onThemeToggle={vi.fn()} theme="light" user={{ name: 'Alex Rivera', role: 'Pricing analyst' }}>
+        <section aria-label="Pipeline workspace"><button type="button">Workspace action</button></section>
+      </Shell>,
+      '/pipeline',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open navigation menu' }));
+    const dialog = screen.getByRole('dialog', { name: 'Primary navigation drawer' });
+    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>('a.layout-sidebar__link[href], button:not(:disabled)'));
+    const nativeTabAnchors = Array.from(dialog.querySelectorAll<HTMLElement>('a[href]:not([tabindex="-1"])'));
+    expect(focusable.length).toBeGreaterThan(1);
+    expect(nativeTabAnchors).toHaveLength(focusable.filter((element) => element.tagName === 'A').length);
+    expect(nativeTabAnchors.every((element) => element.classList.contains('layout-sidebar__link'))).toBe(true);
+
+    const firstControl = focusable[0];
+    const lastControl = focusable[focusable.length - 1];
+    lastControl.focus();
+    fireEvent.keyDown(dialog, { key: 'Tab' });
+    expect(firstControl).toHaveFocus();
+
+    firstControl.focus();
+    fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true });
+    expect(lastControl).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Workspace action' })).not.toHaveFocus();
+    expect(document.querySelector('.layout-sidebar-backdrop')).toHaveAttribute('tabindex', '-1');
+  });
+
   it('closes mobile drawer with Escape and restores focus to trigger', () => {
     installMatchMedia(false);
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });

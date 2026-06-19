@@ -16,6 +16,7 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 class CatalogRepository {
+  private static final UUID SYSTEM_TENANT_ID = new UUID(0L, 0L);
   private static final TypeReference<List<String>> STRING_LIST = new TypeReference<>() {};
   private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
   private static final Set<String> PRICING_CONFIG_REFERENCE_TYPES = Set.of(
@@ -133,6 +134,151 @@ class CatalogRepository {
     versionControl(tenantId, catalogId, catalogType, e.entryId(), e.code(), CatalogStatus.DRAFT, e, actorId);
     bump(tenantId, catalogId);
     return e;
+  }
+
+  EnumerationTypeResponse addEnumerationType(UUID tenantId, UUID catalogId, EnumerationTypeResponse enumeration, String actorId) {
+    requireEditable(tenantId, catalogId);
+    if (existsReference(tenantId, "LOANPASS_ENUMERATION", enumeration.enumTypeId())) throw new CatalogException("ENUM_TYPE_DUPLICATE");
+    Map<String, Object> attributes = new LinkedHashMap<>();
+    attributes.put("source", enumeration.source());
+    attributes.put("overrideScope", enumeration.overrideScope());
+    attributes.put("variants", enumeration.variants());
+    ReferenceEntry e = new ReferenceEntry(UUID.randomUUID(), "LOANPASS_ENUMERATION", enumeration.enumTypeId(), enumeration.name(), "SYSTEM_DEFAULT", attributes, LocalDate.now(), null);
+    jdbc.update("insert into catalog.reference_entry(tenant_id,entry_id,catalog_id,catalog_type,code,label,category,attributes,effective_from,effective_to) values (?,?,?,?,?,?,?,?::jsonb,?,?)",
+        tenantId, e.entryId(), catalogId, e.catalogType(), e.code(), e.label(), e.category(), json(e.attributes()), java.sql.Date.valueOf(e.effectiveFrom()), date(e.effectiveTo()));
+    versionControl(tenantId, catalogId, "LOANPASS_ENUMERATION", e.entryId(), e.code(), CatalogStatus.DRAFT, e, actorId);
+    bump(tenantId, catalogId);
+    return enumerationFrom(e);
+  }
+
+  FieldMetadataResponse addFieldMetadata(UUID tenantId, UUID catalogId, FieldMetadataResponse field, String actorId) {
+    requireEditable(tenantId, catalogId);
+    if (existsReference(tenantId, "LOANPASS_FIELD_METADATA", field.id())) throw new CatalogException("FIELD_ID_DUPLICATE");
+    Map<String, Object> attributes = new LinkedHashMap<>();
+    attributes.put("oldId", field.oldId());
+    attributes.put("description", field.description());
+    attributes.put("valueType", field.valueType());
+    attributes.put("sourceGroup", field.sourceGroup());
+    attributes.put("conditions", field.conditions());
+    attributes.put("disposition", field.disposition());
+    attributes.put("source", field.source());
+    ReferenceEntry e = new ReferenceEntry(UUID.randomUUID(), "LOANPASS_FIELD_METADATA", field.id(), field.name(), field.category(), attributes, LocalDate.now(), null);
+    jdbc.update("insert into catalog.reference_entry(tenant_id,entry_id,catalog_id,catalog_type,code,label,category,attributes,effective_from,effective_to) values (?,?,?,?,?,?,?,?::jsonb,?,?)",
+        tenantId, e.entryId(), catalogId, e.catalogType(), e.code(), e.label(), e.category(), json(e.attributes()), java.sql.Date.valueOf(e.effectiveFrom()), date(e.effectiveTo()));
+    versionControl(tenantId, catalogId, "LOANPASS_FIELD_METADATA", e.entryId(), e.code(), CatalogStatus.DRAFT, e, actorId);
+    bump(tenantId, catalogId);
+    return fieldMetadataFrom(e);
+  }
+
+  List<FieldMetadataResponse> listFieldMetadata(UUID tenantId) {
+    return jdbc.query("select * from catalog.reference_entry where tenant_id=? and catalog_type='LOANPASS_FIELD_METADATA' order by code",
+        (rs, row) -> fieldMetadataFrom(new ReferenceEntry(rs.getObject("entry_id", UUID.class), rs.getString("catalog_type"), rs.getString("code"), rs.getString("label"), rs.getString("category"), map(rs.getString("attributes")), rs.getDate("effective_from").toLocalDate(), localDate(rs.getDate("effective_to")))), tenantId);
+  }
+
+  List<FieldMetadataResponse> listSystemFieldMetadata() {
+    return listFieldMetadata(SYSTEM_TENANT_ID);
+  }
+
+  List<FieldMetadataResponse> importProductSpecificationFieldsFromSystem(UUID tenantId, UUID catalogId, List<FieldMetadataResponse> selected, String actorId) {
+    List<FieldMetadataResponse> imported = new ArrayList<>();
+    for (FieldMetadataResponse field : selected == null ? List.<FieldMetadataResponse>of() : selected) {
+      imported.add(addFieldMetadata(tenantId, catalogId, field, actorId));
+    }
+    return List.copyOf(imported);
+  }
+
+  List<EnumerationTypeResponse> listEnumerations(UUID tenantId) {
+    return jdbc.query("select * from catalog.reference_entry where tenant_id=? and catalog_type='LOANPASS_ENUMERATION' order by code",
+        (rs, row) -> enumerationFrom(new ReferenceEntry(rs.getObject("entry_id", UUID.class), rs.getString("catalog_type"), rs.getString("code"), rs.getString("label"), rs.getString("category"), map(rs.getString("attributes")), rs.getDate("effective_from").toLocalDate(), localDate(rs.getDate("effective_to")))), tenantId);
+  }
+
+  FieldMetadataResponse resolveFieldMetadata(UUID tenantId, String fieldId) {
+    String id = fieldId == null ? "" : fieldId.trim();
+    if (id.isBlank()) throw new CatalogException("FIELD_ID_REQUIRED");
+    List<ReferenceEntry> rows = jdbc.query("select * from catalog.reference_entry where tenant_id=? and catalog_type='LOANPASS_FIELD_METADATA' and code=? order by effective_from desc limit 1",
+        (rs, row) -> new ReferenceEntry(rs.getObject("entry_id", UUID.class), rs.getString("catalog_type"), rs.getString("code"), rs.getString("label"), rs.getString("category"), map(rs.getString("attributes")), rs.getDate("effective_from").toLocalDate(), localDate(rs.getDate("effective_to"))), tenantId, id);
+    if (rows.isEmpty()) throw new CatalogException("FIELD_METADATA_NOT_FOUND");
+    return fieldMetadataFrom(rows.get(0));
+  }
+
+  EnumerationTypeResponse resolveEnumeration(UUID tenantId, String enumTypeId) {
+    String normalized = enumTypeId == null ? "" : enumTypeId.trim().toLowerCase(Locale.ROOT).replace('_', '-');
+    if (normalized.isBlank()) throw new CatalogException("ENUM_TYPE_ID_REQUIRED");
+    List<ReferenceEntry> rows = jdbc.query("select * from catalog.reference_entry where tenant_id=? and catalog_type='LOANPASS_ENUMERATION' and code=? order by effective_from desc limit 1",
+        (rs, row) -> new ReferenceEntry(rs.getObject("entry_id", UUID.class), rs.getString("catalog_type"), rs.getString("code"), rs.getString("label"), rs.getString("category"), map(rs.getString("attributes")), rs.getDate("effective_from").toLocalDate(), localDate(rs.getDate("effective_to"))), tenantId, normalized);
+    if (rows.isEmpty()) throw new CatalogException("ENUM_TYPE_NOT_FOUND");
+    return enumerationFrom(rows.get(0));
+  }
+
+  Optional<ProductSpecificationFieldOrderDraft> productSpecificationFieldOrderDraft(UUID tenantId) {
+    List<ReferenceEntry> rows = jdbc.query("select * from catalog.reference_entry where tenant_id=? and catalog_type='PRODUCT_SPEC_FIELD_ORDER' and code='product-spec-field-order:draft' order by effective_from desc limit 1",
+        (rs, row) -> new ReferenceEntry(rs.getObject("entry_id", UUID.class), rs.getString("catalog_type"), rs.getString("code"), rs.getString("label"), rs.getString("category"), map(rs.getString("attributes")), rs.getDate("effective_from").toLocalDate(), localDate(rs.getDate("effective_to"))), tenantId);
+    return rows.isEmpty() ? Optional.empty() : Optional.of(productSpecFieldOrderFrom(rows.get(0)));
+  }
+
+  Optional<ProductSpecificationTenantFieldDraft> productSpecificationTenantFieldDraft(UUID tenantId) {
+    List<ReferenceEntry> rows = jdbc.query("select * from catalog.reference_entry where tenant_id=? and catalog_type='PRODUCT_SPEC_TENANT_FIELD_DRAFT' and code='product-spec-tenant-field:draft' order by effective_from desc limit 1",
+        (rs, row) -> new ReferenceEntry(rs.getObject("entry_id", UUID.class), rs.getString("catalog_type"), rs.getString("code"), rs.getString("label"), rs.getString("category"), map(rs.getString("attributes")), rs.getDate("effective_from").toLocalDate(), localDate(rs.getDate("effective_to"))), tenantId);
+    return rows.isEmpty() ? Optional.empty() : Optional.of(productSpecTenantFieldDraftFrom(rows.get(0)));
+  }
+
+  Optional<ProductSpecificationConditionDraft> productSpecificationConditionDraft(UUID tenantId) {
+    List<ReferenceEntry> rows = jdbc.query("select * from catalog.reference_entry where tenant_id=? and catalog_type='PRODUCT_SPEC_CONDITION_DRAFT' and code='product-spec-condition:draft' order by effective_from desc limit 1",
+        (rs, row) -> new ReferenceEntry(rs.getObject("entry_id", UUID.class), rs.getString("catalog_type"), rs.getString("code"), rs.getString("label"), rs.getString("category"), map(rs.getString("attributes")), rs.getDate("effective_from").toLocalDate(), localDate(rs.getDate("effective_to"))), tenantId);
+    return rows.isEmpty() ? Optional.empty() : Optional.of(productSpecConditionDraftFrom(rows.get(0)));
+  }
+
+  ProductSpecificationFieldOrderDraft saveProductSpecificationFieldOrderDraft(UUID tenantId, UUID catalogId, ProductSpecificationFieldOrderDraft draft) {
+    requireEditable(tenantId, catalogId);
+    Map<String, Object> attributes = new LinkedHashMap<>();
+    attributes.put("draftStatus", draft.draftStatus());
+    attributes.put("fieldIds", draft.fieldIds());
+    attributes.put("savedAt", draft.savedAt().toString());
+    attributes.put("actorId", draft.actorId());
+    jdbc.update("""
+        insert into catalog.reference_entry(tenant_id,entry_id,catalog_id,catalog_type,code,label,category,attributes,effective_from,effective_to)
+        values (?,?,?,?,?,?,?,?::jsonb,?,null)
+        on conflict (tenant_id,catalog_type,code) do update set catalog_id=excluded.catalog_id,label=excluded.label,category=excluded.category,attributes=excluded.attributes,effective_from=excluded.effective_from,effective_to=null
+        """, tenantId, UUID.randomUUID(), catalogId, "PRODUCT_SPEC_FIELD_ORDER", "product-spec-field-order:draft",
+        "Product specification field order draft", "PRODUCT_SPECIFICATION", json(attributes), java.sql.Date.valueOf(LocalDate.now()));
+    bump(tenantId, catalogId);
+    return draft;
+  }
+
+  ProductSpecificationTenantFieldDraft saveProductSpecificationTenantFieldDraft(UUID tenantId, UUID catalogId, ProductSpecificationTenantFieldDraft draft) {
+    requireEditable(tenantId, catalogId);
+    Map<String, Object> attributes = new LinkedHashMap<>();
+    attributes.put("draftStatus", draft.draftStatus());
+    attributes.put("aliases", draft.aliases());
+    attributes.put("nativeFields", draft.nativeFields());
+    attributes.put("savedAt", draft.savedAt().toString());
+    attributes.put("actorId", draft.actorId());
+    jdbc.update("""
+        insert into catalog.reference_entry(tenant_id,entry_id,catalog_id,catalog_type,code,label,category,attributes,effective_from,effective_to)
+        values (?,?,?,?,?,?,?,?::jsonb,?,null)
+        on conflict (tenant_id,catalog_type,code) do update set catalog_id=excluded.catalog_id,label=excluded.label,category=excluded.category,attributes=excluded.attributes,effective_from=excluded.effective_from,effective_to=null
+        """, tenantId, UUID.randomUUID(), catalogId, "PRODUCT_SPEC_TENANT_FIELD_DRAFT", "product-spec-tenant-field:draft",
+        "Product specification tenant field draft", "PRODUCT_SPECIFICATION", json(attributes), java.sql.Date.valueOf(LocalDate.now()));
+    bump(tenantId, catalogId);
+    return draft;
+  }
+
+  ProductSpecificationConditionDraft saveProductSpecificationConditionDraft(UUID tenantId, UUID catalogId, ProductSpecificationConditionDraft draft) {
+    requireEditable(tenantId, catalogId);
+    Map<String, Object> attributes = new LinkedHashMap<>();
+    attributes.put("draftStatus", draft.draftStatus());
+    attributes.put("includeConditions", draft.includeConditions());
+    attributes.put("additionalConditions", draft.additionalConditions());
+    attributes.put("savedAt", draft.savedAt().toString());
+    attributes.put("actorId", draft.actorId());
+    jdbc.update("""
+        insert into catalog.reference_entry(tenant_id,entry_id,catalog_id,catalog_type,code,label,category,attributes,effective_from,effective_to)
+        values (?,?,?,?,?,?,?,?::jsonb,?,null)
+        on conflict (tenant_id,catalog_type,code) do update set catalog_id=excluded.catalog_id,label=excluded.label,category=excluded.category,attributes=excluded.attributes,effective_from=excluded.effective_from,effective_to=null
+        """, tenantId, UUID.randomUUID(), catalogId, "PRODUCT_SPEC_CONDITION_DRAFT", "product-spec-condition:draft",
+        "Product specification condition draft", "PRODUCT_SPECIFICATION", json(attributes), java.sql.Date.valueOf(LocalDate.now()));
+    bump(tenantId, catalogId);
+    return draft;
   }
 
   TermAmortizationDraftResponse addTermAmortizationDraft(UUID tenantId, UUID catalogId, TermAmortizationDraftRequest request, String actorId) {
@@ -366,6 +512,33 @@ class CatalogRepository {
     transition(tenantId, catalogId, CatalogStatus.APPROVED, CatalogStatus.PUBLISHED);
   }
 
+  Optional<UUID> publishProductSpecificationVersion(UUID tenantId, UUID catalogId, String actorId) {
+    List<FieldMetadataResponse> fields = listFieldMetadata(tenantId);
+    Optional<ProductSpecificationFieldOrderDraft> orderDraft = productSpecificationFieldOrderDraft(tenantId);
+    Optional<ProductSpecificationTenantFieldDraft> tenantFieldDraft = productSpecificationTenantFieldDraft(tenantId);
+    Optional<ProductSpecificationConditionDraft> conditionDraft = productSpecificationConditionDraft(tenantId);
+    ProductSpecificationFieldListResponse fieldList = ProductSpecificationFieldListPolicy.list(fields, orderDraft, tenantFieldDraft, true);
+    if (fieldList.fields().isEmpty() && orderDraft.isEmpty() && tenantFieldDraft.isEmpty() && conditionDraft.isEmpty()) return Optional.empty();
+
+    UUID entryId = productSpecificationEntryId(tenantId).orElse(UUID.randomUUID());
+    Map<String, Object> attributes = new LinkedHashMap<>();
+    attributes.put("sourceScope", fieldList.sourceScope());
+    attributes.put("fieldCount", fieldList.payloadFieldCount());
+    attributes.put("fields", fieldList.fields());
+    orderDraft.ifPresent(draft -> attributes.put("fieldOrderDraft", draft));
+    tenantFieldDraft.ifPresent(draft -> attributes.put("tenantFieldDraft", draft));
+    conditionDraft.ifPresent(draft -> attributes.put("conditionDraft", draft));
+    attributes.put("publishedAt", Instant.now().toString());
+    jdbc.update("""
+        insert into catalog.reference_entry(tenant_id,entry_id,catalog_id,catalog_type,code,label,category,attributes,effective_from,effective_to)
+        values (?,?,?,?,?,?,?,?::jsonb,?,null)
+        on conflict (tenant_id,catalog_type,code) do update set catalog_id=excluded.catalog_id,label=excluded.label,category=excluded.category,attributes=excluded.attributes,effective_from=excluded.effective_from,effective_to=null
+        """, tenantId, entryId, catalogId, "PRODUCT_SPECIFICATION", "product-specification:published",
+        "Published product specification", "PRODUCT_SPECIFICATION", json(attributes), java.sql.Date.valueOf(LocalDate.now()));
+    int versionNumber = nextVersionNumber(tenantId, "PRODUCT_SPECIFICATION", entryId);
+    return Optional.of(versionControl(tenantId, catalogId, "PRODUCT_SPECIFICATION", entryId, "product-specification", CatalogStatus.DRAFT, attributes, actorId, versionNumber));
+  }
+
   void transition(UUID tenantId, UUID catalogId, CatalogStatus expected, CatalogStatus next) {
     int updated = jdbc.update("update catalog.product_catalog set status=?, version=version+1, replay_hash=?, updated_at=now() where tenant_id=? and catalog_id=? and status=?",
         next.name(), hash(next + ":" + tenantId + ":" + catalogId + ":" + Instant.now()), tenantId, catalogId, expected.name());
@@ -588,6 +761,7 @@ class CatalogRepository {
     versions.put("propertyTypes", refs.stream().filter(r -> "PROPERTY_TYPE".equals(r.catalogType())).map(r -> referenceVersionId(tenantId, r.catalogType(), r.code()).orElse(r.entryId()).toString()).sorted().toList());
     versions.put("occupancyTypes", refs.stream().filter(r -> "OCCUPANCY_TYPE".equals(r.catalogType())).map(r -> referenceVersionId(tenantId, r.catalogType(), r.code()).orElse(r.entryId()).toString()).sorted().toList());
     versions.put("termAmortization", refs.stream().filter(r -> "TERM_AMORTIZATION".equals(r.catalogType())).map(r -> referenceVersionId(tenantId, r.catalogType(), r.code()).orElse(r.entryId()).toString()).sorted().toList());
+    versions.put("productSpecifications", refs.stream().filter(r -> "PRODUCT_SPECIFICATION".equals(r.catalogType())).map(r -> referenceVersionId(tenantId, r.catalogType(), "product-specification").orElse(r.entryId()).toString()).sorted().toList());
     versions.put("markets", markets.stream().map(m -> versionIdForMarket(tenantId, m).orElse(m.marketId()).toString()).sorted().toList());
     return versions;
   }
@@ -938,11 +1112,21 @@ class CatalogRepository {
   }
 
   private UUID versionControl(UUID tenantId, UUID catalogId, String artifactType, UUID artifactId, String artifactCode, CatalogStatus status, Object snapshot, String actorId) {
+    return versionControl(tenantId, catalogId, artifactType, artifactId, artifactCode, status, snapshot, actorId, 1);
+  }
+
+  private UUID versionControl(UUID tenantId, UUID catalogId, String artifactType, UUID artifactId, String artifactCode, CatalogStatus status, Object snapshot, String actorId, int versionNumber) {
     String configHash = hash(json(snapshot));
     UUID versionControlId = UUID.randomUUID();
     jdbc.update("insert into catalog.catalog_version_control(tenant_id,version_control_id,catalog_id,artifact_type,artifact_id,artifact_code,version_number,status,effective_start,effective_end,config_hash,snapshot_json,created_by) values (?,?,?,?,?,?,?,?,?,?,?,?::jsonb,?)",
-        tenantId, versionControlId, catalogId, artifactType, artifactId, artifactCode, 1, status.name(), extractEffectiveStart(snapshot), extractEffectiveEnd(snapshot), configHash, json(snapshot), createdBy(actorId));
+        tenantId, versionControlId, catalogId, artifactType, artifactId, artifactCode, versionNumber, status.name(), extractEffectiveStart(snapshot), extractEffectiveEnd(snapshot), configHash, json(snapshot), createdBy(actorId));
     return versionControlId;
+  }
+
+  private Optional<UUID> productSpecificationEntryId(UUID tenantId) {
+    List<UUID> ids = jdbc.query("select entry_id from catalog.reference_entry where tenant_id=? and catalog_type='PRODUCT_SPECIFICATION' and code='product-specification:published' limit 1",
+        (rs, row) -> rs.getObject(1, UUID.class), tenantId);
+    return ids.isEmpty() ? Optional.empty() : Optional.of(ids.get(0));
   }
 
   private static String createdBy(String actorId) {
@@ -1170,6 +1354,50 @@ class CatalogRepository {
           and r.effective_from <= ? and (r.effective_to is null or r.effective_to > ?)
         order by r.code
         """, artifactType, tenantId, catalogId, artifactType, java.sql.Date.valueOf(asOf), java.sql.Date.valueOf(asOf));
+  }
+
+  private EnumerationTypeResponse enumerationFrom(ReferenceEntry ref) {
+    List<EnumerationVariantResponse> variants = convertList(ref.attributes().get("variants"), EnumerationVariantResponse.class);
+    String source = Objects.toString(ref.attributes().get("source"), "LoanPass field library");
+    String overrideScope = Objects.toString(ref.attributes().get("overrideScope"), "system/default");
+    return new EnumerationTypeResponse(ref.code(), ref.label(), variants, source, overrideScope);
+  }
+
+  private FieldMetadataResponse fieldMetadataFrom(ReferenceEntry ref) {
+    Map<String, Object> attributes = ref.attributes();
+    return new FieldMetadataResponse(ref.code(), Objects.toString(attributes.get("oldId"), null), ref.label(), Objects.toString(attributes.get("description"), null), ref.category(),
+        Objects.toString(attributes.get("valueType"), "string"), Objects.toString(attributes.get("sourceGroup"), "rawFields"), conditionMap(attributes.get("conditions")),
+        Objects.toString(attributes.get("disposition"), "native"), Objects.toString(attributes.get("source"), "ReferenceFormfields.json"));
+  }
+
+  private ProductSpecificationFieldOrderDraft productSpecFieldOrderFrom(ReferenceEntry ref) {
+    Map<String, Object> attributes = ref.attributes();
+    String savedAt = Objects.toString(attributes.get("savedAt"), Instant.now().toString());
+    return new ProductSpecificationFieldOrderDraft(Objects.toString(attributes.get("draftStatus"), "DRAFT"),
+        stringListValue(attributes.get("fieldIds")), Instant.parse(savedAt), Objects.toString(attributes.get("actorId"), null));
+  }
+
+  private ProductSpecificationTenantFieldDraft productSpecTenantFieldDraftFrom(ReferenceEntry ref) {
+    Map<String, Object> attributes = ref.attributes();
+    String savedAt = Objects.toString(attributes.get("savedAt"), Instant.now().toString());
+    return new ProductSpecificationTenantFieldDraft(Objects.toString(attributes.get("draftStatus"), "DRAFT"),
+        convertList(attributes.get("aliases"), ProductSpecificationFieldAliasEdit.class),
+        convertList(attributes.get("nativeFields"), ProductSpecificationNativeFieldEdit.class),
+        Instant.parse(savedAt), Objects.toString(attributes.get("actorId"), null));
+  }
+
+  private ProductSpecificationConditionDraft productSpecConditionDraftFrom(ReferenceEntry ref) {
+    Map<String, Object> attributes = ref.attributes();
+    String savedAt = Objects.toString(attributes.get("savedAt"), Instant.now().toString());
+    return new ProductSpecificationConditionDraft(Objects.toString(attributes.get("draftStatus"), "DRAFT"),
+        convertList(attributes.get("includeConditions"), ProductSpecificationConditionRuleEdit.class),
+        convertList(attributes.get("additionalConditions"), ProductSpecificationConditionRuleEdit.class),
+        Instant.parse(savedAt), Objects.toString(attributes.get("actorId"), null));
+  }
+
+  private Map<String, Object> conditionMap(Object value) {
+    if (value == null) return Map.of();
+    return mapper.convertValue(value, MAP_TYPE);
   }
 
   private List<Map<String, Object>> marketRows(UUID tenantId, UUID catalogId, LocalDate asOf) {

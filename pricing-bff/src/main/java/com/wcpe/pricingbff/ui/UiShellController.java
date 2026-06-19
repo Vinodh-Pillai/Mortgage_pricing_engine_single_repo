@@ -1,10 +1,12 @@
 package com.wcpe.pricingbff.ui;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
@@ -19,6 +21,11 @@ import org.springframework.web.bind.annotation.RestController;
 
 @Component
 class PricingBffUiFallbackAdapter {
+  private final Map<String, PipelineSettingsView> pipelineSettingsByTenant = new ConcurrentHashMap<>();
+  private final Map<String, ClientSettingsView> clientSettingsByTenant = new ConcurrentHashMap<>();
+  private final Map<String, NotificationSettingsView> notificationSettingsByTenant = new ConcurrentHashMap<>();
+  private final Map<String, PricingAccessSettingsView> pricingAccessSettingsByTenant = new ConcurrentHashMap<>();
+
   @GetMapping("/api/ui/health")
   UiHealth health(@RequestHeader(value = "X-Correlation-Id", required = false) String correlationId) {
     return new UiHealth("pricing-workbench", "AVAILABLE", true, "Connected services need setup", correlationId, List.of());
@@ -142,6 +149,181 @@ class PricingBffUiFallbackAdapter {
             "Product authorization remains blocked until configured catalog mappings are available."),
         productContract,
         List.of("field@desired-mortgage-type", "field@desired-loan-term", "field@desired-amortization-type")));
+  }
+
+  PipelineSettingsView pipelineSettings(String tenantId, String uiTraceId) {
+    String tenantKey = normalizedTenantKey(tenantId);
+    return pipelineSettingsByTenant.getOrDefault(tenantKey,
+        PipelineSettingsView.unconfigured(tenantKey, normalizeTrace(uiTraceId)));
+  }
+
+  ResponseEntity<PipelineSettingsView> savePipelineSettings(String tenantId, String uiTraceId,
+      PipelineSettingsRequest request) {
+    String tenantKey = normalizedTenantKey(tenantId);
+    String traceId = normalizeTrace(uiTraceId);
+    if (request == null) {
+      return ResponseEntity.badRequest().body(PipelineSettingsView.unconfigured(tenantKey, traceId));
+    }
+
+    List<PipelineFieldSetting> pipelineFields = safePipelineFields(request.pipelineFields());
+    PriceScenarioTableSettings priceScenarioTable = safePriceScenarioTable(request.priceScenarioTable());
+    DefaultPricingFilters defaultFilters = safeDefaultPricingFilters(request.defaultPricingFilters());
+    LockingFieldSettings lockingFields = safeLockingFields(request.lockingFields());
+    PipelineSettingsBindingSummary bindingSummary = new PipelineSettingsBindingSummary(
+        pipelineFields.stream().map(PipelineFieldSetting::fieldId).filter(fieldId -> !fieldId.isBlank()).toList(),
+        priceScenarioCalculationFieldIds(priceScenarioTable), defaultFilters.fieldIds(), lockingFieldIds(lockingFields));
+    List<String> validationMessages = new ArrayList<>();
+    if (bindingSummary.pipelineColumnFieldIds().isEmpty()) {
+      validationMessages.add("pipelineFields are empty; pipeline grid column binding has no configured field list.");
+    }
+    if (bindingSummary.priceScenarioCalculationFieldIds().isEmpty()) {
+      validationMessages.add("priceScenarioTable has no configured calculation field IDs.");
+    }
+    if (bindingSummary.defaultFilterFieldIds().isEmpty()) {
+      validationMessages.add("defaultPricingFilters has no configured field IDs.");
+    }
+    if (bindingSummary.lockingFieldIds().isEmpty()) {
+      validationMessages.add("lockingFields has no configured lock action field IDs.");
+    }
+    PipelineSettingsView view = new PipelineSettingsView(tenantKey,
+        validationMessages.isEmpty() ? "CONFIGURED" : "PARTIAL", true,
+        pipelineFields, priceScenarioTable, defaultFilters, lockingFields, bindingSummary,
+        validationMessages.isEmpty() ? "PIPELINE_SETTINGS_STORED" : "PIPELINE_SETTINGS_PARTIAL",
+        validationMessages, traceId, List.of("PipelineSettingsSaved", "PipelineSettingsFieldsBound"),
+        "Pricing-bff stores tenant-supplied field IDs only; UI rendering and lock desk business rules remain downstream-owned.");
+    pipelineSettingsByTenant.put(tenantKey, view);
+    return ResponseEntity.status(HttpStatus.CREATED).body(view);
+  }
+
+  ClientSettingsView clientSettings(String tenantId, String uiTraceId) {
+    String tenantKey = normalizedTenantKey(tenantId);
+    return clientSettingsByTenant.getOrDefault(tenantKey,
+        ClientSettingsView.unconfigured(tenantKey, normalizeTrace(uiTraceId)));
+  }
+
+  ResponseEntity<ClientSettingsView> saveClientSettings(String tenantId, String uiTraceId,
+      ClientSettingsRequest request) {
+    String tenantKey = normalizedTenantKey(tenantId);
+    String traceId = normalizeTrace(uiTraceId);
+    if (request == null) {
+      return ResponseEntity.badRequest().body(ClientSettingsView.unconfigured(tenantKey, traceId));
+    }
+
+    List<ClientSettingsFieldRef> systemFields = safeClientSettingsFields(request.systemFields());
+    Map<String, String> fieldValues = safeClientFieldValues(request.clientFieldValues());
+    String activeVersion = normalizedRaw(request.activeVersion());
+    List<String> validationMessages = clientSettingsValidation(systemFields, fieldValues, activeVersion);
+    ClientSettingsView view = new ClientSettingsView(tenantKey,
+        validationMessages.isEmpty() ? "CONFIGURED" : "PARTIAL", true, activeVersion,
+        systemFields, fieldValues, validationMessages,
+        validationMessages.isEmpty() ? "CLIENT_SETTINGS_ACTIVE_VERSION_STORED" : "CLIENT_SETTINGS_VALIDATION_PENDING",
+        traceId, List.of("ClientSettingsSaved", "ClientSettingsFieldsReferenced"),
+        "Pricing-bff stores tenant-supplied client setting values and references system field IDs only; it does not infer client-level pricing defaults.");
+    clientSettingsByTenant.put(tenantKey, view);
+    return ResponseEntity.status(HttpStatus.CREATED).body(view);
+  }
+
+  ResponseEntity<ClientSettingsView> publishClientSettings(String tenantId, String uiTraceId) {
+    String tenantKey = normalizedTenantKey(tenantId);
+    String traceId = normalizeTrace(uiTraceId);
+    ClientSettingsView existing = clientSettingsByTenant.getOrDefault(tenantKey,
+        ClientSettingsView.unconfigured(tenantKey, traceId));
+    List<String> validationMessages = clientSettingsValidation(existing.systemFields(), existing.clientFieldValues(),
+        existing.activeVersion());
+    if (!validationMessages.isEmpty()) {
+      ClientSettingsView blocked = existing.withStatus("BLOCKED", "CLIENT_SETTINGS_PUBLISH_BLOCKED", traceId,
+          validationMessages, List.of("ClientSettingsPublishBlocked"));
+      return ResponseEntity.badRequest().body(blocked);
+    }
+    ClientSettingsView published = existing.withStatus("PUBLISHED", "CLIENT_SETTINGS_ACTIVE_VERSION_PUBLISHED", traceId,
+        List.of(), List.of("ClientSettingsPublished"));
+    clientSettingsByTenant.put(tenantKey, published);
+    return ResponseEntity.ok(published);
+  }
+
+  NotificationSettingsView notificationSettings(String tenantId, String uiTraceId) {
+    String tenantKey = normalizedTenantKey(tenantId);
+    return notificationSettingsByTenant.getOrDefault(tenantKey,
+        NotificationSettingsView.unconfigured(tenantKey, normalizeTrace(uiTraceId)));
+  }
+
+  ResponseEntity<NotificationSettingsView> saveNotificationSettings(String tenantId, String uiTraceId,
+      NotificationSettingsRequest request) {
+    String tenantKey = normalizedTenantKey(tenantId);
+    String traceId = normalizeTrace(uiTraceId);
+    if (request == null) {
+      return ResponseEntity.badRequest().body(NotificationSettingsView.unconfigured(tenantKey, traceId));
+    }
+
+    List<ClientSettingsFieldRef> activeFieldLibrary = effectiveActiveFieldLibrary(tenantKey, request.activeFieldLibrary());
+    List<PricingNotificationFieldView> notificationFields = safeNotificationFields(request.notificationFields(),
+        activeFieldLibrary);
+    String activeVersion = normalizedRaw(request.activeVersion());
+    List<String> validationMessages = notificationSettingsValidation(activeFieldLibrary, notificationFields,
+        activeVersion);
+    NotificationSettingsView view = new NotificationSettingsView(tenantKey,
+        validationMessages.isEmpty() ? "CONFIGURED" : "PARTIAL", true, activeVersion,
+        activeFieldLibrary, notificationFields, validationMessages,
+        validationMessages.isEmpty() ? "PRICING_NOTIFICATION_SETTINGS_STORED" : "PRICING_NOTIFICATION_VALIDATION_PENDING",
+        traceId, List.of("PricingNotificationSettingsSaved", "PricingNotificationFieldsReferenced"),
+        "Pricing-bff stores tenant-supplied notification aliases, field IDs, references, and condition expressions only; delivery transport and pricing decisions remain downstream-owned.");
+    notificationSettingsByTenant.put(tenantKey, view);
+    return ResponseEntity.status(HttpStatus.CREATED).body(view);
+  }
+
+  ResponseEntity<NotificationSettingsView> publishNotificationSettings(String tenantId, String uiTraceId) {
+    String tenantKey = normalizedTenantKey(tenantId);
+    String traceId = normalizeTrace(uiTraceId);
+    NotificationSettingsView existing = notificationSettingsByTenant.getOrDefault(tenantKey,
+        NotificationSettingsView.unconfigured(tenantKey, traceId));
+    List<String> validationMessages = notificationSettingsValidation(existing.activeFieldLibrary(),
+        existing.notificationFields(), existing.activeVersion());
+    if (!validationMessages.isEmpty()) {
+      return ResponseEntity.badRequest().body(existing.withStatus("BLOCKED", "PRICING_NOTIFICATION_PUBLISH_BLOCKED",
+          traceId, validationMessages, List.of("PricingNotificationPublishBlocked")));
+    }
+    NotificationSettingsView published = existing.withStatus("PUBLISHED",
+        "PRICING_NOTIFICATION_SETTINGS_PUBLISHED", traceId, List.of(), List.of("PricingNotificationSettingsPublished"));
+    notificationSettingsByTenant.put(tenantKey, published);
+    return ResponseEntity.ok(published);
+  }
+
+  PricingAccessSettingsView pricingAccessSettings(String tenantId, String userRoleId, String uiTraceId) {
+    String tenantKey = normalizedTenantKey(tenantId);
+    String roleId = normalizedRaw(userRoleId);
+    PricingAccessSettingsView existing = pricingAccessSettingsByTenant.getOrDefault(tenantKey,
+        PricingAccessSettingsView.unconfigured(tenantKey, normalizeTrace(uiTraceId)));
+    return existing.withResolvedRole(roleId.isBlank() ? existing.activeRoleId() : roleId, normalizeTrace(uiTraceId));
+  }
+
+  ResponseEntity<PricingAccessSettingsView> savePricingAccessSettings(String tenantId, String uiTraceId,
+      String actorUserId, PricingAccessSettingsRequest request) {
+    String tenantKey = normalizedTenantKey(tenantId);
+    String traceId = normalizeTrace(uiTraceId);
+    if (request == null) {
+      return ResponseEntity.badRequest().body(PricingAccessSettingsView.unconfigured(tenantKey, traceId));
+    }
+
+    List<RolePricingAccessConfig> roles = safeRolePricingAccess(request.roles());
+    List<PricingProfileConfig> pricingProfiles = safePricingProfiles(request.pricingProfiles());
+    List<FeatureFlagConfig> featureFlags = safeFeatureFlags(request.featureFlags());
+    String activeRoleId = normalizedRaw(request.activeRoleId());
+    String activePricingProfileId = normalizedRaw(request.activePricingProfileId());
+    String activeVersion = normalizedRaw(request.activeVersion());
+    List<String> validationMessages = pricingAccessValidation(roles, pricingProfiles, featureFlags, activeRoleId,
+        activePricingProfileId, activeVersion);
+    List<PricingAccessAuditRecord> auditRecords = pricingAccessAuditRecords(tenantKey, normalizedRaw(actorUserId), roles,
+        pricingProfiles, featureFlags, activeRoleId, activePricingProfileId, activeVersion);
+    PricingAccessSettingsView view = new PricingAccessSettingsView(tenantKey,
+        validationMessages.isEmpty() ? "CONFIGURED" : "PARTIAL", true, activeVersion, activeRoleId,
+        activePricingProfileId, roles, pricingProfiles, featureFlags, List.of(), List.of(), null,
+        disabledFeatureIds(featureFlags), auditRecords, validationMessages,
+        validationMessages.isEmpty() ? "PRICING_ACCESS_SETTINGS_STORED" : "PRICING_ACCESS_VALIDATION_PENDING",
+        traceId, List.of("PricingAccessSettingsSaved", "PricingAccessAuditRecorded"),
+        "Pricing-bff stores tenant-supplied role field visibility, pricing profile, and feature flag references only; it does not infer pricing rules or identity policy.")
+        .withResolvedRole(activeRoleId, traceId);
+    pricingAccessSettingsByTenant.put(tenantKey, view);
+    return ResponseEntity.status(HttpStatus.CREATED).body(view);
   }
 
   ProductCatalogManagerView productCatalogManager(String tenantContext, String uiTraceId) {
@@ -1631,6 +1813,312 @@ class PricingBffUiFallbackAdapter {
     return List.of();
   }
 
+  private String normalizedTenantKey(String tenantId) {
+    String normalized = normalized(tenantId);
+    return normalized.isBlank() ? "tenant-context-required" : normalized;
+  }
+
+  private List<RolePricingAccessConfig> safeRolePricingAccess(List<RolePricingAccessConfig> roles) {
+    if (roles == null) {
+      return List.of();
+    }
+    return roles.stream()
+        .filter(role -> role != null && role.roleId() != null && !role.roleId().isBlank())
+        .map(role -> new RolePricingAccessConfig(normalizedRaw(role.roleId()), normalizedRaw(role.label()),
+            safeStringList(role.pricingVisibleFieldIds()), role.pricingActionsEnabled()))
+        .toList();
+  }
+
+  private List<PricingProfileConfig> safePricingProfiles(List<PricingProfileConfig> profiles) {
+    if (profiles == null) {
+      return List.of();
+    }
+    return profiles.stream()
+        .filter(profile -> profile != null && profile.profileId() != null && !profile.profileId().isBlank())
+        .map(profile -> new PricingProfileConfig(normalizedRaw(profile.profileId()), normalizedRaw(profile.label()),
+            safeStringList(profile.fieldIds()), safeStringList(profile.sourceRefs()), profile.active()))
+        .toList();
+  }
+
+  private List<FeatureFlagConfig> safeFeatureFlags(List<FeatureFlagConfig> flags) {
+    if (flags == null) {
+      return List.of();
+    }
+    return flags.stream()
+        .filter(flag -> flag != null && flag.flagId() != null && !flag.flagId().isBlank())
+        .map(flag -> new FeatureFlagConfig(normalizedRaw(flag.flagId()), flag.enabled(),
+            safeStringList(flag.affectedFeatures()), normalizedRaw(flag.sourceRef())))
+        .toList();
+  }
+
+  private List<String> pricingAccessValidation(List<RolePricingAccessConfig> roles,
+      List<PricingProfileConfig> pricingProfiles, List<FeatureFlagConfig> featureFlags, String activeRoleId,
+      String activePricingProfileId, String activeVersion) {
+    List<String> validationMessages = new ArrayList<>();
+    if (roles.isEmpty()) {
+      validationMessages.add("At least one role with pricing-visible field IDs is required before pipeline pricing access can be published.");
+    }
+    if (activeRoleId == null || activeRoleId.isBlank()) {
+      validationMessages.add("An active role ID is required before pricing-visible fields can be resolved.");
+    } else if (roles.stream().noneMatch(role -> role.roleId().equals(activeRoleId))) {
+      validationMessages.add("Active role ID references missing role pricing access config: " + activeRoleId);
+    }
+    List<String> rolesWithoutVisibleFields = roles.stream()
+        .filter(role -> role.pricingVisibleFieldIds().isEmpty())
+        .map(RolePricingAccessConfig::roleId)
+        .toList();
+    if (!rolesWithoutVisibleFields.isEmpty()) {
+      validationMessages.add("Roles require at least one pricing-visible field ID: " + String.join(", ", rolesWithoutVisibleFields));
+    }
+    if (pricingProfiles.isEmpty()) {
+      validationMessages.add("At least one tenant pricing profile is required before pricing behavior can resolve profile context.");
+    }
+    if (activePricingProfileId == null || activePricingProfileId.isBlank()) {
+      validationMessages.add("An active pricing profile ID is required before pricing behavior can resolve tenant profile context.");
+    } else if (pricingProfiles.stream().noneMatch(profile -> profile.profileId().equals(activePricingProfileId))) {
+      validationMessages.add("Active pricing profile ID references missing tenant pricing profile: " + activePricingProfileId);
+    }
+    if (featureFlags.isEmpty()) {
+      validationMessages.add("Tenant feature flags are required before UI/API feature availability can be resolved.");
+    }
+    if (activeVersion == null || activeVersion.isBlank()) {
+      validationMessages.add("Tenant pricing access settings version is required before audit and publish.");
+    }
+    return validationMessages;
+  }
+
+  private List<PricingAccessAuditRecord> pricingAccessAuditRecords(String tenantKey, String actorUserId,
+      List<RolePricingAccessConfig> roles, List<PricingProfileConfig> pricingProfiles, List<FeatureFlagConfig> featureFlags,
+      String activeRoleId, String activePricingProfileId, String activeVersion) {
+    String actor = actorUserId == null || actorUserId.isBlank() ? "actor-context-required" : actorUserId;
+    return List.of(
+        new PricingAccessAuditRecord(tenantKey, actor, "roles-pricing-visible-fields", activeVersion,
+            roles.stream().map(role -> role.roleId() + ":" + String.join("|", role.pricingVisibleFieldIds())).toList(),
+            "audit:pricing-access:roles:" + tenantKey),
+        new PricingAccessAuditRecord(tenantKey, actor, "pricing-profile-assignment", activeVersion,
+            List.of("activeRoleId=" + activeRoleId, "activePricingProfileId=" + activePricingProfileId,
+                "profileIds=" + String.join("|", pricingProfiles.stream().map(PricingProfileConfig::profileId).toList())),
+            "audit:pricing-access:profiles:" + tenantKey),
+        new PricingAccessAuditRecord(tenantKey, actor, "feature-flag-availability", activeVersion,
+            featureFlags.stream().map(flag -> flag.flagId() + "=" + flag.enabled()).toList(),
+            "audit:pricing-access:feature-flags:" + tenantKey));
+  }
+
+  private List<String> disabledFeatureIds(List<FeatureFlagConfig> featureFlags) {
+    return featureFlags.stream().filter(flag -> !flag.enabled()).map(FeatureFlagConfig::flagId).toList();
+  }
+
+  private List<String> unavailableFeatures(List<FeatureFlagConfig> featureFlags) {
+    return featureFlags.stream()
+        .filter(flag -> !flag.enabled())
+        .flatMap(flag -> flag.affectedFeatures().stream())
+        .distinct()
+        .toList();
+  }
+
+  private List<PipelineFieldSetting> safePipelineFields(List<PipelineFieldSetting> fields) {
+    if (fields == null) {
+      return List.of();
+    }
+    return fields.stream()
+        .filter(field -> field != null && field.fieldId() != null && !field.fieldId().isBlank())
+        .map(field -> new PipelineFieldSetting(normalizedRaw(field.fieldId()), normalizedRaw(field.label()),
+            normalizedRaw(field.dataType()), field.visible(), normalizedRaw(field.sourceRef())))
+        .toList();
+  }
+
+  private List<ClientSettingsFieldRef> safeClientSettingsFields(List<ClientSettingsFieldRef> fields) {
+    if (fields == null) {
+      return List.of();
+    }
+    return fields.stream()
+        .filter(field -> field != null && field.systemFieldId() != null && !field.systemFieldId().isBlank())
+        .map(field -> new ClientSettingsFieldRef(normalizedRaw(field.systemFieldId()), normalizedRaw(field.label()),
+            normalizedRaw(field.dataType()), normalizedRaw(field.sourceRef())))
+        .toList();
+  }
+
+  private Map<String, String> safeClientFieldValues(Map<String, String> values) {
+    if (values == null) {
+      return Map.of();
+    }
+    Map<String, String> normalizedValues = new LinkedHashMap<>();
+    values.forEach((fieldId, value) -> {
+      String normalizedFieldId = normalizedRaw(fieldId);
+      String normalizedValue = normalizedRaw(value);
+      if (!normalizedFieldId.isBlank() && !normalizedValue.isBlank()) {
+        normalizedValues.put(normalizedFieldId, normalizedValue);
+      }
+    });
+    return Map.copyOf(normalizedValues);
+  }
+
+  private List<String> clientSettingsValidation(List<ClientSettingsFieldRef> systemFields,
+      Map<String, String> fieldValues, String activeVersion) {
+    List<String> validationMessages = new ArrayList<>();
+    if (systemFields.isEmpty()) {
+      validationMessages.add("Client settings fields must reference imported system field IDs before publishing.");
+    }
+    if (activeVersion == null || activeVersion.isBlank()) {
+      validationMessages.add("Tenant active client settings version is required before pipeline behavior can consume values.");
+    }
+    List<String> systemFieldIds = systemFields.stream().map(ClientSettingsFieldRef::systemFieldId).toList();
+    List<String> missingFieldRefs = fieldValues.keySet().stream()
+        .filter(fieldId -> !systemFieldIds.contains(fieldId))
+        .toList();
+    if (!missingFieldRefs.isEmpty()) {
+      validationMessages.add("Client setting values reference missing system field IDs: " + String.join(", ", missingFieldRefs));
+    }
+    return validationMessages;
+  }
+
+  private List<ClientSettingsFieldRef> effectiveActiveFieldLibrary(String tenantKey,
+      List<ClientSettingsFieldRef> activeFieldLibrary) {
+    List<ClientSettingsFieldRef> requestLibrary = safeClientSettingsFields(activeFieldLibrary);
+    if (!requestLibrary.isEmpty()) {
+      return requestLibrary;
+    }
+    return clientSettingsByTenant.getOrDefault(tenantKey, ClientSettingsView.unconfigured(tenantKey, "local-trace"))
+        .systemFields();
+  }
+
+  private List<PricingNotificationFieldView> safeNotificationFields(List<PricingNotificationFieldConfig> fields,
+      List<ClientSettingsFieldRef> activeFieldLibrary) {
+    if (fields == null) {
+      return List.of();
+    }
+    List<String> activeFieldIds = activeFieldLibrary.stream().map(ClientSettingsFieldRef::systemFieldId).toList();
+    return fields.stream()
+        .filter(field -> field != null && field.fieldId() != null && !field.fieldId().isBlank())
+        .map(field -> {
+          String fieldId = normalizedRaw(field.fieldId());
+          String sendNotificationFieldId = normalizedRaw(field.sendNotificationFieldId());
+          List<String> includeConditions = safeStringList(field.includeConditions());
+          List<String> additionalConditions = safeStringList(field.additionalConditions());
+          List<String> visibleReferences = visibleNotificationReferences(field.showReferences(), field.references(),
+              sendNotificationFieldId, activeFieldIds, includeConditions, additionalConditions);
+          return new PricingNotificationFieldView(fieldId, normalizedRaw(field.nameAlias()),
+              normalizedRaw(field.descriptionAlias()), sendNotificationFieldId, includeConditions, additionalConditions,
+              field.showReferences(), visibleReferences);
+        })
+        .toList();
+  }
+
+  private List<String> visibleNotificationReferences(boolean showReferences, List<String> requestReferences,
+      String sendNotificationFieldId, List<String> activeFieldIds, List<String> includeConditions,
+      List<String> additionalConditions) {
+    if (!showReferences) {
+      return List.of();
+    }
+    List<String> references = new ArrayList<>(safeStringList(requestReferences));
+    if (!sendNotificationFieldId.isBlank() && activeFieldIds.contains(sendNotificationFieldId)) {
+      references.add("field:" + sendNotificationFieldId);
+    }
+    includeConditions.stream().map(condition -> "include-condition:" + condition).forEach(references::add);
+    additionalConditions.stream().map(condition -> "additional-condition:" + condition).forEach(references::add);
+    return List.copyOf(references.stream().distinct().toList());
+  }
+
+  private List<String> notificationSettingsValidation(List<ClientSettingsFieldRef> activeFieldLibrary,
+      List<PricingNotificationFieldView> notificationFields, String activeVersion) {
+    List<String> validationMessages = new ArrayList<>();
+    if (activeFieldLibrary.isEmpty()) {
+      validationMessages.add("Pricing notification settings must reference the tenant active field library before publishing.");
+    }
+    if (activeVersion == null || activeVersion.isBlank()) {
+      validationMessages.add("Tenant active pricing notification settings version is required before publishing.");
+    }
+    if (notificationFields.isEmpty()) {
+      validationMessages.add("At least one pricing notification field must be configured before publishing.");
+    }
+    List<String> activeFieldIds = activeFieldLibrary.stream().map(ClientSettingsFieldRef::systemFieldId).toList();
+    for (PricingNotificationFieldView field : notificationFields) {
+      if (field.nameAlias().isBlank()) {
+        validationMessages.add("Pricing notification " + field.fieldId() + " requires a name alias.");
+      }
+      if (field.descriptionAlias().isBlank()) {
+        validationMessages.add("Pricing notification " + field.fieldId() + " requires a description alias.");
+      }
+      if (field.sendNotificationFieldId().isBlank() || !activeFieldIds.contains(field.sendNotificationFieldId())) {
+        validationMessages.add("Pricing notification " + field.fieldId()
+            + " references missing send-notification field ID: " + field.sendNotificationFieldId());
+      }
+      List<String> invalidConditions = new ArrayList<>();
+      field.includeConditions().stream().filter(condition -> !validNotificationCondition(condition))
+          .forEach(invalidConditions::add);
+      field.additionalConditions().stream().filter(condition -> !validNotificationCondition(condition))
+          .forEach(invalidConditions::add);
+      if (!invalidConditions.isEmpty()) {
+        validationMessages.add("Pricing notification " + field.fieldId() + " has invalid conditions: "
+            + String.join(", ", invalidConditions));
+      }
+    }
+    return validationMessages;
+  }
+
+  private boolean validNotificationCondition(String condition) {
+    String normalizedCondition = normalizedRaw(condition);
+    return normalizedCondition.startsWith("field:") || normalizedCondition.startsWith("condition:")
+        || normalizedCondition.startsWith("ref:");
+  }
+
+  private PriceScenarioTableSettings safePriceScenarioTable(PriceScenarioTableSettings settings) {
+    if (settings == null) {
+      return new PriceScenarioTableSettings("", "", "", List.of());
+    }
+    return new PriceScenarioTableSettings(normalizedRaw(settings.adjustedRateFieldId()),
+        normalizedRaw(settings.lockPeriodFieldId()), normalizedRaw(settings.adjustedPriceFieldId()),
+        safeStringList(settings.extraColumnFieldIds()));
+  }
+
+  private DefaultPricingFilters safeDefaultPricingFilters(DefaultPricingFilters filters) {
+    return new DefaultPricingFilters(filters == null ? List.of() : safeStringList(filters.fieldIds()));
+  }
+
+  private LockingFieldSettings safeLockingFields(LockingFieldSettings settings) {
+    if (settings == null) {
+      return new LockingFieldSettings("", "", "");
+    }
+    return new LockingFieldSettings(normalizedRaw(settings.requestDateFieldId()),
+        normalizedRaw(settings.expirationDateFieldId()), normalizedRaw(settings.extensionDaysFieldId()));
+  }
+
+  private List<String> safeStringList(List<String> values) {
+    if (values == null) {
+      return List.of();
+    }
+    return values.stream().map(this::normalizedRaw).filter(value -> !value.isBlank()).toList();
+  }
+
+  private List<String> priceScenarioCalculationFieldIds(PriceScenarioTableSettings settings) {
+    List<String> fieldIds = new ArrayList<>();
+    if (!settings.adjustedRateFieldId().isBlank()) {
+      fieldIds.add(settings.adjustedRateFieldId());
+    }
+    if (!settings.lockPeriodFieldId().isBlank()) {
+      fieldIds.add(settings.lockPeriodFieldId());
+    }
+    if (!settings.adjustedPriceFieldId().isBlank()) {
+      fieldIds.add(settings.adjustedPriceFieldId());
+    }
+    fieldIds.addAll(settings.extraColumnFieldIds());
+    return List.copyOf(fieldIds);
+  }
+
+  private List<String> lockingFieldIds(LockingFieldSettings settings) {
+    List<String> fieldIds = new ArrayList<>();
+    if (!settings.requestDateFieldId().isBlank()) {
+      fieldIds.add(settings.requestDateFieldId());
+    }
+    if (!settings.expirationDateFieldId().isBlank()) {
+      fieldIds.add(settings.expirationDateFieldId());
+    }
+    if (!settings.extensionDaysFieldId().isBlank()) {
+      fieldIds.add(settings.extensionDaysFieldId());
+    }
+    return List.copyOf(fieldIds);
+  }
+
   record UiHealth(String service, String status, boolean ready, String dependencyStatus, String correlationId,
       List<String> dependencies) {}
 
@@ -1654,6 +2142,139 @@ class PricingBffUiFallbackAdapter {
 
   record LoanPassProduct(String productId, String selectedProgramId, String priceGroupId, String mortgageType,
       String loanQualificationType, String desiredLoanTerm, String desiredAmortizationType, String channelType) {}
+
+  record PipelineSettingsRequest(List<PipelineFieldSetting> pipelineFields,
+      PriceScenarioTableSettings priceScenarioTable, DefaultPricingFilters defaultPricingFilters,
+      LockingFieldSettings lockingFields) {}
+
+  record PipelineSettingsView(String tenantContext, String status, boolean configured,
+      List<PipelineFieldSetting> pipelineFields, PriceScenarioTableSettings priceScenarioTable,
+      DefaultPricingFilters defaultPricingFilters, LockingFieldSettings lockingFields,
+      PipelineSettingsBindingSummary bindingSummary, String dependencyStatus, List<String> validationMessages,
+      String uiTraceId, List<String> events, String fallbackReason) {
+    static PipelineSettingsView unconfigured(String tenantContext, String traceId) {
+      return new PipelineSettingsView(tenantContext, "UNCONFIGURED", false, List.of(),
+          new PriceScenarioTableSettings("", "", "", List.of()), new DefaultPricingFilters(List.of()),
+          new LockingFieldSettings("", "", ""),
+          new PipelineSettingsBindingSummary(List.of(), List.of(), List.of(), List.of()),
+          "PIPELINE_SETTINGS_NOT_CONFIGURED",
+          List.of("Tenant pipeline settings have not been stored for this local BFF tenant."), traceId,
+          List.of("PipelineSettingsRequested"),
+          "Pricing-bff returns only tenant-supplied field IDs; it does not infer pricing, eligibility, or lock policy rules.");
+    }
+  }
+
+  record PipelineFieldSetting(String fieldId, String label, String dataType, boolean visible, String sourceRef) {}
+
+  record PriceScenarioTableSettings(String adjustedRateFieldId, String lockPeriodFieldId,
+      String adjustedPriceFieldId, List<String> extraColumnFieldIds) {}
+
+  record DefaultPricingFilters(List<String> fieldIds) {}
+
+  record LockingFieldSettings(String requestDateFieldId, String expirationDateFieldId, String extensionDaysFieldId) {}
+
+  record PipelineSettingsBindingSummary(List<String> pipelineColumnFieldIds,
+      List<String> priceScenarioCalculationFieldIds, List<String> defaultFilterFieldIds, List<String> lockingFieldIds) {}
+
+  record ClientSettingsRequest(List<ClientSettingsFieldRef> systemFields, Map<String, String> clientFieldValues,
+      String activeVersion) {}
+
+  record ClientSettingsFieldRef(String systemFieldId, String label, String dataType, String sourceRef) {}
+
+  record ClientSettingsView(String tenantContext, String status, boolean configured, String activeVersion,
+      List<ClientSettingsFieldRef> systemFields, Map<String, String> clientFieldValues,
+      List<String> validationMessages, String dependencyStatus, String uiTraceId, List<String> events,
+      String fallbackReason) {
+    static ClientSettingsView unconfigured(String tenantContext, String traceId) {
+      return new ClientSettingsView(tenantContext, "UNCONFIGURED", false, "", List.of(), Map.of(),
+          List.of("Tenant client settings have not been stored for this local BFF tenant."),
+          "CLIENT_SETTINGS_NOT_CONFIGURED", traceId, List.of("ClientSettingsRequested"),
+          "Pricing-bff exposes configured tenant client settings only; no client-level pricing defaults are inferred.");
+    }
+
+    ClientSettingsView withStatus(String status, String dependencyStatus, String traceId,
+        List<String> validationMessages, List<String> events) {
+      return new ClientSettingsView(tenantContext, status, configured, activeVersion, systemFields, clientFieldValues,
+          validationMessages, dependencyStatus, traceId, events, fallbackReason);
+    }
+  }
+
+  record NotificationSettingsRequest(List<ClientSettingsFieldRef> activeFieldLibrary,
+      List<PricingNotificationFieldConfig> notificationFields, String activeVersion) {}
+
+  record PricingNotificationFieldConfig(String fieldId, String nameAlias, String descriptionAlias,
+      String sendNotificationFieldId, List<String> includeConditions, List<String> additionalConditions,
+      boolean showReferences, List<String> references) {}
+
+  record PricingNotificationFieldView(String fieldId, String nameAlias, String descriptionAlias,
+      String sendNotificationFieldId, List<String> includeConditions, List<String> additionalConditions,
+      boolean showReferences, List<String> visibleReferences) {}
+
+  record NotificationSettingsView(String tenantContext, String status, boolean configured, String activeVersion,
+      List<ClientSettingsFieldRef> activeFieldLibrary, List<PricingNotificationFieldView> notificationFields,
+      List<String> validationMessages, String dependencyStatus, String uiTraceId, List<String> events,
+      String fallbackReason) {
+    static NotificationSettingsView unconfigured(String tenantContext, String traceId) {
+      return new NotificationSettingsView(tenantContext, "UNCONFIGURED", false, "", List.of(), List.of(),
+          List.of("Tenant pricing notification settings have not been stored for this local BFF tenant."),
+          "PRICING_NOTIFICATION_SETTINGS_NOT_CONFIGURED", traceId, List.of("PricingNotificationSettingsRequested"),
+          "Pricing-bff exposes configured notification field aliases, references, and condition expressions only; notification delivery remains outside this fallback slice.");
+    }
+
+    NotificationSettingsView withStatus(String status, String dependencyStatus, String traceId,
+        List<String> validationMessages, List<String> events) {
+      return new NotificationSettingsView(tenantContext, status, configured, activeVersion, activeFieldLibrary,
+          notificationFields, validationMessages, dependencyStatus, traceId, events, fallbackReason);
+    }
+  }
+
+  record PricingAccessSettingsRequest(List<RolePricingAccessConfig> roles,
+      List<PricingProfileConfig> pricingProfiles, List<FeatureFlagConfig> featureFlags, String activeRoleId,
+      String activePricingProfileId, String activeVersion) {}
+
+  record RolePricingAccessConfig(String roleId, String label, List<String> pricingVisibleFieldIds,
+      boolean pricingActionsEnabled) {}
+
+  record PricingProfileConfig(String profileId, String label, List<String> fieldIds, List<String> sourceRefs,
+      boolean active) {}
+
+  record FeatureFlagConfig(String flagId, boolean enabled, List<String> affectedFeatures, String sourceRef) {}
+
+  record PricingAccessAuditRecord(String tenantContext, String actorUserId, String changeType, String activeVersion,
+      List<String> changedValues, String auditRef) {}
+
+  record PricingAccessSettingsView(String tenantContext, String status, boolean configured, String activeVersion,
+      String activeRoleId, String activePricingProfileId, List<RolePricingAccessConfig> roles,
+      List<PricingProfileConfig> pricingProfiles, List<FeatureFlagConfig> featureFlags,
+      List<String> authorizedPricingFieldIds, List<String> unavailableFeatures, PricingProfileConfig activePricingProfile,
+      List<String> disabledFeatureFlagIds, List<PricingAccessAuditRecord> auditRecords, List<String> validationMessages,
+      String dependencyStatus, String uiTraceId, List<String> events, String fallbackReason) {
+    static PricingAccessSettingsView unconfigured(String tenantContext, String traceId) {
+      return new PricingAccessSettingsView(tenantContext, "UNCONFIGURED", false, "", "", "", List.of(), List.of(),
+          List.of(), List.of(), List.of(), null, List.of(), List.of(),
+          List.of("Tenant role, pricing profile, and feature flag settings have not been stored for this local BFF tenant."),
+          "PRICING_ACCESS_SETTINGS_NOT_CONFIGURED", traceId, List.of("PricingAccessSettingsRequested"),
+          "Pricing-bff exposes tenant-supplied role, pricing profile, and feature flag settings only; identity management and pricing rules remain downstream-owned.");
+    }
+
+    PricingAccessSettingsView withResolvedRole(String roleId, String traceId) {
+      String resolvedRoleId = roleId == null || roleId.isBlank() ? activeRoleId : roleId;
+      List<String> authorizedFields = roles.stream()
+          .filter(role -> role.roleId().equals(resolvedRoleId))
+          .findFirst()
+          .map(RolePricingAccessConfig::pricingVisibleFieldIds)
+          .orElse(List.of());
+      PricingProfileConfig resolvedProfile = pricingProfiles.stream()
+          .filter(profile -> profile.profileId().equals(activePricingProfileId))
+          .findFirst()
+          .orElse(null);
+      return new PricingAccessSettingsView(tenantContext, status, configured, activeVersion, resolvedRoleId,
+          activePricingProfileId, roles, pricingProfiles, featureFlags, authorizedFields,
+          featureFlags.stream().filter(flag -> !flag.enabled()).flatMap(flag -> flag.affectedFeatures().stream()).distinct().toList(), resolvedProfile,
+          featureFlags.stream().filter(flag -> !flag.enabled()).map(FeatureFlagConfig::flagId).toList(), auditRecords, validationMessages,
+          dependencyStatus, traceId, events, fallbackReason);
+    }
+  }
 
   record ProductCatalogManagerView(String tenantContext, String dependencyStatus, List<ProductCatalogArea> areas,
       ProductCatalogLifecycle lifecycle, List<String> events, String fallbackReason, String uiTraceId) {}

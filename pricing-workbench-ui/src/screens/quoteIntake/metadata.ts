@@ -227,7 +227,12 @@ export async function fetchIntakeMetadata(tenantId: string, fetchImpl: typeof fe
 export function fieldsForStep(metadata: ScenarioIntakeMetadata | null | undefined, stepId: QuoteIntakeStepId): ScenarioIntakeField[] {
   const step = quoteIntakeSteps.find((candidate) => candidate.id === stepId) ?? quoteIntakeSteps[0];
   const metadataFields = metadata ? metadataFieldsForStep(metadata, step) : [];
-  if (metadataFields.length > 0) return withSectionFallbackComplements(normalizeOptionalTechnicalFields(metadataFields), step).map(normalizeFieldHelpDisplay);
+  if (metadataFields.length > 0) {
+    const normalizedFields = normalizeOptionalTechnicalFields(metadataFields).filter(configuredFieldActive);
+    if (metadata?.settings?.applicationFormRuntime?.source === 'published') return normalizedFields.map(normalizeFieldHelpDisplay);
+    return withSectionFallbackComplements(normalizedFields, step).map(normalizeFieldHelpDisplay);
+  }
+  if (metadata?.settings?.applicationFormRuntime?.source === 'published') return [];
   return fallbackFieldsForStep(step);
 }
 
@@ -249,16 +254,17 @@ export function stepsForMetadata(metadata: ScenarioIntakeMetadata | null | undef
 
 export function metadataFieldsForStep(metadata: ScenarioIntakeMetadata, step: QuoteIntakeStepDefinition): ScenarioIntakeField[] {
   const aliases = sectionAliases(step.section);
+  const publishedRuntimeForm = metadata.settings?.applicationFormRuntime?.source === 'published';
   const firstStepFields = new Set((step.id === 1 ? metadata.quickQuoteState?.minimalFirstStepFields ?? [] : []).filter(isBorrowerIntakeField));
   const explicitStepFields = step.id === 1 && firstStepFields.size > 0
     ? metadata.fieldGroups.flatMap((group) => group.fields).filter((field) => firstStepFields.has(field.fieldId))
     : [];
   const groupedFields = metadata.fieldGroups
-    .filter((group) => aliases.some((alias) => normalized(group.groupId).includes(alias) || normalized(group.label).includes(alias)))
+    .filter((group) => publishedRuntimeForm ? normalized(group.groupId) === normalized(step.section) : aliases.some((alias) => normalized(group.groupId).includes(alias) || normalized(group.label).includes(alias)))
     .flatMap((group) => group.fields)
-    .filter((field) => isBorrowerIntakeField(field.fieldId));
+    .filter((field) => isBorrowerIntakeField(String(field.fieldId)) || isHeaderMetadataField(field));
 
-  return uniqueFields([...explicitStepFields, ...groupedFields]);
+  return uniqueFields([...explicitStepFields, ...groupedFields]).sort((left, right) => configuredFieldOrder(left) - configuredFieldOrder(right));
 }
 
 export function fallbackFieldsForStep(step: QuoteIntakeStepDefinition): ScenarioIntakeField[] {
@@ -316,6 +322,7 @@ function fallbackField(fieldId: keyof BorrowerIntake, groupId: string): Scenario
     helpText: '',
     helpTooltip: complexFieldHelpTooltips[fieldId],
     showHelpIcon: complexFieldIds.has(fieldId),
+    valueType: 'input',
     sourceRef: 'intake-metadata',
     decisionQuality: 'UNKNOWN',
     validationMessages: [],
@@ -323,6 +330,7 @@ function fallbackField(fieldId: keyof BorrowerIntake, groupId: string): Scenario
 }
 
 function normalizeFieldHelpDisplay(field: ScenarioIntakeField): ScenarioIntakeField {
+  if (isHeaderMetadataField(field)) return { ...field, required: false, valueType: 'header' };
   const fallbackTooltip = complexFieldHelpTooltips[field.fieldId];
   const showHelpIcon = complexFieldIds.has(field.fieldId);
   return {
@@ -351,9 +359,9 @@ function normalizeOptionalTechnicalFields(fields: ScenarioIntakeField[]) {
 
 function withSectionFallbackComplements(fields: ScenarioIntakeField[], step: QuoteIntakeStepDefinition) {
   const scopedFields = fields.filter((field) => !optionalTechnicalFields.has(field.fieldId));
-  const seen = new Set(scopedFields.map((field) => field.fieldId));
+  const seen = new Set(scopedFields.filter((field) => isBorrowerIntakeField(String(field.fieldId))).map((field) => field.fieldId));
   const complements = step.fallbackFields.filter((fieldId) => !seen.has(fieldId)).map((fieldId) => fallbackField(fieldId, step.section));
-  return uniqueFields([...scopedFields, ...complements]);
+  return uniqueFields([...scopedFields.filter(configuredFieldActive), ...complements]).sort((left, right) => configuredFieldOrder(left) - configuredFieldOrder(right));
 }
 
 function normalized(value: string) {
@@ -363,10 +371,28 @@ function normalized(value: string) {
 function uniqueFields(fields: ScenarioIntakeField[]) {
   const seen = new Set<string>();
   return fields.filter((field) => {
-    if (seen.has(field.fieldId)) return false;
-    seen.add(field.fieldId);
+    const id = String(field.fieldId);
+    if (seen.has(id)) return false;
+    seen.add(id);
     return true;
   });
+}
+
+export function isHeaderMetadataField(field: ScenarioIntakeField) {
+  const record = field as ScenarioIntakeField & { displayType?: string; fieldType?: string; kind?: string; dataType?: string };
+  const valueType = typeof record.valueType === 'object' && record.valueType ? record.valueType.type : record.valueType;
+  return [valueType, record.displayType, record.fieldType, record.kind, record.dataType]
+    .some((value) => typeof value === 'string' && /header|section/i.test(value));
+}
+
+export function configuredFieldActive(field: ScenarioIntakeField) {
+  const record = field as ScenarioIntakeField & { active?: boolean; visible?: boolean; removed?: boolean; isRemoved?: boolean };
+  return record.active !== false && record.visible !== false && record.removed !== true && record.isRemoved !== true;
+}
+
+export function configuredFieldOrder(field: ScenarioIntakeField) {
+  const record = field as ScenarioIntakeField & { order?: number; displayOrder?: number; sortOrder?: number; ordinal?: number; sequence?: number };
+  return [record.order, record.displayOrder, record.sortOrder, record.ordinal, record.sequence].find((value) => typeof value === 'number' && Number.isFinite(value)) ?? Number.MAX_SAFE_INTEGER;
 }
 
 function uniqueSteps(steps: QuoteIntakeStepDefinition[]) {

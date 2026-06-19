@@ -1,6 +1,7 @@
 import type { BorrowerIntake, DropdownOption, ScenarioIntakeField } from '../../../lib/api/quoteRuns';
 import { HelpIcon } from '../../../design-system/icons';
 import type { IntakeFieldErrors } from '../validation';
+import { isBorrowerIntakeField, isHeaderMetadataField } from '../metadata';
 
 export type SelectOption = DropdownOption;
 
@@ -298,7 +299,22 @@ export function StepFields({ fields, intake, errors, onChange, dropdownOptions, 
 
   return (
     <div className="quote-intake-fields">
-      {fields.map((field) => <MetadataDrivenField key={field.fieldId} field={field} value={intake[field.fieldId] ?? ''} error={errors[field.fieldId]} onChange={onChange} dropdownOptions={dropdownOptions} dropdownLoading={dropdownLoading} />)}
+      {fields.map((field, index) => {
+        const fieldKey = `${String(field.fieldId)}-${index}`;
+        if (isHeaderMetadataField(field)) return <MetadataSectionHeader key={fieldKey} field={field} />;
+        if (!isBorrowerIntakeField(String(field.fieldId))) return null;
+        const borrowerField = field as ScenarioIntakeField & { fieldId: keyof BorrowerIntake };
+        return <MetadataDrivenField key={fieldKey} field={borrowerField} value={intake[borrowerField.fieldId] ?? ''} error={errors[borrowerField.fieldId]} onChange={onChange} dropdownOptions={dropdownOptions} dropdownLoading={dropdownLoading} />;
+      })}
+    </div>
+  );
+}
+
+function MetadataSectionHeader({ field }: { field: ScenarioIntakeField }) {
+  return (
+    <div className="quote-intake-section-header" role="separator" aria-label={field.label} data-field-id={String(field.fieldId)}>
+      <span>{field.label}</span>
+      {field.helpText ? <small>{field.helpText}</small> : null}
     </div>
   );
 }
@@ -321,8 +337,9 @@ function MetadataDrivenField({
   const errorId = `${field.fieldId}-error`;
   const describedBy = error ? errorId : undefined;
   const helpTooltip = field.showHelpIcon ? field.helpTooltip : undefined;
-  const selectOptions = optionsForField(field.fieldId, value, dropdownOptions, dropdownLoading);
+  const selectOptions = optionsForField(field, value, dropdownOptions, dropdownLoading);
   const renderedValue = displayValue(field.fieldId, value);
+  const validationMessages = field.validationMessages ?? [];
   const commonProps = {
     id: field.fieldId,
     name: field.fieldId,
@@ -334,23 +351,23 @@ function MetadataDrivenField({
   };
 
   return (
-    <div className={field.dataType === 'textarea' ? 'quote-intake-field quote-intake-field--wide' : 'quote-intake-field'}>
+    <div className={`${fieldValueType(field) === 'textarea' ? 'quote-intake-field quote-intake-field--wide' : 'quote-intake-field'}${error ? ' quote-intake-field--error' : ''}`}>
       <div className="quote-intake-field-label">
-        <label htmlFor={field.fieldId}>{field.label}{field.required ? <span aria-hidden="true"> *</span> : null}</label>
+        <label htmlFor={field.fieldId}>{field.label}{field.required ? <span className="quote-intake-required-badge" aria-hidden="true">Required</span> : null}</label>
         {helpTooltip ? <button type="button" className="quote-intake-help-icon" aria-label={helpTooltip} title={helpTooltip}><HelpIcon size={16} /></button> : null}
       </div>
       {selectOptions ? (
         <select {...commonProps} disabled={dropdownLoading && isConfigBackedDropdown(field.fieldId)}>
           {selectOptions.map((option) => <option key={option.value || 'empty'} value={option.value}>{option.label}</option>)}
         </select>
-      ) : field.dataType === 'textarea' ? (
+      ) : fieldValueType(field) === 'textarea' ? (
         <textarea {...commonProps} rows={4} />
       ) : (
-        <input {...commonProps} type={field.dataType === 'email' ? 'email' : field.dataType === 'number' ? 'number' : dateLikeField(field.fieldId) ? 'date' : 'text'} />
+        <input {...commonProps} {...numericConstraintAttributes(field)} type={inputTypeForField(field)} inputMode={fieldValueType(field) === 'duration' ? 'numeric' : undefined} />
       )}
-      {field.validationMessages.length > 0 ? (
+      {validationMessages.length > 0 ? (
         <ul className="quote-intake-validation-hints" aria-label={`${field.label} validation guidance`}>
-          {field.validationMessages.map((message) => <li key={message}>{message}</li>)}
+          {validationMessages.map((message) => <li key={message}>{message}</li>)}
         </ul>
       ) : null}
       {error ? <p id={errorId} className="quote-intake-error" role="alert">{error}</p> : null}
@@ -358,15 +375,98 @@ function MetadataDrivenField({
   );
 }
 
+function inputTypeForField(field: ScenarioIntakeField) {
+  const type = fieldValueType(field);
+  if (type === 'email') return 'email';
+  if (type === 'number' || type === 'duration') return 'number';
+  if (type === 'date' || dateLikeField(field.fieldId)) return 'date';
+  return 'text';
+}
+
+function numericConstraintAttributes(field: ScenarioIntakeField) {
+  const type = fieldValueType(field);
+  if (type !== 'number' && type !== 'duration') return {};
+  const attributes: Record<string, string> = {};
+  const minimum = firstNumericConstraint(field, ['minimum', 'min', 'minValue']);
+  const maximum = firstNumericConstraint(field, ['maximum', 'max', 'maxValue']);
+  const step = firstNumericConstraint(field, ['step', 'increment']) || precisionStep(field);
+  if (minimum) attributes.min = minimum;
+  if (maximum) attributes.max = maximum;
+  if (step) attributes.step = step;
+  return attributes;
+}
+
+function firstNumericConstraint(field: ScenarioIntakeField, keys: string[]) {
+  const source = field as ScenarioIntakeField & { constraints?: Record<string, unknown>; [key: string]: unknown };
+  const valueType = valueTypeRecord(field);
+  for (const key of keys) {
+    const value = source.constraints?.[key] ?? source[key] ?? valueType?.[key];
+    const numericValue = normalizedNumericAttribute(value);
+    if (numericValue) return numericValue;
+  }
+  return '';
+}
+
+function precisionStep(field: ScenarioIntakeField) {
+  const precision = firstNumericConstraint(field, ['precision']);
+  if (!precision) return '';
+  const precisionNumber = Number(precision);
+  if (!Number.isInteger(precisionNumber) || precisionNumber < 0 || precisionNumber > 8) return '';
+  return precisionNumber === 0 ? '1' : `0.${'0'.repeat(Math.max(0, precisionNumber - 1))}1`;
+}
+
+function normalizedNumericAttribute(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed || Number.isNaN(Number(trimmed))) return '';
+  return trimmed;
+}
+
 function dateLikeField(fieldId: keyof BorrowerIntake) {
   return /Date$/.test(fieldId);
 }
 
-function optionsForField(fieldId: keyof BorrowerIntake, value: string, dropdownOptions?: DropdownOptionsByField, dropdownLoading = false): SelectOption[] | undefined {
+function optionsForField(field: ScenarioIntakeField, value: string, dropdownOptions?: DropdownOptionsByField, dropdownLoading = false): SelectOption[] | undefined {
+  const fieldId = field.fieldId;
+  const inlineOptions = field.options ?? field.enumOptions ?? valueTypeOptions(field);
+  if (fieldValueType(field) === 'enum' && inlineOptions && inlineOptions.length > 0) return withCurrentValue(inlineOptions, value);
   if (dropdownLoading && isConfigBackedDropdown(fieldId)) return value ? [{ value, label: friendlyEnumLabel(value) }, { value: '', label: 'Loading options...' }] : [{ value: '', label: 'Loading options...' }];
   const configuredOptions = dropdownOptions?.[fieldId];
   const options = configuredOptions && configuredOptions.length > 0 ? configuredOptions : selectOptionsByField[fieldId];
   if (!options) return undefined;
+  return withCurrentValue(options, value);
+}
+
+function fieldValueType(field: ScenarioIntakeField) {
+  const valueType = valueTypeRecord(field)?.type;
+  return typeof valueType === 'string' && valueType ? valueType : field.dataType;
+}
+
+function valueTypeRecord(field: ScenarioIntakeField): Record<string, unknown> | null {
+  return typeof field.valueType === 'object' && field.valueType !== null ? field.valueType as Record<string, unknown> : null;
+}
+
+function valueTypeOptions(field: ScenarioIntakeField): SelectOption[] | undefined {
+  const valueType = valueTypeRecord(field);
+  if (!valueType) return undefined;
+  const options = valueType.options ?? valueType.enumOptions ?? valueType.variants;
+  if (!Array.isArray(options)) return undefined;
+  const normalized = options.map((option) => {
+    if (!option || typeof option !== 'object') return null;
+    const record = option as Record<string, unknown>;
+    const value = stringOption(record.value) ?? stringOption(record.id) ?? stringOption(record.variantId);
+    if (!value) return null;
+    return { value, label: stringOption(record.label) ?? stringOption(record.name) ?? friendlyEnumLabel(value) };
+  }).filter((option): option is SelectOption => Boolean(option));
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function stringOption(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function withCurrentValue(options: SelectOption[], value: string) {
   if (!value || options.some((option) => option.value === value)) return options;
   return [...options, { value, label: friendlyEnumLabel(value) }];
 }

@@ -175,6 +175,7 @@ function AppRoutes() {
   const activeModule = currentRoute.module;
   const activeRunId = currentRoute.params.runId ?? null;
   const isLoginRoute = location.pathname === '/login';
+  const fullScreenWorkspace = isFullScreenWorkspacePath(location.pathname);
 
   return (
     <AuthProvider>
@@ -190,6 +191,7 @@ function AppRoutes() {
           activeModuleId={activeModule.id}
           activeRunId={activeRunId}
           breadcrumb={activeModule.breadcrumb}
+          fullScreenWorkspace={fullScreenWorkspace}
           notifications={[]}
           onThemeToggle={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
           theme={resolvedTheme}
@@ -274,6 +276,10 @@ function AppRoutes() {
 
 function requiredRouteParam(value: string | undefined, fallback: string) {
   return value ? decodeURIComponent(value) : fallback;
+}
+
+function isFullScreenWorkspacePath(pathname: string) {
+  return pathname === '/pipeline' || pathname.startsWith('/custom-rules');
 }
 
 function HomeRoute() {

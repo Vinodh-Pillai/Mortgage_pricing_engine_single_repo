@@ -213,14 +213,63 @@ export type ScenarioIntakeField = {
   fieldId: keyof BorrowerIntake;
   label: string;
   groupId: string;
-  dataType: 'text' | 'email' | 'textarea' | 'number';
+  dataType: 'text' | 'string' | 'email' | 'textarea' | 'number' | 'enum' | 'date' | 'duration';
   required: boolean;
   helpText: string;
   helpTooltip?: string;
   showHelpIcon?: boolean;
+  options?: DropdownOption[];
+  enumOptions?: DropdownOption[];
+  constraints?: ScenarioIntakeFieldConstraints;
+  minimum?: string | number | null;
+  maximum?: string | number | null;
+  min?: string | number | null;
+  max?: string | number | null;
+  minValue?: string | number | null;
+  maxValue?: string | number | null;
+  precision?: string | number | null;
+  step?: string | number | null;
+  units?: string | null;
+  valueType?: 'input' | 'header' | string | ScenarioIntakeFieldValueType;
+  displayType?: string;
+  fieldType?: string;
+  order?: number;
+  displayOrder?: number;
+  sortOrder?: number;
+  active?: boolean;
+  visible?: boolean;
+  removed?: boolean;
+  isRemoved?: boolean;
+  visibilityCondition?: ScenarioIntakeFieldVisibilityCondition;
   sourceRef: string;
   decisionQuality: 'VERIFIED' | 'UNKNOWN' | 'CONFLICTING';
   validationMessages: string[];
+};
+
+export type ScenarioIntakeFieldConstraints = Partial<Record<'minimum' | 'maximum' | 'min' | 'max' | 'minValue' | 'maxValue' | 'precision' | 'step' | 'increment' | 'units', string | number | null>>;
+
+export type ScenarioIntakeFieldValueType = {
+  type?: 'text' | 'string' | 'email' | 'textarea' | 'number' | 'enum' | 'date' | 'duration' | string;
+  enumTypeId?: string | null;
+  options?: DropdownOption[];
+  enumOptions?: DropdownOption[];
+  variants?: Array<DropdownOption | { id?: string; variantId?: string; value?: string; label?: string; name?: string }>;
+  minimum?: string | number | null;
+  maximum?: string | number | null;
+  min?: string | number | null;
+  max?: string | number | null;
+  minValue?: string | number | null;
+  maxValue?: string | number | null;
+  precision?: string | number | null;
+  step?: string | number | null;
+  increment?: string | number | null;
+  units?: string | null;
+};
+
+export type ScenarioIntakeFieldVisibilityCondition = {
+  parentFieldId: keyof BorrowerIntake;
+  operator: 'equals' | 'not_equals' | 'any_of' | 'contains' | 'greater_than' | 'less_than' | 'empty' | 'not_empty';
+  values: string[];
 };
 
 export type DropdownOption = {
@@ -261,6 +310,44 @@ export type ScenarioIntakeMetadata = {
   fallbackReason: string;
   uiTraceId: string;
   quickQuoteState?: ProgressiveQuickQuoteState;
+  settings?: {
+    priceScenarioTable?: {
+      columns?: Array<string | { key: string; label?: string; hidden?: boolean; visible?: boolean; order?: number }>;
+      extraColumns?: Array<string | { key?: string; fieldId?: string; label?: string; hidden?: boolean; visible?: boolean; order?: number; missingLabel?: string; blockedLabel?: string }>;
+      hiddenColumns?: string[];
+      columnOrder?: string[];
+    };
+    pipelineFields?: Array<{ fieldId: string; label?: string; hidden?: boolean; visible?: boolean; status?: string; value?: string | number | null; missingLabel?: string; blockedLabel?: string }>;
+    fieldPermissions?: {
+      hiddenFields?: string[];
+      deniedFields?: string[];
+      visibleFields?: string[];
+      [key: string]: unknown;
+    };
+    lockingFields?: {
+      requestDateFieldId?: string;
+      lockRequestDateFieldId?: string;
+      expirationDateFieldId?: string;
+      lockExpirationDateFieldId?: string;
+      extensionFieldId?: string;
+      extensionDaysFieldId?: string;
+      primaryExtensionFieldId?: string;
+      [key: string]: unknown;
+    };
+    autoConfirmation?: {
+      lock?: boolean;
+      reprice?: boolean;
+      relock?: boolean;
+      cancellation?: boolean;
+      approvalPath?: string;
+      disabledApprovalPath?: string;
+      [key: string]: unknown;
+    };
+    applicationFormRuntime?: {
+      source: 'published';
+      versionLabel: string;
+    };
+  };
 };
 
 export type ProgressiveQuickQuoteState = {
@@ -307,6 +394,67 @@ export type MetadataState =
   | { kind: 'loading' }
   | { kind: 'loaded'; metadata: ScenarioIntakeMetadata }
   | { kind: 'unreachable'; message: string };
+
+export type ApplicationFormRuntimeState =
+  | { kind: 'loaded'; metadata: ScenarioIntakeMetadata; versionLabel: string }
+  | { kind: 'missing'; message: string }
+  | { kind: 'unreachable'; message: string };
+
+type ApplicationFormRuntimeResponse = Partial<ScenarioIntakeMetadata> & {
+  tenantId?: string;
+  formId?: string;
+  versionId?: string;
+  version?: string | number;
+  status?: string;
+  fieldGroups?: ScenarioIntakeFieldGroup[];
+  sections?: ScenarioIntakeFieldGroup[];
+  form?: Partial<ScenarioIntakeMetadata> & { fieldGroups?: ScenarioIntakeFieldGroup[]; sections?: ScenarioIntakeFieldGroup[] };
+};
+
+export async function fetchActiveApplicationFormVersion(
+  tenantId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ApplicationFormRuntimeState> {
+  const response = await fetchImpl(`/api/v1/tenants/${encodeURIComponent(tenantId)}/application-forms/active`, {
+    headers: {
+      Accept: 'application/json',
+      'X-Ui-Trace-Id': 'application-form-runtime-renderer',
+    },
+  });
+
+  if (response.status === 404 || response.status === 204) {
+    return { kind: 'missing', message: 'No published tenant application form version is configured. Configuration blocker recorded; runtime did not invent fields.' };
+  }
+  if (!response.ok) throw new Error('Published tenant application form version is temporarily unavailable.');
+
+  const body = await response.json() as ApplicationFormRuntimeResponse;
+  const candidate = body.form ?? body;
+  const fieldGroups = candidate.fieldGroups ?? candidate.sections ?? [];
+  if (!Array.isArray(fieldGroups) || fieldGroups.length === 0) {
+    return { kind: 'missing', message: 'Published tenant application form version did not include field groups. Configuration blocker recorded; runtime did not invent fields.' };
+  }
+
+  return {
+    kind: 'loaded',
+    metadata: {
+      tenantContext: candidate.tenantContext ?? body.tenantId ?? tenantId,
+      dependencyStatus: candidate.dependencyStatus ?? 'READY',
+      fieldGroups,
+      decisionControls: candidate.decisionControls ?? [],
+      validationIssues: candidate.validationIssues ?? [],
+      auditPackageId: candidate.auditPackageId ?? '',
+      replayHashRef: candidate.replayHashRef ?? '',
+      fallbackReason: candidate.fallbackReason ?? '',
+      uiTraceId: candidate.uiTraceId ?? 'application-form-runtime-renderer',
+      quickQuoteState: candidate.quickQuoteState,
+      settings: {
+        ...candidate.settings,
+        applicationFormRuntime: { source: 'published', versionLabel: String(body.versionId ?? body.version ?? body.formId ?? 'active') },
+      },
+    },
+    versionLabel: String(body.versionId ?? body.version ?? body.formId ?? 'active'),
+  };
+}
 
 export async function fetchTenantDropdownOptions(
   tenantId: string,

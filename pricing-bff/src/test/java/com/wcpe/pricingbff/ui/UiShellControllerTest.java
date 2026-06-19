@@ -39,6 +39,7 @@ class UiShellControllerTest {
     assertThat(context.getBean(ScenarioAnalysisUiController.class)).isNotNull();
     assertThat(context.getBean(AdminUiController.class)).isNotNull();
     assertThat(context.getBean(MlAdvisoryUiController.class)).isNotNull();
+    assertThat(context.getBean(PipelineSettingsUiController.class)).isNotNull();
     assertThat(context.getBean(PricingBffUiFallbackAdapter.class)).isNotNull();
   }
 
@@ -193,6 +194,328 @@ class UiShellControllerTest {
         .andExpect(jsonPath("$.lifecycle.auditRefs[1]").value("replay-hash-required"))
         .andExpect(jsonPath("$.events[0]").value("CatalogManagerOpened"))
         .andExpect(jsonPath("$.uiTraceId").value("trace-catalog-manager"));
+  }
+
+  @Test
+  void pipelineSettingsFieldsStoreAndRetrieveTenantFieldBindings() throws Exception {
+    mvc.perform(get("/api/v1/tenants/demo-tenant/pipeline/settings")
+            .header("X-Ui-Trace-Id", "trace-pipeline-settings-before"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.tenantContext").value("demo-tenant"))
+        .andExpect(jsonPath("$.status").value("UNCONFIGURED"))
+        .andExpect(jsonPath("$.configured").value(false))
+        .andExpect(jsonPath("$.validationMessages", hasSize(1)));
+
+    String settings = """
+        {
+          "pipelineFields": [
+            {"fieldId":"loanNumber","label":"Loan number","dataType":"text","visible":true,"sourceRef":"ReferenceFormfields.json:settings.pipelineFields"},
+            {"fieldId":"borrowerLastName","label":"Borrower last name","dataType":"text","visible":true,"sourceRef":"ReferenceFormfields.json:settings.pipelineFields"}
+          ],
+          "priceScenarioTable": {
+            "adjustedRateFieldId":"calc.adjustedRate",
+            "lockPeriodFieldId":"calc.lockPeriod",
+            "adjustedPriceFieldId":"calc.adjustedPrice",
+            "extraColumnFieldIds":["calc.margin","calc.apr"]
+          },
+          "defaultPricingFilters": {"fieldIds":["filter.productType","filter.lockPeriod"]},
+          "lockingFields": {
+            "requestDateFieldId":"lock.requestDate",
+            "expirationDateFieldId":"lock.expirationDate",
+            "extensionDaysFieldId":"lock.extensionDays"
+          }
+        }
+        """;
+
+    mvc.perform(post("/api/v1/tenants/demo-tenant/pipeline/settings")
+            .header("X-Ui-Trace-Id", "trace-pipeline-settings-save")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(settings))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.status").value("CONFIGURED"))
+        .andExpect(jsonPath("$.configured").value(true))
+        .andExpect(jsonPath("$.pipelineFields", hasSize(2)))
+        .andExpect(jsonPath("$.bindingSummary.pipelineColumnFieldIds[0]").value("loanNumber"))
+        .andExpect(jsonPath("$.bindingSummary.priceScenarioCalculationFieldIds[0]").value("calc.adjustedRate"))
+        .andExpect(jsonPath("$.bindingSummary.priceScenarioCalculationFieldIds[3]").value("calc.margin"))
+        .andExpect(jsonPath("$.bindingSummary.defaultFilterFieldIds[1]").value("filter.lockPeriod"))
+        .andExpect(jsonPath("$.bindingSummary.lockingFieldIds[2]").value("lock.extensionDays"))
+        .andExpect(jsonPath("$.validationMessages", empty()))
+        .andExpect(jsonPath("$.events[1]").value("PipelineSettingsFieldsBound"));
+
+    mvc.perform(get("/api/v1/tenants/demo-tenant/pipeline/settings")
+            .header("X-Ui-Trace-Id", "trace-pipeline-settings-read"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("CONFIGURED"))
+        .andExpect(jsonPath("$.pipelineFields[1].fieldId").value("borrowerLastName"))
+        .andExpect(jsonPath("$.priceScenarioTable.adjustedPriceFieldId").value("calc.adjustedPrice"))
+        .andExpect(jsonPath("$.defaultPricingFilters.fieldIds[0]").value("filter.productType"))
+        .andExpect(jsonPath("$.lockingFields.requestDateFieldId").value("lock.requestDate"));
+  }
+
+  @Test
+  void clientSettingsStoreTenantValuesByActiveVersionWithoutPricingDefaults() throws Exception {
+    mvc.perform(get("/api/v1/tenants/tenant-b/pipeline/client-settings")
+            .header("X-Ui-Trace-Id", "trace-client-settings-other-tenant"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.tenantContext").value("tenant-b"))
+        .andExpect(jsonPath("$.status").value("UNCONFIGURED"))
+        .andExpect(jsonPath("$.clientFieldValues").isMap())
+        .andExpect(jsonPath("$.clientFieldValues.*", empty()));
+
+    String settings = """
+        {
+          "activeVersion":"tenant-a-client-settings-v1",
+          "systemFields": [
+            {"systemFieldId":"client.notificationEmail","label":"Notification email","dataType":"email","sourceRef":"ReferenceFormfields.json:rawClientSettingsFields"},
+            {"systemFieldId":"client.pipelineAlertLevel","label":"Pipeline alert level","dataType":"text","sourceRef":"ReferenceFormfields.json:rawClientSettingsFields"}
+          ],
+          "clientFieldValues": {
+            "client.notificationEmail":"ops@example.test",
+            "client.pipelineAlertLevel":"manager-review"
+          }
+        }
+        """;
+
+    mvc.perform(post("/api/v1/tenants/tenant-a/pipeline/client-settings")
+            .header("X-Ui-Trace-Id", "trace-client-settings-save")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(settings))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.status").value("CONFIGURED"))
+        .andExpect(jsonPath("$.activeVersion").value("tenant-a-client-settings-v1"))
+        .andExpect(jsonPath("$.systemFields[0].systemFieldId").value("client.notificationEmail"))
+        .andExpect(jsonPath("$.clientFieldValues['client.notificationEmail']").value("ops@example.test"))
+        .andExpect(jsonPath("$.fallbackReason")
+            .value("Pricing-bff stores tenant-supplied client setting values and references system field IDs only; it does not infer client-level pricing defaults."));
+
+    mvc.perform(post("/api/v1/tenants/tenant-a/pipeline/client-settings/publish")
+            .header("X-Ui-Trace-Id", "trace-client-settings-publish"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("PUBLISHED"))
+        .andExpect(jsonPath("$.dependencyStatus").value("CLIENT_SETTINGS_ACTIVE_VERSION_PUBLISHED"));
+
+    mvc.perform(get("/api/v1/tenants/tenant-b/pipeline/client-settings")
+            .header("X-Ui-Trace-Id", "trace-client-settings-isolated"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("UNCONFIGURED"))
+        .andExpect(jsonPath("$.clientFieldValues.*", empty()));
+  }
+
+  @Test
+  void clientSettingsPublishBlocksValuesThatReferenceMissingSystemFields() throws Exception {
+    String settings = """
+        {
+          "activeVersion":"tenant-c-client-settings-v1",
+          "systemFields": [
+            {"systemFieldId":"client.notificationEmail","label":"Notification email","dataType":"email","sourceRef":"ReferenceFormfields.json:rawClientSettingsFields"}
+          ],
+          "clientFieldValues": {
+            "client.notificationEmail":"ops@example.test",
+            "client.missingField":"should-block-on-publish"
+          }
+        }
+        """;
+
+    mvc.perform(post("/api/v1/tenants/tenant-c/pipeline/client-settings")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(settings))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.status").value("PARTIAL"));
+
+    mvc.perform(post("/api/v1/tenants/tenant-c/pipeline/client-settings/publish"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.status").value("BLOCKED"))
+        .andExpect(jsonPath("$.validationMessages[0]")
+            .value("Client setting values reference missing system field IDs: client.missingField"));
+  }
+
+  @Test
+  void pricingNotificationSettingsStoreAliasesConditionsAndVisibleReferences() throws Exception {
+    mvc.perform(get("/api/v1/tenants/tenant-notify-a/pipeline/pricing-notifications")
+            .header("X-Ui-Trace-Id", "trace-notification-unconfigured"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.tenantContext").value("tenant-notify-a"))
+        .andExpect(jsonPath("$.status").value("UNCONFIGURED"))
+        .andExpect(jsonPath("$.notificationFields", empty()));
+
+    String settings = """
+        {
+          "activeVersion":"tenant-notifications-v1",
+          "activeFieldLibrary": [
+            {"systemFieldId":"pricing.sendNotification","label":"Send notification","dataType":"boolean","sourceRef":"ReferenceFormfields.json:pricingNotifications"},
+            {"systemFieldId":"pricing.pipelineStage","label":"Pipeline stage","dataType":"text","sourceRef":"ReferenceFormfields.json:pricingNotifications"}
+          ],
+          "notificationFields": [
+            {
+              "fieldId":"pricing.quoteReadyNotification",
+              "nameAlias":"Quote ready email",
+              "descriptionAlias":"Notify operations when quote pricing is ready for review.",
+              "sendNotificationFieldId":"pricing.sendNotification",
+              "includeConditions":["field:pricing.pipelineStage:eq:ready"],
+              "additionalConditions":["condition:tenant-visible:true"],
+              "showReferences":true,
+              "references":["condition:quote-ready-reference"]
+            }
+          ]
+        }
+        """;
+
+    mvc.perform(post("/api/v1/tenants/tenant-notify-a/pipeline/pricing-notifications")
+            .header("X-Ui-Trace-Id", "trace-notification-save")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(settings))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.status").value("CONFIGURED"))
+        .andExpect(jsonPath("$.notificationFields[0].nameAlias").value("Quote ready email"))
+        .andExpect(jsonPath("$.notificationFields[0].descriptionAlias")
+            .value("Notify operations when quote pricing is ready for review."))
+        .andExpect(jsonPath("$.notificationFields[0].sendNotificationFieldId").value("pricing.sendNotification"))
+        .andExpect(jsonPath("$.notificationFields[0].includeConditions[0]")
+            .value("field:pricing.pipelineStage:eq:ready"))
+        .andExpect(jsonPath("$.notificationFields[0].additionalConditions[0]")
+            .value("condition:tenant-visible:true"))
+        .andExpect(jsonPath("$.notificationFields[0].visibleReferences[0]")
+            .value("condition:quote-ready-reference"))
+        .andExpect(jsonPath("$.notificationFields[0].visibleReferences[1]").value("field:pricing.sendNotification"))
+        .andExpect(jsonPath("$.events[1]").value("PricingNotificationFieldsReferenced"));
+
+    mvc.perform(post("/api/v1/tenants/tenant-notify-a/pipeline/pricing-notifications/publish")
+            .header("X-Ui-Trace-Id", "trace-notification-publish"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("PUBLISHED"))
+        .andExpect(jsonPath("$.dependencyStatus").value("PRICING_NOTIFICATION_SETTINGS_PUBLISHED"));
+  }
+
+  @Test
+  void pricingNotificationPublishBlocksMissingSendFieldAndInvalidConditions() throws Exception {
+    String settings = """
+        {
+          "activeVersion":"tenant-notifications-v2",
+          "activeFieldLibrary": [
+            {"systemFieldId":"pricing.pipelineStage","label":"Pipeline stage","dataType":"text","sourceRef":"ReferenceFormfields.json:pricingNotifications"}
+          ],
+          "notificationFields": [
+            {
+              "fieldId":"pricing.quoteReadyNotification",
+              "nameAlias":"Quote ready email",
+              "descriptionAlias":"Notify operations when quote pricing is ready for review.",
+              "sendNotificationFieldId":"pricing.sendNotification",
+              "includeConditions":["broken-condition"],
+              "additionalConditions":["field:pricing.pipelineStage:eq:ready"],
+              "showReferences":false,
+              "references":[]
+            }
+          ]
+        }
+        """;
+
+    mvc.perform(post("/api/v1/tenants/tenant-notify-b/pipeline/pricing-notifications")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(settings))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.status").value("PARTIAL"));
+
+    mvc.perform(post("/api/v1/tenants/tenant-notify-b/pipeline/pricing-notifications/publish"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.status").value("BLOCKED"))
+        .andExpect(jsonPath("$.validationMessages[0]")
+            .value("Pricing notification pricing.quoteReadyNotification references missing send-notification field ID: pricing.sendNotification"))
+        .andExpect(jsonPath("$.validationMessages[1]")
+            .value("Pricing notification pricing.quoteReadyNotification has invalid conditions: broken-condition"));
+  }
+
+  @Test
+  void pricingAccessSettingsResolveRoleProfileFeatureFlagsAndAuditByTenant() throws Exception {
+    mvc.perform(get("/api/v1/tenants/tenant-access-b/pipeline/pricing-access")
+            .header("X-User-Role", "loan-officer"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.tenantContext").value("tenant-access-b"))
+        .andExpect(jsonPath("$.status").value("UNCONFIGURED"))
+        .andExpect(jsonPath("$.authorizedPricingFieldIds", empty()));
+
+    String settings = """
+        {
+          "activeVersion":"tenant-access-v1",
+          "activeRoleId":"loan-officer",
+          "activePricingProfileId":"retail-profile",
+          "roles": [
+            {"roleId":"loan-officer","label":"Loan officer","pricingVisibleFieldIds":["loanNumber","borrowerLastName"],"pricingActionsEnabled":true},
+            {"roleId":"ops-reviewer","label":"Ops reviewer","pricingVisibleFieldIds":["loanNumber","borrowerLastName","pricing.quoteReadyNotification"],"pricingActionsEnabled":false}
+          ],
+          "pricingProfiles": [
+            {"profileId":"retail-profile","label":"Retail profile","fieldIds":["filter.productType","filter.lockPeriod"],"sourceRefs":["ReferenceFormfields.json:pricingProfiles"],"active":true}
+          ],
+          "featureFlags": [
+            {"flagId":"pipeline.bulkReprice","enabled":false,"affectedFeatures":["bulk-reprice-button"],"sourceRef":"ReferenceFormfields.json:featureFlags"},
+            {"flagId":"pipeline.quoteDetail","enabled":true,"affectedFeatures":["quote-detail-panel"],"sourceRef":"ReferenceFormfields.json:featureFlags"}
+          ]
+        }
+        """;
+
+    mvc.perform(post("/api/v1/tenants/tenant-access-a/pipeline/pricing-access")
+            .header("X-Ui-Trace-Id", "trace-pricing-access-save")
+            .header("X-User-Id", "admin-user-1")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(settings))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.status").value("CONFIGURED"))
+        .andExpect(jsonPath("$.authorizedPricingFieldIds", hasSize(2)))
+        .andExpect(jsonPath("$.authorizedPricingFieldIds[0]").value("loanNumber"))
+        .andExpect(jsonPath("$.activePricingProfile.profileId").value("retail-profile"))
+        .andExpect(jsonPath("$.disabledFeatureFlagIds[0]").value("pipeline.bulkReprice"))
+        .andExpect(jsonPath("$.unavailableFeatures[0]").value("bulk-reprice-button"))
+        .andExpect(jsonPath("$.auditRecords", hasSize(3)))
+        .andExpect(jsonPath("$.auditRecords[0].tenantContext").value("tenant-access-a"))
+        .andExpect(jsonPath("$.auditRecords[0].actorUserId").value("admin-user-1"))
+        .andExpect(jsonPath("$.auditRecords[0].changedValues[0]").value("loan-officer:loanNumber|borrowerLastName"))
+        .andExpect(jsonPath("$.events[1]").value("PricingAccessAuditRecorded"));
+
+    mvc.perform(get("/api/v1/tenants/tenant-access-a/pipeline/pricing-access")
+            .header("X-User-Role", "ops-reviewer")
+            .header("X-Ui-Trace-Id", "trace-pricing-access-read"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.tenantContext").value("tenant-access-a"))
+        .andExpect(jsonPath("$.activeRoleId").value("ops-reviewer"))
+        .andExpect(jsonPath("$.authorizedPricingFieldIds", hasSize(3)))
+        .andExpect(jsonPath("$.authorizedPricingFieldIds[2]").value("pricing.quoteReadyNotification"))
+        .andExpect(jsonPath("$.uiTraceId").value("trace-pricing-access-read"));
+
+    mvc.perform(get("/api/v1/tenants/tenant-access-b/pipeline/pricing-access")
+            .header("X-User-Role", "ops-reviewer"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("UNCONFIGURED"))
+        .andExpect(jsonPath("$.authorizedPricingFieldIds", empty()))
+        .andExpect(jsonPath("$.disabledFeatureFlagIds", empty()));
+  }
+
+  @Test
+  void pricingAccessSettingsRequireRoleProfileFlagAndVersionConfiguration() throws Exception {
+    String settings = """
+        {
+          "activeRoleId":"missing-role",
+          "activePricingProfileId":"missing-profile",
+          "roles": [
+            {"roleId":"loan-officer","label":"Loan officer","pricingVisibleFieldIds":[],"pricingActionsEnabled":true}
+          ],
+          "pricingProfiles": [],
+          "featureFlags": []
+        }
+        """;
+
+    mvc.perform(post("/api/v1/tenants/tenant-access-validation/pipeline/pricing-access")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(settings))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.status").value("PARTIAL"))
+        .andExpect(jsonPath("$.validationMessages[0]")
+            .value("Active role ID references missing role pricing access config: missing-role"))
+        .andExpect(jsonPath("$.validationMessages[1]")
+            .value("Roles require at least one pricing-visible field ID: loan-officer"))
+        .andExpect(jsonPath("$.validationMessages[2]")
+            .value("At least one tenant pricing profile is required before pricing behavior can resolve profile context."))
+        .andExpect(jsonPath("$.validationMessages[5]")
+            .value("Tenant pricing access settings version is required before audit and publish."));
   }
 
   @Test

@@ -31,3 +31,4 @@ rate-feed-service/evidence/pii-04-implementation-receipt.md
 **/tests/results/
 **/dist/assets/
 **/.local-harness/
+**/bin/

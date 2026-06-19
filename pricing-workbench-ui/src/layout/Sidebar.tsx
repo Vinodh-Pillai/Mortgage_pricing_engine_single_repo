@@ -16,9 +16,10 @@ type SidebarProps = {
   onCloseDrawer: () => void;
   onOpenDrawer: () => void;
   onToggleCollapsed: () => void;
+  returnFocusTarget?: () => HTMLElement | null;
 };
 
-export function Sidebar({ activeModuleId, activeRunId, collapsed, drawerOpen, mode, modules, fallbackPersona, onCloseDrawer, onOpenDrawer, onToggleCollapsed }: SidebarProps) {
+export function Sidebar({ activeModuleId, activeRunId, collapsed, drawerOpen, mode, modules, fallbackPersona, onCloseDrawer, onOpenDrawer, onToggleCollapsed, returnFocusTarget }: SidebarProps) {
   const { t } = useTranslation('navigation');
   const auth = useOptionalAuth();
   const navRef = useRef<HTMLElement>(null);
@@ -28,16 +29,20 @@ export function Sidebar({ activeModuleId, activeRunId, collapsed, drawerOpen, mo
   const isCollapsed = mode === 'rail' && collapsed;
   const sidebarClassName = ['layout-sidebar', mode === 'drawer' ? 'layout-sidebar--drawer' : 'layout-sidebar--rail', isCollapsed ? 'layout-sidebar--collapsed' : 'layout-sidebar--expanded'].join(' ');
 
+  function getFocusableControls() {
+    return Array.from(navRef.current?.querySelectorAll<HTMLElement>('a.layout-sidebar__link[href], button:not(:disabled)') ?? []);
+  }
+
   useEffect(() => {
     if (mode !== 'drawer' || !drawerOpen) return undefined;
     const previousActive = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const firstControl = navRef.current?.querySelector<HTMLElement>('a[href], button:not(:disabled)');
     firstControl?.focus();
-    return () => previousActive?.focus();
-  }, [drawerOpen, mode]);
+    return () => (returnFocusTarget?.() ?? previousActive)?.focus({ preventScroll: true });
+  }, [drawerOpen, mode, returnFocusTarget]);
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
-    const focusable = Array.from(navRef.current?.querySelectorAll<HTMLElement>('a.layout-sidebar__link[href], button:not(:disabled)') ?? []);
+    const focusable = getFocusableControls();
     const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
     if (event.key === 'Escape' && mode === 'drawer') {
       event.preventDefault();
@@ -45,10 +50,10 @@ export function Sidebar({ activeModuleId, activeRunId, collapsed, drawerOpen, mo
       return;
     }
     if (event.key === 'Tab' && mode === 'drawer' && drawerOpen && focusable.length > 0) {
-      if (event.shiftKey && currentIndex === 0) {
+      if (event.shiftKey && currentIndex <= 0) {
         event.preventDefault();
         focusable[focusable.length - 1].focus();
-      } else if (!event.shiftKey && currentIndex === focusable.length - 1) {
+      } else if (!event.shiftKey && (currentIndex === -1 || currentIndex === focusable.length - 1)) {
         event.preventDefault();
         focusable[0].focus();
       }
@@ -67,6 +72,8 @@ export function Sidebar({ activeModuleId, activeRunId, collapsed, drawerOpen, mo
       aria-label={drawerOpen ? t('common:closeNavigationMenu') : t('common:openNavigationMenu')}
       aria-controls="primary-navigation"
       aria-expanded={drawerOpen}
+      aria-hidden={drawerOpen ? true : undefined}
+      tabIndex={drawerOpen ? -1 : undefined}
       onClick={drawerOpen ? onCloseDrawer : onOpenDrawer}
     >
       <span className="layout-sidebar__mobile-trigger-icon" aria-hidden="true"><span /><span /><span /></span>
@@ -142,7 +149,6 @@ export function Sidebar({ activeModuleId, activeRunId, collapsed, drawerOpen, mo
                       <span className="layout-sidebar__link-label">{item.label}</span>
                       {item.badgeCount ? <span className="layout-badge layout-sidebar__badge" aria-label={item.badgeLabel}>{item.badgeCount}</span> : null}
                     </NavLink>
-                    {item.id === 'pipeline-intake' ? <NavLink to={item.route} aria-label="Pipeline" style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clipPath: 'inset(50%)' }}>Pipeline</NavLink> : null}
                   </span>
                 ))}
               </div>

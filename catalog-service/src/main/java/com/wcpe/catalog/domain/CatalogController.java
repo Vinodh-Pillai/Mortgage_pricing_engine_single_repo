@@ -39,6 +39,82 @@ class CatalogController {
     Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.addProduct(tenantId, request, h.idempotencyKey, h.actorId, h.correlationId));
   }
 
+  @PostMapping("/enumerations/imports")
+  @ResponseStatus(HttpStatus.ACCEPTED)
+  EnumerationCatalogImportResponse importEnumerations(@PathVariable UUID tenantId, @RequestBody EnumerationCatalogImportRequest request, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.importEnumerations(tenantId, request, h.idempotencyKey, h.actorId, h.correlationId));
+  }
+
+  @PostMapping("/field-metadata/imports")
+  @ResponseStatus(HttpStatus.ACCEPTED)
+  FieldMetadataImportResponse importFieldMetadata(@PathVariable UUID tenantId, @RequestBody FieldMetadataImportRequest request, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.importFieldMetadata(tenantId, request, h.idempotencyKey, h.actorId, h.correlationId));
+  }
+
+  @PostMapping("/product-specification/fields/imports/system")
+  @ResponseStatus(HttpStatus.ACCEPTED)
+  ProductSpecificationSystemFieldImportResponse importProductSpecificationFieldsFromSystem(@PathVariable UUID tenantId,
+                                                                                           @RequestBody ProductSpecificationSystemFieldImportRequest request,
+                                                                                           HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.importProductSpecificationFieldsFromSystem(tenantId, request, h.idempotencyKey, h.actorId, h.correlationId));
+  }
+
+  @GetMapping("/field-metadata")
+  List<FieldMetadataResponse> listFieldMetadata(@PathVariable UUID tenantId, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("READ_CATALOG", h.roles); return service.listFieldMetadata(tenantId, h.actorId, h.correlationId);
+  }
+
+  @GetMapping("/field-library")
+  FieldLibraryQueryResponse queryFieldLibrary(@PathVariable UUID tenantId, @RequestParam String category,
+                                               @RequestParam(defaultValue = "false") boolean includeEnums,
+                                               HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("READ_CATALOG", h.roles); return service.queryFieldLibrary(tenantId, category, includeEnums, h.actorId, h.correlationId);
+  }
+
+  @GetMapping("/product-specification/fields")
+  ProductSpecificationFieldListResponse productSpecificationFields(@PathVariable UUID tenantId, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("READ_CATALOG", h.roles); return service.productSpecificationFields(tenantId, h.actorId, h.correlationId);
+  }
+
+  @PutMapping("/product-specification/fields/order-draft")
+  ProductSpecificationFieldOrderDraftResponse saveProductSpecificationFieldOrderDraft(@PathVariable UUID tenantId,
+                                                                                       @RequestBody ProductSpecificationFieldOrderDraftRequest request,
+                                                                                       HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.saveProductSpecificationFieldOrderDraft(tenantId, request, h.idempotencyKey, h.actorId, h.correlationId));
+  }
+
+  @PutMapping("/product-specification/fields/tenant-draft")
+  ProductSpecificationTenantFieldDraftResponse saveProductSpecificationTenantFieldDraft(@PathVariable UUID tenantId,
+                                                                                         @RequestBody ProductSpecificationTenantFieldDraftRequest request,
+                                                                                         HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.saveProductSpecificationTenantFieldDraft(tenantId, request, h.idempotencyKey, h.actorId, h.correlationId));
+  }
+
+  @PutMapping("/product-specification/fields/condition-draft")
+  ProductSpecificationConditionDraftResponse saveProductSpecificationConditionDraft(@PathVariable UUID tenantId,
+                                                                                   @RequestBody ProductSpecificationConditionDraftRequest request,
+                                                                                   HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("WRITE_CATALOG", h.roles); return withRoles(h.roles, () -> service.saveProductSpecificationConditionDraft(tenantId, request, h.idempotencyKey, h.actorId, h.correlationId));
+  }
+
+  @PostMapping("/product-specification/fields/{fieldId}/conditions/evaluate")
+  ProductSpecificationFieldConditionEvaluationResponse evaluateProductSpecificationFieldConditions(@PathVariable UUID tenantId,
+                                                                                                  @PathVariable String fieldId,
+                                                                                                  @RequestBody(required = false) ProductSpecificationFieldConditionEvaluationRequest request,
+                                                                                                  HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("READ_CATALOG", h.roles); return service.evaluateProductSpecificationFieldConditions(tenantId, fieldId, request, h.actorId, h.correlationId);
+  }
+
+  @GetMapping("/field-metadata/{fieldId}")
+  FieldMetadataResponse getFieldMetadata(@PathVariable UUID tenantId, @PathVariable String fieldId, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("READ_CATALOG", h.roles); return service.resolveFieldMetadata(tenantId, fieldId, h.actorId, h.correlationId);
+  }
+
+  @GetMapping("/enumerations/{enumTypeId}")
+  EnumerationTypeResponse getEnumeration(@PathVariable UUID tenantId, @PathVariable String enumTypeId, HttpServletRequest http) {
+    Headers h = headers(http); authorizationService.authorize("READ_CATALOG", h.roles); return service.resolveEnumeration(tenantId, enumTypeId, h.actorId, h.correlationId);
+  }
+
   @PostMapping("/products")
   @ResponseStatus(HttpStatus.CREATED)
   ProductCreationResponse createProduct(@PathVariable UUID tenantId, @RequestBody ProductCreationRequest request, HttpServletRequest http) {
@@ -394,6 +470,24 @@ class CatalogController {
           "code", errorCode,
           "message", productCreationMessage(errorCode)));
     }
+    if (errorCode.startsWith("ENUM_")) {
+      return List.of(Map.of(
+          "field", errorCode.equals("ENUM_TYPE_NOT_FOUND") ? "enumTypeId" : "enumerations",
+          "code", errorCode,
+          "message", enumerationMessage(errorCode)));
+    }
+    if (errorCode.startsWith("FIELD_") || "FIELD_METADATA_NOT_FOUND".equals(errorCode)) {
+      return List.of(Map.of(
+          "field", fieldMetadataField(errorCode),
+          "code", errorCode,
+          "message", fieldMetadataMessage(errorCode)));
+    }
+    if (errorCode.startsWith("PRODUCT_SPEC_CONDITION_")) {
+      return List.of(Map.of(
+          "field", "productSpecification.conditions",
+          "code", errorCode,
+          "message", "Fix product specification include/additional condition rules before publishing."));
+    }
     if ("INVALID_COUNTY_FIPS".equals(errorCode)) {
       return List.of(Map.of(
           "field", "countyFips",
@@ -433,6 +527,33 @@ class CatalogController {
       case "EFFECTIVE_WINDOW_INVALID" -> "Use an effective end after the effective start.";
       case "MAPPING_METADATA_KEY_REQUIRED", "MAPPING_METADATA_VALUE_REQUIRED" -> "Provide complete LoanPass mapping metadata keys and values.";
       default -> "Provide a valid product creation value for " + productCreationField(errorCode) + ".";
+    };
+  }
+
+  private static String enumerationMessage(String errorCode) {
+    return switch (errorCode) {
+      case "ENUM_TYPE_NOT_FOUND" -> "Enumeration type was not found in the system/default catalog.";
+      case "ENUM_TYPE_DUPLICATE" -> "Enumeration type already exists; use a versioned update workflow instead of inventing replacement variants.";
+      default -> "Provide LoanPass enumeration types and variants from the approved field library source.";
+    };
+  }
+
+  private static String fieldMetadataField(String errorCode) {
+    return switch (errorCode) {
+      case "FIELD_ID_REQUIRED", "FIELD_ID_DUPLICATE", "FIELD_METADATA_NOT_FOUND" -> "id";
+      case "FIELD_NAME_REQUIRED" -> "name";
+      case "FIELD_CATEGORY_REQUIRED" -> "category";
+      case "FIELD_VALUE_TYPE_REQUIRED", "FIELD_VALUE_TYPE_UNSUPPORTED" -> "valueType";
+      default -> "fieldMetadata";
+    };
+  }
+
+  private static String fieldMetadataMessage(String errorCode) {
+    return switch (errorCode) {
+      case "FIELD_ID_DUPLICATE" -> "Field metadata import contains a duplicate field id for this tenant.";
+      case "FIELD_VALUE_TYPE_UNSUPPORTED" -> "Use a supported field value type such as header, enum, number, string, date, time, duration, US state, or US county.";
+      case "FIELD_METADATA_NOT_FOUND" -> "Field metadata id was not found in the tenant catalog.";
+      default -> "Provide complete field metadata from the approved ReferenceFormfields source.";
     };
   }
 
@@ -489,10 +610,31 @@ class CatalogController {
   }
 
   static HttpStatus catalogErrorStatus(String errorCode) {
+    if ("ENUM_TYPE_NOT_FOUND".equals(errorCode)) return HttpStatus.NOT_FOUND;
     if ("SEPARATION_OF_DUTIES_VIOLATION".equals(errorCode) || "INCLUDE_INACTIVE_REQUIRES_DEBUG_PERMISSION".equals(errorCode)) return HttpStatus.FORBIDDEN;
     if ("IDEMPOTENCY_CONFLICT".equals(errorCode) || "VERSION_CONFLICT".equals(errorCode) || "CATALOG_VERSION_CONFLICT".equals(errorCode) || "IMPORT_ALREADY_PROCESSED".equals(errorCode)) return HttpStatus.CONFLICT;
     return HttpStatus.UNPROCESSABLE_ENTITY;
   }
 
   record Headers(String idempotencyKey, String actorId, String correlationId, String roles) {}
+}
+
+@RestController
+@RequestMapping("/api/v1/field-library")
+class SystemFieldLibraryController {
+  private final CatalogService service;
+  private final AuthorizationService authorizationService;
+
+  SystemFieldLibraryController(CatalogService service, AuthorizationService authorizationService) {
+    this.service = service;
+    this.authorizationService = authorizationService;
+  }
+
+  @GetMapping
+  FieldLibraryQueryResponse querySystemFieldLibrary(@RequestParam String category,
+                                                    @RequestParam(defaultValue = "false") boolean includeEnums,
+                                                    HttpServletRequest http) {
+    authorizationService.authorize("READ_CATALOG", http.getHeader("X-Roles"));
+    return service.querySystemFieldLibrary(category, includeEnums, http.getHeader("X-Actor-Id"), http.getHeader("X-Correlation-Id"));
+  }
 }

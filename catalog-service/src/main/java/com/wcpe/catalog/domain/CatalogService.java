@@ -117,6 +117,174 @@ class CatalogService {
   }
 
   @Transactional
+  EnumerationCatalogImportResponse importEnumerations(UUID tenantId, EnumerationCatalogImportRequest request, String idempotencyKey, String actorId, String correlationId) {
+    requireRole("CATALOG_WRITER", WRITER_ROLES);
+    requireIdempotencyKey(idempotencyKey);
+    List<EnumerationTypeResponse> normalized = EnumerationCatalogPolicy.normalize(request);
+    return repository.idempotent(tenantId, idempotencyKey, request, EnumerationCatalogImportResponse.class, () -> {
+      UUID catalogId = repository.currentCatalogId(tenantId);
+      List<EnumerationTypeResponse> persisted = new ArrayList<>();
+      for (EnumerationTypeResponse enumeration : normalized) {
+        persisted.add(repository.addEnumerationType(tenantId, catalogId, enumeration, actorId));
+      }
+      int variantCount = persisted.stream().mapToInt(e -> e.variants().size()).sum();
+      emit(tenantId, catalogId, "EnumerationCatalogImported.v1", Map.of("enumTypeCount", persisted.size(), "variantCount", variantCount));
+      audit(tenantId, catalogId, "ENUMERATION_CATALOG_IMPORTED", null, persisted, Map.of("enumTypeCount", persisted.size(), "variantCount", variantCount), actorId, correlationId, idempotencyKey);
+      return new EnumerationCatalogImportResponse(persisted, persisted.size(), variantCount);
+    });
+  }
+
+  @Transactional
+  FieldMetadataImportResponse importFieldMetadata(UUID tenantId, FieldMetadataImportRequest request, String idempotencyKey, String actorId, String correlationId) {
+    requireRole("CATALOG_WRITER", WRITER_ROLES);
+    requireIdempotencyKey(idempotencyKey);
+    List<FieldMetadataResponse> normalized = FieldMetadataCatalogPolicy.normalize(request);
+    return repository.idempotent(tenantId, idempotencyKey, request, FieldMetadataImportResponse.class, () -> {
+      UUID catalogId = repository.currentCatalogId(tenantId);
+      List<FieldMetadataResponse> persisted = new ArrayList<>();
+      for (FieldMetadataResponse field : normalized) {
+        persisted.add(repository.addFieldMetadata(tenantId, catalogId, field, actorId));
+      }
+      emit(tenantId, catalogId, "FieldMetadataCatalogImported.v1", Map.of("fieldCount", persisted.size()));
+      audit(tenantId, catalogId, "FIELD_METADATA_CATALOG_IMPORTED", null, persisted, Map.of("fieldCount", persisted.size()), actorId, correlationId, idempotencyKey);
+      return new FieldMetadataImportResponse(persisted, persisted.size());
+    });
+  }
+
+  @Transactional
+  ProductSpecificationSystemFieldImportResponse importProductSpecificationFieldsFromSystem(UUID tenantId,
+                                                                                           ProductSpecificationSystemFieldImportRequest request,
+                                                                                           String idempotencyKey,
+                                                                                           String actorId,
+                                                                                           String correlationId) {
+    requireRole("CATALOG_WRITER", WRITER_ROLES);
+    requireIdempotencyKey(idempotencyKey);
+    List<FieldMetadataResponse> selected = ProductSpecificationFieldListPolicy.normalizeSystemImport(request, repository.listSystemFieldMetadata());
+    return repository.idempotent(tenantId, idempotencyKey, request, ProductSpecificationSystemFieldImportResponse.class, () -> {
+      UUID catalogId = repository.currentCatalogId(tenantId);
+      List<FieldMetadataResponse> imported = repository.importProductSpecificationFieldsFromSystem(tenantId, catalogId, selected, actorId);
+      ProductSpecificationFieldListResponse listed = ProductSpecificationFieldListPolicy.list(imported, Optional.empty(), Optional.empty(), true);
+      emit(tenantId, catalogId, "ProductSpecificationSystemFieldsImported.v1", Map.of("fieldCount", imported.size(), "fieldIds", imported.stream().map(FieldMetadataResponse::id).toList()));
+      audit(tenantId, catalogId, "PRODUCT_SPECIFICATION_SYSTEM_FIELDS_IMPORTED", null, imported,
+          Map.of("fieldCount", imported.size(), "systemDefaultsChanged", false), actorId, correlationId, idempotencyKey);
+      return new ProductSpecificationSystemFieldImportResponse(listed.fields(), imported.size(), false);
+    });
+  }
+
+  List<FieldMetadataResponse> listFieldMetadata(UUID tenantId, String actorId, String correlationId) {
+    List<FieldMetadataResponse> response = repository.listFieldMetadata(tenantId);
+    UUID catalogId = repository.currentCatalogId(tenantId);
+    audit(tenantId, catalogId, "FIELD_METADATA_CATALOG_LISTED", null, response, Map.of("fieldCount", response.size()), actorId, correlationId, null);
+    return response;
+  }
+
+  FieldLibraryQueryResponse queryFieldLibrary(UUID tenantId, String category, boolean includeEnums, String actorId, String correlationId) {
+    List<FieldMetadataResponse> fields = repository.listFieldMetadata(tenantId);
+    List<EnumerationTypeResponse> enumerations = repository.listEnumerations(tenantId);
+    FieldLibraryQueryResponse response = FieldLibraryQueryPolicy.query(category, fields, enumerations, includeEnums, true);
+    UUID catalogId = repository.currentCatalogId(tenantId);
+    audit(tenantId, catalogId, "FIELD_LIBRARY_QUERIED", null, response,
+        Map.of("category", response.category(), "fieldCount", response.payloadFieldCount(), "includeEnums", includeEnums), actorId, correlationId, null);
+    return response;
+  }
+
+  FieldLibraryQueryResponse querySystemFieldLibrary(String category, boolean includeEnums, String actorId, String correlationId) {
+    UUID systemTenantId = new UUID(0L, 0L);
+    List<FieldMetadataResponse> fields = repository.listFieldMetadata(systemTenantId);
+    List<EnumerationTypeResponse> enumerations = repository.listEnumerations(systemTenantId);
+    return FieldLibraryQueryPolicy.query(category, fields, enumerations, includeEnums, false);
+  }
+
+  ProductSpecificationFieldListResponse productSpecificationFields(UUID tenantId, String actorId, String correlationId) {
+    List<FieldMetadataResponse> fields = repository.listFieldMetadata(tenantId);
+    ProductSpecificationFieldListResponse response = ProductSpecificationFieldListPolicy.list(fields, repository.productSpecificationFieldOrderDraft(tenantId), repository.productSpecificationTenantFieldDraft(tenantId), true);
+    UUID catalogId = repository.currentCatalogId(tenantId);
+    audit(tenantId, catalogId, "PRODUCT_SPECIFICATION_FIELDS_LISTED", null, response,
+        Map.of("fieldCount", response.payloadFieldCount(), "sourceScope", response.sourceScope()), actorId, correlationId, null);
+    return response;
+  }
+
+  @Transactional
+  ProductSpecificationFieldOrderDraftResponse saveProductSpecificationFieldOrderDraft(UUID tenantId, ProductSpecificationFieldOrderDraftRequest request,
+                                                                                      String idempotencyKey, String actorId, String correlationId) {
+    requireRole("CATALOG_WRITER", WRITER_ROLES);
+    requireIdempotencyKey(idempotencyKey);
+    List<FieldMetadataResponse> fields = repository.listFieldMetadata(tenantId);
+    ProductSpecificationFieldOrderDraft draft = ProductSpecificationFieldListPolicy.normalizeDraft(request, fields, actorId);
+    return repository.idempotent(tenantId, idempotencyKey, request, ProductSpecificationFieldOrderDraftResponse.class, () -> {
+      UUID catalogId = repository.currentCatalogId(tenantId);
+      ProductSpecificationFieldOrderDraft saved = repository.saveProductSpecificationFieldOrderDraft(tenantId, catalogId, draft);
+      emit(tenantId, catalogId, "ProductSpecificationFieldOrderDraftSaved.v1", Map.of("fieldCount", saved.fieldIds().size(), "draftStatus", saved.draftStatus()));
+      audit(tenantId, catalogId, "PRODUCT_SPECIFICATION_FIELD_ORDER_DRAFT_SAVED", null, saved,
+          Map.of("fieldCount", saved.fieldIds().size(), "draftStatus", saved.draftStatus(), "systemDefaultsChanged", false), actorId, correlationId, idempotencyKey);
+      return new ProductSpecificationFieldOrderDraftResponse(saved.draftStatus(), saved.fieldIds(), false);
+    });
+  }
+
+  @Transactional
+  ProductSpecificationTenantFieldDraftResponse saveProductSpecificationTenantFieldDraft(UUID tenantId, ProductSpecificationTenantFieldDraftRequest request,
+                                                                                        String idempotencyKey, String actorId, String correlationId) {
+    requireRole("CATALOG_WRITER", WRITER_ROLES);
+    requireIdempotencyKey(idempotencyKey);
+    List<FieldMetadataResponse> fields = repository.listFieldMetadata(tenantId);
+    ProductSpecificationTenantFieldDraft draft = ProductSpecificationFieldListPolicy.normalizeTenantFieldDraft(request, fields, actorId);
+    return repository.idempotent(tenantId, idempotencyKey, request, ProductSpecificationTenantFieldDraftResponse.class, () -> {
+      UUID catalogId = repository.currentCatalogId(tenantId);
+      ProductSpecificationTenantFieldDraft saved = repository.saveProductSpecificationTenantFieldDraft(tenantId, catalogId, draft);
+      emit(tenantId, catalogId, "ProductSpecificationTenantFieldDraftSaved.v1", Map.of("aliasCount", saved.aliases().size(), "nativeFieldCount", saved.nativeFields().size(), "draftStatus", saved.draftStatus()));
+      audit(tenantId, catalogId, "PRODUCT_SPECIFICATION_TENANT_FIELD_DRAFT_SAVED", null, saved,
+          Map.of("aliasCount", saved.aliases().size(), "nativeFieldCount", saved.nativeFields().size(), "draftStatus", saved.draftStatus(), "systemDefaultsChanged", false), actorId, correlationId, idempotencyKey);
+      return new ProductSpecificationTenantFieldDraftResponse(saved.draftStatus(), saved.aliases().size(), saved.nativeFields().size(), false);
+    });
+  }
+
+  @Transactional
+  ProductSpecificationConditionDraftResponse saveProductSpecificationConditionDraft(UUID tenantId, ProductSpecificationConditionDraftRequest request,
+                                                                                   String idempotencyKey, String actorId, String correlationId) {
+    requireRole("CATALOG_WRITER", WRITER_ROLES);
+    requireIdempotencyKey(idempotencyKey);
+    List<FieldMetadataResponse> fields = repository.listFieldMetadata(tenantId);
+    List<EnumerationTypeResponse> enumerations = repository.listEnumerations(tenantId);
+    ProductSpecificationConditionDraft draft = ProductSpecificationConditionRulePolicy.normalizeDraft(request, fields, enumerations, actorId);
+    return repository.idempotent(tenantId, idempotencyKey, request, ProductSpecificationConditionDraftResponse.class, () -> {
+      UUID catalogId = repository.currentCatalogId(tenantId);
+      ProductSpecificationConditionDraft saved = repository.saveProductSpecificationConditionDraft(tenantId, catalogId, draft);
+      Map<String, Object> auditPayload = ProductSpecificationConditionRulePolicy.conditionAuditPayload(saved);
+      emit(tenantId, catalogId, "ProductSpecificationConditionDraftSaved.v1", auditPayload);
+      audit(tenantId, catalogId, "PRODUCT_SPECIFICATION_CONDITION_DRAFT_SAVED", null, saved,
+          new LinkedHashMap<>(auditPayload), actorId, correlationId, idempotencyKey);
+      return new ProductSpecificationConditionDraftResponse(saved.draftStatus(), saved.includeConditions().size(), saved.additionalConditions().size(), false);
+    });
+  }
+
+  ProductSpecificationFieldConditionEvaluationResponse evaluateProductSpecificationFieldConditions(UUID tenantId, String fieldId,
+                                                                                                  ProductSpecificationFieldConditionEvaluationRequest request,
+                                                                                                  String actorId, String correlationId) {
+    List<FieldMetadataResponse> fields = repository.listFieldMetadata(tenantId);
+    List<EnumerationTypeResponse> enumerations = repository.listEnumerations(tenantId);
+    ProductSpecificationFieldConditionEvaluationResponse response = ProductSpecificationConditionRulePolicy.evaluateField(fieldId, fields,
+        repository.productSpecificationConditionDraft(tenantId), request == null ? Map.of() : request.parentValues(), enumerations);
+    UUID catalogId = repository.currentCatalogId(tenantId);
+    audit(tenantId, catalogId, "PRODUCT_SPECIFICATION_FIELD_CONDITION_EVALUATED", null, response,
+        Map.of("fieldId", response.fieldId(), "visible", response.visible(), "status", response.status()), actorId, correlationId, null);
+    return response;
+  }
+
+  FieldMetadataResponse resolveFieldMetadata(UUID tenantId, String fieldId, String actorId, String correlationId) {
+    FieldMetadataResponse response = repository.resolveFieldMetadata(tenantId, fieldId);
+    UUID catalogId = repository.currentCatalogId(tenantId);
+    audit(tenantId, catalogId, "FIELD_METADATA_CATALOG_RESOLVED", null, response, Map.of("fieldId", response.id(), "valueType", response.valueType()), actorId, correlationId, null);
+    return response;
+  }
+
+  EnumerationTypeResponse resolveEnumeration(UUID tenantId, String enumTypeId, String actorId, String correlationId) {
+    EnumerationTypeResponse response = repository.resolveEnumeration(tenantId, enumTypeId);
+    UUID catalogId = repository.currentCatalogId(tenantId);
+    audit(tenantId, catalogId, "ENUMERATION_CATALOG_RESOLVED", null, response, Map.of("enumTypeId", response.enumTypeId(), "variantCount", response.variants().size()), actorId, correlationId, null);
+    return response;
+  }
+
+  @Transactional
   ProductTaxonomyDraftResponse addProductTaxonomyDraft(UUID tenantId, ProductTaxonomyDraftRequest request, String idempotencyKey, String actorId, String correlationId) {
     requireRole("CATALOG_WRITER", WRITER_ROLES);
     return repository.idempotent(tenantId, idempotencyKey, request, ProductTaxonomyDraftResponse.class, () -> {
@@ -318,6 +486,8 @@ class CatalogService {
     return repository.idempotent(tenantId, idempotencyKey, request, CatalogResponse.class, () -> {
       UUID catalogId = repository.currentCatalogId(tenantId);
       CatalogResponse before = repository.current(tenantId);
+      ProductSpecificationConditionRulePolicy.validatePublish(repository.listFieldMetadata(tenantId), repository.productSpecificationConditionDraft(tenantId), repository.listEnumerations(tenantId));
+      repository.publishProductSpecificationVersion(tenantId, catalogId, actorId);
       repository.publish(tenantId, catalogId);
       CatalogResponse after = repository.active(tenantId);
       String reason = request.reason() == null ? "publish" : request.reason();

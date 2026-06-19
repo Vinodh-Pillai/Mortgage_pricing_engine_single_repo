@@ -561,6 +561,47 @@ class CatalogServiceIntegrationTest {
     assertThat(rollback.configHash()).isEqualTo(published.configHash());
   }
 
+  @Test
+  void productSpecificationImportAndPublishMaterializesRuntimeVersionWithoutMutatingSystemDefinitions() {
+    UUID tenantId = UUID.randomUUID();
+    UUID systemTenantId = new UUID(0L, 0L);
+    seedSystemProductSpecificationFields(systemTenantId);
+
+    ProductSpecificationSystemFieldImportResponse imported = service.importProductSpecificationFieldsFromSystem(tenantId,
+        new ProductSpecificationSystemFieldImportRequest(List.of("field@product-channel", "field@fico")),
+        "product-spec-import-" + tenantId, "actor-1", "corr-6004");
+    ProductSpecificationTenantFieldDraftResponse tenantDraft = service.saveProductSpecificationTenantFieldDraft(tenantId,
+        new ProductSpecificationTenantFieldDraftRequest(List.of(), List.of(
+            new ProductSpecificationNativeFieldEdit("field@tenant-note", "Tenant Note", "Tenant-native note", "custom", "string", "rawFields", Map.of("section", "product-spec")))),
+        "product-spec-native-" + tenantId, "actor-1", "corr-6004");
+    service.saveProductSpecificationFieldOrderDraft(tenantId,
+        new ProductSpecificationFieldOrderDraftRequest(List.of("field@tenant-note", "field@product-channel")),
+        "product-spec-order-" + tenantId, "actor-1", "corr-6004");
+    service.addReference(tenantId, "CHANNEL", new ReferenceCatalogRequest("RETAIL", "Retail", "CHANNEL", Map.of(), LocalDate.now(), null), "ps-channel-" + tenantId, "actor-1", "corr-6004");
+    service.addReference(tenantId, "LOAN_PURPOSE", new ReferenceCatalogRequest("PURCHASE", "Purchase", "PURPOSE", Map.of(), LocalDate.now(), null), "ps-purpose-" + tenantId, "actor-1", "corr-6004");
+    service.addProduct(tenantId, new ProductRequest("CONV30", "Conventional 30 Year Fixed", "CONVENTIONAL", List.of("RETAIL"), List.of("TX"), LocalDate.now(), null), "ps-product-" + tenantId, "actor-1", "corr-6004");
+    service.addInvestor(tenantId, new InvestorRequest("FNMA", "Fannie Mae", List.of("RETAIL"), List.of("CONV30"), LocalDate.now(), null), "ps-investor-" + tenantId, "actor-1", "corr-6004");
+    authorizeTenantProduct(tenantId, "CONV30", "FNMA", "RETAIL", Instant.parse("2026-01-01T00:00:00Z"), null);
+
+    service.validate(tenantId, new LifecycleActionRequest("product spec valid"), "ps-val-" + tenantId, "actor-1", "corr-6004");
+    service.submitApproval(tenantId, new LifecycleActionRequest("product spec submit"), "ps-sub-" + tenantId, "actor-1", "corr-6004");
+    service.approve(tenantId, new LifecycleActionRequest("product spec approve"), "ps-app-" + tenantId, "actor-2", "corr-6004");
+    service.publish(tenantId, new PublishCatalogRequest("product spec publish", LocalDate.now()), "ps-pub-" + tenantId, "actor-3", "corr-6004");
+
+    ProductConfigSnapshot snapshot = service.resolve(tenantId,
+        new ResolveCatalogRequest(LocalDate.now(), "RETAIL", "TX", "CONVENTIONAL", "FNMA", "PURCHASE", null, null, null, null),
+        "ps-snapshot-" + tenantId, "actor-3", "corr-6004");
+
+    assertThat(imported.systemDefaultsChanged()).isFalse();
+    assertThat(imported.importedFields()).extracting(ProductSpecificationFieldResponse::fieldId).containsExactly("field@product-channel", "field@fico");
+    assertThat(tenantDraft.nativeFieldCount()).isEqualTo(1);
+    assertThat(service.listFieldMetadata(systemTenantId, "actor-1", "corr-6004")).extracting(FieldMetadataResponse::id)
+        .containsExactly("field@fico", "field@product-channel");
+    assertThat(service.active(tenantId).references()).extracting(ReferenceEntry::catalogType).contains("PRODUCT_SPECIFICATION");
+    assertThat(snapshot.referenceVersions()).containsKey("productSpecifications");
+    assertThat(snapshot.referenceVersions().get("productSpecifications")).isNotEmpty();
+  }
+
   private void publishResolvableCatalog(UUID tenantId) {
     service.addReference(tenantId, "CHANNEL", new ReferenceCatalogRequest("RETAIL", "Retail", "CHANNEL", Map.of(), LocalDate.now(), null), "ch-" + tenantId, "actor-1", "corr-1");
     service.addReference(tenantId, "LOAN_PURPOSE", new ReferenceCatalogRequest("PURCHASE", "Purchase", "PURPOSE", Map.of(), LocalDate.now(), null), "lp-" + tenantId, "actor-1", "corr-1");
@@ -571,6 +612,13 @@ class CatalogServiceIntegrationTest {
     service.submitApproval(tenantId, new LifecycleActionRequest("submit"), "sub-" + tenantId, "actor-1", "corr-1");
     service.approve(tenantId, new LifecycleActionRequest("approve"), "app-" + tenantId, "actor-2", "corr-1");
     service.publish(tenantId, new PublishCatalogRequest("initial catalog", LocalDate.now()), "pub-" + tenantId, "actor-2", "corr-1");
+  }
+
+  private void seedSystemProductSpecificationFields(UUID systemTenantId) {
+    service.importFieldMetadata(systemTenantId, new FieldMetadataImportRequest("ReferenceFormfields.json", List.of(
+            new FieldMetadataInput("field@product-channel", "field@product-channel", "Product Channel", "Channel selector", "product", "enum", "productFields", Map.of("enumTypeId", "product-channel"), "inherited"),
+            new FieldMetadataInput("field@fico", null, "Representative Credit Score", "Credit score field", "creditApplication", "number", "creditApplicationFields", Map.of(), "inherited")),
+        List.of(), List.of(), List.of()), "system-product-spec-fields", "system-seed", "corr-6004");
   }
 
   private CatalogVersionControlRecord draftTaxonomyVersion(UUID tenantId, String code) {

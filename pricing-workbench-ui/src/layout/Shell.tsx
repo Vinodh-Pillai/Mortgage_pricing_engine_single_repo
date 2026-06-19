@@ -20,6 +20,7 @@ export interface ShellProps {
   activeModuleId: string;
   activeRunId?: string | null;
   breadcrumb: string;
+  fullScreenWorkspace?: boolean;
   modules?: WorkbenchScreenModule[];
   onThemeToggle: () => void;
   theme: 'dark' | 'light';
@@ -27,7 +28,7 @@ export interface ShellProps {
   notifications: Notification[];
 }
 
-export function Shell({ children, activeModuleId, activeRunId, breadcrumb, modules = workbenchModules, onThemeToggle, theme, user, notifications }: ShellProps) {
+export function Shell({ children, activeModuleId, activeRunId, breadcrumb, fullScreenWorkspace = false, modules = workbenchModules, onThemeToggle, theme, user, notifications }: ShellProps) {
   const { t } = useTranslation('common');
   const auth = useOptionalAuth();
   const showAuthenticatedChrome = auth ? auth.isLoading || auth.isAuthenticated : true;
@@ -42,6 +43,7 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, modul
     }
   });
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const navigationMode = fullScreenWorkspace ? 'drawer' : mode;
   const railCollapsed = mode === 'rail' && navCollapsed;
 
   useEffect(() => {
@@ -63,6 +65,7 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, modul
   }, [showAuthenticatedChrome]);
 
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
+  const focusWorkspace = useCallback(() => document.getElementById('main-content'), []);
   const toggleCollapsed = useCallback(() => {
     setNavCollapsed((current) => {
       const next = !current;
@@ -75,7 +78,7 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, modul
     });
   }, []);
   return (
-    <div className={`layout-shell layout-shell--${mode}${railCollapsed ? ' layout-shell--nav-collapsed' : ''}`} data-breakpoint-mode={mode} data-nav-collapsed={railCollapsed ? 'true' : 'false'}>
+    <div className={`layout-shell layout-shell--${mode}${railCollapsed ? ' layout-shell--nav-collapsed' : ''}${fullScreenWorkspace ? ' layout-shell--workspace' : ''}`} data-breakpoint-mode={mode} data-nav-collapsed={railCollapsed ? 'true' : 'false'} data-full-screen-workspace={fullScreenWorkspace ? 'true' : 'false'}>
       <SkipLink />
       <Header
         breadcrumb={breadcrumb}
@@ -89,32 +92,33 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, modul
         theme={theme}
         user={currentUser}
       />
-      <div className="layout-frame">
+      <div className={`layout-frame${navigationMode === 'drawer' ? ' layout-frame--popup-navigation' : ''}`}>
         {showAuthenticatedChrome ? (
           <>
-            {mode === 'drawer' && drawerOpen ? <button type="button" className="layout-sidebar-backdrop" aria-label="Close navigation backdrop" onClick={closeDrawer} /> : null}
+            {navigationMode === 'drawer' && drawerOpen ? <button type="button" className="layout-sidebar-backdrop" aria-label="Close navigation backdrop" tabIndex={-1} onClick={closeDrawer} /> : null}
             <Sidebar
               activeModuleId={activeModuleId}
               activeRunId={activeRunId}
               collapsed={railCollapsed}
               drawerOpen={drawerOpen}
               fallbackPersona={user.role}
-              mode={mode}
+              mode={navigationMode}
               modules={modules}
               onCloseDrawer={closeDrawer}
               onOpenDrawer={() => setDrawerOpen(true)}
               onToggleCollapsed={toggleCollapsed}
+              returnFocusTarget={fullScreenWorkspace ? focusWorkspace : undefined}
             />
           </>
         ) : null}
-        <ContentArea>{children}</ContentArea>
+        <ContentArea fullScreen={fullScreenWorkspace}>{children}</ContentArea>
       </div>
       {showAuthenticatedChrome && notificationsOpen ? (
         <aside className="layout-notifications" aria-label={t('notifications', { count: notifications.length })} role="status">
           {notifications.length ? notifications.map((notification) => <p key={notification.id}>{notification.label}</p>) : <p>{t('noNotifications')}</p>}
         </aside>
       ) : null}
-      <Footer />
+      {fullScreenWorkspace ? null : <Footer />}
     </div>
   );
 }
