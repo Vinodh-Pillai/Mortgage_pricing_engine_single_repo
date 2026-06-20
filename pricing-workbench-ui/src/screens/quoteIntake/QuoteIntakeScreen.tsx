@@ -4,7 +4,7 @@ import type { MetadataState } from '../../lib/api/quoteRuns';
 import { fetchIntakeMetadata } from './metadata';
 import { QuoteIntakeFlow } from './QuoteIntakeFlow';
 
-export function QuoteIntakeScreen({ tenantId = 'ui-preview-tenant' }: { tenantId?: string }) {
+export function QuoteIntakeScreen({ tenantId = 'ui-preview-tenant', mode = 'pipeline' }: { tenantId?: string; mode?: 'pipeline' | 'quickquote' }) {
   const [metadataState, setMetadataState] = useState<MetadataState>({ kind: 'loading' });
   const navigate = useNavigate();
 
@@ -16,7 +16,7 @@ export function QuoteIntakeScreen({ tenantId = 'ui-preview-tenant' }: { tenantId
     return () => { active = false; };
   }, [tenantId]);
 
-  return <QuoteIntakeFlow tenantId={tenantId} metadataState={metadataState} onNavigate={(route) => navigate(route)} />;
+  return <QuoteIntakeFlow tenantId={tenantId} mode={mode} metadataState={metadataState} onNavigate={(route) => navigate(route)} />;
 }
 
 export default QuoteIntakeScreen;

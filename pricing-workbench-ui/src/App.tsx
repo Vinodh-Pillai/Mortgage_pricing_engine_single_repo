@@ -204,7 +204,7 @@ function AppRoutes() {
               <Route path="/login" element={<LoginScreen />} />
               <Route path="/home" element={<HomeRoute />} />
               <Route path="/pipeline" element={<QuoteIntakeScreen tenantId={tenantBoundaryPlaceholder} />} />
-              <Route path="/quote/start" element={<Navigate to="/pipeline" replace />} />
+              <Route path="/quote/start" element={<QuoteIntakeScreen tenantId={tenantBoundaryPlaceholder} mode="quickquote" />} />
               <Route path="/quote/:runId">
                 <Route path="offers" element={<QuoteOffersRoute />} />
                 <Route path="offers/:optionId" element={<QuoteDetailRoute />} />
@@ -279,7 +279,7 @@ function requiredRouteParam(value: string | undefined, fallback: string) {
 }
 
 function isFullScreenWorkspacePath(pathname: string) {
-  return pathname === '/pipeline' || pathname.startsWith('/custom-rules');
+  return pathname === '/pipeline' || pathname === '/quote/start' || pathname.startsWith('/custom-rules');
 }
 
 function HomeRoute() {

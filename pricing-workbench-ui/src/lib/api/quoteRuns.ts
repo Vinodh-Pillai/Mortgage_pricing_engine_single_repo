@@ -244,6 +244,21 @@ export type ScenarioIntakeField = {
   sourceRef: string;
   decisionQuality: 'VERIFIED' | 'UNKNOWN' | 'CONFLICTING';
   validationMessages: string[];
+  losPrefill?: QuickQuoteLosPrefillMapping;
+};
+
+export type QuickQuoteLosPrefillMapping = {
+  fieldId: keyof BorrowerIntake;
+  sourceSystem: string;
+  losFieldLabel: string;
+  losFieldKey: string;
+  wcpeField: string;
+  confidence: 'VERIFIED' | 'MAPPED' | 'UNKNOWN' | 'CONFLICTING' | string;
+  lastSync: string;
+  missingCategory: 'required_to_price' | 'improves_pricing' | 'required_before_lock';
+  scope: string;
+  authorizationState: string;
+  affectedOutputTraces: string[];
 };
 
 export type ScenarioIntakeFieldConstraints = Partial<Record<'minimum' | 'maximum' | 'min' | 'max' | 'minValue' | 'maxValue' | 'precision' | 'step' | 'increment' | 'units', string | number | null>>;
@@ -312,7 +327,7 @@ export type ScenarioIntakeMetadata = {
   quickQuoteState?: ProgressiveQuickQuoteState;
   settings?: {
     priceScenarioTable?: {
-      columns?: Array<string | { key: string; label?: string; hidden?: boolean; visible?: boolean; order?: number }>;
+      columns?: Array<string | { key: string; label?: string; hidden?: boolean; visible?: boolean; order?: number; missingLabel?: string; blockedLabel?: string }>;
       extraColumns?: Array<string | { key?: string; fieldId?: string; label?: string; hidden?: boolean; visible?: boolean; order?: number; missingLabel?: string; blockedLabel?: string }>;
       hiddenColumns?: string[];
       columnOrder?: string[];
@@ -357,6 +372,7 @@ export type ProgressiveQuickQuoteState = {
   backendOwnedFactSources: string[];
   blockedByContracts: string[];
   fallbackReason: string;
+  losPrefillMappings?: QuickQuoteLosPrefillMapping[];
 };
 
 export type IntakeValidation = {

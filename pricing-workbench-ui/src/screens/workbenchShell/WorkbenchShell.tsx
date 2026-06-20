@@ -64,6 +64,19 @@ function registryCopyFor(screen: WorkbenchScreenModule): RegistryCopy {
 export const workbenchModules: WorkbenchScreenModule[] = [
   homeScreenModule,
   {
+    id: 'quickquote',
+    label: 'QuickQuote',
+    routePattern: '/quote/start',
+    breadcrumb: 'QuickQuote',
+    screenPackage: 'screens/quoteIntake',
+    dataBoundary: 'configured preview products, LOS prefill state, and quote-service readiness states',
+    stateCoverage: ['loading', 'empty', 'prefill-status', 'pricing-progress', 'ready'],
+    personaVisibility: ['loan-officer', 'pricing-analyst', 'admin'],
+    dependencyStatus: 'QuickQuote shell uses configured/mock UI state only until product eligibility and pricing contracts are connected.',
+    evidenceTarget: '.local-harness/evidence/PII-77-S01/quickquote-shell.json',
+    match: (pathname) => pathname === '/quote/start',
+  },
+  {
     id: 'quote-intake',
     label: 'Pipeline',
     routePattern: '/pipeline',
@@ -73,7 +86,7 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     stateCoverage: ['loading', 'empty', 'blocked', 'needs-attention', 'ready'],
     personaVisibility: ['loan-officer', 'borrower', 'pricing-analyst', 'admin'],
     evidenceTarget: '.local-harness/evidence/PII-25-S05/quote-intake.json',
-    match: (pathname) => pathname === '/' || pathname.startsWith('/pipeline') || pathname.startsWith('/quote/start'),
+    match: (pathname) => pathname === '/' || pathname.startsWith('/pipeline'),
   },
   {
     id: 'quote-offers',

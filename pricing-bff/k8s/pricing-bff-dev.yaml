@@ -12,9 +12,6 @@ metadata:
   name: pricing-bff-config
   namespace: wcpe-dev
 data:
-  SPRING_DATASOURCE_URL: jdbc:postgresql://wcpe-postgres.wcpe-dev.svc.cluster.local:5432/wcpe
-  SPRING_DATASOURCE_USERNAME: wcpe
-  SPRING_DATASOURCE_PASSWORD: local-dev-password
   SPRING_PROFILES_ACTIVE: dev
   SERVER_PORT: "8080"
   MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: "true"
@@ -41,6 +38,19 @@ spec:
         app.kubernetes.io/part-of: world-class-pricing-engine
     spec:
       automountServiceAccountToken: false
+      tolerations:
+      - key: "node.kubernetes.io/disk-pressure"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "node.kubernetes.io/memory-pressure"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "node.kubernetes.io/pid-pressure"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "node.kubernetes.io/unschedulable"
+        operator: "Exists"
+        effect: "NoSchedule"
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -50,7 +60,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: pricing-bff
-          image: pricing-bff:0.1.0-local
+          image: pricing-bff:0.1.0-k8s
           imagePullPolicy: Never
           ports:
             - name: http

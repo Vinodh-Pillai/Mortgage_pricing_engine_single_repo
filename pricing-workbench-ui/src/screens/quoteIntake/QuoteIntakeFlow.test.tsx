@@ -2,7 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { QuoteIntakeFlow, initialQuoteIntake } from './QuoteIntakeFlow';
-import type { BorrowerIntake, MetadataState, ScenarioIntakeField } from '../../lib/api/quoteRuns';
+import type { BorrowerIntake, MetadataState, ScenarioIntakeField, ScenarioIntakeMetadata } from '../../lib/api/quoteRuns';
 import { validateFields } from './validation';
 
 const metadataState: MetadataState = {
@@ -23,6 +23,11 @@ const metadataState: MetadataState = {
       backendOwnedFactSources: ['scenario-service', 'quote-service'],
       blockedByContracts: [],
       fallbackReason: '',
+      losPrefillMappings: [
+        { fieldId: 'borrowerLastName', sourceSystem: 'LoanPASS', losFieldLabel: 'Borrower last name', losFieldKey: 'quoteBorrowerInfo.borrowerLastName', wcpeField: 'borrowerLastName', confidence: 'MAPPED', lastSync: 'pending configured LOS adapter', missingCategory: 'required_to_price', scope: 'tenant:ui-preview-tenant;channel:configured-metadata', authorizationState: 'tenant quote-runs metadata endpoint', affectedOutputTraces: ['quote-fact:borrowerLastName'] },
+        { fieldId: 'decisionCreditScore', sourceSystem: 'LoanPASS', losFieldLabel: 'Credit score', losFieldKey: 'creditScore', wcpeField: 'decisionCreditScore', confidence: 'MAPPED', lastSync: 'pending configured LOS adapter', missingCategory: 'improves_pricing', scope: 'tenant:ui-preview-tenant;channel:configured-metadata', authorizationState: 'tenant quote-runs metadata endpoint', affectedOutputTraces: ['quote-fact:decisionCreditScore'] },
+        { fieldId: 'mortgageType', sourceSystem: 'LoanPASS', losFieldLabel: 'Mortgage type', losFieldKey: 'mortgageType', wcpeField: 'mortgageType', confidence: 'UNKNOWN', lastSync: 'pending configured LOS adapter', missingCategory: 'required_before_lock', scope: 'tenant:ui-preview-tenant;channel:configured-metadata', authorizationState: 'tenant quote-runs metadata endpoint', affectedOutputTraces: ['quote-fact:mortgageType'] },
+      ],
     },
     fieldGroups: [
       { groupId: 'scenario-identity', label: 'Loan Basics', helpText: 'basics', fields: [field('borrowerLastName', true), field('loanNumber', true), field('mortgageType', true)] },
@@ -31,6 +36,21 @@ const metadataState: MetadataState = {
       { groupId: 'property', label: 'Property', helpText: 'property', fields: [field('state', false), field('zip', false), field('propertyType', false), field('occupancyType', false), field('purchasePrice', false, 'number')] },
       { groupId: 'income-assets', label: 'Income Assets', helpText: 'income', fields: [field('totalBorrowerIncome', false, 'number'), field('documentationType', false), field('selfEmployed', false)] },
     ],
+  },
+};
+
+const traceConfiguredMetadataState: MetadataState = {
+  kind: 'loaded',
+  metadata: {
+    ...metadataState.metadata,
+    settings: {
+      ...(metadataState.metadata.settings ?? {}),
+      quoteEconomicsTraceRefs: [
+        { productCode: 'CONF_30YR_PREVIEW', metric: 'price', value: 'configured-pricing-trace' },
+        { productCode: 'CONF_30YR_PREVIEW', metric: 'fees', value: 'configured-fee-trace' },
+        { productCode: 'CONF_30YR_PREVIEW', metric: 'llpa', value: 'configured-llpa-trace' },
+      ],
+    } as ScenarioIntakeMetadata['settings'] & Record<string, unknown>,
   },
 };
 
@@ -78,9 +98,9 @@ const calculationOutputMetadataState: MetadataState = {
 const calculationOutputPermissionMetadataState: MetadataState = {
   kind: 'loaded',
   metadata: {
-    ...calculationOutputMetadataState.metadata,
+    ...(calculationOutputMetadataState as { kind: 'loaded'; metadata: ScenarioIntakeMetadata }).metadata,
     settings: {
-      ...calculationOutputMetadataState.metadata.settings,
+      ...((calculationOutputMetadataState as { kind: 'loaded'; metadata: ScenarioIntakeMetadata }).metadata.settings ?? {}),
       fieldPermissions: {
         hiddenFields: ['calc@ltv'],
       },
@@ -91,8 +111,9 @@ const calculationOutputPermissionMetadataState: MetadataState = {
 const lockingConfiguredMetadataState: MetadataState = {
   kind: 'loaded',
   metadata: {
-    ...metadataState.metadata,
+    ...(metadataState as { kind: 'loaded'; metadata: ScenarioIntakeMetadata }).metadata,
     settings: {
+      ...((metadataState as { kind: 'loaded'; metadata: ScenarioIntakeMetadata }).metadata.settings ?? {}),
       lockingFields: {
         lockRequestDateFieldId: 'field@lock-request-date',
         lockExpirationDateFieldId: 'calc@lock-expiration-date',
@@ -109,12 +130,14 @@ const lockingConfiguredMetadataState: MetadataState = {
   },
 };
 
+const baseMetadata = (metadataState as { kind: 'loaded'; metadata: ScenarioIntakeMetadata }).metadata;
+
 const orderedFormMetadataState: MetadataState = {
   kind: 'loaded',
   metadata: {
-    ...metadataState.metadata,
+    ...baseMetadata,
     quickQuoteState: {
-      ...metadataState.metadata.quickQuoteState,
+      ...baseMetadata.quickQuoteState!,
       progressiveSectionOrder: ['property', 'scenario-identity', 'borrower-credit', 'loan-structure', 'income-assets'],
     },
     fieldGroups: [
@@ -130,8 +153,8 @@ const orderedFormMetadataState: MetadataState = {
 const conditionalVisibilityMetadataState: MetadataState = {
   kind: 'loaded',
   metadata: {
-    ...metadataState.metadata,
-    fieldGroups: metadataState.metadata.fieldGroups.map((group) => ({
+    ...baseMetadata,
+    fieldGroups: baseMetadata.fieldGroups.map((group) => ({
       ...group,
       fields: group.fields.map((candidate) => candidate.fieldId === 'baseLoanAmount'
         ? { ...candidate, visibilityCondition: { parentFieldId: 'mortgageType', operator: 'equals', values: ['Conventional'] } }
@@ -143,8 +166,8 @@ const conditionalVisibilityMetadataState: MetadataState = {
 const conditionalRequiredMetadataState: MetadataState = {
   kind: 'loaded',
   metadata: {
-    ...metadataState.metadata,
-    fieldGroups: metadataState.metadata.fieldGroups.map((group) => ({
+    ...baseMetadata,
+    fieldGroups: baseMetadata.fieldGroups.map((group) => ({
       ...group,
       fields: group.fields.map((candidate) => candidate.fieldId === 'baseLoanAmount'
         ? { ...candidate, required: true, visibilityCondition: { parentFieldId: 'mortgageType', operator: 'equals', values: ['Conventional'] } }
@@ -156,8 +179,8 @@ const conditionalRequiredMetadataState: MetadataState = {
 const multiRequiredValidationBannerMetadataState: MetadataState = {
   kind: 'loaded',
   metadata: {
-    ...metadataState.metadata,
-    fieldGroups: metadataState.metadata.fieldGroups.map((group) => group.groupId === 'loan-structure'
+    ...baseMetadata,
+    fieldGroups: baseMetadata.fieldGroups.map((group) => group.groupId === 'loan-structure'
       ? { ...group, fields: [field('loanPurpose', true), field('baseLoanAmount', true, 'number'), field('desiredLoanTerm', false, 'number'), field('desiredAmortizationType', false)] }
       : group),
   },
@@ -289,6 +312,191 @@ describe('PipelineIntakeTest', () => {
     expect(container.querySelector('[aria-label="Required field count"]')).toHaveTextContent(/fields missing/i);
     expect(container.querySelector('[aria-label="Application form builder states"]')).toHaveTextContent(/Headers: section only/i);
     expect(container.querySelector('[aria-label="Field editor states"]')).toHaveTextContent(/Approved enums/i);
+  }, 30000);
+
+  it('rendersFullScreenQuickQuoteShellWithStructuredStatusAndNoPipelineRedirectCopy', () => {
+    render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} />);
+
+    expect(screen.getByRole('heading', { name: /^QuickQuote$/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /^QuickQuote$/i })).toHaveAttribute('aria-current', 'page');
+    const statusStrip = screen.getByRole('region', { name: /QuickQuote status strip/i });
+    expect(statusStrip).toBeInTheDocument();
+    expect(screen.getAllByText('Prefill').length).toBeGreaterThan(0);
+    expect(within(statusStrip).getByText('Missing')).toBeInTheDocument();
+    expect(within(statusStrip).getByText('Eligible')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Save QuickQuote draft$/i })).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: /QuickQuote product eligibility grid/i })).toBeInTheDocument();
+    expect(screen.getByText(/no QuickQuote product filter is applied/i)).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /^Audit$/i })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /^Pipeline$/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Capture the borrower and loan facts/i)).not.toBeInTheDocument();
+  }, 30000);
+
+  it('promptsBeforeModeSwitchWithUnsavedQuickQuoteSelectionAndSeedsPipeline', () => {
+    const onNavigate = vi.fn();
+    const capture = vi.fn();
+    render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} onNavigate={onNavigate} onEvidenceCapture={capture} />);
+
+    fireEvent.click(screen.getByRole('row', { name: /Conventional 30-Year Preview ACTIVE/i }));
+    fireEvent.click(screen.getByRole('link', { name: /^Pipeline$/i }));
+
+    expect(screen.getByRole('dialog', { name: /Switch to Pipeline/i })).toBeInTheDocument();
+    expect(capture).toHaveBeenCalledWith(expect.objectContaining({ action: 'quote-mode-switch-confirmation-required', storyId: 'PII-77-S05', mode: 'pipeline', selectedProductCode: 'CONF_30YR_PREVIEW' }));
+
+    fireEvent.click(screen.getByRole('button', { name: /^Discard$/i }));
+
+    expect(onNavigate).toHaveBeenCalledWith('/pipeline?product=CONF_30YR_PREVIEW');
+    expect(capture).toHaveBeenCalledWith(expect.objectContaining({ action: 'quote-mode-switched', storyId: 'PII-77-S05', mode: 'pipeline', decision: 'discard' }));
+  }, 30000);
+
+  it('keepsAllQuickQuoteProductStatusesVisibleWithAuditTraceRefs', () => {
+    const capture = vi.fn();
+    render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} onEvidenceCapture={capture} />);
+
+    expect(screen.getAllByRole('row')).toHaveLength(6);
+    const referableRow = screen.getByRole('row', { name: /FHA 30-Year Preview PENDING/i });
+    const ineligibleRow = screen.getByRole('row', { name: /Jumbo Preview Product INACTIVE/i });
+
+    expect(within(referableRow).getByText(/Referable product - review reason available/i)).toBeInTheDocument();
+    expect(within(ineligibleRow).getByText(/Inactive product - row actions unavailable/i)).toBeInTheDocument();
+
+    fireEvent.click(referableRow);
+    expect(capture).toHaveBeenCalledWith(expect.objectContaining({ action: 'pipeline-row-selected', storyId: 'PII-77-S02' }));
+    const auditDetails = screen.getByLabelText(/Row audit details/i);
+    expect(auditDetails).toHaveTextContent(/Referable or missing-data state is visible/i);
+    expect(auditDetails).toHaveTextContent(/Eligibility/);
+    expect(auditDetails).toHaveTextContent(/Calculation/);
+    expect(auditDetails).toHaveTextContent(/Adjustment/);
+    expect(auditDetails).toHaveTextContent(/Margin/);
+    expect(auditDetails).toHaveTextContent(/Pricing/);
+
+    fireEvent.click(within(ineligibleRow).getByRole('button', { name: /^Audit$/i }));
+    expect(capture).toHaveBeenCalledWith(expect.objectContaining({ action: 'pipeline-row-status-reviewed', storyId: 'PII-77-S02' }));
+    expect(screen.getByText(/Jumbo Preview Product status: Ineligible/i)).toBeInTheDocument();
+    expect(screen.getByText(/pricing-service:JUMBO_PREVIEW:rate-output-pending/i)).toBeInTheDocument();
+  }, 30000);
+
+  it('exposesQuickQuoteAccessiblePrefillRailGridAndActionsInFocusOrder', async () => {
+    const losPrefilledIntake: BorrowerIntake = {
+      ...initialQuoteIntake,
+      borrowerLastName: 'Rivera',
+      loanNumber: 'LN-2001',
+      mortgageType: 'Conventional',
+      decisionCreditScore: '720',
+      actorId: 'loan-officer-1',
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      if (url.endsWith('/scenarios') && init?.method === 'POST') return json({ scenarioId: 'scenario-los-override-1', scenarioVersion: 1 });
+      return json({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { container, unmount } = render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} />);
+
+    const header = container.querySelector('.quickquote-header');
+    const prefillRail = screen.getByLabelText(/LOS prefill rail/i);
+    const grid = screen.getByRole('table', { name: /QuickQuote product eligibility grid/i });
+    const actions = screen.getByLabelText(/QuickQuote actions/i);
+
+    expect(header).toBeInTheDocument();
+    expect(prefillRail.compareDocumentPosition(grid) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(grid.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByLabelText(/Borrower and loan context/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Missing fact reason categories/i)).toBeInTheDocument();
+    expect(prefillRail).toHaveTextContent(/Source LoanPASS/i);
+    expect(prefillRail).toHaveTextContent(/LOS Borrower last name/i);
+    expect(prefillRail).toHaveTextContent(/WCPE borrowerLastName/i);
+    expect(prefillRail).toHaveTextContent(/Confidence MAPPED/i);
+    expect(prefillRail).toHaveTextContent(/Last sync pending configured LOS adapter/i);
+    expect(prefillRail).toHaveTextContent(/Required to price: 1/i);
+    expect(prefillRail).toHaveTextContent(/Improves pricing: 1/i);
+    expect(prefillRail).toHaveTextContent(/Before lock: 1/i);
+    expect(screen.getByRole('heading', { name: /Override audit/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Mapped LOS values/i })).toBeInTheDocument();
+
+    unmount();
+    const overrideRender = render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} intake={losPrefilledIntake} />);
+
+    const decisionCreditScore = screen.getByRole('spinbutton', { name: /Decision credit score/i });
+    fireEvent.change(decisionCreditScore, { target: { value: '735' } });
+    await waitFor(() => expect(decisionCreditScore).toHaveValue(735));
+    const overrideAudit = screen.getByRole('heading', { name: /Override audit/i }).closest('section') as HTMLElement;
+    expect(overrideAudit).toHaveTextContent(/decisionCreditScore/i);
+    expect(overrideAudit).toHaveTextContent(/Original LOS value: 720/i);
+    expect(overrideAudit).toHaveTextContent(/Override value: 735/i);
+    expect(overrideAudit).toHaveTextContent(/User\/time: loan-officer-1 at/i);
+    expect(overrideAudit).toHaveTextContent(/Affected output traces: quote-fact:decisionCreditScore/i);
+
+    fireEvent.click(screen.getByRole('row', { name: /Conventional 30-Year Preview ACTIVE/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^Save QuickQuote draft$/i }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/tenants/ui-preview-tenant/scenarios', expect.objectContaining({ method: 'POST' })));
+    const persistCall = fetchMock.mock.calls.find(([input, init]) => input.toString().endsWith('/scenarios') && init?.method === 'POST');
+    const persistedBody = JSON.parse(String(persistCall?.[1]?.body));
+    expect(persistedBody).toMatchObject({ data: { borrowerLastName: 'Rivera', loanNumber: 'LN-2001', decisionCreditScore: '735' } });
+    const persistedContext = JSON.parse(String(persistedBody.data.clientContext));
+    expect(persistedContext.quickQuoteDraft).toMatchObject({
+      storyId: 'PII-77-S07',
+      sourceMode: 'quickquote',
+      selectedProduct: { productCode: 'CONF_30YR_PREVIEW' },
+    });
+    expect(persistedContext.quickQuoteDraft.comparedProducts.length).toBeGreaterThan(1);
+    expect(persistedContext.quickQuoteDraft.quoteOutputs).toEqual(expect.arrayContaining([expect.objectContaining({ productCode: 'CONF_30YR_PREVIEW', metric: 'rate' })]));
+    expect(persistedContext.quickQuoteDraft.visibleAssumptions.length).toBeGreaterThan(0);
+    expect(persistedContext.quickQuoteDraft.traceReferences).toEqual(expect.arrayContaining([expect.objectContaining({ value: expect.stringContaining('CONF_30YR_PREVIEW') })]));
+    expect(persistedContext.losOverrides).toEqual([
+      expect.objectContaining({
+        fieldId: 'decisionCreditScore',
+        label: 'decisionCreditScore',
+        originalValue: '720',
+        overrideValue: '735',
+        actor: 'loan-officer-1',
+        affectedOutputTraces: ['quote-fact:decisionCreditScore'],
+      }),
+    ]);
+
+    overrideRender.unmount();
+    render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} intake={{ ...losPrefilledIntake, decisionCreditScore: '735', clientContext: persistedBody.data.clientContext }} />);
+    const restoredAudit = screen.getByRole('heading', { name: /Override audit/i }).closest('section') as HTMLElement;
+    expect(restoredAudit).toHaveTextContent(/Original LOS value: 720/i);
+    expect(restoredAudit).toHaveTextContent(/Override value: 735/i);
+    expect(restoredAudit).toHaveTextContent(/Affected output traces: quote-fact:decisionCreditScore/i);
+    expect(screen.getAllByRole('row').length).toBeGreaterThan(1);
+  }, 30000);
+
+  it('rendersResponsiveQuickQuoteComparisonAndSavesSelectedComparisonProducts', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      if (url.endsWith('/scenarios') && init?.method === 'POST') return json({ scenarioId: 'scenario-comparison-1', scenarioVersion: 1 });
+      return json({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<QuoteIntakeFlow mode="quickquote" metadataState={traceConfiguredMetadataState} intake={{ ...initialQuoteIntake, borrowerLastName: 'Rivera', loanNumber: 'LN-2001', mortgageType: 'Conventional' }} />);
+
+    const comparison = screen.getByRole('table', { name: /QuickQuote product comparison/i });
+    expect(within(comparison).getByRole('row', { name: /Rate comparison/i })).toBeInTheDocument();
+    expect(within(comparison).getByRole('row', { name: /Price comparison/i })).toBeInTheDocument();
+    expect(within(comparison).getByRole('row', { name: /Payment comparison/i })).toBeInTheDocument();
+    expect(within(comparison).getByRole('row', { name: /DSCR comparison/i })).toBeInTheDocument();
+    expect(within(comparison).getByRole('row', { name: /Fees comparison/i })).toBeInTheDocument();
+    expect(within(comparison).getByRole('row', { name: /LLPA comparison/i })).toBeInTheDocument();
+    expect(within(comparison).getByRole('row', { name: /Assumptions comparison/i })).toHaveTextContent(/No visible assumptions|Referable or missing-data/i);
+    expect(within(comparison).getByRole('row', { name: /Trace availability comparison/i })).toHaveTextContent(/trace|pricing-service/i);
+    expect(screen.getByLabelText(/Swipe QuickQuote comparison products/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('row', { name: /Conventional 30-Year Preview ACTIVE/i }));
+    const jumboRow = screen.getByRole('row', { name: /Jumbo Preview Product INACTIVE/i });
+    fireEvent.click(within(jumboRow).getByRole('button', { name: /^Compare$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^Save Draft from comparison$/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/tenants/ui-preview-tenant/scenarios', expect.objectContaining({ method: 'POST' })));
+    const persistCall = fetchMock.mock.calls.find(([input, init]) => input.toString().endsWith('/scenarios') && init?.method === 'POST');
+    const persistedBody = JSON.parse(String(persistCall?.[1]?.body));
+    const persistedContext = JSON.parse(String(persistedBody.data.clientContext));
+    const comparedCodes = persistedContext.quickQuoteDraft.comparedProducts.map((product: { productCode: string }) => product.productCode);
+    expect(persistedContext.quickQuoteDraft.selectedProduct).toMatchObject({ productCode: 'CONF_30YR_PREVIEW' });
+    expect(comparedCodes).toEqual(expect.arrayContaining(['CONF_30YR_PREVIEW', 'JUMBO_PREVIEW']));
+    expect(comparedCodes.length).toBeGreaterThanOrEqual(2);
+    expect(persistedContext.quickQuoteDraft.visibleAssumptions.length).toBeGreaterThan(0);
   }, 30000);
 
   it('showsDataRequiredStateFromConfiguredRequiredFieldsAndMovesToNextField', async () => {
@@ -437,6 +645,38 @@ describe('PipelineIntakeTest', () => {
     expect(within(row).getByText('6.875%')).toBeInTheDocument();
     expect(within(row).getByText('Configured missing output')).toBeInTheDocument();
     expect(within(row).getByText('80.00%')).toBeInTheDocument();
+  });
+
+  it('rendersReusableQuoteEconomicsMetricsWithConfiguredOutputsAndTraceLinks', () => {
+    const { container } = render(<QuoteIntakeFlow mode="quickquote" metadataState={traceConfiguredMetadataState} intake={{ ...filledIntake(), secondaryAdjustment: '101.250', totalLiabilityMonthlyPayment: '$2,450', estimatedDSCR: '1.23x', 'calc@fees': '$1,100 fees', 'calc@llpa': '0.250 LLPA' } as BorrowerIntake & Record<string, string>} />);
+
+    const row = screen.getByRole('row', { name: /Conventional 30-Year Preview ACTIVE/i });
+    expect(within(row).getByText('101.250')).toBeInTheDocument();
+    expect(within(row).getByText('$2,450')).toBeInTheDocument();
+    expect(within(row).getByText('1.23x')).toBeInTheDocument();
+    expect(within(row).getByText('$1,100 fees')).toBeInTheDocument();
+    expect(within(row).getByText('0.250 LLPA')).toBeInTheDocument();
+    fireEvent.click(row);
+    const pricingTrace = within(row).getByRole('link', { name: /Pricing trace/i });
+    const feeTrace = within(row).getByRole('link', { name: /Fee trace/i });
+    const llpaTrace = within(row).getByRole('link', { name: /LLPA trace/i });
+    expect(pricingTrace).toHaveAttribute('href', '#quote-trace-configured-pricing-trace');
+    expect(pricingTrace).not.toHaveAttribute('href', expect.stringContaining('pricing-service'));
+    expect(feeTrace).toHaveAttribute('href', '#quote-trace-configured-fee-trace');
+    expect(llpaTrace).toHaveAttribute('href', '#quote-trace-configured-llpa-trace');
+    expect(container.querySelector('#quote-trace-configured-pricing-trace')).toHaveTextContent('configured-pricing-trace');
+    expect(container.querySelector('#quote-trace-configured-fee-trace')).toHaveTextContent('configured-fee-trace');
+    expect(container.querySelector('#quote-trace-configured-llpa-trace')).toHaveTextContent('configured-llpa-trace');
+  });
+
+  it('showsExplicitMissingQuoteEconomicsStatesTiedToMissingFacts', () => {
+    render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} />);
+
+    const row = screen.getByRole('row', { name: /Conventional 30-Year Preview ACTIVE/i });
+    expect(row.querySelector('[aria-label="Payment: Missing data"]')).toBeInTheDocument();
+    expect(row.querySelector('[aria-label="DSCR: Missing data"]')).toBeInTheDocument();
+    expect(within(row).getAllByText(/Needs Mortgage Type/i).length).toBeGreaterThan(0);
+    expect(within(row).queryByRole('link', { name: /trace/i })).not.toBeInTheDocument();
   });
 
   it('hidesCalculationOutputColumnsDeniedByFieldPermissions', () => {
@@ -618,7 +858,7 @@ describe('PipelineIntakeTest', () => {
     expect(within(row).getByRole('button', { name: /^Request lock$/i })).toBeDisabled();
     fireEvent.click(within(row).getByRole('button', { name: /^Status$/i }));
 
-    expect(screen.getByText(/Jumbo Preview Product status: Inactive/i)).toBeInTheDocument();
+    expect(screen.getByText(/Jumbo Preview Product status: Ineligible/i)).toBeInTheDocument();
     expect(document.querySelector('.quote-product-card')).not.toBeInTheDocument();
   });
 });

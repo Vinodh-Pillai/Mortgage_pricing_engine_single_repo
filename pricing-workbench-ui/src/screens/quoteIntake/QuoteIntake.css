@@ -6,6 +6,373 @@
   min-inline-size: 0;
 }
 
+.quickquote-workspace {
+  block-size: 100%;
+  display: grid;
+  gap: var(--ds-space-4);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  inline-size: 100%;
+  min-block-size: calc(100vh - 7rem);
+}
+
+.quickquote-header,
+.quickquote-status-strip,
+.quickquote-prefill-rail,
+.quickquote-products,
+.quickquote-actions {
+  background: color-mix(in srgb, var(--ds-color-surface) 86%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ds-color-border) 78%, transparent);
+  border-radius: var(--ds-radius-xl);
+  box-shadow: var(--ds-shadow-3);
+}
+
+.quickquote-header,
+.quickquote-status-strip,
+.quickquote-products__toolbar,
+.quickquote-actions {
+  align-items: center;
+  display: flex;
+  gap: var(--ds-space-4);
+  justify-content: space-between;
+}
+
+.quickquote-header,
+.quickquote-status-strip,
+.quickquote-products {
+  padding: var(--ds-space-4);
+}
+
+.quickquote-header__identity,
+.quickquote-prefill-rail,
+.quickquote-products,
+.quickquote-missing-facts,
+.quickquote-override-audit,
+.quickquote-empty-state {
+  display: grid;
+  gap: var(--ds-space-3);
+}
+
+.quickquote-mode-toggle {
+  display: inline-flex;
+  gap: var(--ds-space-2);
+}
+
+.quickquote-mode-toggle a,
+.quickquote-reason-chips span,
+.quickquote-ready-chip {
+  border: 1px solid var(--ds-color-border);
+  border-radius: var(--ds-radius-full);
+  color: var(--ds-color-text);
+  font-size: var(--ds-font-size-sm);
+  font-weight: 800;
+  padding: 0.35rem 0.7rem;
+  text-decoration: none;
+}
+
+.quickquote-mode-toggle a[aria-current='page'],
+.quickquote-ready-chip {
+  background: color-mix(in srgb, var(--ds-color-primary) 16%, transparent);
+  border-color: color-mix(in srgb, var(--ds-color-primary) 42%, var(--ds-color-border));
+}
+
+.quickquote-context,
+.quickquote-status-strip,
+.quickquote-reason-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-3);
+}
+
+.quickquote-context div {
+  display: grid;
+  gap: var(--ds-space-1);
+}
+
+.quickquote-context dt,
+.quickquote-state-card span,
+.quickquote-prefill-groups span,
+.quickquote-prefill-metadata small,
+.quickquote-override-audit small {
+  color: var(--ds-color-text-muted);
+  font-size: var(--ds-font-size-sm);
+  font-weight: 800;
+}
+
+.quickquote-context dd {
+  font-weight: 900;
+  margin: 0;
+}
+
+.quickquote-grid-shell {
+  display: grid;
+  gap: var(--ds-space-4);
+  grid-template-columns: minmax(15rem, 20rem) minmax(0, 1fr);
+  min-block-size: 0;
+}
+
+.quickquote-prefill-rail,
+.quickquote-products {
+  min-block-size: 0;
+  overflow: auto;
+  padding: var(--ds-space-4);
+}
+
+.quickquote-state-card {
+  border: 1px solid var(--ds-color-border);
+  border-radius: var(--ds-radius-lg);
+  display: grid;
+  gap: var(--ds-space-1);
+  padding: var(--ds-space-3);
+}
+
+.quickquote-products__assurance {
+  color: var(--ds-color-text-muted);
+  font-size: var(--ds-font-size-sm);
+  font-weight: 700;
+  margin: var(--ds-space-1) 0 0;
+}
+
+.quote-product-audit-cell {
+  display: grid;
+  gap: var(--ds-space-2);
+}
+
+.quote-product-audit-cell span {
+  color: var(--ds-color-text-muted);
+  font-size: var(--ds-font-size-sm);
+  font-weight: 800;
+}
+
+.quote-product-audit-details {
+  border: 1px solid var(--ds-color-border);
+  border-radius: var(--ds-radius-lg);
+  display: grid;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-3);
+}
+
+.quote-product-audit-details dl {
+  display: grid;
+  gap: var(--ds-space-2);
+  margin: 0;
+}
+
+.quote-product-audit-details dd {
+  overflow-wrap: anywhere;
+}
+
+.quickquote-state-card[data-state='loading'] {
+  background: color-mix(in srgb, var(--ds-color-warning) 12%, transparent);
+}
+
+.quickquote-prefill-groups {
+  display: grid;
+  gap: var(--ds-space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.quickquote-prefill-groups > li {
+  border: 1px solid var(--ds-color-border);
+  border-radius: var(--ds-radius-md);
+  display: grid;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-2);
+}
+
+.quickquote-prefill-group__summary {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.quickquote-prefill-metadata,
+.quickquote-override-audit ul {
+  display: grid;
+  gap: var(--ds-space-2);
+  list-style: none;
+  margin: 0;
+  padding: var(--ds-space-2);
+}
+
+.quickquote-prefill-metadata li,
+.quickquote-override-audit li {
+  border: 1px dashed color-mix(in srgb, var(--ds-color-border) 72%, transparent);
+  border-radius: var(--ds-radius-sm);
+  display: grid;
+  gap: var(--ds-space-1);
+  padding: var(--ds-space-2);
+}
+
+.quickquote-prefill-metadata li[data-value-state='overridden'] {
+  background: color-mix(in srgb, var(--ds-color-warning) 14%, transparent);
+}
+
+.quickquote-missing-facts ul {
+  display: grid;
+  gap: var(--ds-space-2);
+  margin: 0;
+  padding-inline-start: var(--ds-space-5);
+}
+
+.quickquote-skeleton {
+  display: grid;
+  gap: var(--ds-space-2);
+  margin-block-end: var(--ds-space-3);
+}
+
+.quickquote-skeleton span {
+  animation: quote-step-enter var(--ds-motion-normal) var(--ds-ease-standard) infinite alternate;
+  background: color-mix(in srgb, var(--ds-color-border) 42%, transparent);
+  border-radius: var(--ds-radius-md);
+  block-size: 2.5rem;
+  color: transparent;
+}
+
+.quote-product-grid--quickquote {
+  min-inline-size: 64rem;
+}
+
+.quote-product-row[data-comparison-selected='true'] {
+  outline: 2px solid color-mix(in srgb, var(--ds-color-primary) 54%, transparent);
+  outline-offset: -2px;
+}
+
+.quickquote-comparison {
+  border: 1px solid color-mix(in srgb, var(--ds-color-border) 78%, transparent);
+  border-radius: var(--ds-radius-xl);
+  display: grid;
+  gap: var(--ds-space-3);
+  margin-block-start: var(--ds-space-4);
+  padding: var(--ds-space-4);
+}
+
+.quickquote-comparison__header {
+  align-items: start;
+  display: flex;
+  gap: var(--ds-space-3);
+  justify-content: space-between;
+}
+
+.quickquote-comparison__header h3,
+.quickquote-comparison__header p {
+  margin: 0;
+}
+
+.quickquote-comparison__header p,
+.quickquote-comparison__notice,
+.quickquote-comparison__empty-state {
+  color: var(--ds-color-text-muted);
+  font-size: var(--ds-font-size-sm);
+  font-weight: 700;
+}
+
+.quickquote-comparison__viewport {
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  padding-block-end: var(--ds-space-2);
+  scroll-snap-type: x proximity;
+}
+
+.quickquote-comparison__grid {
+  display: grid;
+  grid-auto-rows: minmax(3.5rem, auto);
+  min-inline-size: max(100%, 42rem);
+}
+
+.quickquote-comparison__row {
+  display: grid;
+  grid-template-columns: var(--quickquote-comparison-columns);
+}
+
+.quickquote-comparison__row > div {
+  align-content: start;
+  border-block-end: 1px solid color-mix(in srgb, var(--ds-color-border) 68%, transparent);
+  display: grid;
+  gap: var(--ds-space-2);
+  min-inline-size: 0;
+  padding: var(--ds-space-3);
+}
+
+.quickquote-comparison__row--header > div {
+  background: color-mix(in srgb, var(--ds-color-primary) 10%, var(--ds-color-surface));
+  font-weight: 900;
+}
+
+.quickquote-comparison__metric-label {
+  background: color-mix(in srgb, var(--ds-color-surface) 94%, transparent);
+  border-inline-end: 1px solid color-mix(in srgb, var(--ds-color-border) 68%, transparent);
+  font-weight: 900;
+  inset-inline-start: 0;
+  position: sticky;
+  z-index: 1;
+}
+
+.quickquote-comparison__cell {
+  scroll-snap-align: start;
+}
+
+.quickquote-comparison__state,
+.quickquote-comparison__actions {
+  display: grid;
+  gap: var(--ds-space-2);
+}
+
+.quickquote-comparison__actions button,
+.quote-product-row-actions button {
+  min-block-size: 2.25rem;
+}
+
+.quickquote-comparison__assumptions,
+.quickquote-comparison__traces {
+  display: grid;
+  gap: var(--ds-space-1);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.quickquote-comparison__traces a {
+  overflow-wrap: anywhere;
+}
+
+.quickquote-empty-state {
+  border: 1px dashed var(--ds-color-border);
+  border-radius: var(--ds-radius-lg);
+  margin-block-end: var(--ds-space-3);
+  padding: var(--ds-space-4);
+}
+
+.quickquote-empty-state__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2);
+}
+
+@media (max-width: 900px) {
+  .quickquote-header,
+  .quickquote-status-strip,
+  .quickquote-products__toolbar,
+  .quickquote-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .quickquote-grid-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .quickquote-comparison__header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .quickquote-comparison__grid {
+    min-inline-size: max(100%, 34rem);
+  }
+}
+
 .quote-intake-shell--single-page {
   overflow-x: clip;
 }
@@ -1489,6 +1856,38 @@
   color: var(--ds-color-text-muted);
   font-size: 0.72rem;
   font-weight: 800;
+}
+
+.quote-economics-metric {
+  align-items: flex-start;
+  display: grid;
+  gap: 0.15rem;
+}
+
+.quote-economics-metric strong {
+  font-size: 0.9rem;
+  line-height: 1.1;
+}
+
+.quote-economics-metric small,
+.quote-economics-metric a {
+  font-size: 0.68rem;
+  font-weight: 850;
+}
+
+.quote-economics-metric small {
+  color: var(--ds-color-text-muted);
+}
+
+.quote-economics-metric a {
+  color: var(--ds-color-primary);
+  text-decoration: underline;
+  text-underline-offset: 0.12em;
+}
+
+.quote-economics-metric[data-metric-state='missing'] strong,
+.quote-economics-metric[data-metric-state='not-applicable'] strong {
+  color: var(--ds-color-text-muted);
 }
 
 .quote-product-cell--actions {

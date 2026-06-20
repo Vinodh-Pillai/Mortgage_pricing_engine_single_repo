@@ -4,6 +4,7 @@ import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.hasSize;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -28,6 +29,7 @@ class UiShellControllerTest {
     assertThat(context.getBean(ShellUiController.class)).isNotNull();
     assertThat(context.getBean(ProductCatalogUiController.class)).isNotNull();
     assertThat(context.getBean(QuoteRunUiController.class)).isNotNull();
+    assertThat(context.getBean(ScenarioDraftUiController.class)).isNotNull();
     assertThat(context.getBean(OfferUiController.class)).isNotNull();
     assertThat(context.getBean(PartnerUiController.class)).isNotNull();
     assertThat(context.getBean(OpsUiController.class)).isNotNull();
@@ -686,6 +688,66 @@ class UiShellControllerTest {
   }
 
   @Test
+  void quickQuoteDraftScenarioPersistsPipelineContextForTenantScopedRetrieve() throws Exception {
+    String draft = """
+        {
+          "status": "DRAFT_INCOMPLETE",
+          "externalLoanId": "LN-2001",
+          "data": {
+            "borrowerLastName": "Rivera",
+            "loanNumber": "LN-2001",
+            "decisionCreditScore": "735",
+            "clientContext": "{\\\"quickQuoteDraft\\\":{\\\"storyId\\\":\\\"PII-77-S07\\\",\\\"selectedProduct\\\":{\\\"productCode\\\":\\\"CONF_30YR_PREVIEW\\\"},\\\"visibleAssumptions\\\":[\\\"Mortgage Type must be confirmed before lock or final submission.\\\"],\\\"traceReferences\\\":[{\\\"label\\\":\\\"Pricing\\\",\\\"value\\\":\\\"pricing-service:CONF_30YR_PREVIEW:rate-output-pending\\\"}]}}"
+          },
+          "initialFacts": {
+            "borrowerLastName": "Rivera",
+            "loanNumber": "LN-2001"
+          }
+        }
+        """;
+
+    mvc.perform(post("/api/v1/tenants/demo-tenant/scenarios")
+            .header("X-Tenant-Context", "demo-tenant")
+            .header("X-Ui-Trace-Id", "trace-s07-save")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(draft))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.status").value("DRAFT_INCOMPLETE"))
+        .andExpect(jsonPath("$.intake.borrowerLastName").value("Rivera"))
+        .andExpect(jsonPath("$.intake.clientContext").value(org.hamcrest.Matchers.containsString("PII-77-S07")))
+        .andExpect(jsonPath("$.events[0]").value("QuickQuotePipelineDraftCreated"));
+
+    mvc.perform(get("/api/v1/tenants/demo-tenant/scenarios")
+            .header("X-Tenant-Context", "demo-tenant")
+            .param("borrowerLastName", "Rivera")
+            .param("loanNumber", "LN-2001")
+            .param("status", "DRAFT_INCOMPLETE"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.records", hasSize(1)))
+        .andExpect(jsonPath("$.records[0].intake.loanNumber").value("LN-2001"))
+        .andExpect(jsonPath("$.records[0].intake.clientContext").value(org.hamcrest.Matchers.containsString("CONF_30YR_PREVIEW")));
+  }
+
+  @Test
+  void quickQuoteDraftScenarioRejectsCrossTenantAccessWithoutLeakingDraftData() throws Exception {
+    mvc.perform(post("/api/v1/tenants/tenant-a/scenarios")
+            .header("X-Tenant-Context", "tenant-a")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"data\":{\"borrowerLastName\":\"Rivera\",\"loanNumber\":\"LN-SEC\"}}"))
+        .andExpect(status().isCreated());
+
+    mvc.perform(get("/api/v1/tenants/tenant-a/scenarios")
+            .header("X-Tenant-Context", "tenant-b")
+            .param("borrowerLastName", "Rivera")
+            .param("loanNumber", "LN-SEC"))
+        .andExpect(status().isForbidden())
+        .andExpect(jsonPath("$.status").value("DENIED"))
+        .andExpect(jsonPath("$.message").value("Draft scenario access denied."))
+        .andExpect(jsonPath("$.records").doesNotExist())
+        .andExpect(jsonPath("$.intake").doesNotExist());
+  }
+
+  @Test
   void scenarioIntakeMetadataReturnsFieldGroupsBlockersAuditAndReplayWithoutPricingRules() throws Exception {
     mvc.perform(get("/api/v1/tenants/demo-tenant/quote-runs/intake-metadata")
             .header("X-Ui-Trace-Id", "trace-brw-s01"))
@@ -713,6 +775,12 @@ class UiShellControllerTest {
         .andExpect(jsonPath("$.quickQuoteState.quoteServiceRequiredFacts[4]").value("baseLoanAmount"))
         .andExpect(jsonPath("$.quickQuoteState.backendOwnedFactSources[0]").value("creditApplicationFields"))
         .andExpect(jsonPath("$.quickQuoteState.blockedByContracts", hasSize(3)))
+        .andExpect(jsonPath("$.quickQuoteState.losPrefillMappings", hasSize(9)))
+        .andExpect(jsonPath("$.quickQuoteState.losPrefillMappings[0].sourceSystem").value("LoanPASS"))
+        .andExpect(jsonPath("$.quickQuoteState.losPrefillMappings[0].losFieldKey").value("quoteBorrowerInfo.borrowerLastName"))
+        .andExpect(jsonPath("$.quickQuoteState.losPrefillMappings[0].wcpeField").value("borrowerLastName"))
+        .andExpect(jsonPath("$.quickQuoteState.losPrefillMappings[0].missingCategory").value("required_to_price"))
+        .andExpect(jsonPath("$.quickQuoteState.losPrefillMappings[0].scope").value("tenant:demo-tenant;channel:configured-metadata"))
         .andExpect(jsonPath("$.auditPackageId").value("review-package-required-after-scenario-create"))
         .andExpect(jsonPath("$.replayHashRef").value("review-reference-required-after-scenario-create"))
         .andExpect(jsonPath("$.uiTraceId").value("trace-brw-s01"));

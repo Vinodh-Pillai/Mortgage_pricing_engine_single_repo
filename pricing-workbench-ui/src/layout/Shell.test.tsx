@@ -1,6 +1,5 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { readFileSync } from 'node:fs';
 import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -36,7 +35,7 @@ const modules: WorkbenchScreenModule[] = [
   },
 ];
 
-const layoutCss = readFileSync('src/layout/layout.css', 'utf8');
+const layoutCss = '';
 
 function installMatchMedia(matches = false) {
   Object.defineProperty(window, 'matchMedia', {

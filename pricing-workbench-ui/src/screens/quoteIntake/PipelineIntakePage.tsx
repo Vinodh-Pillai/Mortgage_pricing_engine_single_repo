@@ -1,5 +1,5 @@
-import { type CSSProperties, type FocusEvent, type FormEvent, type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { fetchActiveApplicationFormVersion, fetchTenantDropdownOptions, loanPassQuoteIntakeFields, type ApplicationFormRuntimeState, type BorrowerIntake, type DropdownOption, type LaunchState, type MetadataState, type QuoteLaunchSelectedProduct, type ScenarioIntakeField, type ScenarioIntakeMetadata, type TenantDropdownOptions } from '../../lib/api/quoteRuns';
+import { type CSSProperties, type FocusEvent, type FormEvent, type MouseEvent, type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { fetchActiveApplicationFormVersion, fetchTenantDropdownOptions, loanPassQuoteIntakeFields, type ApplicationFormRuntimeState, type BorrowerIntake, type DropdownOption, type LaunchState, type MetadataState, type QuickQuoteLosPrefillMapping, type QuoteLaunchSelectedProduct, type ScenarioIntakeField, type ScenarioIntakeMetadata, type TenantDropdownOptions } from '../../lib/api/quoteRuns';
 import { availableFiltersFor, tenantHomePreviewProducts, type AuthorizedProduct, type TenantProductStatus } from '../../lib/api/tenantHome';
 import { createDraftScenario, getDraftScenario, loadDraftBackup, saveDraftBackup, updateDraftScenario, type DraftBackup, type DraftScenario } from './draft';
 import { emptyFieldEditorDraft, fieldEditorDataTypeLabel, fieldEditorDataTypes, serializeFieldEditorDraft, validateFieldEditorDraft, type FieldEditorDraft, type FieldEditorSerializedDraft } from './fieldEditorDataTypes';
@@ -10,8 +10,11 @@ import { StepFields, type DropdownOptionsByField } from './steps/StepFields';
 import { errorsToValidation, firstInvalidField, validateFields, type IntakeFieldErrors } from './validation';
 import './QuoteIntake.css';
 
+type QuoteMode = 'pipeline' | 'quickquote';
+
 export type PipelineIntakePageProps = {
   tenantId?: string;
+  mode?: QuoteMode;
   intake?: BorrowerIntake;
   errors?: IntakeFieldErrors;
   launchState?: LaunchState;
@@ -46,7 +49,7 @@ type DropdownConfigState =
   | { kind: 'ready'; options: TenantDropdownOptions; message: string }
   | { kind: 'fallback'; options: TenantDropdownOptions; message: string };
 
-type BasePriceScenarioColumnKey = 'product' | 'investor' | 'status' | 'adjustedRate' | 'lockPeriod' | 'adjustedPrice' | 'payment' | 'pitiaItia' | 'dscr' | 'ltv' | 'fico' | 'actions';
+type BasePriceScenarioColumnKey = 'product' | 'investor' | 'status' | 'adjustedRate' | 'lockPeriod' | 'adjustedPrice' | 'payment' | 'pitiaItia' | 'dscr' | 'fees' | 'llpa' | 'ltv' | 'fico' | 'audit' | 'actions';
 type PriceScenarioColumnKey = BasePriceScenarioColumnKey | string;
 
 type PriceScenarioColumn = {
@@ -59,11 +62,48 @@ type PriceScenarioColumn = {
 
 type ProductRowAction = 'refresh' | 'lock' | 'status';
 
+const quickQuoteProductEvidenceActions = new Set([
+  'pipeline-product-selected',
+  'pipeline-row-selected',
+  'pipeline-row-refresh-requested',
+  'pipeline-row-lock-requested',
+  'pipeline-row-status-reviewed',
+]);
+
+const modeToggleEvidenceActions = new Set([
+  'quote-mode-active',
+  'quote-mode-filter-reset',
+  'quote-mode-switch-confirmation-required',
+  'quote-mode-switched',
+  'quote-mode-switch-cancelled',
+  'quote-mode-switch-save-failed',
+]);
+
+const quickQuoteDraftEvidenceActions = new Set([
+  'draft-created',
+  'draft-updated',
+  'draft-local-backup',
+  'pipeline-retrieved',
+]);
+
+const quickQuoteComparisonEvidenceActions = new Set([
+  'quickquote-comparison-selection-changed',
+]);
+
 type ProductRowActionState = {
   productCode: string;
   tone: 'ready' | 'attention' | 'blocked';
   message: string;
   details: string[];
+};
+
+type QuoteEconomicsMetricKey = 'rate' | 'price' | 'payment' | 'dscr' | 'fees' | 'llpa';
+
+type ProductMetricTraceRef = {
+  label: string;
+  value: string;
+  metric?: string;
+  href?: string;
 };
 
 type LockFieldBinding = {
@@ -82,6 +122,34 @@ type VisibilityConditionDraft = {
 
 type PipelineRequiredField = ScenarioIntakeField & { fieldId: keyof BorrowerIntake; pipelineRequired?: boolean };
 type SaveRetrieveIdentifierField = 'borrowerLastName' | 'loanNumber';
+
+type LosOverrideAudit = {
+  fieldId: keyof BorrowerIntake;
+  label: string;
+  originalValue: string;
+  overrideValue: string;
+  actor: string;
+  changedAt: string;
+  affectedOutputTraces: string[];
+};
+
+type QuickQuoteDraftContext = {
+  storyId: 'PII-77-S07';
+  sourceMode: QuoteMode;
+  selectedProduct?: QuoteLaunchSelectedProduct;
+  comparedProducts: QuoteLaunchSelectedProduct[];
+  productFilters: ProductFilterState;
+  quoteOutputs: Array<{ productCode: string; metric: QuoteEconomicsMetricKey; value: string; state: 'ready' | 'missing' | 'assumption'; traceRef?: ProductMetricTraceRef }>;
+  visibleAssumptions: string[];
+  traceReferences: ProductMetricTraceRef[];
+  losPrefillMappings: QuickQuoteLosPrefillMapping[];
+  savedAt: string;
+};
+
+type ModeSwitchRequest = {
+  mode: QuoteMode;
+  route: string;
+};
 
 
 const tenantBoundaryPlaceholder = 'ui-preview-tenant';
@@ -284,6 +352,7 @@ export const initialQuoteIntake = Object.fromEntries(
 
 export function PipelineIntakePage({
   tenantId = tenantBoundaryPlaceholder,
+  mode = 'pipeline',
   intake,
   errors = {},
   launchState,
@@ -307,6 +376,7 @@ export function PipelineIntakePage({
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [productFilters, setProductFilters] = useState<ProductFilterState>(emptyProductFilters);
   const [selectedProduct, setSelectedProduct] = useState<AuthorizedProduct | null>(null);
+  const [comparisonProductCodes, setComparisonProductCodes] = useState<string[]>(() => tenantHomePreviewProducts.slice(0, 2).map((product) => product.productCode));
   const [rowActionState, setRowActionState] = useState<ProductRowActionState | null>(null);
   const [dropdownConfigState, setDropdownConfigState] = useState<DropdownConfigState>(() => tenantDropdownConfigCache.get(tenantId) ?? { kind: 'loading', options: fallbackTenantDropdownOptions(), message: 'Loading tenant dropdown options...' });
   const [saveOpen, setSaveOpen] = useState(false);
@@ -317,6 +387,8 @@ export function PipelineIntakePage({
   const [retrieveKeys, setRetrieveKeys] = useState({ borrowerLastName: '', loanNumber: '' });
   const [retrieveError, setRetrieveError] = useState('');
   const [retrieveLoading, setRetrieveLoading] = useState(false);
+  const [hasUnsavedModeChanges, setHasUnsavedModeChanges] = useState(false);
+  const [pendingModeSwitch, setPendingModeSwitch] = useState<ModeSwitchRequest | null>(null);
   const [builderDraftOrder, setBuilderDraftOrder] = useState<Record<string, string[]>>(() => loadFormBuilderDraftOrder(tenantId));
   const [builderVisibilityDrafts, setBuilderVisibilityDrafts] = useState<Record<string, VisibilityConditionDraft>>(() => loadFormBuilderVisibilityDrafts(tenantId));
   const [builderValidationMessage, setBuilderValidationMessage] = useState('');
@@ -325,12 +397,13 @@ export function PipelineIntakePage({
   const [fieldEditorSavedSummary, setFieldEditorSavedSummary] = useState('');
   const [applicationFormRuntimeState, setApplicationFormRuntimeState] = useState<ApplicationFormRuntimeState | { kind: 'loading'; message: string }>(() => ({ kind: 'loading', message: 'Loading tenant application form configuration...' }));
   const [validationBannerDismissed, setValidationBannerDismissed] = useState(false);
+  const [losOverrideAudit, setLosOverrideAudit] = useState<Record<string, LosOverrideAudit>>(() => overrideAuditFromClientContext((intake ?? initialQuoteIntake).clientContext));
   const savingRef = useRef(false);
   const savePromiseRef = useRef<Promise<DraftScenario | null> | null>(null);
   const firstEntryDraftRef = useRef(false);
   const validationBannerSignatureRef = useRef('');
   const validationBannerFocusKeyRef = useRef('');
-  const values = useMemo(() => normalizeDisplayedIntake(intake ?? localIntake), [intake, localIntake]);
+  const values = useMemo(() => normalizeDisplayedIntake(localIntake), [localIntake]);
   const mergedErrors = { ...errors, ...localErrors };
   const { metadata } = normalizeMetadataState(metadataState);
   const runtimeMetadata = applicationFormRuntimeState.kind === 'loaded' ? applicationFormRuntimeState.metadata : metadata;
@@ -364,11 +437,40 @@ export function PipelineIntakePage({
   const validationBannerSignature = actionableMissingRequiredFields.map((field) => String(field.fieldId)).join('|');
   const validationBannerVisible = validationBannerSignature.length > 0 && !validationBannerDismissed;
   const productGridStyle = { '--quote-product-grid-template': priceScenarioGridTemplate(priceScenarioColumns) } as CSSProperties;
+  const quickQuoteColumns = useMemo<PriceScenarioColumn[]>(() => [
+    { key: 'status', label: 'Eligibility' },
+    { key: 'product', label: 'Product' },
+    { key: 'adjustedRate', label: 'Rate' },
+    { key: 'adjustedPrice', label: 'Price' },
+    { key: 'payment', label: 'Payment' },
+    { key: 'dscr', label: 'DSCR' },
+    { key: 'fees', label: 'Fees' },
+    { key: 'llpa', label: 'LLPA' },
+    { key: 'audit', label: 'Audit' },
+    { key: 'actions', label: 'Actions' },
+  ], []);
+  const quickQuoteGridStyle = { '--quote-product-grid-template': priceScenarioGridTemplate(quickQuoteColumns) } as CSSProperties;
+  const quickQuoteStatusCounts = useMemo(() => productStatusCounts(tenantHomePreviewProducts), []);
+  const quickQuoteComparisonProducts = useMemo(() => tenantHomePreviewProducts.filter((product) => comparisonProductCodes.includes(product.productCode)), [comparisonProductCodes]);
+  const losPrefillMappings = useMemo(() => quickQuotePrefillMappingsForMetadata(runtimeMetadata, runtimeSections), [runtimeMetadata, runtimeSections]);
+  const losOverrideRows = useMemo(() => Object.values(losOverrideAudit).sort((left, right) => left.label.localeCompare(right.label)), [losOverrideAudit]);
+  const losPrefillEditableFields = useMemo(() => fieldsById(Array.from(new Set(losPrefillMappings.map((mapping) => mapping.fieldId)))), [losPrefillMappings, runtimeSections]);
+  const quickQuoteLoading = metadataState.kind === 'loading' || applicationFormRuntimeState.kind === 'loading' || dropdownConfigState.kind === 'loading' || flowState.kind === 'submitting';
+  const quickQuoteBorrower = borrowerContextLabel(values);
+  const quickQuoteLoan = loanContextLabel(values);
   const startReady = true;
   const quoteReady = missingRequiredFields.length === 0 && Boolean(selectedProduct);
   const launchDisabled = flowState.kind === 'submitting' || !quoteReady;
   const launchStatus = quoteReady ? 'Ready to launch quote' : selectedProduct && missingRequiredFields.length > 0 ? 'Data required before pricing refresh' : 'Select a product and complete required fields';
   const completionPercent = completedFactPercent(values);
+
+  useEffect(() => {
+    capture('quote-mode-active', modeSwitchAuditDetail(mode, 'active'));
+    if (mode === 'quickquote') {
+      setProductFilters(emptyProductFilters);
+      capture('quote-mode-filter-reset', modeSwitchAuditDetail('quickquote', 'discard-pipeline-filters'));
+    }
+  }, [mode]);
 
   useEffect(() => {
     if (intake) setLocalIntake(intake);
@@ -469,14 +571,37 @@ export function PipelineIntakePage({
   }, [values, scenarioId, scenarioVersion]);
 
   function changeField(field: keyof BorrowerIntake, value: string) {
+    trackLosOverride(field, value);
     const nextValues = { ...values, [field]: value };
     setLocalIntake(nextValues);
+    setHasUnsavedModeChanges(true);
     setLocalErrors((current) => ({ ...current, [field]: undefined }));
     onChange?.(field, value);
     if (!firstEntryDraftRef.current && isLoanBasicsField(field) && value.trim()) {
       firstEntryDraftRef.current = true;
       void saveDraft('first-field-entry', nextValues);
     }
+  }
+
+  function trackLosOverride(field: keyof BorrowerIntake, value: string) {
+    const mapping = losPrefillMappings.find((candidate) => candidate.fieldId === field);
+    if (!mapping) return;
+    const originalValue = (values[field] ?? '').trim();
+    const overrideValue = value.trim();
+    if (!originalValue || originalValue === overrideValue) return;
+    const now = new Date().toISOString();
+    setLosOverrideAudit((current) => ({
+      ...current,
+      [field]: {
+        fieldId: field,
+        label: mapping.wcpeField || String(field),
+        originalValue,
+        overrideValue,
+        actor: values.actorId || 'current QuickQuote user',
+        changedAt: now,
+        affectedOutputTraces: mapping.affectedOutputTraces.length > 0 ? mapping.affectedOutputTraces : ['eligibility/pricing trace pending configured adapter'],
+      },
+    }));
   }
 
   function focusPipelineField(fieldId: keyof BorrowerIntake) {
@@ -528,6 +653,7 @@ export function PipelineIntakePage({
   }
 
   function setFilter(key: keyof ProductFilterState, value: string) {
+    setHasUnsavedModeChanges(true);
     setProductFilters((current) => ({ ...current, [key]: value }));
     if (key === 'productType') changeField('mortgageType', value);
     if (key === 'investor') changeField('investorCode', value);
@@ -555,6 +681,7 @@ export function PipelineIntakePage({
     changeField('investorCode', product.investorCode);
     changeField('mortgageType', mortgageType);
     setSelectedProduct(product);
+    setHasUnsavedModeChanges(true);
     setProductFilters((current) => ({ ...current, productType: product.productType, investor: product.investorCode, channel: product.channelCode, status: product.status }));
     setStatusMessage(`${product.productName} selected.`);
     capture('pipeline-product-selected', { productCode: product.productCode, investor: product.investorCode, channel: channelLabel(channel) });
@@ -562,8 +689,19 @@ export function PipelineIntakePage({
 
   function selectProduct(product: AuthorizedProduct) {
     setSelectedProduct(product);
+    if (mode === 'quickquote') {
+      setComparisonProductCodes((current) => current.includes(product.productCode) ? current : [...current, product.productCode]);
+    }
+    setHasUnsavedModeChanges(true);
     setStatusMessage(`${product.productName} row selected.`);
     capture('pipeline-row-selected', { productCode: product.productCode, status: product.status });
+  }
+
+  function toggleComparisonProduct(product: AuthorizedProduct) {
+    setComparisonProductCodes((current) => current.includes(product.productCode) ? current.filter((code) => code !== product.productCode) : [...current, product.productCode]);
+    setHasUnsavedModeChanges(true);
+    setStatusMessage(`${product.productName} ${comparisonProductCodes.includes(product.productCode) ? 'removed from' : 'added to'} comparison.`);
+    capture('quickquote-comparison-selection-changed', { productCode: product.productCode });
   }
 
   function requestRowAction(product: AuthorizedProduct, action: ProductRowAction) {
@@ -594,11 +732,13 @@ export function PipelineIntakePage({
       return;
     }
 
-    setRowActionState({ productCode: product.productCode, tone: isProductEligible(product) ? 'ready' : 'blocked', message: `${product.productName} status: ${friendlyLabel(product.status)}.`, details: [productUnavailableReason(product)] });
+    const traceDetails = productAuditTraceRefs(product, runtimeMetadata).map((ref) => `${ref.label}: ${ref.value}`);
+    setRowActionState({ productCode: product.productCode, tone: isProductEligible(product) ? 'ready' : product.status === 'PENDING' ? 'attention' : 'blocked', message: `${product.productName} status: ${productEligibilityReviewLabel(product)}.`, details: [productUnavailableReason(product), ...(traceDetails.length > 0 ? traceDetails : ['Trace evidence unavailable from configured/API product data.'])] });
     capture('pipeline-row-status-reviewed', { productCode: product.productCode, status: product.status });
   }
 
   function clearFilters() {
+    setHasUnsavedModeChanges(true);
     setProductFilters({ ...emptyProductFilters, status: '' });
     setStatusMessage('Filters cleared.');
   }
@@ -677,6 +817,7 @@ export function PipelineIntakePage({
       return;
     }
     savePipelineLookup(saveValues, saved.scenarioId, saved.scenarioVersion);
+    setHasUnsavedModeChanges(false);
     setStatusMessage('Saved.');
   }
 
@@ -714,12 +855,15 @@ export function PipelineIntakePage({
     setScenarioId(draft.scenarioId);
     setScenarioVersion(draft.scenarioVersion);
     const resumedIntake = normalizeDisplayedIntake({ ...values, ...(draft.intake ?? {}) });
+    setLosOverrideAudit(overrideAuditFromClientContext(resumedIntake.clientContext));
+    restoreQuickQuoteDraftContext(resumedIntake);
     setLocalIntake(resumedIntake);
     Object.entries(resumedIntake).forEach(([field, value]) => {
       if (typeof value === 'string') onChange?.(field as keyof BorrowerIntake, value);
     });
     setRetrieveOpen(false);
     setRetrieveError('');
+    setHasUnsavedModeChanges(false);
     setStatusMessage(message);
     capture('pipeline-retrieved', { scenarioId: draft.scenarioId, scenarioVersion: draft.scenarioVersion });
   }
@@ -727,7 +871,15 @@ export function PipelineIntakePage({
   async function saveDraft(reason = 'manual-save', valueOverride?: BorrowerIntake): Promise<DraftScenario | null> {
     if (savingRef.current) return savePromiseRef.current;
     savingRef.current = true;
-    const draftValues = valueOverride ?? values;
+    const draftValues = withQuickQuoteDraftContext(withLosOverrideContext(valueOverride ?? values, losOverrideRows), {
+      sourceMode: mode,
+      selectedProduct,
+      comparedProducts: mode === 'quickquote' ? quickQuoteComparisonProducts : filteredProducts,
+      productFilters,
+      missingFields: missingRequiredFields,
+      metadata: runtimeMetadata,
+      losPrefillMappings,
+    });
     const operation = persistDraft(reason, draftValues);
     savePromiseRef.current = operation;
     try {
@@ -747,7 +899,8 @@ export function PipelineIntakePage({
         setScenarioId(draft.scenarioId);
         setScenarioVersion(draft.scenarioVersion);
         saveDraftBackup(draft.scenarioId, draft.scenarioVersion, 1, draftValues);
-        setStatusMessage('Pipeline draft created and saved.');
+        setHasUnsavedModeChanges(false);
+        setStatusMessage(reason === 'quickquote-save-draft' ? 'QuickQuote draft saved to Pipeline context.' : 'Pipeline draft created and saved.');
         if (reason !== 'pre-launch') setFlowState({ kind: 'idle' });
         capture('draft-created', { scenarioId: draft.scenarioId, scenarioVersion: draft.scenarioVersion, reason });
         return draft;
@@ -756,7 +909,8 @@ export function PipelineIntakePage({
         setScenarioId(saved.scenarioId);
         setScenarioVersion(saved.scenarioVersion);
         saveDraftBackup(saved.scenarioId, saved.scenarioVersion, 1, draftValues);
-        setStatusMessage('Pipeline draft auto-saved.');
+        setHasUnsavedModeChanges(false);
+        setStatusMessage(reason === 'quickquote-save-draft' ? 'QuickQuote draft saved to Pipeline context.' : 'Pipeline draft auto-saved.');
         if (reason !== 'pre-launch') setFlowState({ kind: 'idle' });
         capture('draft-updated', { scenarioId: saved.scenarioId, scenarioVersion: saved.scenarioVersion, reason });
         return saved;
@@ -822,17 +976,72 @@ export function PipelineIntakePage({
     setScenarioId(resumeBackup.scenarioId);
     setScenarioVersion(resumeBackup.scenarioVersion);
     const resumedIntake = normalizeDisplayedIntake({ ...values, ...resumeBackup.intake });
+    setLosOverrideAudit(overrideAuditFromClientContext(resumedIntake.clientContext));
+    restoreQuickQuoteDraftContext(resumedIntake);
     setLocalIntake(resumedIntake);
     Object.entries(resumedIntake).forEach(([field, value]) => {
       if (typeof value === 'string') onChange?.(field as keyof BorrowerIntake, value);
     });
     setResumeDismissed(true);
+    setHasUnsavedModeChanges(false);
     setStatusMessage(`Draft ${resumeBackup.scenarioId} resumed.`);
+  }
+
+  function restoreQuickQuoteDraftContext(resumedIntake: BorrowerIntake) {
+    const context = quickQuoteDraftContextFromClientContext(resumedIntake.clientContext);
+    if (!context) return;
+    setProductFilters(context.productFilters ?? emptyProductFilters);
+    const productCode = context.selectedProduct?.productCode;
+    const restoredProduct = productCode ? tenantHomePreviewProducts.find((product) => product.productCode === productCode) ?? null : null;
+    setSelectedProduct(restoredProduct);
+    setRowActionState(null);
   }
 
   function handleBlur(event: FocusEvent<HTMLFormElement>) {
     const target = event.target as unknown as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
     if (target.name && target.value.trim()) void saveDraft('field-blur');
+  }
+
+  function requestModeSwitch(event: MouseEvent<HTMLAnchorElement>, nextMode: QuoteMode) {
+    event.preventDefault();
+    if (nextMode === mode) return;
+    const request = { mode: nextMode, route: routeForMode(nextMode, selectedProduct) };
+    if (hasUnsavedModeChanges) {
+      setPendingModeSwitch(request);
+      capture('quote-mode-switch-confirmation-required', modeSwitchAuditDetail(nextMode, 'unsaved-changes'));
+      return;
+    }
+    finishModeSwitch(request, 'direct');
+  }
+
+  async function saveAndSwitchMode() {
+    if (!pendingModeSwitch) return;
+    const saved = await saveDraft('mode-switch-save');
+    if (!saved) {
+      setStatusMessage('Save was unavailable. Discard or keep editing before switching modes.');
+      capture('quote-mode-switch-save-failed', modeSwitchAuditDetail(pendingModeSwitch.mode, 'save-failed'));
+      return;
+    }
+    finishModeSwitch(pendingModeSwitch, 'save');
+  }
+
+  function discardAndSwitchMode() {
+    if (!pendingModeSwitch) return;
+    setHasUnsavedModeChanges(false);
+    finishModeSwitch(pendingModeSwitch, 'discard');
+  }
+
+  function cancelModeSwitch() {
+    if (pendingModeSwitch) capture('quote-mode-switch-cancelled', modeSwitchAuditDetail(pendingModeSwitch.mode, 'keep-editing'));
+    setPendingModeSwitch(null);
+  }
+
+  function finishModeSwitch(request: ModeSwitchRequest, decision: 'direct' | 'save' | 'discard') {
+    if (request.mode === 'quickquote') setProductFilters(emptyProductFilters);
+    setPendingModeSwitch(null);
+    capture('quote-mode-switched', modeSwitchAuditDetail(request.mode, decision));
+    if (onNavigate) onNavigate(request.route);
+    else window.location.assign(request.route);
   }
 
   function sectionForStep(stepId: QuoteIntakeStepDefinition['id']) {
@@ -877,7 +1086,122 @@ export function PipelineIntakePage({
   }
 
   function capture(action: string, detail: Record<string, unknown>) {
-    onEvidenceCapture?.({ action, storyId: 'PII-72-S04', ...detail });
+    let storyId = 'PII-72-S04';
+    if (modeToggleEvidenceActions.has(action)) storyId = 'PII-77-S05';
+    if (quickQuoteDraftEvidenceActions.has(action)) storyId = 'PII-77-S07';
+    if (mode === 'quickquote') storyId = quickQuoteProductEvidenceActions.has(action) ? 'PII-77-S02' : 'PII-77-S01';
+    if (quickQuoteComparisonEvidenceActions.has(action)) storyId = 'PII-77-S06';
+    if (modeToggleEvidenceActions.has(action)) storyId = 'PII-77-S05';
+    if (quickQuoteDraftEvidenceActions.has(action)) storyId = 'PII-77-S07';
+    onEvidenceCapture?.({ action, storyId, ...detail });
+  }
+
+  function modeSwitchAuditDetail(nextMode: QuoteMode, decision: string) {
+    return {
+      mode: nextMode,
+      sourceMode: mode,
+      sourceScenarioId: scenarioId ?? resumeBackup?.scenarioId ?? '',
+      selectedProductCode: selectedProduct?.productCode ?? '',
+      draftLinked: Boolean(scenarioId ?? resumeBackup?.scenarioId),
+      decision,
+    };
+  }
+
+  function renderModeSwitchDialog() {
+    if (!pendingModeSwitch) return null;
+    const target = pendingModeSwitch.mode === 'quickquote' ? 'QuickQuote' : 'Pipeline';
+    return (
+      <div className="quote-pipeline-modal" role="dialog" aria-modal="true" aria-labelledby="mode-switch-heading">
+        <div className="quote-pipeline-modal__card">
+          <div className="quote-pipeline-modal__header">
+            <h3 id="mode-switch-heading">Switch to {target}?</h3>
+            <button type="button" onClick={cancelModeSwitch} aria-label="Close">×</button>
+          </div>
+          <p className="quote-pipeline-modal__copy">Save this draft before switching, or discard local mode changes.</p>
+          <div className="quote-pipeline-modal__actions">
+            <button type="button" className="quote-filter-clear" onClick={cancelModeSwitch}>Keep editing</button>
+            <button type="button" className="quote-filter-clear" onClick={discardAndSwitchMode}>Discard</button>
+            <button type="button" className="quote-intake-primary" onClick={() => void saveAndSwitchMode()}>Save draft</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (mode === 'quickquote') {
+    return (
+      <section id="quickquote-workspace" className="quickquote-workspace" aria-labelledby="quickquote-heading" data-loading={quickQuoteLoading ? 'true' : 'false'}>
+        <header className="quickquote-header" aria-label="QuickQuote header">
+          <div className="quickquote-header__identity">
+            <nav className="quickquote-mode-toggle" aria-label="Quote mode">
+              <a href="/quote/start" aria-current="page" onClick={(event) => requestModeSwitch(event, 'quickquote')}>QuickQuote</a>
+              <a href={routeForMode('pipeline', selectedProduct)} onClick={(event) => requestModeSwitch(event, 'pipeline')}>Pipeline</a>
+            </nav>
+            <h1 id="quickquote-heading">QuickQuote</h1>
+          </div>
+          <dl className="quickquote-context" aria-label="Borrower and loan context">
+            <div><dt>Borrower</dt><dd>{quickQuoteBorrower}</dd></div>
+            <div><dt>Loan</dt><dd>{quickQuoteLoan}</dd></div>
+            <div><dt>Updated</dt><dd>{statusMessage ? 'Now' : 'Awaiting changes'}</dd></div>
+          </dl>
+        </header>
+
+        <section className="quickquote-status-strip" aria-label="QuickQuote status strip">
+          <MetricCard label="Prefill" value={`${completionPercent}%`} detail="complete" tone={missingRequiredFields.length === 0 ? 'ready' : 'attention'} />
+          <MetricCard label="Missing" value={String(missingRequiredFields.length)} detail="facts" tone={missingRequiredFields.length === 0 ? 'ready' : 'attention'} />
+          <MetricCard label="Eligible" value={String(quickQuoteStatusCounts.eligible)} detail="products" tone="ready" />
+          <MetricCard label="Refer" value={String(quickQuoteStatusCounts.refer)} detail="review" tone={quickQuoteStatusCounts.refer > 0 ? 'attention' : undefined} />
+          <MetricCard label="Ineligible" value={String(quickQuoteStatusCounts.ineligible)} detail="products" />
+          <button type="button" className="quote-intake-primary" onClick={() => void saveDraft('quickquote-save-draft')} aria-label="Save QuickQuote draft">Save Draft</button>
+        </section>
+
+        <div className="quickquote-grid-shell">
+          <aside className="quickquote-prefill-rail" aria-label="LOS prefill rail">
+            <QuickQuoteStateCard title="Prefill" state={quickQuoteLoading ? 'loading' : 'ready'} detail={dropdownConfigState.kind === 'fallback' ? 'Fallback enum state' : 'Mapped state'} />
+            <QuickQuotePrefillGroups sections={runtimeSections} values={values} mappings={losPrefillMappings} overrides={losOverrideAudit} />
+            <QuickQuoteMappedFieldOverrides fields={losPrefillEditableFields} values={values} errors={visibleErrors} dropdownOptions={fieldDropdownOptions} dropdownLoading={dropdownConfigState.kind === 'loading'} onChange={changeField} />
+            <QuickQuoteMissingFacts fields={missingRequiredFields} mappings={losPrefillMappings} values={values} />
+            <QuickQuoteOverrideAudit overrides={losOverrideRows} />
+          </aside>
+
+          <section className="quickquote-products" aria-labelledby="quickquote-products-heading" aria-busy={quickQuoteLoading ? 'true' : 'false'}>
+            <div className="quickquote-products__toolbar">
+              <div>
+                <span className="eyebrow">Grid</span>
+                <h2 id="quickquote-products-heading">Product eligibility</h2>
+                <p className="quickquote-products__assurance">Showing all configured tenant/channel products; no QuickQuote product filter is applied.</p>
+              </div>
+              <QuickQuoteStateCard title="Pricing" state={quickQuoteLoading ? 'loading' : tenantHomePreviewProducts.length > 0 ? 'ready' : 'empty'} detail={`${tenantHomePreviewProducts.length} candidates`} />
+            </div>
+
+            {quickQuoteLoading ? <QuickQuoteSkeleton /> : null}
+            {!quickQuoteLoading && tenantHomePreviewProducts.length === 0 ? <QuickQuoteEmptyState missingFacts={missingRequiredFields.length} /> : null}
+
+            <div className="quote-product-grid quote-product-grid--quickquote" role="table" aria-label="QuickQuote product eligibility grid" style={quickQuoteGridStyle}>
+              <div className="quote-product-row quote-product-row--header" role="row">
+                {quickQuoteColumns.map((column) => <div key={column.key} role="columnheader">{column.label}</div>)}
+              </div>
+              {tenantHomePreviewProducts.map((product) => (
+                <ProductResultRow key={product.productCode} product={product} values={values} columns={quickQuoteColumns} missingFields={missingRequiredFields} metadata={runtimeMetadata} selected={selectedProduct?.productCode === product.productCode} comparisonSelected={comparisonProductCodes.includes(product.productCode)} actionState={rowActionState?.productCode === product.productCode ? rowActionState : null} onSelect={selectProduct} onApply={applyProduct} onAction={requestRowAction} onCompare={toggleComparisonProduct} />
+              ))}
+            </div>
+
+            <QuickQuoteComparisonPanel products={quickQuoteComparisonProducts} selectedProductCode={selectedProduct?.productCode ?? ''} values={values} missingFields={missingRequiredFields} metadata={runtimeMetadata} onSelectProduct={selectProduct} onUseProduct={applyProduct} onSaveDraft={() => void saveDraft('quickquote-save-draft')} />
+          </section>
+        </div>
+
+        <div className="quote-pipeline-launchbar quickquote-actions" aria-label="QuickQuote actions">
+          <div>
+            <strong>{selectedProduct?.productName ?? 'No product selected'}</strong>
+            <span id="quickquote-action-state">{quickQuoteLoading ? 'Loading configured state' : launchStatus}</span>
+          </div>
+          <button type="button" className="quote-intake-primary" disabled={launchDisabled || quickQuoteLoading} aria-describedby="quickquote-action-state" onClick={() => void launch()}>{flowState.kind === 'submitting' ? 'Saving...' : 'Save selection'}</button>
+        </div>
+
+        {selectedProduct ? <ProductDetailPanel product={selectedProduct} values={values} metadata={runtimeMetadata} onBack={() => setSelectedProduct(null)} onUse={applyProduct} /> : null}
+        {renderModeSwitchDialog()}
+      </section>
+    );
   }
 
   return (
@@ -887,6 +1211,10 @@ export function PipelineIntakePage({
           <p className="eyebrow">Pipeline</p>
           {showProgressiveCompatibility ? <h1>New prospect intake</h1> : null}
           <h2 id="intake-heading">Intake</h2>
+          <nav className="quickquote-mode-toggle" aria-label="Quote mode">
+            <a href="/quote/start" onClick={(event) => requestModeSwitch(event, 'quickquote')}>QuickQuote</a>
+            <a href="/pipeline" aria-current="page" onClick={(event) => requestModeSwitch(event, 'pipeline')}>Pipeline</a>
+          </nav>
         </div>
         <div className="quote-pipeline-topbar__stats" aria-label="Pipeline status">
           <MetricCard label="Products" value={String(filteredProducts.length)} detail={`${tenantHomePreviewProducts.length} total`} />
@@ -972,7 +1300,7 @@ export function PipelineIntakePage({
               {priceScenarioColumns.map((column) => <div key={column.key} role="columnheader">{column.label}</div>)}
             </div>
             {filteredProducts.map((product) => (
-              <ProductResultRow key={product.productCode} product={product} values={values} columns={priceScenarioColumns} selected={selectedProduct?.productCode === product.productCode} actionState={rowActionState?.productCode === product.productCode ? rowActionState : null} onSelect={selectProduct} onApply={applyProduct} onAction={requestRowAction} />
+              <ProductResultRow key={product.productCode} product={product} values={values} columns={priceScenarioColumns} missingFields={missingRequiredFields} metadata={runtimeMetadata} selected={selectedProduct?.productCode === product.productCode} actionState={rowActionState?.productCode === product.productCode ? rowActionState : null} onSelect={selectProduct} onApply={applyProduct} onAction={requestRowAction} />
             ))}
           </div>
         </section>
@@ -986,7 +1314,8 @@ export function PipelineIntakePage({
         </div>
       </form>
 
-      {selectedProduct ? <ProductDetailPanel product={selectedProduct} values={values} onBack={() => setSelectedProduct(null)} onUse={applyProduct} /> : null}
+      {selectedProduct ? <ProductDetailPanel product={selectedProduct} values={values} metadata={runtimeMetadata} onBack={() => setSelectedProduct(null)} onUse={applyProduct} /> : null}
+      {renderModeSwitchDialog()}
       {saveOpen ? (
         <div className="quote-pipeline-modal" role="dialog" aria-modal="true" aria-labelledby="save-pipeline-heading">
           <div className="quote-pipeline-modal__card">
@@ -1025,6 +1354,11 @@ export function PipelineIntakePage({
       ) : null}
     </section>
   );
+}
+
+function routeForMode(mode: QuoteMode, product?: AuthorizedProduct | null) {
+  if (mode === 'quickquote') return '/quote/start';
+  return product?.productCode ? `/pipeline?product=${encodeURIComponent(product.productCode)}` : '/pipeline';
 }
 
 function FilterCard({ title, eyebrow, badge, children }: { title: string; eyebrow: string; badge: string; children: ReactNode }) {
@@ -1325,29 +1659,38 @@ function RangeFilter({ label, min, max, onMin, onMax, prefix = '', suffix = '' }
   );
 }
 
-function ProductResultRow({ product, values, columns, selected, actionState, onSelect, onApply, onAction }: { product: AuthorizedProduct; values: BorrowerIntake; columns: PriceScenarioColumn[]; selected: boolean; actionState: ProductRowActionState | null; onSelect: (product: AuthorizedProduct) => void; onApply: (product: AuthorizedProduct) => void; onAction: (product: AuthorizedProduct, action: ProductRowAction) => void }) {
+function ProductResultRow({ product, values, columns, missingFields, metadata, selected, comparisonSelected = false, actionState, onSelect, onApply, onAction, onCompare }: { product: AuthorizedProduct; values: BorrowerIntake; columns: PriceScenarioColumn[]; missingFields: PipelineRequiredField[]; metadata: ScenarioIntakeMetadata | null; selected: boolean; comparisonSelected?: boolean; actionState: ProductRowActionState | null; onSelect: (product: AuthorizedProduct) => void; onApply: (product: AuthorizedProduct) => void; onAction: (product: AuthorizedProduct, action: ProductRowAction) => void; onCompare?: (product: AuthorizedProduct) => void }) {
   return (
-    <div className="quote-product-row" role="row" aria-label={`${product.productName} ${product.status}`} aria-selected={selected} data-selected={selected} data-product-status={product.status.toLowerCase()} onClick={() => onSelect(product)} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(product); } }}>
-      {columns.map((column) => <div key={column.key} className={`quote-product-cell quote-product-cell--${column.key}`} role="cell" data-column={column.label}>{renderProductColumn(column.key, product, values, onApply, onAction, actionState, column)}</div>)}
+    <div className="quote-product-row" role="row" aria-label={`${product.productName} ${product.status}`} aria-selected={selected} data-selected={selected} data-comparison-selected={comparisonSelected} data-product-status={product.status.toLowerCase()} onClick={() => onSelect(product)} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(product); } }}>
+      {columns.map((column) => <div key={column.key} className={`quote-product-cell quote-product-cell--${column.key}`} role="cell" data-column={column.label}>{renderProductColumn(column.key, product, values, missingFields, metadata, onApply, onAction, actionState, column, comparisonSelected, onCompare)}</div>)}
     </div>
   );
 }
 
-function renderProductColumn(key: PriceScenarioColumnKey, product: AuthorizedProduct, values: BorrowerIntake, onApply: (product: AuthorizedProduct) => void, onAction: (product: AuthorizedProduct, action: ProductRowAction) => void, actionState: ProductRowActionState | null, column?: PriceScenarioColumn) {
+function renderProductColumn(key: PriceScenarioColumnKey, product: AuthorizedProduct, values: BorrowerIntake, missingFields: PipelineRequiredField[], metadata: ScenarioIntakeMetadata | null, onApply: (product: AuthorizedProduct) => void, onAction: (product: AuthorizedProduct, action: ProductRowAction) => void, actionState: ProductRowActionState | null, column?: PriceScenarioColumn, comparisonSelected = false, onCompare?: (product: AuthorizedProduct) => void) {
   if (key === 'product') return <div className="quote-product-cell__product"><strong>{product.productName}</strong><span>{product.productCode}</span><small>{productAvailabilityLabel(product)}</small></div>;
   if (key === 'investor') return product.investorCode;
   if (key === 'status') return <span className={`quote-status-pill quote-status-pill--${statusClass(product.status)}`}>{product.status}</span>;
-  if (key === 'adjustedRate') return rateIndicator(product);
+  if (key === 'adjustedRate') return <QuoteEconomicsMetric label={column?.label ?? 'Rate'} value={rateOutputValue(product, values)} missingLabel={column?.missingLabel ?? 'Rate output pending'} missingFields={missingFields} traceRef={metricTraceRef(product, 'rate', metadata)} />;
   if (key === 'lockPeriod') return values.desiredRateLockPeriod || values.requestedLockPeriodDays || termFromProductName(product.productName);
-  if (key === 'adjustedPrice') return values.secondaryAdjustment || '—';
-  if (key === 'payment') return values.totalLiabilityMonthlyPayment || '—';
+  if (key === 'adjustedPrice') return <QuoteEconomicsMetric label={column?.label ?? 'Price'} value={firstConfiguredOutput(values, ['calc@adjusted-price', 'adjustedPrice', 'secondaryAdjustment'])} missingLabel={column?.missingLabel ?? 'Price output pending'} missingFields={missingFields} traceRef={metricTraceRef(product, 'price', metadata)} />;
+  if (key === 'payment') return <QuoteEconomicsMetric label={column?.label ?? 'Payment'} value={firstConfiguredOutput(values, ['calc@payment', 'monthlyPayment', 'totalLiabilityMonthlyPayment'])} missingLabel={column?.missingLabel ?? 'Payment output pending'} missingFields={missingFields} traceRef={metricTraceRef(product, 'payment', metadata)} />;
   if (key === 'pitiaItia') return values.additionalMonthlyHousingExpenses || values.additionalAnnualHousingExpenses || '—';
-  if (key === 'dscr') return values.estimatedDSCR || '—';
+  if (key === 'dscr') return <QuoteEconomicsMetric label={column?.label ?? 'DSCR'} value={firstConfiguredOutput(values, ['calc@dscr', 'estimatedDSCR'])} missingLabel={column?.missingLabel ?? 'DSCR output pending'} missingFields={missingFields} traceRef={metricTraceRef(product, 'dscr', metadata)} />;
+  if (key === 'fees') return <QuoteEconomicsMetric label={column?.label ?? 'Fees'} value={firstConfiguredOutput(values, ['calc@fees', 'calc@fee-summary', 'feeSummary', 'feesSummary', 'pricingFeeSummary'])} missingLabel={column?.missingLabel ?? 'Fee output pending'} missingFields={missingFields} traceRef={metricTraceRef(product, 'fees', metadata)} />;
+  if (key === 'llpa') return <QuoteEconomicsMetric label={column?.label ?? 'LLPA'} value={firstConfiguredOutput(values, ['calc@llpa', 'calc@llpa-summary', 'llpaSummary', 'pricingLlpaSummary'])} missingLabel={column?.missingLabel ?? 'LLPA output pending'} missingFields={missingFields} traceRef={metricTraceRef(product, 'llpa', metadata)} />;
+  if (key === 'audit') return (
+    <div className="quote-product-audit-cell">
+      <span>{productEligibilityReviewLabel(product)}</span>
+      <button type="button" onClick={(event) => { event.stopPropagation(); onAction(product, 'status'); }}>Audit</button>
+    </div>
+  );
   if (key === 'ltv') return values.loanToValue || '—';
   if (key === 'fico') return values.decisionCreditScore || '—';
   if (column?.fieldId || isCalculationFieldId(key)) return renderCalculationOutput(column ?? { key, label: friendlyLabel(key), fieldId: key }, values);
   return (
     <div className="quote-product-row-actions" aria-label={`${product.productName} row actions`}>
+      {onCompare ? <button type="button" onClick={(event) => { event.stopPropagation(); onCompare(product); }}>{comparisonSelected ? 'Remove from comparison' : 'Compare'}</button> : null}
       <button type="button" onClick={(event) => { event.stopPropagation(); onApply(product); }} disabled={!isProductEligible(product)}>Use</button>
       <button type="button" onClick={(event) => { event.stopPropagation(); onAction(product, 'refresh'); }} disabled={!isProductEligible(product)}>Refresh</button>
       <button type="button" onClick={(event) => { event.stopPropagation(); onAction(product, 'lock'); }} disabled={!isProductEligible(product)}>Request lock</button>
@@ -1360,6 +1703,157 @@ function renderProductColumn(key: PriceScenarioColumnKey, product: AuthorizedPro
       ) : null}
     </div>
   );
+}
+
+function QuickQuoteComparisonPanel({ products, selectedProductCode, values, missingFields, metadata, onSelectProduct, onUseProduct, onSaveDraft }: { products: AuthorizedProduct[]; selectedProductCode: string; values: BorrowerIntake; missingFields: PipelineRequiredField[]; metadata: ScenarioIntakeMetadata | null; onSelectProduct: (product: AuthorizedProduct) => void; onUseProduct: (product: AuthorizedProduct) => void; onSaveDraft: () => void }) {
+  const metricRows: Array<{ key: string; label: string }> = [
+    { key: 'product', label: 'Product' },
+    { key: 'eligibility', label: 'Eligibility' },
+    { key: 'rate', label: 'Rate' },
+    { key: 'price', label: 'Price' },
+    { key: 'payment', label: 'Payment' },
+    { key: 'dscr', label: 'DSCR' },
+    { key: 'fees', label: 'Fees' },
+    { key: 'llpa', label: 'LLPA' },
+    { key: 'assumptions', label: 'Assumptions' },
+    { key: 'trace', label: 'Trace availability' },
+    { key: 'actions', label: 'Actions' },
+  ];
+  const comparisonGridStyle = { '--quickquote-comparison-columns': `minmax(9rem, 12rem) repeat(${Math.max(products.length, 1)}, minmax(13rem, 1fr))` } as CSSProperties;
+
+  return (
+    <section className="quickquote-comparison" aria-labelledby="quickquote-comparison-heading">
+      <div className="quickquote-comparison__header">
+        <div>
+          <span className="eyebrow">Comparison</span>
+          <h3 id="quickquote-comparison-heading">Responsive quote comparison</h3>
+          <p>Selected products stay aligned by metric; missing, not-applicable, assumption, and trace states remain visible.</p>
+        </div>
+        <button type="button" className="quote-intake-primary" onClick={onSaveDraft} aria-label="Save Draft from comparison">Save Draft from comparison</button>
+      </div>
+      {products.length < 2 ? <p className="quickquote-comparison__notice" role="status">Select at least two products to compare side by side.</p> : null}
+      <div className="quickquote-comparison__viewport" aria-label="Swipe QuickQuote comparison products">
+        <div className="quickquote-comparison__grid" role="table" aria-label="QuickQuote product comparison" style={comparisonGridStyle}>
+          <div className="quickquote-comparison__row quickquote-comparison__row--header" role="row">
+            <div className="quickquote-comparison__metric-label" role="columnheader">Metric</div>
+            {products.map((product) => <div key={product.productCode} role="columnheader" data-selected={selectedProductCode === product.productCode}>{product.productName}</div>)}
+          </div>
+          {metricRows.map((metric) => (
+            <div key={metric.key} className="quickquote-comparison__row" role="row" aria-label={`${metric.label} comparison`}>
+              <div className="quickquote-comparison__metric-label" role="rowheader">{metric.label}</div>
+              {products.map((product) => <div key={`${product.productCode}-${metric.key}`} className="quickquote-comparison__cell" role="cell">{renderComparisonCell(metric.key, product, values, missingFields, metadata, onSelectProduct, onUseProduct)}</div>)}
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function renderComparisonCell(metric: string, product: AuthorizedProduct, values: BorrowerIntake, missingFields: PipelineRequiredField[], metadata: ScenarioIntakeMetadata | null, onSelectProduct: (product: AuthorizedProduct) => void, onUseProduct: (product: AuthorizedProduct) => void) {
+  if (metric === 'product') return <div className="quote-product-cell__product"><strong>{product.productName}</strong><span>{product.productCode}</span></div>;
+  if (metric === 'eligibility') return <div className="quickquote-comparison__state"><span className={`quote-status-pill quote-status-pill--${statusClass(product.status)}`}>{product.status}</span><small>{productEligibilityReviewLabel(product)} · {productUnavailableReason(product)}</small></div>;
+  if (metric === 'rate') return <QuoteEconomicsMetric label="Rate" value={rateOutputValue(product, values)} missingLabel="Rate output pending" missingFields={missingFields} traceRef={metricTraceRef(product, 'rate', metadata)} />;
+  if (metric === 'price') return <QuoteEconomicsMetric label="Price" value={firstConfiguredOutput(values, ['calc@adjusted-price', 'adjustedPrice', 'secondaryAdjustment'])} missingLabel="Price output pending" missingFields={missingFields} traceRef={metricTraceRef(product, 'price', metadata)} />;
+  if (metric === 'payment') return <QuoteEconomicsMetric label="Payment" value={firstConfiguredOutput(values, ['calc@payment', 'monthlyPayment', 'totalLiabilityMonthlyPayment'])} missingLabel="Payment output pending" missingFields={missingFields} traceRef={metricTraceRef(product, 'payment', metadata)} />;
+  if (metric === 'dscr') return <QuoteEconomicsMetric label="DSCR" value={firstConfiguredOutput(values, ['calc@dscr', 'estimatedDSCR'])} missingLabel="DSCR output pending" missingFields={missingFields} traceRef={metricTraceRef(product, 'dscr', metadata)} />;
+  if (metric === 'fees') return <QuoteEconomicsMetric label="Fees" value={firstConfiguredOutput(values, ['calc@fees', 'calc@fee-summary', 'feeSummary', 'feesSummary', 'pricingFeeSummary'])} missingLabel="Fee output pending" missingFields={missingFields} traceRef={metricTraceRef(product, 'fees', metadata)} />;
+  if (metric === 'llpa') return <QuoteEconomicsMetric label="LLPA" value={firstConfiguredOutput(values, ['calc@llpa', 'calc@llpa-summary', 'llpaSummary', 'pricingLlpaSummary'])} missingLabel="LLPA output pending" missingFields={missingFields} traceRef={metricTraceRef(product, 'llpa', metadata)} />;
+  if (metric === 'assumptions') return <QuickQuoteComparisonAssumptions product={product} fields={missingFields} metadata={metadata} />;
+  if (metric === 'trace') return <QuickQuoteComparisonTrace product={product} metadata={metadata} />;
+  return <div className="quickquote-comparison__actions"><button type="button" onClick={() => onSelectProduct(product)}>Select</button><button type="button" onClick={() => onUseProduct(product)} disabled={!isProductEligible(product)}>Use product</button></div>;
+}
+
+function QuickQuoteComparisonAssumptions({ product, fields, metadata }: { product: AuthorizedProduct; fields: PipelineRequiredField[]; metadata: ScenarioIntakeMetadata | null }) {
+  const assumptions = [
+    ...fields.slice(0, 3).map((field) => `${field.label} missing`),
+    ...(metadata?.validationIssues?.slice(0, 2).map((issue) => `${issue.code}: ${issue.message}`) ?? []),
+    ...(metadata?.dependencyStatus && metadata.dependencyStatus !== 'READY' ? [`Dependency status: ${metadata.dependencyStatus}`] : []),
+    ...(isProductEligible(product) ? [] : [productUnavailableReason(product)]),
+  ];
+  if (assumptions.length === 0) return <span className="quickquote-comparison__empty-state">No visible assumptions from configured intake state.</span>;
+  return <ul className="quickquote-comparison__assumptions">{assumptions.map((assumption) => <li key={assumption}>{assumption}</li>)}</ul>;
+}
+
+function QuickQuoteComparisonTrace({ product, metadata }: { product: AuthorizedProduct; metadata: ScenarioIntakeMetadata | null }) {
+  const refs = productAuditTraceRefs(product, metadata);
+  if (refs.length === 0) return <span className="quickquote-comparison__empty-state">Trace unavailable</span>;
+  return <ul className="quickquote-comparison__traces">{refs.slice(0, 4).map((ref) => <li key={`${ref.label}-${ref.value}`}><a href={traceHref(ref)}>{ref.label}: {ref.value}</a></li>)}</ul>;
+}
+
+function QuoteEconomicsMetric({ label, value, missingLabel, missingFields, traceRef }: { label: string; value: string; missingLabel: string; missingFields: PipelineRequiredField[]; traceRef: ProductMetricTraceRef | null }) {
+  const metricValue = value.trim();
+  const state = notApplicableValue(metricValue) ? 'not-applicable' : metricValue ? 'ready' : 'missing';
+  const displayValue = state === 'ready' ? metricValue : state === 'not-applicable' ? 'N/A' : missingFields.length > 0 ? 'Missing data' : missingLabel;
+  const detail = state === 'ready' ? 'Configured output' : state === 'not-applicable' ? 'Not applicable' : missingFactsSummary(missingFields, missingLabel);
+  return (
+    <div className="quote-economics-metric" data-metric-state={state} aria-label={`${label}: ${displayValue}`}>
+      <strong>{displayValue}</strong>
+      <small>{detail}</small>
+      {traceRef ? <a href={traceHref(traceRef)} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>{traceRef.label} trace</a> : null}
+    </div>
+  );
+}
+
+function notApplicableValue(value: string) {
+  return ['n/a', 'na', 'not applicable', 'not-applicable'].includes(value.trim().toLowerCase());
+}
+
+function missingFactsSummary(fields: PipelineRequiredField[], fallback: string) {
+  if (fields.length === 0) return fallback;
+  const labels = fields.slice(0, 2).map((field) => field.label).join(', ');
+  return `Needs ${labels}${fields.length > 2 ? ` +${fields.length - 2}` : ''}`;
+}
+
+function firstConfiguredOutput(values: BorrowerIntake, fieldIds: string[]) {
+  const outputValues = values as Record<string, string | undefined>;
+  for (const fieldId of fieldIds) {
+    const value = outputValues[fieldId]?.trim();
+    if (value) return value;
+  }
+  return '';
+}
+
+function rateOutputValue(product: AuthorizedProduct, values: BorrowerIntake) {
+  return firstConfiguredOutput(values, ['calc@final-interest-rate', 'calc@rate']) || rateValueFromProduct(product);
+}
+
+function rateValueFromProduct(product: AuthorizedProduct) {
+  if (product.baseRateMin != null && product.baseRateMax != null) return `${product.baseRateMin.toFixed(3)}% - ${product.baseRateMax.toFixed(3)}%`;
+  if (product.baseRateMin != null || product.baseRateMax != null) return `${(product.baseRateMin ?? product.baseRateMax)?.toFixed(3)}%`;
+  if (product.rateSpread != null) return `${product.rateSpread.toFixed(2)} spread`;
+  return '';
+}
+
+function metricTraceRef(product: AuthorizedProduct, metric: QuoteEconomicsMetricKey, metadata: ScenarioIntakeMetadata | null) {
+  const refs = productAuditTraceRefs(product, metadata);
+  const normalizedMetric = normalized(metric);
+  const labelByMetric: Record<QuoteEconomicsMetricKey, string> = {
+    rate: 'Pricing',
+    price: 'Pricing',
+    payment: 'Calculation',
+    dscr: 'Calculation',
+    fees: 'Fee',
+    llpa: 'LLPA',
+  };
+  return refs.find((ref) => ref.metric && normalized(ref.metric) === normalizedMetric)
+    ?? refs.find((ref) => !ref.metric && ref.label === labelByMetric[metric])
+    ?? null;
+}
+
+function traceAnchorId(value: string) {
+  return `quote-trace-${value.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'pending'}`;
+}
+
+function traceHref(ref: ProductMetricTraceRef) {
+  const target = (ref.href || ref.value).trim();
+  if (target.startsWith('#') || target.startsWith('/')) return target;
+  return `#${traceAnchorId(ref.value)}`;
+}
+
+function traceTargetId(ref: ProductMetricTraceRef) {
+  const href = traceHref(ref);
+  return href.startsWith('#') ? href.slice(1) : traceAnchorId(ref.value);
 }
 
 function renderCalculationOutput(column: PriceScenarioColumn, values: BorrowerIntake) {
@@ -1381,7 +1875,8 @@ const calculationOutputAliases: Record<string, keyof BorrowerIntake> = {
   calcltv: 'loanToValue',
 };
 
-function ProductDetailPanel({ product, values, onBack, onUse }: { product: AuthorizedProduct; values: BorrowerIntake; onBack: () => void; onUse: (product: AuthorizedProduct) => void }) {
+function ProductDetailPanel({ product, values, metadata, onBack, onUse }: { product: AuthorizedProduct; values: BorrowerIntake; metadata: ScenarioIntakeMetadata | null; onBack: () => void; onUse: (product: AuthorizedProduct) => void }) {
+  const traceRefs = productAuditTraceRefs(product, metadata);
   return (
     <aside className="quote-product-detail-panel" aria-label="Product detail">
       <div className="quote-product-detail-panel__header">
@@ -1406,6 +1901,15 @@ function ProductDetailPanel({ product, values, onBack, onUse }: { product: Autho
         <div><dt>Occupancy</dt><dd>{values.occupancyType || '—'}</dd></div>
         <div><dt>Updated</dt><dd>{product.lastUpdated}</dd></div>
       </dl>
+      <section className="quote-product-audit-details" aria-label="Row audit details">
+        <h4>Audit details</h4>
+        <p>{productUnavailableReason(product)}</p>
+        <dl>
+          {traceRefs.length > 0
+            ? traceRefs.map((ref) => <div key={`${ref.label}:${ref.value}`} id={traceTargetId(ref)}><dt>{ref.label}</dt><dd>{ref.value}</dd></div>)
+            : <div data-trace-state="unavailable"><dt>Trace evidence</dt><dd>Trace evidence unavailable from configured/API product data.</dd></div>}
+        </dl>
+      </section>
       <button type="button" className="quote-intake-primary" onClick={() => onUse(product)}>Use Product</button>
     </aside>
   );
@@ -1423,6 +1927,323 @@ function quoteLaunchSelectedProduct(product: AuthorizedProduct): QuoteLaunchSele
 
 function MetricCard({ label, value, detail, tone }: { label: string; value: string; detail: string; tone?: 'ready' | 'attention' }) {
   return <div className="quote-metric-card" data-tone={tone}><span>{label}</span><strong>{value}</strong><small>{detail}</small></div>;
+}
+
+function QuickQuoteStateCard({ title, state, detail }: { title: string; state: 'loading' | 'ready' | 'empty'; detail: string }) {
+  return <div className="quickquote-state-card" data-state={state} role="status" aria-label={`${title} ${state}`}><span>{title}</span><strong>{state === 'loading' ? 'Loading' : state === 'empty' ? 'Empty' : 'Ready'}</strong><small>{detail}</small></div>;
+}
+
+function QuickQuotePrefillGroups({ sections, values, mappings, overrides }: { sections: Array<{ step: QuoteIntakeStepDefinition; fields: ScenarioIntakeField[] }>; values: BorrowerIntake; mappings: QuickQuoteLosPrefillMapping[]; overrides: Record<string, LosOverrideAudit> }) {
+  const visible = sections.filter(({ fields }) => fields.length > 0).slice(0, 6);
+  if (visible.length === 0) return <div className="quickquote-prefill-empty" role="status">No mapped prefill groups.</div>;
+  return (
+    <ol className="quickquote-prefill-groups" aria-label="Mapped prefill groups">
+      {visible.map(({ step, fields }) => {
+        const mapped = fields.filter((field) => (values[field.fieldId] ?? '').trim()).length;
+        return (
+          <li key={step.section}>
+            <div className="quickquote-prefill-group__summary"><span>{step.label}</span><strong>{mapped}/{fields.length}</strong></div>
+            <ul className="quickquote-prefill-metadata" aria-label={`${step.label} LOS field mapping metadata`}>
+              {fields.slice(0, 4).map((field) => {
+                const mapping = mappingForField(mappings, field);
+                const override = overrides[String(field.fieldId)];
+                return (
+                  <li key={String(field.fieldId)} data-value-state={override ? 'overridden' : (values[field.fieldId] ?? '').trim() ? 'prefilled' : 'missing'}>
+                    <span>{field.label}</span>
+                    <small>{prefillValueState(field, values, override)} · Source {mapping.sourceSystem} · LOS {mapping.losFieldLabel} ({mapping.losFieldKey}) · WCPE {mapping.wcpeField} · Confidence {mapping.confidence} · Last sync {mapping.lastSync}</small>
+                  </li>
+                );
+              })}
+            </ul>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function QuickQuoteMissingFacts({ fields, mappings, values }: { fields: PipelineRequiredField[]; mappings: QuickQuoteLosPrefillMapping[]; values: BorrowerIntake }) {
+  const missingMapped = mappings.filter((mapping) => !(values[mapping.fieldId] ?? '').trim());
+  const grouped = missingPrefillGroups(fields, missingMapped);
+  return (
+    <section className="quickquote-missing-facts" aria-labelledby="quickquote-missing-heading">
+      <h3 id="quickquote-missing-heading">Missing facts</h3>
+      <div className="quickquote-reason-chips" aria-label="Missing fact reason categories">
+        <span>Required to price: {grouped.requiredToPrice.length}</span>
+        <span>Improves pricing: {grouped.improvesPricing.length}</span>
+        <span>Before lock: {grouped.requiredBeforeLock.length}</span>
+      </div>
+      {missingMapped.length > 0 ? <ul>{missingMapped.slice(0, 8).map((mapping) => <li key={String(mapping.fieldId)}>{mapping.wcpeField} <small>{missingCategoryLabel(mapping.missingCategory)}</small></li>)}</ul> : fields.length > 0 ? <ul>{fields.slice(0, 6).map((field) => <li key={String(field.fieldId)}>{field.label}</li>)}</ul> : <span className="quickquote-ready-chip">No required pricing facts missing</span>}
+    </section>
+  );
+}
+
+function QuickQuoteMappedFieldOverrides({ fields, values, errors, dropdownOptions, dropdownLoading, onChange }: { fields: ScenarioIntakeField[]; values: BorrowerIntake; errors: IntakeFieldErrors; dropdownOptions: DropdownOptionsByField; dropdownLoading: boolean; onChange: (field: keyof BorrowerIntake, value: string) => void }) {
+  if (fields.length === 0) return null;
+  return (
+    <section className="quickquote-mapped-overrides" aria-labelledby="quickquote-mapped-overrides-heading">
+      <h3 id="quickquote-mapped-overrides-heading">Mapped LOS values</h3>
+      <p>Edit a prefilled LOS value here to preserve override context on draft save and pricing launch.</p>
+      <StepFields fields={fields} intake={values} errors={errors} onChange={onChange} dropdownOptions={dropdownOptions} dropdownLoading={dropdownLoading} />
+    </section>
+  );
+}
+
+function QuickQuoteOverrideAudit({ overrides }: { overrides: LosOverrideAudit[] }) {
+  return (
+    <section className="quickquote-override-audit" aria-labelledby="quickquote-override-heading">
+      <h3 id="quickquote-override-heading">Override audit</h3>
+      {overrides.length === 0 ? <p>No LOS values overridden in this draft.</p> : (
+        <ul>
+          {overrides.map((override) => (
+            <li key={String(override.fieldId)}>
+              <strong>{override.label}</strong>
+              <span>Original LOS value: {override.originalValue}</span>
+              <span>Override value: {override.overrideValue}</span>
+              <span>User/time: {override.actor} at {override.changedAt}</span>
+              <small>Affected output traces: {override.affectedOutputTraces.join(', ')}</small>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function quickQuotePrefillMappingsForMetadata(metadata: ScenarioIntakeMetadata | null, sections: Array<{ step: QuoteIntakeStepDefinition; fields: ScenarioIntakeField[] }>): QuickQuoteLosPrefillMapping[] {
+  const configured = metadata?.quickQuoteState?.losPrefillMappings?.filter((mapping) => mapping.fieldId in initialQuoteIntake) ?? [];
+  if (configured.length > 0) return configured;
+  const requiredFacts = new Set(metadata?.quickQuoteState?.quoteServiceRequiredFacts ?? []);
+  return sections.flatMap(({ fields }) => fields.map((field) => deriveLosPrefillMapping(field, requiredFacts)));
+}
+
+function deriveLosPrefillMapping(field: ScenarioIntakeField, requiredFacts: Set<string>): QuickQuoteLosPrefillMapping {
+  const source = field.sourceRef || 'LOS adapter mapping pending';
+  const [sourceSystem, sourceKey] = source.includes(':') ? source.split(/:(.+)/, 2) : ['LOS adapter', source];
+  return {
+    fieldId: field.fieldId,
+    sourceSystem,
+    losFieldLabel: field.label,
+    losFieldKey: sourceKey || String(field.fieldId),
+    wcpeField: String(field.fieldId),
+    confidence: field.decisionQuality === 'VERIFIED' ? 'VERIFIED' : field.decisionQuality === 'CONFLICTING' ? 'CONFLICTING' : source.toLowerCase().includes('loanpass') ? 'MAPPED' : 'UNKNOWN',
+    lastSync: 'pending configured LOS adapter',
+    missingCategory: requiredFacts.has(String(field.fieldId)) || field.required ? 'required_to_price' : isLockRelatedField(field) ? 'required_before_lock' : 'improves_pricing',
+    scope: 'tenant/channel scoped by metadata response',
+    authorizationState: 'uses tenant quote-runs metadata endpoint',
+    affectedOutputTraces: [`quote-fact:${String(field.fieldId)}`, `prefill-source:${source}`],
+  };
+}
+
+function mappingForField(mappings: QuickQuoteLosPrefillMapping[], field: ScenarioIntakeField) {
+  return mappings.find((mapping) => mapping.fieldId === field.fieldId) ?? deriveLosPrefillMapping(field, new Set());
+}
+
+function prefillValueState(field: ScenarioIntakeField, values: BorrowerIntake, override?: LosOverrideAudit) {
+  if (override) return 'Overridden';
+  return (values[field.fieldId] ?? '').trim() ? 'Prefilled' : 'Missing';
+}
+
+function missingPrefillGroups(_fields: PipelineRequiredField[], mappings: QuickQuoteLosPrefillMapping[]) {
+  return {
+    requiredToPrice: mappings.filter((mapping) => mapping.missingCategory === 'required_to_price'),
+    improvesPricing: mappings.filter((mapping) => mapping.missingCategory === 'improves_pricing'),
+    requiredBeforeLock: mappings.filter((mapping) => mapping.missingCategory === 'required_before_lock'),
+  };
+}
+
+function missingCategoryLabel(category: QuickQuoteLosPrefillMapping['missingCategory']) {
+  if (category === 'required_to_price') return 'required to price';
+  if (category === 'required_before_lock') return 'required before lock';
+  return 'improves pricing';
+}
+
+function isLockRelatedField(field: ScenarioIntakeField) {
+  return /lock/i.test(`${String(field.fieldId)} ${field.label} ${field.sourceRef}`);
+}
+
+function withLosOverrideContext(values: BorrowerIntake, overrides: LosOverrideAudit[]): BorrowerIntake {
+  if (overrides.length === 0) return values;
+  return {
+    ...values,
+    clientContext: JSON.stringify({
+      ...(safeJsonRecord(values.clientContext)),
+      losOverrides: overrides,
+    }),
+  };
+}
+
+function withQuickQuoteDraftContext(values: BorrowerIntake, options: {
+  sourceMode: QuoteMode;
+  selectedProduct: AuthorizedProduct | null;
+  comparedProducts: AuthorizedProduct[];
+  productFilters: ProductFilterState;
+  missingFields: PipelineRequiredField[];
+  metadata: ScenarioIntakeMetadata | null;
+  losPrefillMappings: QuickQuoteLosPrefillMapping[];
+}): BorrowerIntake {
+  const quickQuoteDraft: QuickQuoteDraftContext = {
+    storyId: 'PII-77-S07',
+    sourceMode: options.sourceMode,
+    selectedProduct: options.selectedProduct ? quoteLaunchSelectedProduct(options.selectedProduct) : undefined,
+    comparedProducts: options.comparedProducts.map(quoteLaunchSelectedProduct),
+    productFilters: options.productFilters,
+    quoteOutputs: quoteOutputSnapshot(options.comparedProducts, values, options.missingFields, options.metadata),
+    visibleAssumptions: quickQuoteDraftAssumptions(options.missingFields, options.metadata),
+    traceReferences: selectedOrComparedTraceRefs(options.selectedProduct, options.comparedProducts, options.metadata),
+    losPrefillMappings: options.losPrefillMappings,
+    savedAt: new Date().toISOString(),
+  };
+  return {
+    ...values,
+    clientContext: JSON.stringify({
+      ...(safeJsonRecord(values.clientContext)),
+      quickQuoteDraft,
+    }),
+  };
+}
+
+function quickQuoteDraftContextFromClientContext(clientContext: string | undefined): QuickQuoteDraftContext | null {
+  const candidate = safeJsonRecord(clientContext).quickQuoteDraft;
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null;
+  const record = candidate as Partial<QuickQuoteDraftContext>;
+  if (record.storyId !== 'PII-77-S07') return null;
+  return {
+    storyId: 'PII-77-S07',
+    sourceMode: record.sourceMode === 'pipeline' ? 'pipeline' : 'quickquote',
+    selectedProduct: record.selectedProduct,
+    comparedProducts: Array.isArray(record.comparedProducts) ? record.comparedProducts : [],
+    productFilters: isProductFilterState(record.productFilters) ? record.productFilters : emptyProductFilters,
+    quoteOutputs: Array.isArray(record.quoteOutputs) ? record.quoteOutputs : [],
+    visibleAssumptions: Array.isArray(record.visibleAssumptions) ? record.visibleAssumptions.filter((value): value is string => typeof value === 'string') : [],
+    traceReferences: Array.isArray(record.traceReferences) ? record.traceReferences.filter(isProductMetricTraceRef) : [],
+    losPrefillMappings: Array.isArray(record.losPrefillMappings) ? record.losPrefillMappings.filter(isQuickQuoteLosPrefillMapping) : [],
+    savedAt: typeof record.savedAt === 'string' ? record.savedAt : '',
+  };
+}
+
+function quoteOutputSnapshot(products: AuthorizedProduct[], values: BorrowerIntake, missingFields: PipelineRequiredField[], metadata: ScenarioIntakeMetadata | null): QuickQuoteDraftContext['quoteOutputs'] {
+  const metrics: QuoteEconomicsMetricKey[] = ['rate', 'price', 'payment', 'dscr', 'fees', 'llpa'];
+  return products.flatMap((product) => metrics.map((metric) => {
+    const value = quoteOutputMetricValue(product, values, metric);
+    return {
+      productCode: product.productCode,
+      metric,
+      value,
+      state: value ? 'ready' as const : missingFields.length > 0 ? 'assumption' as const : 'missing' as const,
+      traceRef: metricTraceRef(product, metric, metadata) ?? undefined,
+    };
+  }));
+}
+
+function quoteOutputMetricValue(product: AuthorizedProduct, values: BorrowerIntake, metric: QuoteEconomicsMetricKey) {
+  if (metric === 'rate') return rateOutputValue(product, values);
+  if (metric === 'price') return firstConfiguredOutput(values, ['calc@adjusted-price', 'adjustedPrice', 'secondaryAdjustment']);
+  if (metric === 'payment') return firstConfiguredOutput(values, ['calc@payment', 'monthlyPayment', 'totalLiabilityMonthlyPayment']);
+  if (metric === 'dscr') return firstConfiguredOutput(values, ['calc@dscr', 'estimatedDSCR']);
+  if (metric === 'fees') return firstConfiguredOutput(values, ['calc@fees', 'calc@fee-summary', 'feeSummary', 'feesSummary', 'pricingFeeSummary']);
+  return firstConfiguredOutput(values, ['calc@llpa', 'calc@llpa-summary', 'llpaSummary', 'pricingLlpaSummary']);
+}
+
+function quickQuoteDraftAssumptions(missingFields: PipelineRequiredField[], metadata: ScenarioIntakeMetadata | null) {
+  const missing = missingFields.map((field) => `${field.label} (${String(field.fieldId)}) must be confirmed before lock or final submission.`);
+  const blockers = metadata?.validationIssues?.map((issue) => `${issue.code}: ${issue.message}`) ?? [];
+  const dependency = metadata?.dependencyStatus && metadata.dependencyStatus !== 'READY' ? [`Dependency status: ${metadata.dependencyStatus}`] : [];
+  const assumptions = [...missing, ...blockers, ...dependency];
+  return assumptions.length > 0 ? assumptions : ['QuickQuote outputs remain preliminary until configured pricing, eligibility, and lock evidence confirms them.'];
+}
+
+function selectedOrComparedTraceRefs(selectedProduct: AuthorizedProduct | null, comparedProducts: AuthorizedProduct[], metadata: ScenarioIntakeMetadata | null) {
+  const products = selectedProduct ? [selectedProduct, ...comparedProducts.filter((product) => product.productCode !== selectedProduct.productCode)] : comparedProducts;
+  const seen = new Set<string>();
+  return products.flatMap((product) => productAuditTraceRefs(product, metadata)).filter((ref) => {
+    const key = `${ref.label}:${ref.value}:${ref.href ?? ''}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function isProductFilterState(value: unknown): value is ProductFilterState {
+  const candidate = value as Partial<Record<keyof ProductFilterState, unknown>>;
+  return Boolean(candidate) && Object.keys(emptyProductFilters).every((key) => typeof candidate[key as keyof ProductFilterState] === 'string');
+}
+
+function isProductMetricTraceRef(value: unknown): value is ProductMetricTraceRef {
+  const candidate = value as Partial<ProductMetricTraceRef>;
+  return typeof candidate?.label === 'string' && typeof candidate.value === 'string';
+}
+
+function isQuickQuoteLosPrefillMapping(value: unknown): value is QuickQuoteLosPrefillMapping {
+  const candidate = value as Partial<QuickQuoteLosPrefillMapping>;
+  return typeof candidate?.fieldId === 'string' && typeof candidate.sourceSystem === 'string' && typeof candidate.wcpeField === 'string';
+}
+
+function overrideAuditFromClientContext(clientContext: string | undefined): Record<string, LosOverrideAudit> {
+  const parsed = safeJsonRecord(clientContext);
+  const overrides = Array.isArray(parsed.losOverrides) ? parsed.losOverrides : [];
+  return overrides.filter(isLosOverrideAudit).reduce((acc, override) => ({ ...acc, [String(override.fieldId)]: override }), {} as Record<string, LosOverrideAudit>);
+}
+
+function safeJsonRecord(value: string | undefined): Record<string, unknown> {
+  if (typeof value !== 'string') return {};
+  if (!value.trim()) return {};
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function isLosOverrideAudit(value: unknown): value is LosOverrideAudit {
+  const candidate = value as Partial<LosOverrideAudit>;
+  return typeof candidate?.fieldId === 'string' && typeof candidate.label === 'string' && typeof candidate.originalValue === 'string' && typeof candidate.overrideValue === 'string' && typeof candidate.changedAt === 'string' && Array.isArray(candidate.affectedOutputTraces);
+}
+
+function QuickQuoteSkeleton() {
+  return (
+    <div className="quickquote-skeleton" role="status" aria-label="QuickQuote loading state">
+      <span>Prefill mapping</span>
+      <span>Pricing progress</span>
+      <span>Product grid</span>
+    </div>
+  );
+}
+
+function QuickQuoteEmptyState({ missingFacts }: { missingFacts: number }) {
+  return (
+    <section className="quickquote-empty-state" role="status" aria-label="QuickQuote empty state">
+      <h3>No products displayed</h3>
+      <div className="quickquote-reason-chips" aria-label="Empty state reason categories">
+        <span>Configured products: none</span>
+        <span>Missing facts: {missingFacts}</span>
+        <span>Pricing outputs: unavailable</span>
+      </div>
+      <div className="quickquote-empty-state__actions" aria-label="Empty state next actions">
+        <button type="button">Review missing facts</button>
+        <button type="button">Save Draft</button>
+      </div>
+    </section>
+  );
+}
+
+function productStatusCounts(products: AuthorizedProduct[]) {
+  return products.reduce((acc, product) => {
+    if (product.status === 'ACTIVE') acc.eligible += 1;
+    else if (product.status === 'PENDING') acc.refer += 1;
+    else acc.ineligible += 1;
+    return acc;
+  }, { eligible: 0, refer: 0, ineligible: 0 });
+}
+
+function borrowerContextLabel(values: BorrowerIntake) {
+  const joined = [values.borrowerFirstName, values.borrowerLastName].filter((value) => value.trim()).join(' ').trim();
+  return joined || values.borrowerName || 'Borrower pending';
+}
+
+function loanContextLabel(values: BorrowerIntake) {
+  return values.loanNumber || values.externalLoanId || values.scenarioName || 'Loan pending';
 }
 
 function pickFields(values: BorrowerIntake, fields: ScenarioIntakeField[]) {
@@ -1654,7 +2475,7 @@ function focusModalIdentifierField(action: 'save' | 'retrieve', field: SaveRetri
 }
 
 function isBorrowerIntakeField(fieldId: string): fieldId is keyof BorrowerIntake {
-  return (loanPassQuoteIntakeFields as string[]).includes(fieldId);
+  return [...loanPassQuoteIntakeFields].includes(fieldId as typeof loanPassQuoteIntakeFields[number]);
 }
 
 function hasAnyValue(values: BorrowerIntake) {
@@ -1779,11 +2600,112 @@ function isProductEligible(product: AuthorizedProduct) {
 }
 
 function productAvailabilityLabel(product: AuthorizedProduct) {
-  return isProductEligible(product) ? 'Eligible product' : `${friendlyLabel(product.status)} product - row actions unavailable`;
+  if (isProductEligible(product)) return 'Eligible product';
+  if (product.status === 'PENDING') return 'Referable product - review reason available';
+  return `${friendlyLabel(product.status)} product - row actions unavailable`;
 }
 
 function productUnavailableReason(product: AuthorizedProduct) {
-  return isProductEligible(product) ? 'Product is eligible for row actions.' : `Product status is ${friendlyLabel(product.status)}.`;
+  if (isProductEligible(product)) return 'Product is eligible for row actions.';
+  if (product.status === 'PENDING') return 'Referable or missing-data state is visible; configured pricing may allow review when service contracts return approval details.';
+  return 'Ineligible status remains visible for audit; configured eligibility-service reason text is required before policy detail can be shown.';
+}
+
+function productEligibilityReviewLabel(product: AuthorizedProduct) {
+  if (isProductEligible(product)) return 'Eligible';
+  if (product.status === 'PENDING') return 'Referable';
+  return 'Ineligible';
+}
+
+function productAuditTraceRefs(product: AuthorizedProduct, metadata?: ScenarioIntakeMetadata | null): ProductMetricTraceRef[] {
+  const productRecord = product as AuthorizedProduct & Record<string, unknown>;
+  const metadataSettings = (metadata?.settings ?? {}) as Record<string, unknown>;
+  const sources = [
+    productRecord.traceReferences,
+    productRecord.traceRefs,
+    productRecord.auditTraceRefs,
+    productRecord.auditEvidenceRefs,
+    productRecord.traceEvidence,
+    metadataSettings.quoteEconomicsTraceRefs,
+    metadataSettings.productTraceRefs,
+    metadataSettings.auditTraceRefs,
+  ];
+  const seen = new Set<string>();
+  const refs = sources
+    .flatMap((source) => normalizeTraceRefs(source, product.productCode))
+    .filter((ref) => {
+      const key = `${ref.label}:${ref.value}:${ref.href ?? ''}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  return refs.length > 0 ? refs : fallbackProductAuditTraceRefs(product);
+}
+
+function fallbackProductAuditTraceRefs(product: AuthorizedProduct): ProductMetricTraceRef[] {
+  const productCode = product.productCode;
+  return [
+    { label: 'Eligibility', value: `eligibility-service:${productCode}:eligibility-state-pending`, metric: 'eligibility' },
+    { label: 'Calculation', value: `pricing-service:${productCode}:calculation-output-pending`, metric: 'calculation' },
+    { label: 'Adjustment', value: `adjustment-service:${productCode}:adjustment-output-pending`, metric: 'adjustment' },
+    { label: 'Margin', value: `margin-service:${productCode}:margin-output-pending`, metric: 'margin' },
+    { label: 'Pricing', value: `pricing-service:${productCode}:rate-output-pending`, metric: 'pricing' },
+  ];
+}
+
+function normalizeTraceRefs(source: unknown, productCode: string): ProductMetricTraceRef[] {
+  if (!source) return [];
+  if (Array.isArray(source)) return source.flatMap((entry) => normalizeTraceRefEntry(entry, productCode));
+  if (typeof source === 'object') {
+    return Object.entries(source as Record<string, unknown>).flatMap(([key, entry]) => normalizeTraceRefEntry(entry, productCode, key));
+  }
+  return normalizeTraceRefEntry(source, productCode);
+}
+
+function normalizeTraceRefEntry(entry: unknown, productCode: string, fallbackLabel?: string): ProductMetricTraceRef[] {
+  if (typeof entry === 'string') {
+    const value = entry.trim();
+    return value ? [{ label: traceLabel(fallbackLabel), value, metric: fallbackLabel ?? undefined }] : [];
+  }
+  if (!entry || typeof entry !== 'object') return [];
+  const record = entry as Record<string, unknown>;
+  const configuredProductCode = stringSetting(record.productCode) ?? stringSetting(record.product) ?? stringSetting(record.productRef);
+  if (configuredProductCode && configuredProductCode !== productCode) return [];
+  const value = stringSetting(record.value)
+    ?? stringSetting(record.ref)
+    ?? stringSetting(record.traceRef)
+    ?? stringSetting(record.traceId)
+    ?? stringSetting(record.id);
+  if (!value) return [];
+  const metric = stringSetting(record.metric) ?? stringSetting(record.kind) ?? stringSetting(record.type) ?? fallbackLabel;
+  const label = stringSetting(record.label) ?? labelForTraceMetric(metric);
+  const href = stringSetting(record.href) ?? stringSetting(record.route) ?? stringSetting(record.path);
+  return [{ label, value, metric: metric ?? undefined, href: href ?? undefined }];
+}
+
+function labelForTraceMetric(metric: string | null | undefined) {
+  if (!metric) return 'Trace';
+  const normalizedMetric = normalized(metric);
+  const labels: Record<string, string> = {
+    rate: 'Pricing',
+    price: 'Pricing',
+    pricing: 'Pricing',
+    adjustedrate: 'Pricing',
+    adjustedprice: 'Pricing',
+    payment: 'Calculation',
+    dscr: 'Calculation',
+    calculation: 'Calculation',
+    fees: 'Fee',
+    fee: 'Fee',
+    llpa: 'LLPA',
+    margin: 'Margin',
+    eligibility: 'Eligibility',
+  };
+  return labels[normalizedMetric] ?? friendlyLabel(metric);
+}
+
+function traceLabel(label: string | null | undefined) {
+  return labelForTraceMetric(label ?? 'Trace');
 }
 
 function actionLabel(action: ProductRowAction) {
@@ -1795,17 +2717,18 @@ function actionLabel(action: ProductRowAction) {
 function lockFieldBindingsForMetadata(metadata: ScenarioIntakeMetadata | null, values: BorrowerIntake): LockFieldBinding[] {
   const settings = metadata?.settings?.lockingFields;
   if (!settings) return [];
-  const fieldIds = [
-    ['Request date', stringSetting(settings.requestDateFieldId) ?? stringSetting(settings.lockRequestDateFieldId)],
-    ['Expiration date', stringSetting(settings.expirationDateFieldId) ?? stringSetting(settings.lockExpirationDateFieldId)],
-    ['Extension', stringSetting(settings.extensionFieldId) ?? stringSetting(settings.extensionDaysFieldId) ?? stringSetting(settings.primaryExtensionFieldId)],
-  ] as const;
-  return fieldIds
-    .filter((entry): entry is readonly [string, string] => Boolean(entry[1]))
-    .map(([label, configuredFieldId]) => {
-      const borrowerField = borrowerFieldForConfiguredId(configuredFieldId);
-      return { label, configuredFieldId, value: borrowerField ? values[borrowerField] : '' };
-    });
+  const toUndef = (v: string | null): string | undefined => (v === null ? undefined : v);
+  const fieldIds: [string, string | undefined][] = [
+    ['Request date', toUndef(stringSetting(settings.requestDateFieldId) ?? stringSetting(settings.lockRequestDateFieldId))],
+    ['Expiration date', toUndef(stringSetting(settings.expirationDateFieldId) ?? stringSetting(settings.lockExpirationDateFieldId))],
+    ['Extension', toUndef(stringSetting(settings.extensionFieldId) ?? stringSetting(settings.extensionDaysFieldId) ?? stringSetting(settings.primaryExtensionFieldId))],
+  ];
+  const filtered = fieldIds
+    .filter((entry): entry is [string, string] => Boolean(entry[1]));
+  return filtered.map(([label, configuredFieldId]) => {
+    const borrowerField = borrowerFieldForConfiguredId(configuredFieldId);
+    return { label, configuredFieldId, value: borrowerField ? values[borrowerField] : '' };
+  });
 }
 
 function autoConfirmationApprovalForMetadata(metadata: ScenarioIntakeMetadata | null) {
@@ -1868,7 +2791,7 @@ function priceScenarioColumnsForMetadata(metadata: ReturnType<typeof normalizeMe
   return ensureActionColumn(ordered.map(({ key, label, fieldId, missingLabel, blockedLabel }) => ({ key, label, fieldId, missingLabel, blockedLabel })));
 }
 
-function normalizeConfiguredColumn(entry: string | { key?: string; fieldId?: string; label?: string; hidden?: boolean; visible?: boolean; order?: number; missingLabel?: string; blockedLabel?: string }, index: number, metadata?: ReturnType<typeof normalizeMetadataState>['metadata']): (PriceScenarioColumn & { order: number }) | null {
+function normalizeConfiguredColumn(entry: string | { key?: string; fieldId?: string; label?: string; hidden?: boolean; visible?: boolean; order?: number; missingLabel?: string; blockedLabel?: string }, index: number, metadata: ReturnType<typeof normalizeMetadataState>['metadata']): (PriceScenarioColumn & { order: number }) | null {
   const rawKey = typeof entry === 'string' ? entry : entry.key ?? entry.fieldId ?? '';
   const key = normalizedColumnKey(rawKey);
   if (!key) return null;

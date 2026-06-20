@@ -29,9 +29,10 @@ export async function createDraftScenario(
 ): Promise<DraftScenario> {
   const response = await fetchImpl(`/api/v1/tenants/${encodeURIComponent(tenantId)}/scenarios`, {
     method: 'POST',
-    headers: jsonHeaders('create', data),
+    headers: jsonHeaders(tenantId, 'create', data),
     body: JSON.stringify({ status: 'DRAFT_INCOMPLETE', data, initialFacts: data, externalLoanId: data.loanNumber }),
   });
+  if (response.status === 401 || response.status === 403) throw new Error('Draft scenario access denied.');
   if (response.status === 404) throw new Error('Draft scenario creation endpoint is unavailable.');
   if (response.status >= 500) throw new Error('Draft scenario creation is temporarily unavailable.');
   return normalizeDraft(await response.json(), 1);
@@ -47,9 +48,10 @@ export async function updateDraftScenario(
 ): Promise<DraftScenario> {
   const response = await fetchImpl(`/api/v1/tenants/${encodeURIComponent(tenantId)}/scenarios/${encodeURIComponent(scenarioId)}/${encodeURIComponent(section)}`, {
     method: 'PATCH',
-    headers: jsonHeaders('update', { scenarioId, section, version }),
+    headers: jsonHeaders(tenantId, 'update', { scenarioId, section, version }),
     body: JSON.stringify({ scenarioVersion: version, section, data }),
   });
+  if (response.status === 401 || response.status === 403) throw new Error('Draft scenario access denied.');
   if (response.status === 404) throw new Error('Saved draft scenario could not be found.');
   if (response.status === 409) throw new Error('Draft scenario version conflict. Reload the draft before continuing.');
   if (response.status >= 500) throw new Error('Draft scenario update is temporarily unavailable.');
@@ -66,8 +68,10 @@ export async function getDraftScenario(
     headers: {
       Accept: 'application/json',
       'X-Ui-Trace-Id': quoteIntakeTraceId,
+      'X-Tenant-Context': tenantId,
     },
   });
+  if (response.status === 401 || response.status === 403) throw new Error('Draft scenario access denied.');
   if (response.status === 404) throw new Error('Saved draft scenario could not be found.');
   if (response.status >= 500) throw new Error('Draft scenario resume is temporarily unavailable.');
   return normalizeDraft(await response.json(), 1, scenarioIdOrLookup);
@@ -87,8 +91,10 @@ async function getDraftScenarioByLookup(
     headers: {
       Accept: 'application/json',
       'X-Ui-Trace-Id': quoteIntakeTraceId,
+      'X-Tenant-Context': tenantId,
     },
   });
+  if (response.status === 401 || response.status === 403) throw new Error('Draft scenario access denied.');
   if (response.status === 404) throw new Error('No saved pipeline found.');
   if (response.status >= 500) throw new Error('Draft scenario lookup is temporarily unavailable.');
   const payload = await response.json();
@@ -106,9 +112,10 @@ export async function validateDraftSection(
 ): Promise<IntakeValidation> {
   const response = await fetchImpl(`/api/v1/tenants/${encodeURIComponent(tenantId)}/scenarios/${encodeURIComponent(scenarioId)}/${encodeURIComponent(section)}/validate`, {
     method: 'POST',
-    headers: jsonHeaders(),
+    headers: jsonHeaders(tenantId),
     body: JSON.stringify({ scenarioVersion: version }),
   });
+  if (response.status === 401 || response.status === 403) throw new Error('Draft scenario access denied.');
   if (response.status === 404) return { passed: true, status: 'PASSED', message: 'Server validation endpoint is not configured for this local preview.', blockers: {} };
   if (response.status >= 500) throw new Error('Draft scenario validation is temporarily unavailable.');
   return (await response.json()) as IntakeValidation;
@@ -136,11 +143,12 @@ export function loadDraftBackup(scenarioId?: string): DraftBackup | null {
   }
 }
 
-function jsonHeaders(action = 'draft', seed?: unknown) {
+function jsonHeaders(tenantId: string, action = 'draft', seed?: unknown) {
   return {
     Accept: 'application/json',
     'Content-Type': 'application/json',
     'X-Ui-Trace-Id': quoteIntakeTraceId,
+    'X-Tenant-Context': tenantId,
     'X-Correlation-Id': quoteIntakeTraceId,
     'Idempotency-Key': `${quoteIntakeTraceId}-${action}-${hashSeed(seed)}`,
   };

@@ -25,6 +25,7 @@ class PricingBffUiFallbackAdapter {
   private final Map<String, ClientSettingsView> clientSettingsByTenant = new ConcurrentHashMap<>();
   private final Map<String, NotificationSettingsView> notificationSettingsByTenant = new ConcurrentHashMap<>();
   private final Map<String, PricingAccessSettingsView> pricingAccessSettingsByTenant = new ConcurrentHashMap<>();
+  private final Map<String, Map<String, DraftScenarioView>> draftScenariosByTenant = new ConcurrentHashMap<>();
 
   @GetMapping("/api/ui/health")
   UiHealth health(@RequestHeader(value = "X-Correlation-Id", required = false) String correlationId) {
@@ -326,6 +327,82 @@ class PricingBffUiFallbackAdapter {
     return ResponseEntity.status(HttpStatus.CREATED).body(view);
   }
 
+  ResponseEntity<?> createDraftScenario(String tenantId, String tenantContext, String uiTraceId,
+      DraftScenarioRequest request) {
+    ResponseEntity<Map<String, String>> denied = denyCrossTenantDraftAccess(tenantId, tenantContext, uiTraceId);
+    if (denied != null) return denied;
+    String tenantKey = normalizedTenantKey(tenantId);
+    String traceId = normalizeTrace(uiTraceId);
+    Map<String, Object> data = safeObjectMap(request == null ? null : request.data());
+    Map<String, Object> initialFacts = safeObjectMap(request == null ? null : request.initialFacts());
+    String externalLoanId = normalizedRaw(request == null ? null : request.externalLoanId());
+    if (externalLoanId.isBlank()) externalLoanId = normalizedRaw(data.get("loanNumber"));
+    String scenarioId = "draft-" + tenantKey + "-" + Integer.toUnsignedString((tenantKey + "|" + externalLoanId + "|" + draftScenarios(tenantKey).size()).hashCode(), 36);
+    DraftScenarioView draft = new DraftScenarioView(scenarioId, 1,
+        normalizedRaw(request == null ? null : request.status()).isBlank() ? "DRAFT_INCOMPLETE" : normalizedRaw(request.status()),
+        data, initialFacts.isEmpty() ? data : initialFacts, data, externalLoanId, traceId,
+        List.of("QuickQuotePipelineDraftCreated", "TenantScopedDraftStored"));
+    draftScenarios(tenantKey).put(scenarioId, draft);
+    return ResponseEntity.status(HttpStatus.CREATED).body(draft);
+  }
+
+  ResponseEntity<?> updateDraftScenario(String tenantId, String scenarioId, String section, String tenantContext,
+      String uiTraceId, DraftScenarioRequest request) {
+    ResponseEntity<Map<String, String>> denied = denyCrossTenantDraftAccess(tenantId, tenantContext, uiTraceId);
+    if (denied != null) return denied;
+    String tenantKey = normalizedTenantKey(tenantId);
+    String traceId = normalizeTrace(uiTraceId);
+    DraftScenarioView existing = draftScenarios(tenantKey).get(scenarioId);
+    if (existing == null) return ResponseEntity.notFound().build();
+    int expectedVersion = request == null || request.scenarioVersion() == null ? existing.scenarioVersion() : request.scenarioVersion();
+    if (expectedVersion != existing.scenarioVersion()) {
+      return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("status", "VERSION_CONFLICT", "message", "Draft scenario version conflict.", "uiTraceId", traceId));
+    }
+    Map<String, Object> data = new LinkedHashMap<>(existing.data());
+    data.putAll(safeObjectMap(request == null ? null : request.data()));
+    DraftScenarioView updated = new DraftScenarioView(existing.scenarioId(), existing.scenarioVersion() + 1,
+        existing.status(), data, existing.initialFacts(), data, existing.externalLoanId(), traceId,
+        List.of("QuickQuotePipelineDraftUpdated", "DraftSectionStored:" + normalizedRaw(section)));
+    draftScenarios(tenantKey).put(scenarioId, updated);
+    return ResponseEntity.ok(updated);
+  }
+
+  ResponseEntity<?> getDraftScenario(String tenantId, String scenarioId, String tenantContext, String uiTraceId) {
+    ResponseEntity<Map<String, String>> denied = denyCrossTenantDraftAccess(tenantId, tenantContext, uiTraceId);
+    if (denied != null) return denied;
+    DraftScenarioView draft = draftScenarios(normalizedTenantKey(tenantId)).get(scenarioId);
+    if (draft == null) return ResponseEntity.notFound().build();
+    return ResponseEntity.ok(draft.withTrace(normalizeTrace(uiTraceId)));
+  }
+
+  ResponseEntity<?> findDraftScenarios(String tenantId, String tenantContext, String uiTraceId,
+      String borrowerLastName, String loanNumber, String status) {
+    ResponseEntity<Map<String, String>> denied = denyCrossTenantDraftAccess(tenantId, tenantContext, uiTraceId);
+    if (denied != null) return denied;
+    String normalizedBorrower = normalizedRaw(borrowerLastName);
+    String normalizedLoan = normalizedRaw(loanNumber);
+    String normalizedStatus = normalizedRaw(status);
+    List<DraftScenarioView> matches = draftScenarios(normalizedTenantKey(tenantId)).values().stream()
+        .filter(draft -> normalizedStatus.isBlank() || normalizedStatus.equals(normalizedRaw(draft.status())))
+        .filter(draft -> normalizedBorrower.isBlank() || normalizedBorrower.equals(normalizedRaw(draft.intake().get("borrowerLastName"))))
+        .filter(draft -> normalizedLoan.isBlank() || normalizedLoan.equals(normalizedRaw(draft.intake().get("loanNumber"))))
+        .map(draft -> draft.withTrace(normalizeTrace(uiTraceId)))
+        .toList();
+    if (matches.isEmpty()) return ResponseEntity.notFound().build();
+    return ResponseEntity.ok(Map.of("records", matches));
+  }
+
+  private Map<String, DraftScenarioView> draftScenarios(String tenantKey) {
+    return draftScenariosByTenant.computeIfAbsent(tenantKey, ignored -> new ConcurrentHashMap<>());
+  }
+
+  private ResponseEntity<Map<String, String>> denyCrossTenantDraftAccess(String tenantId, String tenantContext, String uiTraceId) {
+    String requested = normalizedTenantKey(tenantId);
+    String presented = normalizedTenantKey(tenantContext);
+    if (presented.isBlank() || requested.equals(presented)) return null;
+    return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("status", "DENIED", "message", "Draft scenario access denied.", "uiTraceId", normalizeTrace(uiTraceId)));
+  }
+
   ProductCatalogManagerView productCatalogManager(String tenantContext, String uiTraceId) {
     String tenant = tenantContext == null || tenantContext.isBlank() ? "ui-preview-tenant" : tenantContext;
     String traceId = uiTraceId == null || uiTraceId.isBlank() ? "catalog-manager-local-trace" : uiTraceId;
@@ -482,7 +559,17 @@ class PricingBffUiFallbackAdapter {
                 "desiredAmortizationType", "numberOfUnits"),
             List.of("creditApplicationFields", "quoteAddressDTO", "catalog-enum-variants"),
             List.of("loanpass-enum-mapping", "catalog-service-contract", "lock-period-catalog"),
-            "LoanPASS field mapping, catalog enum variants, and lock-period configuration are required for full quote launch."));
+            "LoanPASS field mapping, catalog enum variants, and lock-period configuration are required for full quote launch.",
+            List.of(
+                new LosPrefillMapping("borrowerLastName", "LoanPASS", "Borrower last name", "quoteBorrowerInfo.borrowerLastName", "borrowerLastName", "MAPPED", "pending configured LOS adapter", "required_to_price", "tenant:" + tenantId + ";channel:configured-metadata", "tenant quote-runs metadata endpoint", List.of("quote-fact:borrowerLastName", "eligibility:borrower-context")),
+                new LosPrefillMapping("loanNumber", "LoanPASS", "Loan number", "quoteBorrowerInfo.loanNumber", "loanNumber", "MAPPED", "pending configured LOS adapter", "required_to_price", "tenant:" + tenantId + ";channel:configured-metadata", "tenant quote-runs metadata endpoint", List.of("quote-fact:loanNumber", "pricing:quote-run-identity")),
+                new LosPrefillMapping("decisionCreditScore", "LoanPASS", "Credit score", "creditScore", "decisionCreditScore", "MAPPED", "pending configured LOS adapter", "improves_pricing", "tenant:" + tenantId + ";channel:configured-metadata", "tenant quote-runs metadata endpoint", List.of("quote-fact:decisionCreditScore", "eligibility:credit")),
+                new LosPrefillMapping("baseLoanAmount", "LoanPASS", "Requested loan amount", "requestedLoanAmount", "baseLoanAmount", "MAPPED", "pending configured LOS adapter", "required_to_price", "tenant:" + tenantId + ";channel:configured-metadata", "tenant quote-runs metadata endpoint", List.of("quote-fact:baseLoanAmount", "pricing:loan-structure")),
+                new LosPrefillMapping("state", "LoanPASS", "Property state", "quoteAddressDTO.state", "state", "MAPPED", "pending configured LOS adapter", "required_to_price", "tenant:" + tenantId + ";channel:configured-metadata", "tenant quote-runs metadata endpoint", List.of("quote-fact:state", "eligibility:property")),
+                new LosPrefillMapping("zip", "LoanPASS", "Property ZIP", "quoteAddressDTO.zip", "zip", "MAPPED", "pending configured LOS adapter", "required_to_price", "tenant:" + tenantId + ";channel:configured-metadata", "tenant quote-runs metadata endpoint", List.of("quote-fact:zip", "eligibility:property")),
+                new LosPrefillMapping("estimatedDti", "LoanPASS", "Debt-to-income ratio", "debtToIncomeRatio", "estimatedDti", "MAPPED", "pending configured LOS adapter", "improves_pricing", "tenant:" + tenantId + ";channel:configured-metadata", "tenant quote-runs metadata endpoint", List.of("quote-fact:estimatedDti", "pricing:capacity")),
+                new LosPrefillMapping("estimatedDSCR", "LoanPASS", "DSCR", "debtServiceCoverageRatio", "estimatedDSCR", "UNKNOWN", "pending configured LOS adapter", "improves_pricing", "tenant:" + tenantId + ";channel:configured-metadata", "tenant quote-runs metadata endpoint", List.of("quote-fact:estimatedDSCR", "pricing:capacity")),
+                new LosPrefillMapping("mortgageType", "LoanPASS", "Mortgage type", "mortgageType", "mortgageType", "UNKNOWN", "pending configured LOS adapter", "required_before_lock", "tenant:" + tenantId + ";channel:configured-metadata", "tenant quote-runs metadata endpoint", List.of("quote-fact:mortgageType", "lock:product-context")))));
   }
 
   @PostMapping("/api/v1/tenants/{tenantId}/quote-runs/{runId}/intake/validate")
@@ -1806,6 +1893,16 @@ class PricingBffUiFallbackAdapter {
     return value == null ? "" : value.toString().trim();
   }
 
+  private Map<String, Object> safeObjectMap(Map<String, Object> values) {
+    if (values == null || values.isEmpty()) return Map.of();
+    Map<String, Object> safe = new LinkedHashMap<>();
+    values.forEach((key, value) -> {
+      String normalizedKey = normalizedRaw(key);
+      if (!normalizedKey.isBlank()) safe.put(normalizedKey, value);
+    });
+    return safe;
+  }
+
   private List<String> stringList(Object value) {
     if (value instanceof List<?> values) {
       return values.stream().map(this::normalizedRaw).filter(item -> !item.isBlank()).toList();
@@ -2285,6 +2382,18 @@ class PricingBffUiFallbackAdapter {
   record ProductCatalogLifecycle(String state, boolean actionsDisabled, List<String> actions,
       List<String> snapshotRefs, List<String> auditRefs, String blocker) {}
 
+  record DraftScenarioRequest(String status, Map<String, Object> data, Map<String, Object> initialFacts,
+      String externalLoanId, Integer scenarioVersion, String section) {}
+
+  record DraftScenarioView(String scenarioId, int scenarioVersion, String status, Map<String, Object> intake,
+      Map<String, Object> initialFacts, Map<String, Object> data, String externalLoanId, String uiTraceId,
+      List<String> events) {
+    DraftScenarioView withTrace(String traceId) {
+      return new DraftScenarioView(scenarioId, scenarioVersion, status, intake, initialFacts, data, externalLoanId,
+          traceId, events);
+    }
+  }
+
   record IntakeValidation(boolean passed, String status, String message, Map<String, String> blockers) {}
 
   record QuoteRunLaunch(String runId, String status, String nextRoute, IntakeValidation validationSummary, String uiTraceId,
@@ -2303,7 +2412,11 @@ class PricingBffUiFallbackAdapter {
 
   record ProgressiveQuickQuoteState(List<String> minimalFirstStepFields, List<String> progressiveSectionOrder,
       List<String> quoteServiceRequiredFacts, List<String> backendOwnedFactSources, List<String> blockedByContracts,
-      String fallbackReason) {}
+      String fallbackReason, List<LosPrefillMapping> losPrefillMappings) {}
+
+  record LosPrefillMapping(String fieldId, String sourceSystem, String losFieldLabel, String losFieldKey,
+      String wcpeField, String confidence, String lastSync, String missingCategory, String scope,
+      String authorizationState, List<String> affectedOutputTraces) {}
 
   record ScenarioIntakeFieldGroup(String groupId, String label, String helpText, List<ScenarioIntakeField> fields) {}
 
