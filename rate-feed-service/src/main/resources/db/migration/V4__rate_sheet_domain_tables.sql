@@ -46,6 +46,13 @@ create table rate_feed.rate_sheet (
 create unique index rate_sheet_version_unique
   on rate_feed.rate_sheet (tenant_id, investor_id, channel_id, product_code, version);
 
+-- Sheet IDs are generated UUIDs and used as global references by downstream domain tables.
+create unique index rate_sheet_sheet_id_unique
+  on rate_feed.rate_sheet (sheet_id);
+
+create unique index rate_sheet_sheet_id_version_unique
+  on rate_feed.rate_sheet (sheet_id, version);
+
 -- Resolution query index (PII-05 primary path)
 create index rate_sheet_resolve_idx
   on rate_feed.rate_sheet (tenant_id, investor_id, channel_id, product_code)

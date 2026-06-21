@@ -63,10 +63,8 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext:
-        runAsNonRoot: true
-        runAsUser: 999
-        runAsGroup: 999
-        fsGroup: 999
+        runAsUser: 0
+        runAsGroup: 0
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -77,13 +75,14 @@ spec:
           envFrom:
             - secretRef:
                 name: rate-feed-postgres-dev-secret
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: ["ALL"]
+            - name: postgres-run
+              mountPath: /var/run/postgresql
           readinessProbe:
             exec:
               command: ["pg_isready", "-U", "rate_feed_dev"]
@@ -96,10 +95,15 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: true
       volumes:
         - name: data
-          persistentVolumeClaim:
-            claimName: rate-feed-postgres-data
+          emptyDir: {}
+        - name: postgres-run
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -141,8 +145,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: rate-feed-service
-          image: rate-feed-service:0.1.0-local
-          imagePullPolicy: Never
+          image: 192.168.4.102:32061/mortgage-pricing/rate-feed-service:0.1.0-k8s
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
           envFrom:
@@ -163,6 +167,9 @@ spec:
                 secretKeyRef:
                   name: rate-feed-postgres-dev-secret
                   key: POSTGRES_PASSWORD
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
@@ -187,6 +194,9 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

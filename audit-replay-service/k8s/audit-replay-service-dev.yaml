@@ -12,9 +12,12 @@ metadata:
   name: audit-replay-service-config
   namespace: wcpe-dev
 data:
-  SPRING_DATASOURCE_URL: jdbc:postgresql://wcpe-postgres.wcpe-dev.svc.cluster.local:5432/audit_replay
-  SPRING_DATASOURCE_USERNAME: wcpe
-  SPRING_DATASOURCE_PASSWORD: local-dev-password
+  SPRING_DATASOURCE_URL: jdbc:postgresql://catalog-postgres.wcpe-dev.svc.cluster.local:5432/catalog
+  SPRING_DATASOURCE_USERNAME: catalog_app
+  SPRING_DATASOURCE_PASSWORD: catalog_app
+  SPRING_FLYWAY_TABLE: audit_replay_flyway_schema_history
+  SPRING_FLYWAY_VALIDATE_ON_MIGRATE: "false"
+  SPRING_FLYWAY_BASELINE_ON_MIGRATE: "true"
   SPRING_PROFILES_ACTIVE: dev
   SERVER_PORT: "8086"
   MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: "true"
@@ -50,14 +53,23 @@ spec:
           type: RuntimeDefault
       containers:
         - name: audit-replay-service
-          image: audit-replay-service:0.1.0-local
-          imagePullPolicy: Never
+          image: 192.168.4.102:32061/mortgage-pricing/audit-replay-service:0.1.0-k8s
+          imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8086
           envFrom:
             - configMapRef:
                 name: audit-replay-service-config
+          env:
+            - name: JAVA_TOOL_OPTIONS
+              value: >-
+                -Dspring.flyway.table=audit_replay_flyway_schema_history
+                -Dspring.flyway.validate-on-migrate=false
+                -Dspring.flyway.baseline-on-migrate=true
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
@@ -82,6 +94,9 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

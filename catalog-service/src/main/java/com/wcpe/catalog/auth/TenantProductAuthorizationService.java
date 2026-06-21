@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.Function;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -23,6 +24,7 @@ public class TenantProductAuthorizationService {
     private final Function<UUID, List<TenantProductAuthorization>> loader;
     private final ApplicationEventPublisher events;
 
+    @Autowired
     public TenantProductAuthorizationService(JdbcTemplate jdbc, ApplicationEventPublisher events) {
         this(jdbc, Caffeine.newBuilder().expireAfterWrite(AUTH_CACHE_TTL).build(), null, events);
     }

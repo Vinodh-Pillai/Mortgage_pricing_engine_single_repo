@@ -12,6 +12,7 @@ data:
   SPRING_DATASOURCE_URL: jdbc:postgresql://catalog-postgres.wcpe-dev.svc.cluster.local:5432/catalog
   SPRING_DATASOURCE_USERNAME: catalog_app
   SERVER_PORT: "8083"
+  SPRING_MAIN_ALLOW_BEAN_DEFINITION_OVERRIDING: "true"
 ---
 apiVersion: apps/v1
 kind: Deployment

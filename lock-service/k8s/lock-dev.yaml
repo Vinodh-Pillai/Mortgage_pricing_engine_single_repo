@@ -52,6 +52,9 @@ spec:
           envFrom:
             - configMapRef:
                 name: lock-service-config
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
@@ -76,6 +79,9 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

@@ -127,6 +127,9 @@ spec:
                 secretKeyRef:
                   name: catalog-db-secret
                   key: POSTGRES_PASSWORD
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
@@ -146,6 +149,9 @@ spec:
             limits:
               cpu: 500m
               memory: 768Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

@@ -16,6 +16,7 @@ data:
   SERVER_PORT: "8080"
   MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info,prometheus
   WCPE_SYNTHETIC_ONLY: "true"
+  WCPE_ADJUSTMENT_SERVICE_BASE_URL: http://adjustment-service.wcpe-dev.svc.cluster.local:8080
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -52,6 +53,9 @@ spec:
           envFrom:
             - configMapRef:
                 name: quote-service-config
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
@@ -76,6 +80,9 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
