@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-const email = process.env.E2E_LOGIN_EMAIL || 'loan@example.com';
+const email = process.env.E2E_LOGIN_EMAIL || 'admin@wcpe.demo';
 const password = process.env.E2E_LOGIN_PASSWORD || 'Password123!';
 
 test.describe('BFF-backed login', () => {
@@ -21,7 +21,7 @@ test.describe('BFF-backed login', () => {
 
     const request = await loginRequest;
     expect(new URL(request.url()).pathname).toBe('/api/auth/login');
-    await expect(page).toHaveURL(/\/pipeline$/);
+    await expect(page).toHaveURL(/\/home$/);
     await expect(page.getByRole('alert')).toHaveCount(0);
   });
 });

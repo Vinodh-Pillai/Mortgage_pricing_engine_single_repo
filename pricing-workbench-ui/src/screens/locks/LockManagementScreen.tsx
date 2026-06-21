@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { MajorFunctionalityPage, type EvidenceCapture, type FunctionalityPageConfig } from '../shared/MajorFunctionalityPage';
 import type { ScreenVisualState } from '../contract/ScreenProps';
 
@@ -44,6 +45,7 @@ const lockConfig: FunctionalityPageConfig<LockRow> = {
   emptyMessage: 'No lock records are available for this workspace.',
   blockedMessage: 'Lock management is blocked until lock-service expiration and delivery references are available.',
   attentionMessage: 'Requested and expiring locks need operations review.',
+  renderSpotlight: (onEvidence) => <LockOperationsSpotlight onEvidence={onEvidence} />,
 };
 
 export function LockManagementScreen({ visualState, onEvidenceCapture }: { visualState?: ScreenVisualState; onEvidenceCapture?: EvidenceCapture }) {
@@ -51,3 +53,30 @@ export function LockManagementScreen({ visualState, onEvidenceCapture }: { visua
 }
 
 export default LockManagementScreen;
+
+function LockOperationsSpotlight({ onEvidence }: { onEvidence: (actionId: string) => void }) {
+  const [notice, setNotice] = useState('');
+
+  function stageAction(actionId: string, message: string) {
+    onEvidence(actionId);
+    setNotice(message);
+  }
+
+  return (
+    <section className="panel" aria-labelledby="lock-ops-spotlight-heading">
+      <div className="panel-heading-row">
+        <div>
+          <p className="eyebrow">Local lock desk fixture</p>
+          <h2 id="lock-ops-spotlight-heading">Lock lifecycle actions</h2>
+        </div>
+      </div>
+      <p className="field-help">These controls stage Sarah loan-officer and operations actions locally. Production lock-service, investor delivery, fee settlement, cutoff calendars, and accounting integrations remain explicitly blocked.</p>
+      <div className="offer-toolbar" aria-label="Local lock lifecycle actions">
+        <button type="button" onClick={() => stageAction('request-lock-local-fixture', 'Local request-lock evidence staged. Production investor submission and compliance disclosure package are required before durable lock creation.')}>Stage Request Lock</button>
+        <button type="button" onClick={() => stageAction('extend-expiring-lock-local-fixture', 'Local lock-extension review staged. Extension days, fees, cutoffs, and investor policy must come from production lock desk integrations.')}>Stage Extension Review</button>
+        <button type="button" onClick={() => stageAction('show-expiry-blockers-local-fixture', 'Expiry blockers shown from local fixture; live investor calendars and status sync are missing production integrations.')}>Show Expiry Blockers</button>
+      </div>
+      {notice ? <div className="banner banner--info" role="status">{notice}</div> : null}
+    </section>
+  );
+}

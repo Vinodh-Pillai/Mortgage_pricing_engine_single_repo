@@ -72,6 +72,20 @@
   z-index: var(--layout-z-sticky);
 }
 
+.layout-header--compact {
+  min-height: 3.35rem;
+  padding-block: 0.4rem;
+}
+
+.layout-header--compact .layout-header__brand-mark {
+  height: 2.25rem;
+  width: 2.25rem;
+}
+
+.layout-header--compact .layout-header__title h1 {
+  font-size: clamp(1rem, 1.4vw, 1.2rem);
+}
+
 .layout-nav-toggle {
   align-items: center;
   backdrop-filter: var(--ds-glass-blur);
@@ -176,6 +190,19 @@
   gap: 0.5rem;
   list-style: none;
   padding: 0;
+}
+
+.layout-breadcrumbs a {
+  border-radius: var(--ds-radius-sm);
+  color: inherit;
+  text-decoration: none;
+}
+
+.layout-breadcrumbs a:hover,
+.layout-breadcrumbs a:focus-visible {
+  color: var(--ds-color-primary);
+  outline: 2px solid color-mix(in srgb, var(--ds-color-primary) 48%, transparent);
+  outline-offset: 0.18rem;
 }
 
 .layout-breadcrumbs li + li::before {
@@ -440,11 +467,6 @@
   }
 }
 
-.layout-shell--workspace .layout-sidebar__mobile-trigger {
-  left: 1rem;
-  top: 4.75rem;
-}
-
 .layout-nav {
   align-self: start;
   backdrop-filter: var(--ds-glass-blur);
@@ -642,8 +664,7 @@
   justify-content: flex-end;
 }
 
-.layout-sidebar__control,
-.layout-sidebar__mobile-trigger {
+.layout-sidebar__control {
   align-items: center;
   backdrop-filter: var(--ds-glass-blur);
   background: color-mix(in srgb, var(--ds-glass-surface) 92%, transparent);
@@ -663,9 +684,7 @@
 }
 
 .layout-sidebar__control:hover,
-.layout-sidebar__control:focus-visible,
-.layout-sidebar__mobile-trigger:hover,
-.layout-sidebar__mobile-trigger:focus-visible {
+.layout-sidebar__control:focus-visible {
   border-color: color-mix(in srgb, var(--ds-color-primary) 62%, var(--ds-glass-border));
   box-shadow: var(--ds-shadow-focus), 0 12px 28px rgb(0 0 0 / 18%);
   outline: 0;
@@ -845,29 +864,6 @@
   width: 36px;
 }
 
-.layout-sidebar__mobile-trigger {
-  box-shadow: var(--ds-shadow-glass-raised);
-  left: 0.75rem;
-  padding: 0;
-  position: fixed;
-  top: 0.72rem;
-  z-index: calc(var(--layout-z-sticky) + 1);
-}
-
-.layout-sidebar__mobile-trigger-icon {
-  display: grid;
-  gap: 0.22rem;
-  width: 1.05rem;
-}
-
-.layout-sidebar__mobile-trigger-icon span {
-  background: currentcolor;
-  border-radius: var(--ds-radius-full);
-  display: block;
-  height: 2px;
-  width: 100%;
-}
-
 .layout-sidebar__empty {
   color: var(--ds-color-text-muted);
   font-weight: 800;
@@ -876,12 +872,12 @@
 
 .layout-content {
   margin-inline: auto;
-  max-width: 1400px;
+  max-width: none;
   min-width: 0;
   outline: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  padding: 1.5rem;
+  padding: clamp(0.85rem, 1.6vw, 1.5rem);
   scroll-behavior: smooth;
   width: 100%;
 }
@@ -902,7 +898,7 @@
   min-height: calc(100vh - 9rem);
   min-width: 0;
   overflow-x: auto;
-  padding: clamp(1.5rem, 3vw, 2.5rem);
+  padding: clamp(1rem, 2vw, 1.6rem);
 }
 
 .layout-content__panel--workspace {
@@ -947,14 +943,14 @@
   }
 
   .layout-content {
-    max-width: 1600px;
-    padding: 2.5rem;
+    max-width: none;
+    padding: 1.75rem;
   }
 }
 
 @media (min-width: 768px) and (max-width: 1199px) {
   .layout-content {
-    padding: 2rem;
+    padding: 1.25rem;
   }
 }
 
@@ -965,7 +961,6 @@
     gap: var(--ds-space-2) var(--ds-space-3);
     min-height: 3.5rem;
     padding-inline: 1rem;
-    padding-left: 4rem;
   }
 
   .layout-header__actions {

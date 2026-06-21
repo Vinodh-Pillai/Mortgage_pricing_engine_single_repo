@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { getCurrentUser, login as loginRequest, logout as logoutRequest, type User, type UserRole } from '../api/auth';
 import { canAccessRoute as personaCanAccessRoute, hasPermission as personaHasPermission, permissionsForRoute, type Permission, type Persona, type PersonaRole } from './personas';
 
@@ -35,6 +35,7 @@ export const rolePermissionMatrix: Record<UserRole, readonly Permission[]> = {
 };
 
 export const ACTIVE_PERSONA_STORAGE_KEY = 'wcpe:activePersona';
+const AUTH_USER_STORAGE_KEY = 'wcpe:authUser';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -69,6 +70,28 @@ function personaFromUser(user: User): Persona {
   };
 }
 
+function readStoredUser(): User | null {
+  if (typeof window === 'undefined') return null;
+  const raw = window.sessionStorage.getItem(AUTH_USER_STORAGE_KEY) ?? window.localStorage.getItem(AUTH_USER_STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as User;
+    return parsed?.id && parsed?.email && parsed?.role ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeUser(user: User | null) {
+  if (typeof window === 'undefined') return;
+  if (!user) {
+    window.sessionStorage.removeItem(AUTH_USER_STORAGE_KEY);
+    window.localStorage.removeItem(AUTH_USER_STORAGE_KEY);
+    return;
+  }
+  window.sessionStorage.setItem(AUTH_USER_STORAGE_KEY, JSON.stringify(user));
+}
+
 function roleHasPermission(role: UserRole, permission: Permission): boolean {
   const permissions = rolePermissionMatrix[role] ?? [];
   if (permissions.includes('*')) return true;
@@ -78,13 +101,16 @@ function roleHasPermission(role: UserRole, permission: Permission): boolean {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(() => readStoredUser());
+  const userRef = useRef<User | null>(user);
   const [isLoading, setIsLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
   const currentPersona = useMemo(() => (user ? personaFromUser(user) : null), [user]);
 
   const applyUser = useCallback((nextUser: User | null) => {
+    userRef.current = nextUser;
+    storeUser(nextUser);
     setUser(nextUser);
     return nextUser;
   }, []);
@@ -99,6 +125,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       emitAuthEvent({ type: 'session-refresh', userId: nextUser.id, allowed: true });
       return nextUser;
     } catch {
+      const currentUser = userRef.current;
+      if (currentUser) return currentUser;
       applyUser(null);
       emitAuthEvent({ type: 'session-refresh', userId: null, allowed: false });
       return null;
@@ -114,8 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (email: string, password: string) => {
     setIsLoading(true);
     try {
-      await loginRequest(email, password);
-      const response = await getCurrentUser();
+      const response = await loginRequest(email, password);
       const nextUser = response.user;
       applyUser(nextUser);
       setAuthError(null);

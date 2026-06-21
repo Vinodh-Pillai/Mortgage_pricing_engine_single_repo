@@ -23,6 +23,7 @@ export function ScenarioAnalysisWorkspaceScreen({ runId, tenantContext }: { runI
   const [requestedValue, setRequestedValue] = useState('');
   const [variantName, setVariantName] = useState('');
   const [selectedVariantId, setSelectedVariantId] = useState('');
+  const [localDraftVariants, setLocalDraftVariants] = useState<ScenarioAnalysisVariant[]>([]);
   const [recalculation, setRecalculation] = useState<ScenarioRecalculationResult | null>(null);
   const [recalculateError, setRecalculateError] = useState('');
   const [workspaceNotice, setWorkspaceNotice] = useState('');
@@ -51,10 +52,11 @@ export function ScenarioAnalysisWorkspaceScreen({ runId, tenantContext }: { runI
     setRecalculateError('');
     setWorkspaceNotice('');
     const selectedDimension = workspaceState.view.dimensions.find((dimension) => dimension.dimensionId === dimensionId);
+    const visibleVariants = [...workspaceState.view.variants, ...localDraftVariants];
     const selectedVariants = scope === 'all'
-      ? workspaceState.view.variants
-      : workspaceState.view.variants.filter((variant) => variant.variantId === selectedVariantId);
-    const variantsForFacts = selectedVariants.length > 0 ? selectedVariants : workspaceState.view.variants;
+      ? visibleVariants
+      : visibleVariants.filter((variant) => variant.variantId === selectedVariantId);
+    const variantsForFacts = selectedVariants.length > 0 ? selectedVariants : visibleVariants;
     const facts = Array.from(new Set([
       ...(selectedDimension?.requiredFacts ?? []),
       ...variantsForFacts.flatMap((variant) => variant.factRefs),
@@ -74,15 +76,45 @@ export function ScenarioAnalysisWorkspaceScreen({ runId, tenantContext }: { runI
 
   function createVariant() {
     const name = variantName.trim();
-    setWorkspaceNotice(name
-      ? `Variant draft "${name}" is staged locally and requires scenario-analysis-service to persist and calculate.`
-      : 'Enter a variant name before staging a draft.');
+    if (!name) {
+      setWorkspaceNotice('Enter a variant name before staging a draft.');
+      return;
+    }
+    const draftId = `local-draft-${slugifyVariantName(name)}-${localDraftVariants.length + 1}`;
+    const draft: ScenarioAnalysisVariant = {
+      variantId: draftId,
+      label: `${name} (local draft)`,
+      status: 'LOCAL_DRAFT_BLOCKED_PENDING_BACKEND',
+      dimensionRefs: dimensionId ? [dimensionId] : [],
+      factRefs: [`local-draft:${draftId}:facts`],
+      guardrailBlockers: [{
+        blockerCode: 'PRODUCTION_INTEGRATION_REQUIRED',
+        severity: 'blocked',
+        reason: 'Local what-if draft is staged in the browser only. scenario-analysis-service must persist the variant and calculate backend result refs.',
+        requiredFacts: ['scenario-analysis-service variant id', 'pricing result refs', 'eligibility guardrail refs'],
+        sourceRef: `scenario-analysis-ui:${draftId}`,
+      }],
+      resultRefs: [],
+    };
+    setLocalDraftVariants((current) => [...current, draft]);
+    setSelectedVariantId(draftId);
+    setVariantName('');
+    setWorkspaceNotice(`Variant draft "${name}" is staged locally and blocked for backend persistence/calculation.`);
   }
 
   function deleteVariant() {
-    setWorkspaceNotice(selectedVariantId
-      ? `Delete requested for ${selectedVariantId}; scenario-analysis-service owns durable variant removal.`
-      : 'Select a variant before requesting deletion.');
+    if (!selectedVariantId) {
+      setWorkspaceNotice('Select a variant before requesting deletion.');
+      return;
+    }
+    const localDraft = localDraftVariants.find((variant) => variant.variantId === selectedVariantId);
+    if (localDraft) {
+      setLocalDraftVariants((current) => current.filter((variant) => variant.variantId !== selectedVariantId));
+      setSelectedVariantId(workspaceState.kind === 'loaded' ? workspaceState.view.variants[0]?.variantId ?? '' : '');
+      setWorkspaceNotice(`Local draft ${selectedVariantId} removed. Durable backend variants still require scenario-analysis-service.`);
+      return;
+    }
+    setWorkspaceNotice(`Delete requested for ${selectedVariantId}; scenario-analysis-service owns durable variant removal.`);
   }
 
   function saveAnalysis() {
@@ -115,6 +147,7 @@ export function ScenarioAnalysisWorkspaceScreen({ runId, tenantContext }: { runI
   }
 
   const view = workspaceState.view;
+  const visibleVariants = [...view.variants, ...localDraftVariants];
 
   return (
     <>
@@ -142,7 +175,7 @@ export function ScenarioAnalysisWorkspaceScreen({ runId, tenantContext }: { runI
           {view.dimensions.map((dimension) => <ScenarioDimensionCard key={dimension.dimensionId} dimension={dimension} />)}
         </div>
         <div className="offer-grid" role="list" aria-label="What-if variants">
-          {view.variants.map((variant) => <ScenarioVariantCard key={variant.variantId} variant={variant} />)}
+          {visibleVariants.map((variant) => <ScenarioVariantCard key={variant.variantId} variant={variant} />)}
         </div>
       </section>
 
@@ -154,10 +187,11 @@ export function ScenarioAnalysisWorkspaceScreen({ runId, tenantContext }: { runI
           <button type="button" onClick={createVariant}>Create Variant</button>
           <label htmlFor="scenario-selected-variant">Selected variant</label>
           <select id="scenario-selected-variant" value={selectedVariantId} onChange={(event) => setSelectedVariantId(event.target.value)}>
-            {view.variants.map((variant) => <option key={variant.variantId} value={variant.variantId}>{variant.label}</option>)}
+            {visibleVariants.map((variant) => <option key={variant.variantId} value={variant.variantId}>{variant.label}</option>)}
           </select>
           <button type="button" onClick={deleteVariant}>Delete Variant</button>
         </div>
+        {localDraftVariants.length > 0 ? <ChipList label="Local what-if drafts blocked for backend persistence" values={localDraftVariants.map((variant) => variant.variantId)} /> : null}
       </section>
 
       <section className="panel" aria-labelledby="scenario-recalculate-heading">
@@ -233,6 +267,11 @@ export function ScenarioAnalysisWorkspaceScreen({ runId, tenantContext }: { runI
       </section>
     </>
   );
+}
+
+function slugifyVariantName(name: string) {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  return slug || 'variant';
 }
 
 function ScenarioDimensionCard({ dimension }: { dimension: ScenarioAnalysisDimension }) {

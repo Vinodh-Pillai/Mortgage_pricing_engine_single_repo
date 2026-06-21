@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { Avatar, roleColorKeyForLabel, roleColors, themeStorageKey } from '../design-system';
 import { useTranslation } from '../lib/i18n';
 
@@ -6,6 +7,9 @@ type HeaderProps = {
   breadcrumb: string;
   notificationCount: number;
   showAuthenticatedChrome?: boolean;
+  showNavigationToggle?: boolean;
+  navigationOpen?: boolean;
+  onNavigationToggle?: () => void;
   onNotificationsToggle: () => void;
   onLogout?: () => void;
   onThemeToggle: () => void;
@@ -13,9 +17,11 @@ type HeaderProps = {
   user: { name: string; role: string; avatar?: string };
 };
 
-export function Header({ breadcrumb, notificationCount, showAuthenticatedChrome = true, onNotificationsToggle, onLogout, onThemeToggle, theme, user }: HeaderProps) {
+export function Header({ breadcrumb, notificationCount, showAuthenticatedChrome = true, showNavigationToggle = false, navigationOpen = false, onNavigationToggle, onNotificationsToggle, onLogout, onThemeToggle, theme, user }: HeaderProps) {
   const { t } = useTranslation('common');
+  const location = useLocation();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [compactHeader, setCompactHeader] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const userMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const userMenuDropdownRef = useRef<HTMLDivElement>(null);
@@ -23,6 +29,13 @@ export function Header({ breadcrumb, notificationCount, showAuthenticatedChrome 
   const roleColor = roleColors[roleColorKey];
   const displayName = user.name?.trim() || t('pricingWorkbench');
   const initials = user.avatar ?? displayName.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
+
+  useEffect(() => {
+    const updateCompactHeader = () => setCompactHeader(window.scrollY > 24);
+    updateCompactHeader();
+    window.addEventListener('scroll', updateCompactHeader, { passive: true });
+    return () => window.removeEventListener('scroll', updateCompactHeader);
+  }, []);
 
   useEffect(() => {
     if (!showAuthenticatedChrome) {
@@ -91,22 +104,34 @@ export function Header({ breadcrumb, notificationCount, showAuthenticatedChrome 
   };
 
   return (
-    <header className="layout-header" role="banner">
+    <header className={`layout-header${compactHeader ? ' layout-header--compact' : ''}`} role="banner">
       <div className="layout-header__brand">
+        {showNavigationToggle ? (
+          <button
+            className="layout-nav-toggle"
+            type="button"
+            aria-label={navigationOpen ? t('closeNavigationMenu') : t('openNavigationMenu')}
+            aria-controls="primary-navigation"
+            aria-expanded={navigationOpen}
+            onClick={onNavigationToggle}
+          >
+            <span className="layout-nav-toggle__glyph" aria-hidden="true"><span /><span /><span /></span>
+          </button>
+        ) : null}
         <div className="layout-header__brand-mark" aria-hidden="true">LW</div>
         <div className="layout-header__title">
           <h1>{t('appTitle')}</h1>
           <nav aria-label={t('navigation:breadcrumb')} className="layout-breadcrumbs">
             <ol>
-              <li>{t('home')}</li>
-              <li aria-current="page">{breadcrumb || t('unknownScreen')}</li>
+              <li><Link to="/home">{t('home')}</Link></li>
+              <li aria-current="page"><Link to={location.pathname}>{breadcrumb || t('unknownScreen')}</Link></li>
             </ol>
           </nav>
         </div>
       </div>
       <div className="layout-header__actions">
         {showAuthenticatedChrome ? (
-          <button className="layout-icon-button" type="button" onClick={handleNotificationsToggle} aria-label={t('notifications', { count: notificationCount })}>
+          <button className="layout-icon-button" type="button" data-layout-notifications-trigger="true" onClick={handleNotificationsToggle} aria-label={t('notifications', { count: notificationCount })}>
             <span aria-hidden="true">🔔</span><span className="layout-header__action-label">{t('alerts')}</span>{notificationCount > 0 ? <span className="layout-badge">{notificationCount}</span> : null}
           </button>
         ) : null}

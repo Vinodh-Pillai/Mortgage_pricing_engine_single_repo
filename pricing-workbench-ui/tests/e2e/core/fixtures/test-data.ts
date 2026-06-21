@@ -294,3 +294,85 @@ export const pii25FunctionalityFixtures = {
   pricing: { runId: 'e2e-run', scenario: 'Baseline scenario' },
   locks: { lockId: 'lock-e2e', borrowerRef: 'Borrower ref B' },
 };
+
+export type SarahMitchellWorkflowName =
+  | 'pipeline-intake'
+  | 'quick-quote'
+  | 'quote-comparison'
+  | 'request-lock'
+  | 'lock-status'
+  | 'lock-expiry'
+  | 'lock-extension'
+  | 'scenario-analysis'
+  | 'what-if';
+
+export const sarahMitchellWorkflowFixtureMetadata = {
+  personaId: 'persona-loan-officer',
+  personaName: 'Sarah Mitchell',
+  classification: 'synthetic-test-only',
+  sourceNote: 'Public local E2E fixture data. Values are deterministic test inputs, not production borrower data or mortgage pricing rules.',
+  missingProductionIntegrations: [
+    'Live LOS/LoanPASS borrower and pipeline import adapters are not production-backed in this fixture.',
+    'Quote comparison responses are served by deterministic BFF/local mocks until full downstream quote-service integration is proven.',
+    'Investor lock submission, lock expiry, and lock extension workflows are fixture-backed; no investor lock desk adapter is invoked.',
+    'Scenario analysis and what-if responses use synthetic expected ranges only and must not be treated as pricing policy.',
+  ],
+  workflows: [
+    'pipeline-intake',
+    'quick-quote',
+    'quote-comparison',
+    'request-lock',
+    'lock-status',
+    'lock-expiry',
+    'lock-extension',
+    'scenario-analysis',
+    'what-if',
+  ] satisfies SarahMitchellWorkflowName[],
+} as const;
+
+export const sarahMitchellWorkflowFixtures = {
+  metadata: sarahMitchellWorkflowFixtureMetadata,
+  pipelineIntake: {
+    ...pii25QuoteIntakeFixture,
+    scenarioName: 'Synthetic Sarah Mitchell Pipeline Intake',
+    externalLoanId: 'SARAH-SYNTH-PIPELINE-001',
+    borrowerName: 'Sarah Synthetic Borrower',
+    contactEmail: 'sarah.synthetic.borrower@example.com',
+  },
+  quickQuote: {
+    quoteIntent: pii25QuoteIntakeFixture.quoteIntent,
+    productPreference: pii25QuoteIntakeFixture.productPreference,
+    minimalFields: ['borrowerName', 'externalLoanId', 'loanPurpose', 'loanAmount', 'purchasePriceOrValue', 'propertyState'],
+    expectedStatus: 'READY_FOR_SYNTHETIC_QUOTE',
+    fixtureOnlyNumericInputs: {
+      creditScore: pii25QuoteIntakeFixture.creditScore,
+      loanAmount: pii25QuoteIntakeFixture.loanAmount,
+      purchasePriceOrValue: pii25QuoteIntakeFixture.purchasePriceOrValue,
+    },
+  },
+  quoteComparison: {
+    runId: 'sarah-synthetic-run-001',
+    optionIds: ['sarah-synthetic-conv-30', 'sarah-synthetic-fha-30'],
+    expectedEvidenceStatus: 'QUOTE_SERVICE_EVIDENCE_VISIBLE',
+    expectedPricingRange: expectedPricingOutcomes.primePurchase,
+    fixtureOnlyNote: 'Expected pricing range is inherited from synthetic primePurchase fixture and is not a production rate rule.',
+  },
+  lockWorkflow: {
+    request: { lockId: 'sarah-synthetic-lock-001', optionId: 'sarah-synthetic-conv-30', lockPeriodDays: 30, requestedBy: 'Sarah Mitchell' },
+    status: { state: 'REQUESTED', evidenceLabel: 'Synthetic lock request accepted by local mock' },
+    expiry: { expiresOn: '2024-02-19', daysUntilExpiry: 30, evidenceLabel: 'Synthetic lock expiry date for deterministic E2E assertions' },
+    extension: { extensionRequestId: 'sarah-synthetic-extension-001', extensionDays: 15, status: 'PENDING_FIXTURE_REVIEW' },
+  },
+  scenarioAnalysis: {
+    scenarioId: 'sarah-synthetic-scenario-001',
+    sourceScenario: testScenarios.primePurchase.scenarioName,
+    analysisMode: 'fixture-backed-local-preview',
+    expectedProducts: expectedPricingOutcomes.primePurchase.eligibleProducts,
+  },
+  whatIf: {
+    workspaceId: 'sarah-synthetic-what-if-001',
+    scenarios: ['fico-sensitivity', 'ltv-sensitivity', 'product-comparison', 'lock-period-comparison'],
+    status: 'SYNTHETIC_FIXTURE_ONLY',
+    policyNote: 'Do not infer production pricing adjustments from these local what-if labels or fixture ranges.',
+  },
+} as const;

@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { buildSyntheticPersonaSeedSpecs, seedSyntheticPersonaUsers } from './synthetic-persona-seed';
+import { sarahMitchellWorkflowFixtureMetadata, sarahMitchellWorkflowFixtures } from './test-data';
 
 test.describe('synthetic persona seed fixture', () => {
   test('builds admin, tenant admin, pricing admin, loan officer, and borrower usernames without passwords', () => {
@@ -13,6 +14,7 @@ test.describe('synthetic persona seed fixture', () => {
       'loan-officer.pii-user-seed@wcpe.synthetic.invalid',
       'borrower.pii-user-seed@wcpe.synthetic.invalid',
     ]);
+    expect(specs.find((spec) => spec.persona === 'loan-officer')?.fullName).toBe('Synthetic Sarah Mitchell Loan Officer');
     expect(JSON.stringify(specs)).not.toMatch(/password/i);
   });
 
@@ -53,5 +55,26 @@ test.describe('synthetic persona seed fixture', () => {
 
     expect(results.every((result) => result.status === 'unavailable')).toBe(true);
     expect(JSON.stringify(results)).not.toMatch(/password":"(?!redacted)/i);
+  });
+
+  test('documents Sarah Mitchell synthetic workflow fixtures and missing production integrations', () => {
+    expect(sarahMitchellWorkflowFixtureMetadata.classification).toBe('synthetic-test-only');
+    expect(sarahMitchellWorkflowFixtureMetadata.workflows).toEqual(expect.arrayContaining([
+      'pipeline-intake',
+      'quick-quote',
+      'quote-comparison',
+      'request-lock',
+      'lock-status',
+      'lock-expiry',
+      'lock-extension',
+      'scenario-analysis',
+      'what-if',
+    ]));
+    expect(sarahMitchellWorkflowFixtureMetadata.missingProductionIntegrations.join(' ')).toMatch(/not production-backed|fixture-backed|synthetic/i);
+    expect(sarahMitchellWorkflowFixtures.pipelineIntake.borrowerName).toContain('Synthetic');
+    expect(sarahMitchellWorkflowFixtures.quickQuote.fixtureOnlyNumericInputs.loanAmount).toBe('400000');
+    expect(sarahMitchellWorkflowFixtures.quoteComparison.fixtureOnlyNote).toMatch(/not a production rate rule/i);
+    expect(sarahMitchellWorkflowFixtures.lockWorkflow.extension.status).toBe('PENDING_FIXTURE_REVIEW');
+    expect(sarahMitchellWorkflowFixtures.whatIf.policyNote).toMatch(/Do not infer production pricing/i);
   });
 });

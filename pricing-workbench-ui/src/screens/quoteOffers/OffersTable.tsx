@@ -82,9 +82,9 @@ export function OffersTable({ offers, selectedOfferId, compareOfferIds, onInspec
               <span role="cell"><ChipList label={`${offer.offerId} rationale`} values={offer.rationaleChips} /></span>
               <span role="cell"><ChipList label={`${offer.offerId} flags`} values={offer.scenarioFlags} /></span>
               <span role="cell" className="quick-quote-state quote-table__actions-cell" style={actionCellStyle}>
-                <label><input type="radio" name="selected-offer" checked={selected} onChange={() => onSelect(offer)} /> Select</label>
-                <label><input type="checkbox" checked={compareOfferIds.includes(offer.offerId)} onChange={() => onCompareToggle(offer.offerId)} /> Compare</label>
-                <button type="button" onMouseEnter={() => onInspect(offer)} onFocus={() => onInspect(offer)} onClick={() => onInspect(offer)}>Preview</button>
+                <label><input type="radio" name="selected-offer" checked={selected} onChange={() => onSelect(offer)} /> Select for quote</label>
+                <label><input type="checkbox" checked={compareOfferIds.includes(offer.offerId)} onChange={() => onCompareToggle(offer.offerId)} /> Compare offers</label>
+                <button type="button" onMouseEnter={() => onInspect(offer)} onFocus={() => onInspect(offer)} onClick={() => onInspect(offer)}>Review explanation</button>
               </span>
             </div>
           );

@@ -57,7 +57,7 @@ export default function QuoteOffersScreen({ tenantId = 'tenant-fixture', runId, 
       <section className="hero" aria-labelledby="quote-offers-title">
         <p className="eyebrow">Offer comparison | PII-24-S10</p>
         <h1 id="quote-offers-title">Compare Offers</h1>
-        <p>Review backend-ranked offers without calculating rates, eligibility, or investor decisions in the UI.</p>
+        <p>Review connected ranked offers without calculating rates, eligibility, or investor decisions in the UI.</p>
       </section>
 
       {visualState === 'empty' ? <EmptyOffers fallbackReason={comparison.fallbackReason} /> : null}

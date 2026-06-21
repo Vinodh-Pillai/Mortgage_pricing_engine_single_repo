@@ -53,6 +53,8 @@ function renderGuard(initialEntry: string) {
 describe('RouteGuard', () => {
   beforeEach(() => {
     sessionUser = null;
+    window.localStorage.clear();
+    window.sessionStorage.clear();
     installFetchMock();
   });
 

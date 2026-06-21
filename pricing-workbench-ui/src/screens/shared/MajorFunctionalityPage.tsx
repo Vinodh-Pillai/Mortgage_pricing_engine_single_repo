@@ -61,7 +61,7 @@ export function MajorFunctionalityPage<T extends object>({ config, visualState =
         title={config.title}
         breadcrumb={config.breadcrumb}
         summary={config.summary}
-        meta={<span>Boundary: {config.dataBoundary} · Evidence: {config.evidenceTarget}</span>}
+        meta={<span>Screen data is scoped to this workspace.</span>}
         actions={<ActionToolbar label={`${config.title} actions`} primaryActions={config.primaryActions} secondaryActions={config.secondaryActions} onAction={recordAction} />}
       />
       <PageStateWrapper state={state} title={config.title} emptyMessage={config.emptyMessage} blockedMessage={config.blockedMessage} attentionMessage={config.attentionMessage}>

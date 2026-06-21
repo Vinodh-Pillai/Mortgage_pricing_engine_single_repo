@@ -60,9 +60,9 @@ const seedDefinitions: Array<Omit<SyntheticPersonaSeedSpec, 'username' | 'tenant
   },
   {
     persona: 'loan-officer',
-    fullName: 'Synthetic Loan Officer User',
+    fullName: 'Synthetic Sarah Mitchell Loan Officer',
     apiRole: 'loan_officer',
-    roleMappingNote: 'Uses the existing auth API loan_officer role.',
+    roleMappingNote: 'Uses the existing auth API loan_officer role for the public Sarah Mitchell synthetic fixture persona.',
   },
   {
     persona: 'borrower',

@@ -84,4 +84,36 @@ describe('AuthContext', () => {
     expect(rolePermissionMatrix.loan_officer).toEqual(expect.arrayContaining(['quote:create', 'quote:read', 'scenario:create', 'lock:create', 'eligibility:read']));
     expect(rolePermissionMatrix.pricing_analyst).toEqual(expect.arrayContaining(['product:read', 'rate-feed:read', 'pricing:analysis']));
   });
+
+  it('AuthTest.sessionRefreshDoesNotLoopAfterAuthenticatedMe', async () => {
+    sessionUser = pricingUser;
+    const fetchMock = vi.mocked(fetch);
+    render(<AuthProvider><AuthProbe /></AuthProvider>);
+    await waitFor(() => expect(screen.getByTestId('authenticated')).toHaveTextContent('true'));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const meCalls = fetchMock.mock.calls.filter(([input]) => new URL(String(input), 'http://localhost').pathname === '/api/auth/me');
+    expect(meCalls).toHaveLength(1);
+  });
+
+  it('AuthTest.staleMeFailureDoesNotClearLoggedInUser', async () => {
+    let resolveMe: ((response: Response) => void) | null = null;
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), 'http://localhost');
+      if (url.pathname === '/api/auth/me') {
+        return new Promise<Response>((resolve) => { resolveMe = resolve; });
+      }
+      if (url.pathname === '/api/auth/login' && init?.method === 'POST') {
+        return jsonResponse({ user: pricingUser });
+      }
+      return jsonResponse({ error: 'Not found' }, 404);
+    }));
+
+    render(<AuthProvider><AuthProbe /></AuthProvider>);
+    fireEvent.click(screen.getByRole('button', { name: 'login pricing' }));
+    await waitFor(() => expect(screen.getByTestId('authenticated')).toHaveTextContent('true'));
+    resolveMe?.(new Response(JSON.stringify({ error: 'Not authenticated' }), { status: 401, headers: { 'Content-Type': 'application/json' } }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.getByTestId('authenticated')).toHaveTextContent('true');
+    expect(screen.getByTestId('user')).toHaveTextContent('Pricing Analyst');
+  });
 });

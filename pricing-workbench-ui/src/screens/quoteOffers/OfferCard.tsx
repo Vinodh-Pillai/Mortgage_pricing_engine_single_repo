@@ -23,9 +23,9 @@ export function OfferCard({ offer, selected, compared, onInspect, onSelect, onCo
       <ChipList label={`${offer.offerId} rationale`} values={offer.rationaleChips} />
       <ChipList label={`${offer.offerId} flags`} values={offer.scenarioFlags} />
       <div className="quick-quote-state">
-        <button type="button" aria-pressed={selected} onClick={() => onSelect(offer)}>Select offer</button>
-        <button type="button" aria-pressed={compared} onClick={() => onCompareToggle(offer.offerId)}>Compare</button>
-        <button type="button" onClick={() => onInspect(offer)}>Preview explanation</button>
+        <button type="button" aria-pressed={selected} onClick={() => onSelect(offer)}>Select for quote</button>
+        <button type="button" aria-pressed={compared} onClick={() => onCompareToggle(offer.offerId)}>{compared ? 'Remove from comparison' : 'Add to comparison'}</button>
+        <button type="button" onClick={() => onInspect(offer)}>Review explanation</button>
       </div>
     </article>
   );

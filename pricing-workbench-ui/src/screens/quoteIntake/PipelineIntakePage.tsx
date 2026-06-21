@@ -8,6 +8,7 @@ import { fieldsForStep, isHeaderMetadataField, normalizeMetadataState, stepsForM
 import { ResumeDraft, draftToBackup } from './ResumeDraft';
 import { StepFields, type DropdownOptionsByField } from './steps/StepFields';
 import { errorsToValidation, firstInvalidField, validateFields, type IntakeFieldErrors } from './validation';
+import { businessFacingText } from '../../lib/utils/businessFacingText';
 import './QuoteIntake.css';
 
 type QuoteMode = 'pipeline' | 'quickquote';
@@ -48,6 +49,11 @@ type DropdownConfigState =
   | { kind: 'loading'; options: TenantDropdownOptions | null; message: string }
   | { kind: 'ready'; options: TenantDropdownOptions; message: string }
   | { kind: 'fallback'; options: TenantDropdownOptions; message: string };
+
+type AutosaveSnapshot = {
+  values: BorrowerIntake;
+  saveDraft: (reason?: string, valueOverride?: BorrowerIntake) => Promise<DraftScenario | null>;
+};
 
 type BasePriceScenarioColumnKey = 'product' | 'investor' | 'status' | 'adjustedRate' | 'lockPeriod' | 'adjustedPrice' | 'payment' | 'pitiaItia' | 'dscr' | 'fees' | 'llpa' | 'ltv' | 'fico' | 'audit' | 'actions';
 type PriceScenarioColumnKey = BasePriceScenarioColumnKey | string;
@@ -395,11 +401,12 @@ export function PipelineIntakePage({
   const [fieldEditorDraft, setFieldEditorDraft] = useState<FieldEditorDraft>(() => loadFieldEditorDraft(tenantId));
   const [fieldEditorValidationMessage, setFieldEditorValidationMessage] = useState('');
   const [fieldEditorSavedSummary, setFieldEditorSavedSummary] = useState('');
-  const [applicationFormRuntimeState, setApplicationFormRuntimeState] = useState<ApplicationFormRuntimeState | { kind: 'loading'; message: string }>(() => ({ kind: 'loading', message: 'Loading tenant application form configuration...' }));
+  const [applicationFormRuntimeState, setApplicationFormRuntimeState] = useState<ApplicationFormRuntimeState | { kind: 'loading'; message: string }>(() => ({ kind: 'loading', message: 'Loading application fields...' }));
   const [validationBannerDismissed, setValidationBannerDismissed] = useState(false);
   const [losOverrideAudit, setLosOverrideAudit] = useState<Record<string, LosOverrideAudit>>(() => overrideAuditFromClientContext((intake ?? initialQuoteIntake).clientContext));
   const savingRef = useRef(false);
   const savePromiseRef = useRef<Promise<DraftScenario | null> | null>(null);
+  const autosaveSnapshotRef = useRef<AutosaveSnapshot | null>(null);
   const firstEntryDraftRef = useRef(false);
   const validationBannerSignatureRef = useRef('');
   const validationBannerFocusKeyRef = useRef('');
@@ -410,8 +417,8 @@ export function PipelineIntakePage({
   const orderedSteps = useMemo(() => stepsForMetadata(runtimeMetadata), [runtimeMetadata]);
   const compatibilityStartFieldIds = useMemo(() => startFieldIdsForMetadata(runtimeMetadata, values), [runtimeMetadata, values]);
   const showProgressiveCompatibility = compatibilityStartFieldIds.some((fieldId) => fieldId === 'quoteIntent');
-  const sections = useMemo(() => applyBuilderDraftOrder(consolidateCanonicalFields(orderedSteps.map((step) => ({ step, fields: fieldsForStep(runtimeMetadata, step.id).map(normalizePipelineRequirement) }))), builderDraftOrder), [builderDraftOrder, orderedSteps, runtimeMetadata]);
-  const runtimeSections = useMemo(() => applyRuntimeFieldVisibility(sections, values, builderVisibilityDrafts), [builderVisibilityDrafts, sections, values]);
+  const sections = useMemo(() => consolidateCanonicalFields(orderedSteps.map((step) => ({ step, fields: fieldsForStep(runtimeMetadata, step.id).map(normalizePipelineRequirement) }))), [orderedSteps, runtimeMetadata]);
+  const runtimeSections = useMemo(() => applyRuntimeFieldVisibility(sections, values, {}), [sections, values]);
   const draftId = draftIdFromLocation();
   const fieldDropdownOptions = useMemo(() => dropdownOptionsForFields(dropdownConfigState.options), [dropdownConfigState.options]);
   const availableFilters = useMemo(() => availableFiltersForDropdownConfig(dropdownConfigState.options), [dropdownConfigState.options]);
@@ -446,7 +453,7 @@ export function PipelineIntakePage({
     { key: 'dscr', label: 'DSCR' },
     { key: 'fees', label: 'Fees' },
     { key: 'llpa', label: 'LLPA' },
-    { key: 'audit', label: 'Audit' },
+    { key: 'audit', label: 'Review' },
     { key: 'actions', label: 'Actions' },
   ], []);
   const quickQuoteGridStyle = { '--quote-product-grid-template': priceScenarioGridTemplate(quickQuoteColumns) } as CSSProperties;
@@ -511,7 +518,7 @@ export function PipelineIntakePage({
 
   useEffect(() => {
     let cancelled = false;
-    setApplicationFormRuntimeState({ kind: 'loading', message: 'Loading tenant application form configuration...' });
+    setApplicationFormRuntimeState({ kind: 'loading', message: 'Loading application fields...' });
     fetchActiveApplicationFormVersion(tenantId)
       .then((state) => {
         if (cancelled) return;
@@ -544,8 +551,7 @@ export function PipelineIntakePage({
         if (!cancelled) setDropdownConfigState(readyState);
       })
       .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'Tenant dropdown configuration is unavailable.';
-        const fallbackState = fallbackDropdownConfigState(`${message} LoanPass enum defaults are in use.`);
+        const fallbackState = fallbackDropdownConfigState('Some product choices are unavailable. Standard options are in use.');
         tenantDropdownConfigCache.set(tenantId, fallbackState);
         if (!cancelled) setDropdownConfigState(fallbackState);
       });
@@ -564,20 +570,25 @@ export function PipelineIntakePage({
   }, [draftId, resumeBackup, resumeDismissed, tenantId]);
 
   useEffect(() => {
+    autosaveSnapshotRef.current = { values, saveDraft };
+  });
+
+  useEffect(() => {
     const timer = window.setInterval(() => {
-      if (hasAnyValue(values)) void saveDraft('autosave-interval');
+      const snapshot = autosaveSnapshotRef.current;
+      if (snapshot && hasAnyValue(snapshot.values)) void snapshot.saveDraft('autosave-interval', snapshot.values);
     }, 30_000);
     return () => window.clearInterval(timer);
-  }, [values, scenarioId, scenarioVersion]);
+  }, [scenarioId, scenarioVersion]);
 
-  function changeField(field: keyof BorrowerIntake, value: string) {
+  function changeField(field: keyof BorrowerIntake, value: string, options: { autoSave?: boolean } = {}) {
     trackLosOverride(field, value);
     const nextValues = { ...values, [field]: value };
     setLocalIntake(nextValues);
     setHasUnsavedModeChanges(true);
     setLocalErrors((current) => ({ ...current, [field]: undefined }));
     onChange?.(field, value);
-    if (!firstEntryDraftRef.current && isLoanBasicsField(field) && value.trim()) {
+    if (options.autoSave !== false && !firstEntryDraftRef.current && isLoanBasicsField(field) && value.trim()) {
       firstEntryDraftRef.current = true;
       void saveDraft('first-field-entry', nextValues);
     }
@@ -676,10 +687,10 @@ export function PipelineIntakePage({
     }
     const channel = product.channelCode;
     const mortgageType = product.productType;
-    changeField('channel', channel);
-    changeField('channelCode', product.channelCode);
-    changeField('investorCode', product.investorCode);
-    changeField('mortgageType', mortgageType);
+    changeField('channel', channel, { autoSave: false });
+    changeField('channelCode', product.channelCode, { autoSave: false });
+    changeField('investorCode', product.investorCode, { autoSave: false });
+    changeField('mortgageType', mortgageType, { autoSave: false });
     setSelectedProduct(product);
     setHasUnsavedModeChanges(true);
     setProductFilters((current) => ({ ...current, productType: product.productType, investor: product.investorCode, channel: product.channelCode, status: product.status }));
@@ -711,7 +722,7 @@ export function PipelineIntakePage({
     }
 
     if (action === 'refresh') {
-      setRowActionState({ productCode: product.productCode, tone: 'ready', message: `Pricing refresh requested for ${product.productName}.`, details: ['No pricing rules were changed in the row action.'] });
+      setRowActionState({ productCode: product.productCode, tone: 'ready', message: `Pricing refresh queued for ${product.productName}.`, details: ['Use Launch Quote to send the current borrower facts to pricing.'] });
       capture('pipeline-row-refresh-requested', { productCode: product.productCode });
       return;
     }
@@ -726,14 +737,14 @@ export function PipelineIntakePage({
           : autoConfirmationApproval.required
             ? `Approval required before lock, reprice, relock, or cancellation. ${autoConfirmationApproval.path}`
             : `Lock request prepared for ${product.productName}.`,
-        details: lockFieldBindings.map((binding) => `${binding.label}: ${binding.configuredFieldId} = ${binding.value || 'Not yet captured'}`),
+        details: lockFieldBindings.map((binding) => `${binding.label}: ${binding.value || 'Not yet captured'}`),
       });
       capture('pipeline-row-lock-requested', { productCode: product.productCode, approvalRequired: autoConfirmationApproval.required, lockFields: lockFieldBindings.map((binding) => binding.configuredFieldId) });
       return;
     }
 
     const traceDetails = productAuditTraceRefs(product, runtimeMetadata).map((ref) => `${ref.label}: ${ref.value}`);
-    setRowActionState({ productCode: product.productCode, tone: isProductEligible(product) ? 'ready' : product.status === 'PENDING' ? 'attention' : 'blocked', message: `${product.productName} status: ${productEligibilityReviewLabel(product)}.`, details: [productUnavailableReason(product), ...(traceDetails.length > 0 ? traceDetails : ['Trace evidence unavailable from configured/API product data.'])] });
+    setRowActionState({ productCode: product.productCode, tone: isProductEligible(product) ? 'ready' : product.status === 'PENDING' ? 'attention' : 'blocked', message: `${product.productName} status: ${productEligibilityReviewLabel(product)}.`, details: [productUnavailableReason(product), ...(traceDetails.length > 0 ? traceDetails : ['Pricing trace is not available yet.'])] });
     capture('pipeline-row-status-reviewed', { productCode: product.productCode, status: product.status });
   }
 
@@ -1169,7 +1180,7 @@ export function PipelineIntakePage({
               <div>
                 <span className="eyebrow">Grid</span>
                 <h2 id="quickquote-products-heading">Product eligibility</h2>
-                <p className="quickquote-products__assurance">Showing all configured tenant/channel products; no QuickQuote product filter is applied.</p>
+                <p className="quickquote-products__assurance">Showing all tenant/channel products; no QuickQuote product filter is applied.</p>
               </div>
               <QuickQuoteStateCard title="Pricing" state={quickQuoteLoading ? 'loading' : tenantHomePreviewProducts.length > 0 ? 'ready' : 'empty'} detail={`${tenantHomePreviewProducts.length} candidates`} />
             </div>
@@ -1193,9 +1204,9 @@ export function PipelineIntakePage({
         <div className="quote-pipeline-launchbar quickquote-actions" aria-label="QuickQuote actions">
           <div>
             <strong>{selectedProduct?.productName ?? 'No product selected'}</strong>
-            <span id="quickquote-action-state">{quickQuoteLoading ? 'Loading configured state' : launchStatus}</span>
+            <span id="quickquote-action-state">{quickQuoteLoading ? 'Loading quote state' : launchStatus}</span>
           </div>
-          <button type="button" className="quote-intake-primary" disabled={launchDisabled || quickQuoteLoading} aria-describedby="quickquote-action-state" onClick={() => void launch()}>{flowState.kind === 'submitting' ? 'Saving...' : 'Save selection'}</button>
+          <button type="button" className="quote-intake-primary" disabled={launchDisabled || quickQuoteLoading} aria-describedby="quickquote-action-state" onClick={() => void launch()}>{flowState.kind === 'submitting' ? 'Launching...' : 'Launch quote'}</button>
         </div>
 
         {selectedProduct ? <ProductDetailPanel product={selectedProduct} values={values} metadata={runtimeMetadata} onBack={() => setSelectedProduct(null)} onUse={applyProduct} /> : null}
@@ -1238,18 +1249,16 @@ export function PipelineIntakePage({
       ) : null}
       {dropdownConfigState.kind === 'loading' ? <p className="quote-intake-status" role="status">Loading tenant dropdown options...</p> : null}
       {dropdownConfigState.kind === 'fallback' ? <p className="quote-intake-status" aria-live="polite">{dropdownConfigState.message}</p> : null}
-      {applicationFormRuntimeState.kind === 'loading' ? <p className="quote-intake-status" role="status">Loading tenant application form configuration...</p> : null}
-      {applicationFormRuntimeState.kind === 'loaded' ? <p className="quote-intake-status" aria-live="polite">Published application form version {applicationFormRuntimeState.versionLabel} loaded for {tenantId}.</p> : null}
-      {applicationFormRuntimeState.kind === 'missing' || applicationFormRuntimeState.kind === 'unreachable' ? <p className="quote-intake-status" role="alert">Application form configuration blocker: {applicationFormRuntimeState.message}</p> : null}
+      {applicationFormRuntimeState.kind === 'loading' ? <p className="quote-intake-status" role="status">Loading application fields...</p> : null}
+      {applicationFormRuntimeState.kind === 'loaded' ? <p className="quote-intake-status" aria-live="polite">Application fields loaded.</p> : null}
+      {applicationFormRuntimeState.kind === 'missing' || applicationFormRuntimeState.kind === 'unreachable' ? <p className="quote-intake-status" role="alert">{applicationFieldsUnavailableText(applicationFormRuntimeState.message)}</p> : null}
       {statusMessage ? <p className="quote-intake-status" role="status">{statusMessage}</p> : null}
       {validationBannerVisible ? <ValidationTopBanner fields={actionableMissingRequiredFields} onClose={() => setValidationBannerDismissed(true)} onFocusField={focusPipelineField} /> : null}
       <DataRequiredPanel fields={actionableMissingRequiredFields} onNextField={focusNextRequiredField} />
 
       <form id="pipeline-product-form" className="quote-intake-form quote-intake-form--product-finder quote-intake-form--single-page" onSubmit={(event) => void launch(event)} onBlur={handleBlur} noValidate>
         <aside className="quote-product-filter-panel" aria-label="Pipeline filters">
-          <ApplicationFormBuilderPanel sections={sections} conditions={builderVisibilityDrafts} dropdownOptions={fieldDropdownOptions} validationMessage={builderValidationMessage} fieldEditorDraft={fieldEditorDraft} fieldEditorValidationMessage={fieldEditorValidationMessage} fieldEditorSavedSummary={fieldEditorSavedSummary} onFieldEditorDraftChange={setFieldEditorDraft} onFieldEditorSave={saveFieldEditorDraft} onMove={moveBuilderField} onConditionChange={changeBuilderCondition} onConditionClear={clearBuilderCondition} onSave={saveBuilderDraftOrder} />
-
-          {applicationFormRuntimeState.kind === 'loading' ? null : <ApplicationFormRuntimeRenderer sections={applicationFormRuntimeState.kind === 'loaded' ? runtimeSections : []} values={values} errors={visibleErrors} dropdownOptions={fieldDropdownOptions} dropdownLoading={dropdownConfigState.kind === 'loading'} onChange={changeField} />}
+          {applicationFormRuntimeState.kind === 'loaded' ? <ApplicationFormRuntimeRenderer sections={runtimeSections} values={values} errors={visibleErrors} dropdownOptions={fieldDropdownOptions} dropdownLoading={dropdownConfigState.kind === 'loading'} onChange={changeField} /> : null}
 
           {startFields().length > 0 ? (
             <FilterCard title="Keys" eyebrow="Save" badge={startReady ? 'Ready' : 'Required fields'}>
@@ -1391,14 +1400,14 @@ function ApplicationFormRuntimeRenderer({
   const visibleSections = sections.filter(({ fields }) => fields.length > 0);
   if (visibleSections.length === 0) {
     return (
-      <FilterCard title="Application Form" eyebrow="Runtime" badge="Blocked">
-        <p className="quote-intake-empty" role="status">No published application form fields are configured for runtime rendering.</p>
+      <FilterCard title="Borrower Details" eyebrow="Profile" badge="Blocked">
+        <p className="quote-intake-empty" role="status">Application fields are unavailable for this borrower profile.</p>
       </FilterCard>
     );
   }
   return (
-    <FilterCard title="Application Form" eyebrow="Runtime" badge="Tenant config">
-      <div className="quote-runtime-form" aria-label="Runtime application form">
+    <FilterCard title="Borrower Details" eyebrow="Profile" badge="Ready">
+      <div className="quote-runtime-form" aria-label="Borrower details form">
         {visibleSections.map(({ step, fields }) => (
           <section key={step.section} className="quote-runtime-form__section" aria-labelledby={`runtime-${step.section}-heading`}>
             <h4 id={`runtime-${step.section}-heading`}>{step.label}</h4>
@@ -1439,8 +1448,8 @@ function DataRequiredPanel({ fields, onNextField }: { fields: PipelineRequiredFi
         <h3 id="data-required-heading">Complete required fields</h3>
         <span className="quote-intake-data-required__state" aria-label="Required field count">{fields.length} {fields.length === 1 ? 'field' : 'fields'} missing</span>
       </div>
-      <ul aria-label="Missing configured required fields">
-        {fields.map((field) => <li key={String(field.fieldId)} data-field-id={String(field.fieldId)}>{field.label}<code>{String(field.fieldId)}</code></li>)}
+      <ul aria-label="Missing required fields">
+        {fields.map((field) => <li key={String(field.fieldId)} data-field-id={String(field.fieldId)}>{field.label}</li>)}
       </ul>
       <button type="button" className="quote-filter-clear" onClick={onNextField}>Next Field</button>
     </section>
@@ -1682,7 +1691,7 @@ function renderProductColumn(key: PriceScenarioColumnKey, product: AuthorizedPro
   if (key === 'audit') return (
     <div className="quote-product-audit-cell">
       <span>{productEligibilityReviewLabel(product)}</span>
-      <button type="button" onClick={(event) => { event.stopPropagation(); onAction(product, 'status'); }}>Audit</button>
+      <button type="button" onClick={(event) => { event.stopPropagation(); onAction(product, 'status'); }}>Review status</button>
     </div>
   );
   if (key === 'ltv') return values.loanToValue || '—';
@@ -1690,11 +1699,11 @@ function renderProductColumn(key: PriceScenarioColumnKey, product: AuthorizedPro
   if (column?.fieldId || isCalculationFieldId(key)) return renderCalculationOutput(column ?? { key, label: friendlyLabel(key), fieldId: key }, values);
   return (
     <div className="quote-product-row-actions" aria-label={`${product.productName} row actions`}>
-      {onCompare ? <button type="button" onClick={(event) => { event.stopPropagation(); onCompare(product); }}>{comparisonSelected ? 'Remove from comparison' : 'Compare'}</button> : null}
-      <button type="button" onClick={(event) => { event.stopPropagation(); onApply(product); }} disabled={!isProductEligible(product)}>Use</button>
-      <button type="button" onClick={(event) => { event.stopPropagation(); onAction(product, 'refresh'); }} disabled={!isProductEligible(product)}>Refresh</button>
+      {onCompare ? <button type="button" onClick={(event) => { event.stopPropagation(); onCompare(product); }}>{comparisonSelected ? 'Remove from comparison' : 'Add to comparison'}</button> : null}
+      <button type="button" onClick={(event) => { event.stopPropagation(); onApply(product); }} disabled={!isProductEligible(product)}>Use for quote</button>
+      <button type="button" onClick={(event) => { event.stopPropagation(); onAction(product, 'refresh'); }} disabled={!isProductEligible(product)}>Queue pricing refresh</button>
       <button type="button" onClick={(event) => { event.stopPropagation(); onAction(product, 'lock'); }} disabled={!isProductEligible(product)}>Request lock</button>
-      <button type="button" onClick={(event) => { event.stopPropagation(); onAction(product, 'status'); }}>Status</button>
+      {!onCompare ? <button type="button" onClick={(event) => { event.stopPropagation(); onAction(product, 'status'); }}>Review status</button> : null}
       {actionState ? (
         <div className={`quote-product-row-action-status quote-product-row-action-status--${actionState.tone}`} role="status" onClick={(event) => event.stopPropagation()}>
           <strong>{actionState.message}</strong>
@@ -1729,7 +1738,7 @@ function QuickQuoteComparisonPanel({ products, selectedProductCode, values, miss
           <h3 id="quickquote-comparison-heading">Responsive quote comparison</h3>
           <p>Selected products stay aligned by metric; missing, not-applicable, assumption, and trace states remain visible.</p>
         </div>
-        <button type="button" className="quote-intake-primary" onClick={onSaveDraft} aria-label="Save Draft from comparison">Save Draft from comparison</button>
+        <button type="button" className="quote-intake-primary" onClick={onSaveDraft} aria-label="Save QuickQuote draft from comparison">Save Draft from comparison</button>
       </div>
       {products.length < 2 ? <p className="quickquote-comparison__notice" role="status">Select at least two products to compare side by side.</p> : null}
       <div className="quickquote-comparison__viewport" aria-label="Swipe QuickQuote comparison products">
@@ -1761,7 +1770,7 @@ function renderComparisonCell(metric: string, product: AuthorizedProduct, values
   if (metric === 'llpa') return <QuoteEconomicsMetric label="LLPA" value={firstConfiguredOutput(values, ['calc@llpa', 'calc@llpa-summary', 'llpaSummary', 'pricingLlpaSummary'])} missingLabel="LLPA output pending" missingFields={missingFields} traceRef={metricTraceRef(product, 'llpa', metadata)} />;
   if (metric === 'assumptions') return <QuickQuoteComparisonAssumptions product={product} fields={missingFields} metadata={metadata} />;
   if (metric === 'trace') return <QuickQuoteComparisonTrace product={product} metadata={metadata} />;
-  return <div className="quickquote-comparison__actions"><button type="button" onClick={() => onSelectProduct(product)}>Select</button><button type="button" onClick={() => onUseProduct(product)} disabled={!isProductEligible(product)}>Use product</button></div>;
+  return <div className="quickquote-comparison__actions"><button type="button" onClick={() => onSelectProduct(product)}>Select for quote</button><button type="button" onClick={() => onUseProduct(product)} disabled={!isProductEligible(product)}>Use for quote</button></div>;
 }
 
 function QuickQuoteComparisonAssumptions({ product, fields, metadata }: { product: AuthorizedProduct; fields: PipelineRequiredField[]; metadata: ScenarioIntakeMetadata | null }) {
@@ -1771,7 +1780,7 @@ function QuickQuoteComparisonAssumptions({ product, fields, metadata }: { produc
     ...(metadata?.dependencyStatus && metadata.dependencyStatus !== 'READY' ? [`Dependency status: ${metadata.dependencyStatus}`] : []),
     ...(isProductEligible(product) ? [] : [productUnavailableReason(product)]),
   ];
-  if (assumptions.length === 0) return <span className="quickquote-comparison__empty-state">No visible assumptions from configured intake state.</span>;
+  if (assumptions.length === 0) return <span className="quickquote-comparison__empty-state">No visible assumptions from current intake state.</span>;
   return <ul className="quickquote-comparison__assumptions">{assumptions.map((assumption) => <li key={assumption}>{assumption}</li>)}</ul>;
 }
 
@@ -1901,8 +1910,8 @@ function ProductDetailPanel({ product, values, metadata, onBack, onUse }: { prod
         <div><dt>Occupancy</dt><dd>{values.occupancyType || '—'}</dd></div>
         <div><dt>Updated</dt><dd>{product.lastUpdated}</dd></div>
       </dl>
-      <section className="quote-product-audit-details" aria-label="Row audit details">
-        <h4>Audit details</h4>
+      <section className="quote-product-audit-details" aria-label="Product review details">
+        <h4>Review details</h4>
         <p>{productUnavailableReason(product)}</p>
         <dl>
           {traceRefs.length > 0
@@ -1910,7 +1919,7 @@ function ProductDetailPanel({ product, values, metadata, onBack, onUse }: { prod
             : <div data-trace-state="unavailable"><dt>Trace evidence</dt><dd>Trace evidence unavailable from configured/API product data.</dd></div>}
         </dl>
       </section>
-      <button type="button" className="quote-intake-primary" onClick={() => onUse(product)}>Use Product</button>
+      <button type="button" className="quote-intake-primary" onClick={() => onUse(product)}>Use for quote</button>
     </aside>
   );
 }
@@ -1943,14 +1952,14 @@ function QuickQuotePrefillGroups({ sections, values, mappings, overrides }: { se
         return (
           <li key={step.section}>
             <div className="quickquote-prefill-group__summary"><span>{step.label}</span><strong>{mapped}/{fields.length}</strong></div>
-            <ul className="quickquote-prefill-metadata" aria-label={`${step.label} LOS field mapping metadata`}>
+            <ul className="quickquote-prefill-metadata" aria-label={`${step.label} borrower detail status`}>
               {fields.slice(0, 4).map((field) => {
                 const mapping = mappingForField(mappings, field);
                 const override = overrides[String(field.fieldId)];
                 return (
                   <li key={String(field.fieldId)} data-value-state={override ? 'overridden' : (values[field.fieldId] ?? '').trim() ? 'prefilled' : 'missing'}>
                     <span>{field.label}</span>
-                    <small>{prefillValueState(field, values, override)} · Source {mapping.sourceSystem} · LOS {mapping.losFieldLabel} ({mapping.losFieldKey}) · WCPE {mapping.wcpeField} · Confidence {mapping.confidence} · Last sync {mapping.lastSync}</small>
+                    <small>{prefillValueState(field, values, override)} · {missingCategoryLabel(mapping.missingCategory)}</small>
                   </li>
                 );
               })}
@@ -1982,8 +1991,8 @@ function QuickQuoteMappedFieldOverrides({ fields, values, errors, dropdownOption
   if (fields.length === 0) return null;
   return (
     <section className="quickquote-mapped-overrides" aria-labelledby="quickquote-mapped-overrides-heading">
-      <h3 id="quickquote-mapped-overrides-heading">Mapped LOS values</h3>
-      <p>Edit a prefilled LOS value here to preserve override context on draft save and pricing launch.</p>
+      <h3 id="quickquote-mapped-overrides-heading">Borrower details</h3>
+      <p>Edit borrower details before saving the draft or launching pricing.</p>
       <StepFields fields={fields} intake={values} errors={errors} onChange={onChange} dropdownOptions={dropdownOptions} dropdownLoading={dropdownLoading} />
     </section>
   );
@@ -1992,16 +2001,16 @@ function QuickQuoteMappedFieldOverrides({ fields, values, errors, dropdownOption
 function QuickQuoteOverrideAudit({ overrides }: { overrides: LosOverrideAudit[] }) {
   return (
     <section className="quickquote-override-audit" aria-labelledby="quickquote-override-heading">
-      <h3 id="quickquote-override-heading">Override audit</h3>
-      {overrides.length === 0 ? <p>No LOS values overridden in this draft.</p> : (
+      <h3 id="quickquote-override-heading">Recent edits</h3>
+      {overrides.length === 0 ? <p>No prefilled values were edited in this draft.</p> : (
         <ul>
           {overrides.map((override) => (
             <li key={String(override.fieldId)}>
               <strong>{override.label}</strong>
-              <span>Original LOS value: {override.originalValue}</span>
-              <span>Override value: {override.overrideValue}</span>
-              <span>User/time: {override.actor} at {override.changedAt}</span>
-              <small>Affected output traces: {override.affectedOutputTraces.join(', ')}</small>
+              <span>Original value: {override.originalValue}</span>
+              <span>Edited value: {override.overrideValue}</span>
+              <span>Edited by: {override.actor} at {override.changedAt}</span>
+              <small>Pricing impact is rechecked when the quote is launched.</small>
             </li>
           ))}
         </ul>
@@ -2216,13 +2225,13 @@ function QuickQuoteEmptyState({ missingFacts }: { missingFacts: number }) {
     <section className="quickquote-empty-state" role="status" aria-label="QuickQuote empty state">
       <h3>No products displayed</h3>
       <div className="quickquote-reason-chips" aria-label="Empty state reason categories">
-        <span>Configured products: none</span>
+        <span>Products: none</span>
         <span>Missing facts: {missingFacts}</span>
         <span>Pricing outputs: unavailable</span>
       </div>
       <div className="quickquote-empty-state__actions" aria-label="Empty state next actions">
-        <button type="button">Review missing facts</button>
-        <button type="button">Save Draft</button>
+        <span className="quote-status-pill quote-status-pill--pending">Complete borrower facts</span>
+        <span className="quote-status-pill quote-status-pill--pending">Save draft from the action bar</span>
       </div>
     </section>
   );
@@ -2260,7 +2269,7 @@ function backendDraftPayload(values: BorrowerIntake, fields: ScenarioIntakeField
 }
 
 function isLoanBasicsField(field: keyof BorrowerIntake) {
-  return ['borrowerLastName', 'loanNumber'].includes(field);
+  return ['borrowerLastName', 'loanNumber', 'mortgageType'].includes(field);
 }
 
 function startFieldIdsForMetadata(metadata: ReturnType<typeof normalizeMetadataState>['metadata'], values: BorrowerIntake): Array<keyof BorrowerIntake> {
@@ -2490,6 +2499,14 @@ function fallbackDropdownConfigState(message: string): DropdownConfigState {
   return { kind: 'fallback', options: fallbackTenantDropdownOptions(), message };
 }
 
+function applicationFieldsUnavailableText(message: string) {
+  const detail = businessFacingText(message).trim();
+  if (!detail || detail === 'Not provided' || /setup support is needed/i.test(detail)) {
+    return 'Application fields are unavailable. Setup support is needed.';
+  }
+  return `Application fields are unavailable. ${detail}`;
+}
+
 function fallbackTenantDropdownOptions(): TenantDropdownOptions {
   const staticFilters = availableFiltersFor(tenantHomePreviewProducts);
   return {
@@ -2607,8 +2624,8 @@ function productAvailabilityLabel(product: AuthorizedProduct) {
 
 function productUnavailableReason(product: AuthorizedProduct) {
   if (isProductEligible(product)) return 'Product is eligible for row actions.';
-  if (product.status === 'PENDING') return 'Referable or missing-data state is visible; configured pricing may allow review when service contracts return approval details.';
-  return 'Ineligible status remains visible for audit; configured eligibility-service reason text is required before policy detail can be shown.';
+  if (product.status === 'PENDING') return 'Referable state is visible; pricing review can continue when connected approval details are available.';
+  return 'Ineligible status remains visible; eligibility reason text is needed before policy detail can be shown.';
 }
 
 function productEligibilityReviewLabel(product: AuthorizedProduct) {

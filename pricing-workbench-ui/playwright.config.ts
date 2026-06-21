@@ -78,8 +78,8 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
     env: {
-      VITE_API_BASE: process.env.VITE_API_BASE || 'http://localhost:8080',
-      VITE_BFF_API_BASE_URL: process.env.VITE_BFF_API_BASE_URL || process.env.VITE_API_BASE || 'http://localhost:8080',
+      VITE_API_BASE: process.env.VITE_API_BASE || 'http://127.0.0.1:18080',
+      VITE_BFF_API_BASE_URL: process.env.VITE_BFF_API_BASE_URL || process.env.VITE_API_BASE || 'http://127.0.0.1:18080',
     },
   },
   snapshotDir: './tests/baselines',

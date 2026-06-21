@@ -44,7 +44,7 @@ export const AUTH_CONFIG = {
 } as const;
 
 export const AUTH_SECURITY_BLOCKERS = [
-  'The UI must submit authentication requests only to VITE_BFF_API_BASE_URL.',
+  'The UI must submit authentication requests only to the same-origin /api proxy or VITE_BFF_API_BASE_URL.',
   'The BFF owns the tenant-context-service authentication contract and session cookie forwarding.',
   'Full OIDC/PKCE remains blocked until IdP issuer, client id, redirect URIs, scopes, and token/session ownership are supplied by approved configuration.',
 ] as const;
@@ -79,9 +79,6 @@ export function getAuthClientConfig(): AuthClientConfig {
 
 function resolveAuthApiBaseUrl(): string {
   const config = getAuthClientConfig();
-  if (!config.bffApiBaseUrl) {
-    throw new Error('BFF API base URL is required before authentication requests. Configure VITE_BFF_API_BASE_URL.');
-  }
   return config.bffApiBaseUrl;
 }
 

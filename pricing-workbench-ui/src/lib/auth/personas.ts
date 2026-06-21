@@ -21,6 +21,11 @@ export interface Persona {
   description: string;
   permissions: Permission[];
   defaultRoute: string;
+  syntheticFixtureMetadata?: {
+    classification: 'synthetic-test-only';
+    workflowCoverage: string[];
+    missingProductionIntegrations: string[];
+  };
 }
 
 export type RoutePermissionRule = {
@@ -64,6 +69,25 @@ export const syntheticPersonas: Persona[] = [
       'borrower:manage',
     ],
     defaultRoute: '/quote/start',
+    syntheticFixtureMetadata: {
+      classification: 'synthetic-test-only',
+      workflowCoverage: [
+        'pipeline-intake',
+        'quick-quote',
+        'quote-comparison',
+        'request-lock',
+        'lock-status',
+        'lock-expiry',
+        'lock-extension',
+        'scenario-analysis',
+        'what-if',
+      ],
+      missingProductionIntegrations: [
+        'Live LOS/LoanPASS borrower import remains mocked for local E2E fixtures.',
+        'Investor lock submission, expiry, and extension integrations remain fixture-backed.',
+        'Pricing/rate values used by Sarah workflows are deterministic synthetic fixtures, not production pricing rules.',
+      ],
+    },
   },
   {
     id: 'persona-pricing-analyst',
@@ -214,6 +238,7 @@ export const roleHierarchy: Record<PersonaRole, PersonaRole[]> = {
 export const routePermissionRules: RoutePermissionRule[] = [
   { pattern: '/login', permissions: [], match: 'all' },
   { pattern: '/', permissions: ['quote:create'], match: 'all' },
+  { pattern: '/home', permissions: ['quote:read'], match: 'all' },
   { pattern: '/pipeline*', permissions: ['quote:create'], match: 'all' },
   { pattern: '/quote/start', permissions: ['quote:create', 'scenario:create'], match: 'all' },
   { pattern: '/quote/*/offers/*', permissions: ['quote:read'], match: 'all' },

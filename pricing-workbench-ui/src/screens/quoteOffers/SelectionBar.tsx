@@ -19,8 +19,8 @@ export function SelectionBar({ runId, selectedOffer, comparison, compareOfferIds
         </div>
       ) : null}
       <div className="quick-quote-state">
-        <button type="button" onClick={() => onNavigateDetail(selectedOffer.offerId)}>Compare Detail</button>
-        <button type="button" disabled={commitBlocked} onClick={onNavigateLock}>Lock Terms</button>
+        <button type="button" onClick={() => onNavigateDetail(selectedOffer.offerId)}>Review comparison detail</button>
+        <button type="button" disabled={commitBlocked} onClick={onNavigateLock}>Start lock request</button>
       </div>
     </section>
   );

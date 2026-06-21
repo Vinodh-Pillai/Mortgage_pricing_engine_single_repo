@@ -38,6 +38,28 @@ describe('synthetic persona RBAC model', () => {
     expect(hasPermission(loanOfficer, 'offer:compare')).toBe(true);
   });
 
+  it('PersonaTest.sarahFixtureMetadataCoversLoanOfficerWorkflows', () => {
+    const sarah = getPersonaById('persona-loan-officer')!;
+    expect(sarah.name).toBe('Sarah Mitchell');
+    expect(sarah.syntheticFixtureMetadata?.classification).toBe('synthetic-test-only');
+    expect(sarah.syntheticFixtureMetadata?.workflowCoverage).toEqual(expect.arrayContaining([
+      'pipeline-intake',
+      'quick-quote',
+      'quote-comparison',
+      'request-lock',
+      'lock-status',
+      'lock-expiry',
+      'lock-extension',
+      'scenario-analysis',
+      'what-if',
+    ]));
+    expect(sarah.syntheticFixtureMetadata?.missingProductionIntegrations.join(' ')).toMatch(/mocked|fixture-backed|synthetic/i);
+    expect(canAccessRoute(sarah, '/pipeline')).toBe(true);
+    expect(canAccessRoute(sarah, '/quote/run-123/offers')).toBe(true);
+    expect(canAccessRoute(sarah, '/quote/run-123/status')).toBe(true);
+    expect(canAccessRoute(sarah, '/quote/run-123/what-if/product-comparison')).toBe(true);
+  });
+
   it('AuthTest.hasPermissionChecksCorrectly', () => {
     const pricingAnalyst = getPersonaById('persona-pricing-analyst')!;
     expect(hasPermission(pricingAnalyst, 'pricing:waterfall')).toBe(true);

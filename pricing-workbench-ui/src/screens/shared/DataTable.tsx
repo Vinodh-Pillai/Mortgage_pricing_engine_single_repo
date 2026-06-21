@@ -14,21 +14,31 @@ export interface DataTableProps<T extends object> {
   pageSize?: number;
 }
 
+type IndexedTableRow<T extends object> = {
+  row: T;
+  searchValues: string[];
+};
+
 export function DataTable<T extends object>({ caption, rows, columns, filterLabel = 'Filter records', pageSize = 5 }: DataTableProps<T>) {
   const [filter, setFilter] = useState('');
   const [sortKey, setSortKey] = useState<keyof T & string>(columns[0]?.key ?? ('id' as keyof T & string));
   const [ascending, setAscending] = useState(true);
 
+  const indexedRows = useMemo<IndexedTableRow<T>[]>(() => rows.map((row) => ({
+    row,
+    searchValues: Object.values(row as Record<string, unknown>).map((value) => String(value).toLowerCase()),
+  })), [rows]);
+
   const visibleRows = useMemo(() => {
     const normalizedFilter = filter.trim().toLowerCase();
     const filtered = normalizedFilter
-      ? rows.filter((row) => Object.values(row as Record<string, unknown>).some((value) => String(value).toLowerCase().includes(normalizedFilter)))
-      : rows;
+      ? indexedRows.filter((entry) => entry.searchValues.some((value) => value.includes(normalizedFilter)))
+      : indexedRows;
     return [...filtered].sort((left, right) => {
-      const comparison = String((left as Record<string, unknown>)[sortKey] ?? '').localeCompare(String((right as Record<string, unknown>)[sortKey] ?? ''));
+      const comparison = String((left.row as Record<string, unknown>)[sortKey] ?? '').localeCompare(String((right.row as Record<string, unknown>)[sortKey] ?? ''));
       return ascending ? comparison : -comparison;
-    }).slice(0, pageSize);
-  }, [ascending, filter, pageSize, rows, sortKey]);
+    }).slice(0, pageSize).map((entry) => entry.row);
+  }, [ascending, filter, indexedRows, pageSize, sortKey]);
 
   function toggleSort(key: keyof T & string) {
     if (key === sortKey) {

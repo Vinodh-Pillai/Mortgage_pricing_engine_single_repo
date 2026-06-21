@@ -13,6 +13,12 @@ export interface ActionToolbarProps {
 }
 
 export function ActionToolbar({ label, primaryActions = [], secondaryActions = [], onAction }: ActionToolbarProps) {
+  const hasActions = primaryActions.length > 0 || secondaryActions.length > 0;
+
+  if (!hasActions || !onAction) {
+    return <p className="action-toolbar action-toolbar--empty" aria-label={label}>No page actions available.</p>;
+  }
+
   const renderAction = (action: ToolbarAction) => (
     <button
       key={action.id}

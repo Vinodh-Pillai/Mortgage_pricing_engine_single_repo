@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from '../lib/i18n';
 import { useOptionalAuth } from '../lib/auth/AuthContext';
 import { roleLabels } from '../lib/auth/personas';
@@ -43,6 +43,7 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, fullS
     }
   });
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const notificationsRef = useRef<HTMLElement>(null);
   const navigationMode = fullScreenWorkspace ? 'drawer' : mode;
   const railCollapsed = mode === 'rail' && navCollapsed;
 
@@ -63,6 +64,25 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, fullS
     setDrawerOpen(false);
     setNotificationsOpen(false);
   }, [showAuthenticatedChrome]);
+
+  useEffect(() => {
+    if (!notificationsOpen) return undefined;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && notificationsRef.current?.contains(target)) return;
+      if (target instanceof HTMLElement && target.closest('[data-layout-notifications-trigger="true"]')) return;
+      setNotificationsOpen(false);
+    };
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') setNotificationsOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [notificationsOpen]);
 
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
   const focusWorkspace = useCallback(() => document.getElementById('main-content'), []);
@@ -87,8 +107,11 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, fullS
         onNotificationsToggle={() => {
           if (showAuthenticatedChrome) setNotificationsOpen((current) => !current);
         }}
+        onNavigationToggle={() => setDrawerOpen((current) => !current)}
         onLogout={auth?.logout}
         onThemeToggle={onThemeToggle}
+        showNavigationToggle={showAuthenticatedChrome && navigationMode === 'drawer'}
+        navigationOpen={drawerOpen}
         theme={theme}
         user={currentUser}
       />
@@ -105,7 +128,6 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, fullS
               mode={navigationMode}
               modules={modules}
               onCloseDrawer={closeDrawer}
-              onOpenDrawer={() => setDrawerOpen(true)}
               onToggleCollapsed={toggleCollapsed}
               returnFocusTarget={fullScreenWorkspace ? focusWorkspace : undefined}
             />
@@ -114,7 +136,7 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, fullS
         <ContentArea fullScreen={fullScreenWorkspace}>{children}</ContentArea>
       </div>
       {showAuthenticatedChrome && notificationsOpen ? (
-        <aside className="layout-notifications" aria-label={t('notifications', { count: notifications.length })} role="status">
+        <aside ref={notificationsRef} className="layout-notifications" aria-label={t('notifications', { count: notifications.length })} role="status">
           {notifications.length ? notifications.map((notification) => <p key={notification.id}>{notification.label}</p>) : <p>{t('noNotifications')}</p>}
         </aside>
       ) : null}

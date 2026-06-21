@@ -23,6 +23,7 @@ export const routeComponentLoaders: Record<string, () => Promise<{ default: Comp
   'tenant-home': () => import('../screens/tenantHome').then((module) => ({ default: module.TenantHomeScreen })),
   shell: () => import('../screens/quoteIntake/QuoteIntakeScreen').then((module) => ({ default: module.QuoteIntakeScreen })),
   'quote-intake': () => import('../screens/quoteIntake/QuoteIntakeScreen').then((module) => ({ default: module.QuoteIntakeScreen })),
+  quickquote: () => import('../screens/quoteIntake/QuoteIntakeScreen').then((module) => ({ default: module.QuoteIntakeScreen })),
   'quote-offers': () => import('../screens/quoteOffers/QuoteOffersScreen'),
   'quote-detail': () => import('../screens/quoteDetail/QuoteDetailScreen'),
   'pricing-waterfall': () => import('../screens/pricingWaterfall/PricingWaterfallScreen'),

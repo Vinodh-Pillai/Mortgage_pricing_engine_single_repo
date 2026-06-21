@@ -33,6 +33,7 @@ export default function QuoteLockScreen({ tenantId = 'tenant-fixture', runId, op
   const [isConfirming, setIsConfirming] = useState(false);
   const visualState = stateForLockWorkflow({ ...workflowState, status: currentStatus });
   const disclosuresAccepted = scrollComplete && checked && signatureName.trim().length > 0;
+  const displayedHistory = confirmation?.historyEvent ? [...workflowState.history, confirmation.historyEvent] : workflowState.history;
 
   useEffect(() => {
     setWorkflowState(workflow);
@@ -86,7 +87,7 @@ export default function QuoteLockScreen({ tenantId = 'tenant-fixture', runId, op
     };
     setIsConfirming(true);
     try {
-      const result = await (confirmLock?.(request) ?? confirmLockWorkflowAction(tenantId, activeRunId, request, fetchImpl).catch(() => deterministicLockConfirmation));
+      const result = await (confirmLock?.(request) ?? confirmLockWorkflowAction(tenantId, activeRunId, request, fetchImpl).catch(() => localSyntheticLockResult(action, workflowState, confirmation)));
       setConfirmation(result);
       if (result.status === 'CONFIRMED') setCurrentStatus(action === 'confirm' ? 'CONFIRMED' : action === 'float_down' ? 'FLOAT_DOWN' : action === 'relock' ? 'RELOCKED' : 'EXTENDED');
       setDialogOpen(false);
@@ -113,7 +114,8 @@ export default function QuoteLockScreen({ tenantId = 'tenant-fixture', runId, op
         <button type="button" className="button-secondary" onClick={() => navigate(`/quote/${encodeURIComponent(activeRunId)}/offers`)}>Back to offers</button>
       </section>
 
-      <LockStatusBanner status={currentStatus} lockId={confirmation?.lockId ?? workflowState.lockId} expiresAt={confirmation?.expiresAt ?? workflowState.terms.expiresAt} extensionCount={workflowState.history.filter((event) => event.eventType === 'extended').length} />
+      <LockStatusBanner status={currentStatus} lockId={confirmation?.lockId ?? workflowState.lockId} expiresAt={confirmation?.expiresAt ?? workflowState.terms.expiresAt} extensionCount={displayedHistory.filter((event) => event.eventType === 'extended').length} />
+      {confirmation?.message ? <div className="banner banner--info" role="status">{confirmation.message}</div> : null}
 
       <section className="quote-detail-layout" aria-label="Responsive lock workflow layout" style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 22rem), 1fr))' }}>
         <div>
@@ -122,7 +124,7 @@ export default function QuoteLockScreen({ tenantId = 'tenant-fixture', runId, op
         </div>
         <div>
           <PostLockActions status={currentStatus} actions={workflowState.postLockActions} onSelect={(action) => setSelectedAction(action)} />
-          <LockHistory events={confirmation?.historyEvent ? [...workflowState.history, confirmation.historyEvent] : workflowState.history} />
+          <LockHistory events={displayedHistory} />
         </div>
       </section>
 
@@ -143,6 +145,30 @@ export default function QuoteLockScreen({ tenantId = 'tenant-fixture', runId, op
       ) : null}
     </main>
   );
+}
+
+function localSyntheticLockResult(action: LockConfirmationRequest['action'], workflow: LockWorkflowView, currentConfirmation: LockConfirmationResult | null): LockConfirmationResult {
+  const actionLabel = action === 'confirm' ? 'confirm lock' : action === 'float_down' ? 'request float-down' : action === 'relock' ? 'request relock' : 'request extension';
+  const eventType = action === 'confirm' ? 'confirmed' : action === 'float_down' ? 'float-down-requested' : action === 'relock' ? 'relock-requested' : 'extended';
+  const lockId = currentConfirmation?.lockId ?? workflow.lockId ?? workflow.lockIdPreview;
+  const timestamp = new Date().toISOString();
+  return {
+    status: 'CONFIRMED',
+    lockId,
+    expiresAt: currentConfirmation?.expiresAt ?? workflow.terms.expiresAt,
+    message: `Local synthetic/dev fixture staged ${actionLabel}. Production lock-service, investor, and compliance integrations must confirm durable status before borrower reliance.`,
+    conflictResolution: null,
+    auditRef: `audit:local-synthetic:${action}`,
+    historyEvent: {
+      eventId: `evt-local-${action}-${timestamp}`,
+      eventType,
+      timestamp,
+      actor: 'loan-officer-local-fixture',
+      terms: `Local synthetic ${actionLabel} event; no fees, cutoffs, investor calendars, or pricing rules were calculated in the UI.`,
+      approvalRef: 'production-integration-required',
+      auditRef: `audit:local-synthetic:${action}`,
+    },
+  };
 }
 
 export function stateForLockWorkflow(workflow: LockWorkflowView) {

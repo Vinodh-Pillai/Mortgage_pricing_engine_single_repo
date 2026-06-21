@@ -35,8 +35,6 @@ const modules: WorkbenchScreenModule[] = [
   },
 ];
 
-const layoutCss = '';
-
 function installMatchMedia(matches = false) {
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
@@ -115,12 +113,12 @@ describe('responsive layout shell', () => {
     expect(document.querySelector('.layout-frame')).toHaveClass('layout-frame--popup-navigation');
     expect(screen.getByRole('main')).toHaveClass('layout-content--workspace');
     expect(document.querySelector('.layout-content__panel')).toHaveClass('layout-content__panel--workspace');
-    expect(layoutCss).toMatch(/\.layout-shell--workspace\s+\.layout-sidebar--drawer\s*\{[\s\S]*?position:\s*fixed;[\s\S]*?top:\s*4rem;[\s\S]*?z-index:\s*var\(--layout-z-drawer\);/);
     expect(screen.queryByRole('contentinfo')).not.toBeInTheDocument();
     expect(screen.queryByRole('navigation', { name: 'Main navigation' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open navigation menu' }));
     expect(screen.getByRole('dialog', { name: 'Primary navigation drawer' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Close' })).not.toBeInTheDocument();
     const backdrop = document.querySelector('.layout-sidebar-backdrop') as HTMLElement;
     expect(backdrop).toBeInTheDocument();
     fireEvent.click(backdrop);
@@ -147,7 +145,7 @@ describe('responsive layout shell', () => {
     const dialog = screen.getByRole('dialog', { name: 'Primary navigation drawer' });
     const focusable = Array.from(dialog.querySelectorAll<HTMLElement>('a.layout-sidebar__link[href], button:not(:disabled)'));
     const nativeTabAnchors = Array.from(dialog.querySelectorAll<HTMLElement>('a[href]:not([tabindex="-1"])'));
-    expect(focusable.length).toBeGreaterThan(1);
+    expect(focusable.length).toBeGreaterThan(0);
     expect(nativeTabAnchors).toHaveLength(focusable.filter((element) => element.tagName === 'A').length);
     expect(nativeTabAnchors.every((element) => element.classList.contains('layout-sidebar__link'))).toBe(true);
 

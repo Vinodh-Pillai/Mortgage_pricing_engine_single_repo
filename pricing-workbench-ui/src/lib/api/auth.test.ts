@@ -27,13 +27,17 @@ describe('auth api client security boundaries', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('blocks authentication when the BFF base URL is missing', async () => {
-    const fetchMock = vi.fn();
+  it('uses the same-origin BFF proxy when the explicit BFF base URL is missing', async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe('/api/auth/login');
+      expect(init?.method).toBe('POST');
+      return jsonResponse({ user: { id: 'u-1', email: 'user@example.test', fullName: 'Test User', role: 'pricing_analyst' } });
+    });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(login('user@example.test', 'test-password-value')).rejects.toThrow(/BFF API base URL is required/);
+    await login('user@example.test', 'test-password-value');
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('routes registration through the configured BFF base URL', async () => {
@@ -63,7 +67,7 @@ describe('auth api client security boundaries', () => {
     });
     expect(AUTH_SECURITY_BLOCKERS).toEqual(expect.arrayContaining([
       expect.stringContaining('OIDC/PKCE'),
-      expect.stringContaining('only to VITE_BFF_API_BASE_URL'),
+      expect.stringContaining('same-origin /api proxy'),
     ]));
   });
 });

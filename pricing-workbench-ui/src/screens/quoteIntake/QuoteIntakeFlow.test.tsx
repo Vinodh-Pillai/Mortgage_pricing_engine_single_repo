@@ -207,11 +207,11 @@ describe('PipelineIntakeTest', () => {
     expect(container.querySelector('#keys-heading')).not.toBeInTheDocument();
     expect(container.querySelector('input[name="borrowerLastName"]')).not.toBeInTheDocument();
     expect(container.querySelector('input[name="loanNumber"]')).not.toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: /^Mortgage type/i })).not.toBeRequired();
+    expect(screen.getAllByRole('combobox', { name: /^Mortgage type/i })[0]).not.toBeRequired();
     expect(screen.queryByRole('button', { name: /Preferences & Launch/i })).not.toBeInTheDocument();
   }, 30000);
 
-  it('loanBasicsCreatesDraftOnFirstPricingFieldEntryAndSavesOnBlur', async () => {
+  it('keepsPricingFieldEditsLocalUntilExplicitPipelineSave', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input.toString();
       if (url.endsWith('/scenarios') && init?.method === 'POST') return json({ scenarioId: 'scenario-1', scenarioVersion: 1 });
@@ -224,11 +224,10 @@ describe('PipelineIntakeTest', () => {
     const quoteSection = screen.getByRole('heading', { name: /^Quote$/i }).closest('section') as HTMLElement;
     const mortgageType = within(quoteSection).getByRole('combobox', { name: /^Mortgage type/i });
     fireEvent.change(mortgageType, { target: { value: 'Conventional' } });
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/tenants/ui-preview-tenant/scenarios', expect.objectContaining({ method: 'POST' })));
-    const firstDraftCreate = fetchMock.mock.calls.find(([input, init]) => input.toString().endsWith('/scenarios') && init?.method === 'POST');
-    expect(JSON.parse(String(firstDraftCreate?.[1]?.body))).toMatchObject({ data: { mortgageType: 'Conventional' } });
     fireEvent.blur(mortgageType);
-    await waitFor(() => expect(window.localStorage.getItem('wcpe:quoteIntakeDraft:last')).toBe('scenario-1'));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/tenants/ui-preview-tenant/application-forms/active', expect.anything()));
+    expect(fetchMock.mock.calls.some(([input, init]) => input.toString().endsWith('/scenarios') && init?.method === 'POST')).toBe(false);
+    expect(window.localStorage.getItem('wcpe:quoteIntakeDraft:last')).toBeNull();
   }, 60000);
 
   it('launchesQuoteFromProductFinderWithMinimumStartKeys', async () => {
@@ -243,7 +242,7 @@ describe('PipelineIntakeTest', () => {
     render(<QuoteIntakeFlow metadataState={metadataState} intake={{ ...filledIntake(), borrowerLastName: 'Alex', loanNumber: 'LP-1001', mortgageType: 'Conventional', zip: '90001', contactEmail: 'alex@example.test', state: 'CA' }} onNavigate={onNavigate} />);
 
     expect(screen.getByRole('heading', { name: /^Products$/i })).toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole('button', { name: /^Use$/i })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: /^Use for quote$/i })[0]);
     const launchButton = screen.getByRole('button', { name: /^Launch Quote$/i });
     await waitFor(() => expect(launchButton).not.toBeDisabled());
     fireEvent.click(launchButton);
@@ -309,9 +308,10 @@ describe('PipelineIntakeTest', () => {
     expect(screen.queryByText(/Capture the borrower and loan facts/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Headers separate runtime sections/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Configure field-library data types/i)).not.toBeInTheDocument();
-    expect(container.querySelector('[aria-label="Required field count"]')).toHaveTextContent(/fields missing/i);
-    expect(container.querySelector('[aria-label="Application form builder states"]')).toHaveTextContent(/Headers: section only/i);
-    expect(container.querySelector('[aria-label="Field editor states"]')).toHaveTextContent(/Approved enums/i);
+    fireEvent.click(screen.getByRole('row', { name: /Conventional 30-Year Preview ACTIVE/i }));
+    expect(container.querySelector('[aria-label="Required field count"]')).toHaveTextContent(/field missing/i);
+    expect(container.querySelector('[aria-label="Application form builder states"]')).not.toBeInTheDocument();
+    expect(container.querySelector('[aria-label="Field editor states"]')).not.toBeInTheDocument();
   }, 30000);
 
   it('rendersFullScreenQuickQuoteShellWithStructuredStatusAndNoPipelineRedirectCopy', () => {
@@ -327,7 +327,7 @@ describe('PipelineIntakeTest', () => {
     expect(screen.getByRole('button', { name: /^Save QuickQuote draft$/i })).toBeInTheDocument();
     expect(screen.getByRole('table', { name: /QuickQuote product eligibility grid/i })).toBeInTheDocument();
     expect(screen.getByText(/no QuickQuote product filter is applied/i)).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: /^Audit$/i })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /^Review$/i })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: /^Pipeline$/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/Capture the borrower and loan facts/i)).not.toBeInTheDocument();
   }, 30000);
@@ -349,11 +349,11 @@ describe('PipelineIntakeTest', () => {
     expect(capture).toHaveBeenCalledWith(expect.objectContaining({ action: 'quote-mode-switched', storyId: 'PII-77-S05', mode: 'pipeline', decision: 'discard' }));
   }, 30000);
 
-  it('keepsAllQuickQuoteProductStatusesVisibleWithAuditTraceRefs', () => {
+  it('keepsAllQuickQuoteProductStatusesVisibleWithReviewTraceRefs', () => {
     const capture = vi.fn();
     render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} onEvidenceCapture={capture} />);
 
-    expect(screen.getAllByRole('row')).toHaveLength(6);
+    expect(within(screen.getByRole('table', { name: /QuickQuote product eligibility grid/i })).getAllByRole('row')).toHaveLength(6);
     const referableRow = screen.getByRole('row', { name: /FHA 30-Year Preview PENDING/i });
     const ineligibleRow = screen.getByRole('row', { name: /Jumbo Preview Product INACTIVE/i });
 
@@ -362,15 +362,15 @@ describe('PipelineIntakeTest', () => {
 
     fireEvent.click(referableRow);
     expect(capture).toHaveBeenCalledWith(expect.objectContaining({ action: 'pipeline-row-selected', storyId: 'PII-77-S02' }));
-    const auditDetails = screen.getByLabelText(/Row audit details/i);
-    expect(auditDetails).toHaveTextContent(/Referable or missing-data state is visible/i);
+    const auditDetails = screen.getByLabelText(/Product review details/i);
+    expect(auditDetails).toHaveTextContent(/Referable state is visible/i);
     expect(auditDetails).toHaveTextContent(/Eligibility/);
     expect(auditDetails).toHaveTextContent(/Calculation/);
     expect(auditDetails).toHaveTextContent(/Adjustment/);
     expect(auditDetails).toHaveTextContent(/Margin/);
     expect(auditDetails).toHaveTextContent(/Pricing/);
 
-    fireEvent.click(within(ineligibleRow).getByRole('button', { name: /^Audit$/i }));
+    fireEvent.click(within(ineligibleRow).getByRole('button', { name: /^Review status$/i }));
     expect(capture).toHaveBeenCalledWith(expect.objectContaining({ action: 'pipeline-row-status-reviewed', storyId: 'PII-77-S02' }));
     expect(screen.getByText(/Jumbo Preview Product status: Ineligible/i)).toBeInTheDocument();
     expect(screen.getByText(/pricing-service:JUMBO_PREVIEW:rate-output-pending/i)).toBeInTheDocument();
@@ -403,16 +403,13 @@ describe('PipelineIntakeTest', () => {
     expect(grid.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByLabelText(/Borrower and loan context/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/Missing fact reason categories/i)).toBeInTheDocument();
-    expect(prefillRail).toHaveTextContent(/Source LoanPASS/i);
-    expect(prefillRail).toHaveTextContent(/LOS Borrower last name/i);
-    expect(prefillRail).toHaveTextContent(/WCPE borrowerLastName/i);
-    expect(prefillRail).toHaveTextContent(/Confidence MAPPED/i);
-    expect(prefillRail).toHaveTextContent(/Last sync pending configured LOS adapter/i);
+    expect(prefillRail).not.toHaveTextContent(/Source LoanPASS/i);
+    expect(prefillRail).not.toHaveTextContent(/WCPE borrowerLastName/i);
     expect(prefillRail).toHaveTextContent(/Required to price: 1/i);
     expect(prefillRail).toHaveTextContent(/Improves pricing: 1/i);
     expect(prefillRail).toHaveTextContent(/Before lock: 1/i);
-    expect(screen.getByRole('heading', { name: /Override audit/i })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: /Mapped LOS values/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Recent edits/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Borrower details/i })).toBeInTheDocument();
 
     unmount();
     const overrideRender = render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} intake={losPrefilledIntake} />);
@@ -420,12 +417,12 @@ describe('PipelineIntakeTest', () => {
     const decisionCreditScore = screen.getByRole('spinbutton', { name: /Decision credit score/i });
     fireEvent.change(decisionCreditScore, { target: { value: '735' } });
     await waitFor(() => expect(decisionCreditScore).toHaveValue(735));
-    const overrideAudit = screen.getByRole('heading', { name: /Override audit/i }).closest('section') as HTMLElement;
+    const overrideAudit = screen.getByRole('heading', { name: /Recent edits/i }).closest('section') as HTMLElement;
     expect(overrideAudit).toHaveTextContent(/decisionCreditScore/i);
-    expect(overrideAudit).toHaveTextContent(/Original LOS value: 720/i);
-    expect(overrideAudit).toHaveTextContent(/Override value: 735/i);
-    expect(overrideAudit).toHaveTextContent(/User\/time: loan-officer-1 at/i);
-    expect(overrideAudit).toHaveTextContent(/Affected output traces: quote-fact:decisionCreditScore/i);
+    expect(overrideAudit).toHaveTextContent(/Original value: 720/i);
+    expect(overrideAudit).toHaveTextContent(/Edited value: 735/i);
+    expect(overrideAudit).toHaveTextContent(/Edited by: loan-officer-1 at/i);
+    expect(overrideAudit).toHaveTextContent(/Pricing impact is rechecked/i);
 
     fireEvent.click(screen.getByRole('row', { name: /Conventional 30-Year Preview ACTIVE/i }));
     fireEvent.click(screen.getByRole('button', { name: /^Save QuickQuote draft$/i }));
@@ -456,10 +453,10 @@ describe('PipelineIntakeTest', () => {
 
     overrideRender.unmount();
     render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} intake={{ ...losPrefilledIntake, decisionCreditScore: '735', clientContext: persistedBody.data.clientContext }} />);
-    const restoredAudit = screen.getByRole('heading', { name: /Override audit/i }).closest('section') as HTMLElement;
-    expect(restoredAudit).toHaveTextContent(/Original LOS value: 720/i);
-    expect(restoredAudit).toHaveTextContent(/Override value: 735/i);
-    expect(restoredAudit).toHaveTextContent(/Affected output traces: quote-fact:decisionCreditScore/i);
+    const restoredAudit = screen.getByRole('heading', { name: /Recent edits/i }).closest('section') as HTMLElement;
+    expect(restoredAudit).toHaveTextContent(/Original value: 720/i);
+    expect(restoredAudit).toHaveTextContent(/Edited value: 735/i);
+    expect(restoredAudit).toHaveTextContent(/Pricing impact is rechecked/i);
     expect(screen.getAllByRole('row').length).toBeGreaterThan(1);
   }, 30000);
 
@@ -485,8 +482,8 @@ describe('PipelineIntakeTest', () => {
 
     fireEvent.click(screen.getByRole('row', { name: /Conventional 30-Year Preview ACTIVE/i }));
     const jumboRow = screen.getByRole('row', { name: /Jumbo Preview Product INACTIVE/i });
-    fireEvent.click(within(jumboRow).getByRole('button', { name: /^Compare$/i }));
-    fireEvent.click(screen.getByRole('button', { name: /^Save Draft from comparison$/i }));
+    fireEvent.click(within(jumboRow).getByRole('button', { name: /^Add to comparison$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^Save QuickQuote draft from comparison$/i }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/tenants/ui-preview-tenant/scenarios', expect.objectContaining({ method: 'POST' })));
     const persistCall = fetchMock.mock.calls.find(([input, init]) => input.toString().endsWith('/scenarios') && init?.method === 'POST');
@@ -535,7 +532,7 @@ describe('PipelineIntakeTest', () => {
     fireEvent.click(banner.querySelector('.quote-validation-top-banner__close') as HTMLButtonElement);
     expect(container.querySelector('.quote-validation-top-banner')).not.toBeInTheDocument();
 
-    fireEvent.click(Array.from(firstProductRow.querySelectorAll('button')).find((button) => button.textContent === 'Use') as HTMLButtonElement);
+    fireEvent.click(Array.from(firstProductRow.querySelectorAll('button')).find((button) => button.textContent === 'Use for quote') as HTMLButtonElement);
     expect(container.querySelector('.quote-validation-top-banner')).not.toBeInTheDocument();
     const launchButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Launch Quote') as HTMLButtonElement;
     expect(launchButton).not.toBeDisabled();
@@ -693,7 +690,7 @@ describe('PipelineIntakeTest', () => {
     const row = screen.getByRole('row', { name: /Conventional 30-Year Preview ACTIVE/i });
     fireEvent.keyDown(row, { key: 'Enter' });
     expect(row).toHaveAttribute('aria-selected', 'true');
-    fireEvent.click(within(row).getByRole('button', { name: /^Use$/i }));
+    fireEvent.click(within(row).getByRole('button', { name: /^Use for quote$/i }));
 
     expect(row).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByText(/Conventional 30-Year Preview selected/i)).toBeInTheDocument();
@@ -708,60 +705,43 @@ describe('PipelineIntakeTest', () => {
 
     expect(screen.getByText(/Approval required before lock, reprice, relock, or cancellation/i)).toBeInTheDocument();
     expect(screen.getByText(/Approval path: lock-desk-review/i)).toBeInTheDocument();
-    expect(screen.getByText('Request date: field@lock-request-date = 2026-06-18')).toBeInTheDocument();
-    expect(screen.getByText('Expiration date: calc@lock-expiration-date = 30')).toBeInTheDocument();
-    expect(screen.getByText('Extension: field@lock-extension = 5')).toBeInTheDocument();
+    expect(screen.getByText('Request date: 2026-06-18')).toBeInTheDocument();
+    expect(screen.getByText('Expiration date: 30')).toBeInTheDocument();
+    expect(screen.getByText('Extension: 5')).toBeInTheDocument();
   });
 
-  it('rendersConfiguredApplicationFormSectionsHeadersAndOmitsRemovedFields', () => {
+  it('rendersRuntimeApplicationFormSectionsHeadersAndOmitsRemovedFieldsWithoutBuilderControls', () => {
     const { container } = render(<QuoteIntakeFlow metadataState={orderedFormMetadataState} />);
 
-    const sectionLabels = Array.from(container.querySelectorAll('.quote-form-builder__sections > li > strong')).map((node) => node.textContent);
-    expect(sectionLabels[0]).toBe('Property');
-    const headerRow = container.querySelector('[data-field-id="field@property-details"][data-value-type="header"]') as HTMLElement;
-    expect(headerRow).toBeInTheDocument();
-    expect(within(headerRow).getByText(/section header/i)).toBeInTheDocument();
-    expect(headerRow.querySelector('input, textarea, select')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /^Borrower Details$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /^Property$/i })).not.toBeInTheDocument();
     expect(container.querySelector('[data-field-id="occupancyType"]')).not.toBeInTheDocument();
+    expect(container.querySelector('.quote-form-builder')).not.toBeInTheDocument();
   });
 
-  it('savesReorderedApplicationFormFieldsToTenantDraftOnly', () => {
+  it('doesNotExposeApplicationFormBuilderDraftOrderingOnUserScreens', () => {
     const { container } = render(<QuoteIntakeFlow metadataState={orderedFormMetadataState} tenantId="tenant-alpha" />);
-    const loanNumberRow = container.querySelector('[data-field-id="loanNumber"]') as HTMLElement;
 
-    fireEvent.click(within(loanNumberRow).getByRole('button', { name: /^Move up$/i }));
-    fireEvent.click(screen.getByRole('button', { name: /^Save form draft order$/i }));
-
-    const saved = JSON.parse(window.localStorage.getItem('wcpe:application-form-builder:tenantalpha:draft-order') ?? '{}');
-    expect(saved.tenantId).toBe('tenant-alpha');
-    expect(saved.sections['scenario-identity'][0]).toBe('loanNumber');
+    expect(container.querySelector('.quote-form-builder')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Save form draft order$/i })).not.toBeInTheDocument();
+    expect(window.localStorage.getItem('wcpe:application-form-builder:tenantalpha:draft-order')).toBeNull();
     expect(window.localStorage.getItem('wcpe:application-form-builder:tenantbeta:draft-order')).toBeNull();
   });
 
-  it('authorsConditionalVisibilityWithParentOperatorsAndEnumValues', () => {
-    const { container } = render(<QuoteIntakeFlow metadataState={orderedFormMetadataState} tenantId="tenant-alpha" />);
-    const loanPurposeRow = container.querySelector('[data-field-id="baseLoanAmount"]') as HTMLElement;
+  it('doesNotExposeConditionalVisibilityAuthoringOnUserScreens', () => {
+    render(<QuoteIntakeFlow metadataState={orderedFormMetadataState} tenantId="tenant-alpha" />);
 
-    fireEvent.change(within(loanPurposeRow).getByLabelText(/Parent field/i), { target: { value: 'mortgageType' } });
-
-    expect(within(loanPurposeRow).getByRole('option', { name: /Any of/i })).toBeInTheDocument();
-    expect(within(loanPurposeRow).getByRole('option', { name: /Conventional/i })).toBeInTheDocument();
-
-    fireEvent.change(within(loanPurposeRow).getByLabelText(/Condition value/i), { target: { value: 'CONVENTIONAL' } });
-    fireEvent.click(screen.getByRole('button', { name: /^Save form draft order$/i }));
-
-    const saved = JSON.parse(window.localStorage.getItem('wcpe:application-form-builder:tenantalpha:conditional-visibility') ?? '{}');
-    expect(saved.conditions.baseLoanAmount).toEqual({ parentFieldId: 'mortgageType', operator: 'equals', values: ['CONVENTIONAL'] });
-    expect(screen.getByText(/conditional visibility saved for this tenant/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Parent field/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Condition value/i)).not.toBeInTheDocument();
+    expect(window.localStorage.getItem('wcpe:application-form-builder:tenantalpha:conditional-visibility')).toBeNull();
   }, 30000);
 
-  it('blocksConditionalSavingThatReferencesHiddenOrRemovedParentFields', () => {
+  it('ignoresLocalBuilderDraftsWhenRenderingUserRuntimeFields', () => {
     window.localStorage.setItem('wcpe:application-form-builder:tenantalpha:conditional-visibility', JSON.stringify({ tenantId: 'tenant-alpha', conditions: { baseLoanAmount: { parentFieldId: 'occupancyType', operator: 'equals', values: ['Investment'] } } }));
     render(<QuoteIntakeFlow metadataState={orderedFormMetadataState} tenantId="tenant-alpha" />);
 
-    fireEvent.click(screen.getByRole('button', { name: /^Save form draft order$/i }));
-
-    expect(document.body.textContent).toContain('references hidden or removed parent field occupancyType');
+    expect(screen.queryByText(/references hidden or removed parent field occupancyType/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Save form draft order$/i })).not.toBeInTheDocument();
   }, 30000);
 
   it('appliesConditionalVisibilityWithTheFieldLibraryEvaluatorAtRuntime', () => {
@@ -798,9 +778,9 @@ describe('PipelineIntakeTest', () => {
     render(<QuoteIntakeFlow metadataState={metadataState} tenantId="tenant-alpha" />);
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/tenants/tenant-alpha/application-forms/active', expect.objectContaining({ headers: expect.objectContaining({ Accept: 'application/json' }) })));
-    await screen.findByText(/Published application form version v-runtime-1 loaded for tenant-alpha/i);
+    await screen.findByText(/Application fields loaded/i);
 
-    const runtimeCard = screen.getByRole('heading', { name: /^Application Form$/i }).closest('section') as HTMLElement;
+    const runtimeCard = screen.getByRole('heading', { name: /^Borrower Details$/i }).closest('section') as HTMLElement;
     expect(within(runtimeCard).getByText('Runtime header')).toBeInTheDocument();
     expect(within(runtimeCard).getByRole('combobox', { name: /^Mortgage Type/i })).toBeInTheDocument();
     expect(within(runtimeCard).getByRole('option', { name: /^Conventional$/i })).toBeInTheDocument();
@@ -847,7 +827,7 @@ describe('PipelineIntakeTest', () => {
 
     render(<QuoteIntakeFlow metadataState={metadataState} tenantId="tenant-missing" />);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/configuration blocker: no published tenant application form version is configured/i);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Application fields are unavailable\. Setup support is needed\./i);
   }, 30000);
 
   it('showsUnavailableProductRowStatusWithoutCardAffordances', () => {
@@ -856,7 +836,7 @@ describe('PipelineIntakeTest', () => {
     const row = screen.getByRole('row', { name: /Jumbo Preview Product INACTIVE/i });
     expect(within(row).getByText(/Inactive product - row actions unavailable/i)).toBeInTheDocument();
     expect(within(row).getByRole('button', { name: /^Request lock$/i })).toBeDisabled();
-    fireEvent.click(within(row).getByRole('button', { name: /^Status$/i }));
+    fireEvent.click(within(row).getByRole('button', { name: /^Review status$/i }));
 
     expect(screen.getByText(/Jumbo Preview Product status: Ineligible/i)).toBeInTheDocument();
     expect(document.querySelector('.quote-product-card')).not.toBeInTheDocument();

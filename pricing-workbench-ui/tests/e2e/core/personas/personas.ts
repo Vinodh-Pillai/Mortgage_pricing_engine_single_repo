@@ -409,6 +409,11 @@ export interface Pii25Persona {
   authorizedRoutes: string[];
   unauthorizedRoutes: string[];
   expectedModules: string[];
+  syntheticFixtureMetadata?: {
+    classification: 'synthetic-test-only';
+    workflowCoverage: string[];
+    missingProductionIntegrations: string[];
+  };
 }
 
 export const pii25Personas: Pii25Persona[] = [
@@ -419,9 +424,39 @@ export const pii25Personas: Pii25Persona[] = [
     roleLabel: 'Loan officer',
     email: 'sarah.mitchell@wcpe.demo',
     defaultRoute: '/quote/start',
-    authorizedRoutes: ['/quote/start', '/locks'],
+    authorizedRoutes: [
+      '/pipeline',
+      '/quote/start',
+      '/quote/:runId/offers',
+      '/quote/:runId/offers/:optionId',
+      '/quote/:runId/lock',
+      '/quote/:runId/status',
+      '/quote/:runId/what-if',
+      '/quote/:runId/what-if/product-comparison',
+      '/quote/:runId/what-if/lock-period-comparison',
+      '/locks',
+    ],
     unauthorizedRoutes: ['/tenant/onboarding', '/admin/products/new', '/compliance/evidence'],
-    expectedModules: ['Progressive Quote Intake', 'Lock Management'],
+    expectedModules: ['Progressive Quote Intake', 'Quote Comparison', 'Lock Management', 'Scenario Analysis'],
+    syntheticFixtureMetadata: {
+      classification: 'synthetic-test-only',
+      workflowCoverage: [
+        'pipeline-intake',
+        'quick-quote',
+        'quote-comparison',
+        'request-lock',
+        'lock-status',
+        'lock-expiry',
+        'lock-extension',
+        'scenario-analysis',
+        'what-if',
+      ],
+      missingProductionIntegrations: [
+        'Live LOS/LoanPASS intake adapters are not production-backed in this E2E persona fixture.',
+        'Investor lock submission, expiry, and extension workflows use deterministic local mocks.',
+        'Pricing/rate values referenced by Sarah workflows are synthetic fixtures only.',
+      ],
+    },
   },
   {
     id: 'persona-pricing-analyst',

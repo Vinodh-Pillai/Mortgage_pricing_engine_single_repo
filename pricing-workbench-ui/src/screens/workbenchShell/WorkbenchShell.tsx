@@ -536,6 +536,16 @@ export const workbenchModules: WorkbenchScreenModule[] = [
   },
 ];
 
+const workbenchModuleCards = workbenchModules.map((screen) => {
+  const copy = registryCopyFor(screen);
+  return {
+    screen,
+    copy,
+    personaVisibility: personaVisibilityFor(screen),
+    stateLabels: uniqueValues(copy.stateLabels),
+  };
+});
+
 export function resolveWorkbenchModule(pathname: string) {
   return workbenchModules.find((screen) => screen.match(pathname)) ?? workbenchModules[0];
 }
@@ -552,17 +562,14 @@ export function WorkbenchModuleRail({ activeModuleId }: { activeModuleId: string
         </p>
       </div>
       <div className="module-rail__grid" role="list" aria-label="Workbench screen modules">
-        {workbenchModules.map((screen) => (
+        {workbenchModuleCards.map(({ screen, copy, personaVisibility, stateLabels }) => (
           <article
             key={screen.id}
             className={screen.id === activeModuleId ? 'module-card module-card--active' : 'module-card'}
             role="listitem"
             aria-current={screen.id === activeModuleId ? 'page' : undefined}
           >
-            {(() => {
-              const copy = registryCopyFor(screen);
-              return <>
-                <p className="module-card__route">{copy.pathLabel}</p>
+            <p className="module-card__route">{copy.pathLabel}</p>
             <strong className="module-card__title">{screen.label}</strong>
             <dl>
               <dt>Screen purpose</dt>
@@ -573,13 +580,11 @@ export function WorkbenchModuleRail({ activeModuleId }: { activeModuleId: string
               <dd>{copy.evidenceLabel}</dd>
             </dl>
             <ul className="chip-list" aria-label={`${screen.label} role and persona visibility`}>
-              {personaVisibilityFor(screen).map((persona) => <li key={persona}>{persona}</li>)}
+              {personaVisibility.map((persona) => <li key={persona}>{persona}</li>)}
             </ul>
             <ul className="chip-list" aria-label={`${screen.label} loading error blocked state coverage`}>
-              {uniqueValues(copy.stateLabels).map((state) => <li key={state}>{state}</li>)}
+              {stateLabels.map((state) => <li key={state}>{state}</li>)}
             </ul>
-              </>;
-            })()}
           </article>
         ))}
       </div>

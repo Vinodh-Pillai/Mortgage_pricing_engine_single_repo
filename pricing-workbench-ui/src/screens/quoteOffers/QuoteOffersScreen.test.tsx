@@ -60,8 +60,8 @@ describe('PII-24-S10 offer comparison screen', () => {
     render(<QuoteOffersScreen comparison={deterministicOfferComparison} onNavigate={onNavigate} />);
 
     fireEvent.click(screen.getAllByLabelText(/Select/i)[0]);
-    fireEvent.click(screen.getByRole('button', { name: /Compare Detail/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Lock Terms/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Review comparison detail/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Start lock request/i }));
 
     expect(onNavigate).toHaveBeenCalledWith('/quote/run-preview-001/offers/offer-a');
     expect(onNavigate).toHaveBeenCalledWith('/quote/run-preview-001/lock');

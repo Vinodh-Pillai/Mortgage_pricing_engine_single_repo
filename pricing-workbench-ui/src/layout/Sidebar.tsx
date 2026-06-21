@@ -14,12 +14,11 @@ type SidebarProps = {
   modules: WorkbenchScreenModule[];
   fallbackPersona?: string;
   onCloseDrawer: () => void;
-  onOpenDrawer: () => void;
   onToggleCollapsed: () => void;
   returnFocusTarget?: () => HTMLElement | null;
 };
 
-export function Sidebar({ activeModuleId, activeRunId, collapsed, drawerOpen, mode, modules, fallbackPersona, onCloseDrawer, onOpenDrawer, onToggleCollapsed, returnFocusTarget }: SidebarProps) {
+export function Sidebar({ activeModuleId, activeRunId, collapsed, drawerOpen, mode, modules, fallbackPersona, onCloseDrawer, onToggleCollapsed, returnFocusTarget }: SidebarProps) {
   const { t } = useTranslation('navigation');
   const auth = useOptionalAuth();
   const navRef = useRef<HTMLElement>(null);
@@ -65,26 +64,9 @@ export function Sidebar({ activeModuleId, activeRunId, collapsed, drawerOpen, mo
     }
   }
 
-  const mobileTrigger = mode === 'drawer' ? (
-    <button
-      className="layout-sidebar__mobile-trigger"
-      type="button"
-      aria-label={drawerOpen ? t('common:closeNavigationMenu') : t('common:openNavigationMenu')}
-      aria-controls="primary-navigation"
-      aria-expanded={drawerOpen}
-      aria-hidden={drawerOpen ? true : undefined}
-      tabIndex={drawerOpen ? -1 : undefined}
-      onClick={drawerOpen ? onCloseDrawer : onOpenDrawer}
-    >
-      <span className="layout-sidebar__mobile-trigger-icon" aria-hidden="true"><span /><span /><span /></span>
-    </button>
-  ) : null;
-
-  if (mode === 'drawer' && !drawerOpen) return mobileTrigger;
+  if (mode === 'drawer' && !drawerOpen) return null;
 
   return (
-    <>
-    {mobileTrigger}
     <nav
       id="primary-navigation"
       ref={navRef}
@@ -104,9 +86,7 @@ export function Sidebar({ activeModuleId, activeRunId, collapsed, drawerOpen, mo
         </span>
       </div>
       <div className="layout-sidebar__actions">
-        {mode === 'drawer' ? (
-          <button type="button" className="layout-sidebar__control" onClick={onCloseDrawer}>{t('common:close')}</button>
-        ) : (
+        {mode === 'rail' ? (
           <button
             type="button"
             className="layout-sidebar__control layout-sidebar__control--collapse"
@@ -118,7 +98,7 @@ export function Sidebar({ activeModuleId, activeRunId, collapsed, drawerOpen, mo
             <span aria-hidden="true">{collapsed ? '›' : '‹'}</span>
             <span className="layout-sidebar__control-label">{collapsed ? t('expand') : t('collapse')}</span>
           </button>
-        )}
+        ) : null}
       </div>
       {items.length === 0 ? <p className="layout-sidebar__empty" role="status">{t('noAccessibleModules')}</p> : null}
       <div className="layout-sidebar__groups">
@@ -157,6 +137,5 @@ export function Sidebar({ activeModuleId, activeRunId, collapsed, drawerOpen, mo
         })}
       </div>
     </nav>
-    </>
   );
 }
