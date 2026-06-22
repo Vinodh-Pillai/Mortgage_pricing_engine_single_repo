@@ -99,7 +99,7 @@ class RateLimitEvaluationServiceTest {
     RateLimitCounterStore unavailable = (key, capacity, resetAt) -> {
       throw new RateLimitCounterUnavailableException("redis unavailable in local test");
     };
-    RateLimitEvaluationService service = new RateLimitEvaluationService(unavailable, new InMemoryRateLimitCounterStore());
+    RateLimitEvaluationService service = new RateLimitEvaluationService(unavailable, new LocalRateLimitCounterStore());
     RateLimitPolicy policy = policy(10, 0, 2, PRINCIPAL_HASH);
 
     RateLimitResult highRisk = service.evaluate(List.of(policy), request(TENANT_ID, PRINCIPAL_HASH, EndpointRisk.HIGH_RISK_OPS));
@@ -171,7 +171,7 @@ class RateLimitEvaluationServiceTest {
   }
 
   private static RateLimitEvaluationService service() {
-    return new RateLimitEvaluationService(new InMemoryRateLimitCounterStore(), new InMemoryRateLimitCounterStore());
+    return new RateLimitEvaluationService(new LocalRateLimitCounterStore(), new LocalRateLimitCounterStore());
   }
 
   private static RateLimitPolicy policy(int limit, int burst, int fallbackLimit, String principalHash) {

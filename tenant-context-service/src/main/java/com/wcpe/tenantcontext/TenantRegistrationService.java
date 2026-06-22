@@ -2,13 +2,15 @@ package com.wcpe.tenantcontext;
 
 import java.time.Clock;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -30,22 +32,35 @@ public class TenantRegistrationService {
         "loanpass_callback_delivery"
     );
 
-    private final Map<String, TenantRecord> tenantsById = new LinkedHashMap<>();
-    private final Map<String, String> tenantIdByNormalizedName = new LinkedHashMap<>();
-    private final Map<String, LinkedHashMap<String, FeatureFlag>> featureFlagsByTenantId = new LinkedHashMap<>();
     private final Clock clock;
     private final Supplier<String> tenantIdSupplier;
+    private final JdbcTemplate jdbcTemplate;
+    private final TenantRegistrationStore testStore;
 
     public TenantRegistrationService() {
-        this(Clock.systemUTC(), () -> "tenant-" + UUID.randomUUID());
+        throw new IllegalStateException("TenantRegistrationService requires a JDBC DataSource-backed constructor in production; refusing in-memory store-of-record fallback");
+    }
+
+    @Autowired
+    public TenantRegistrationService(JdbcTemplate jdbcTemplate, Clock clock) {
+        this.clock = clock == null ? Clock.systemUTC() : clock;
+        this.tenantIdSupplier = () -> "";
+        this.jdbcTemplate = java.util.Objects.requireNonNull(jdbcTemplate, "jdbcTemplate is required");
+        this.testStore = null;
     }
 
     TenantRegistrationService(Clock clock, Supplier<String> tenantIdSupplier) {
+        throw new IllegalStateException("TenantRegistrationService test memory state must be supplied by a src/test fixture; refusing src/main process-local store-of-record fallback");
+    }
+
+    TenantRegistrationService(Clock clock, Supplier<String> tenantIdSupplier, TenantRegistrationStore testStore) {
         if (clock == null || tenantIdSupplier == null) {
             throw new TenantRegistrationException(500, "CONFIGURATION_INVALID", "Tenant registration dependencies are required.");
         }
         this.clock = clock;
         this.tenantIdSupplier = tenantIdSupplier;
+        this.jdbcTemplate = null;
+        this.testStore = java.util.Objects.requireNonNull(testStore, "testStore is required");
     }
 
     public TenantDetails register(TenantRegistrationCommand command) {
@@ -77,13 +92,15 @@ public class TenantRegistrationService {
     }
 
     public TenantDetails createTenant(TenantCreateRequest request, String createdBy) {
+        requireJdbcContractOrMemoryTestMode();
         Map<String, String> fieldErrors = validateCreate(request);
         if (!fieldErrors.isEmpty()) {
             throw new TenantRegistrationException(422, "VALIDATION_FAILED", "Tenant creation fields are invalid.", "", fieldErrors);
         }
 
         String normalizedName = normalizeName(request.tenantName());
-        String existingTenantId = tenantIdByNormalizedName.get(normalizedName);
+        TenantRegistrationStore store = requireTestStore();
+        String existingTenantId = store.tenantIdByNormalizedName(normalizedName).orElse(null);
         if (existingTenantId != null) {
             throw new TenantRegistrationException(409, "TENANT_NAME_EXISTS", "Tenant name already exists.", existingTenantId, Map.of());
         }
@@ -114,13 +131,13 @@ public class TenantRegistrationService {
             optional(request.nmlsId()),
             optional(createdBy)
         );
-        tenantsById.put(tenantId, record);
-        tenantIdByNormalizedName.put(normalizedName, tenantId);
-        featureFlagsByTenantId.put(tenantId, defaultFeatureFlags(createdBy));
+        store.saveTenant(normalizedName, record);
+        store.saveFeatureFlags(tenantId, defaultFeatureFlags(createdBy));
         return record.toDetails();
     }
 
     public TenantDetails updateTenant(String tenantId, TenantUpdateRequest request, String updatedBy) {
+        requireJdbcContractOrMemoryTestMode();
         TenantRecord record = requireTenant(tenantId);
         if (request == null) {
             throw new TenantRegistrationException(422, "VALIDATION_FAILED", "Tenant update request is required.");
@@ -141,16 +158,17 @@ public class TenantRegistrationService {
             optional(updatedBy),
             Instant.now(clock)
         );
-        tenantsById.put(updated.tenantId(), updated);
+        requireTestStore().saveTenant(normalizeName(updated.name()), updated);
         return updated.toDetails();
     }
 
     public List<TenantDetails> listTenants(TenantFilter filter) {
+        requireJdbcContractOrMemoryTestMode();
         TenantFilter safeFilter = filter == null ? new TenantFilter("", "") : filter;
         String search = optional(safeFilter.search()).toLowerCase(Locale.ROOT);
         String status = optional(safeFilter.status()).toUpperCase(Locale.ROOT);
-        List<TenantDetails> tenants = new ArrayList<>();
-        for (TenantRecord record : tenantsById.values()) {
+        List<TenantDetails> tenants = new java.util.ArrayList<>();
+        for (TenantRecord record : requireTestStore().tenants()) {
             boolean searchMatches = search.isBlank()
                 || record.name().toLowerCase(Locale.ROOT).contains(search)
                 || record.displayName().toLowerCase(Locale.ROOT).contains(search);
@@ -161,6 +179,7 @@ public class TenantRegistrationService {
     }
 
     public TenantDetails activate(String tenantId) {
+        requireJdbcContractOrMemoryTestMode();
         TenantRecord record = requireTenant(tenantId);
         if (record.status() == TenantStatus.ACTIVE) return record.toDetails();
         if (record.status() == TenantStatus.DEACTIVATED) {
@@ -168,48 +187,53 @@ public class TenantRegistrationService {
         }
 
         TenantRecord active = record.withStatus(TenantStatus.ACTIVE, Instant.now(clock), "system");
-        tenantsById.put(active.tenantId(), active);
+        requireTestStore().saveTenant(normalizeName(active.name()), active);
         return active.toDetails();
     }
 
     public TenantDetails suspend(String tenantId) {
+        requireJdbcContractOrMemoryTestMode();
         TenantRecord record = requireTenant(tenantId);
         if (record.status() != TenantStatus.ACTIVE) {
             throw new TenantRegistrationException(409, "TENANT_NOT_ACTIVE", "Only active tenants can be suspended.");
         }
         TenantRecord suspended = record.withStatus(TenantStatus.SUSPENDED, Instant.now(clock), "system");
-        tenantsById.put(suspended.tenantId(), suspended);
+        requireTestStore().saveTenant(normalizeName(suspended.name()), suspended);
         return suspended.toDetails();
     }
 
     public TenantDetails deactivate(String tenantId) {
+        requireJdbcContractOrMemoryTestMode();
         TenantRecord record = requireTenant(tenantId);
         if (record.status() == TenantStatus.DEACTIVATED) return record.toDetails();
         if (record.status() == TenantStatus.PENDING_ACTIVATION) {
             throw new TenantRegistrationException(409, "TENANT_NOT_ACTIVE", "Only active or suspended tenants can be deactivated.");
         }
         TenantRecord deactivated = record.withStatus(TenantStatus.DEACTIVATED, Instant.now(clock), "system");
-        tenantsById.put(deactivated.tenantId(), deactivated);
+        requireTestStore().saveTenant(normalizeName(deactivated.name()), deactivated);
         return deactivated.toDetails();
     }
 
     public TenantDetails read(String tenantId) {
+        requireJdbcContractOrMemoryTestMode();
         return requireTenant(tenantId).toDetails();
     }
 
     public TenantFeatureFlags getFeatureFlags(String tenantId) {
+        requireJdbcContractOrMemoryTestMode();
         requireTenant(tenantId);
         String normalizedTenantId = tenantId.trim();
-        return new TenantFeatureFlags(normalizedTenantId, Map.copyOf(featureFlagsByTenantId.computeIfAbsent(normalizedTenantId, ignored -> defaultFeatureFlags("system"))));
+        return new TenantFeatureFlags(normalizedTenantId, Map.copyOf(featureFlagsFor(normalizedTenantId, "system")));
     }
 
     public TenantFeatureFlags updateFeatureFlags(String tenantId, Map<String, Boolean> flags, String updatedBy) {
+        requireJdbcContractOrMemoryTestMode();
         requireTenant(tenantId);
         if (flags == null || flags.isEmpty()) {
             throw new TenantRegistrationException(422, "VALIDATION_FAILED", "At least one feature flag update is required.");
         }
         String normalizedTenantId = tenantId.trim();
-        LinkedHashMap<String, FeatureFlag> existing = featureFlagsByTenantId.computeIfAbsent(normalizedTenantId, ignored -> defaultFeatureFlags(updatedBy));
+        LinkedHashMap<String, FeatureFlag> existing = featureFlagsFor(normalizedTenantId, updatedBy);
         for (Map.Entry<String, Boolean> entry : flags.entrySet()) {
             String featureKey = optional(entry.getKey());
             if (!DEFAULT_FEATURE_KEYS.contains(featureKey)) {
@@ -219,14 +243,17 @@ public class TenantRegistrationService {
             int nextVersion = previous == null ? 1 : previous.version() + 1;
             existing.put(featureKey, featureFlag(featureKey, entry.getValue() != null && entry.getValue(), nextVersion, optional(updatedBy)));
         }
+        requireTestStore().saveFeatureFlags(normalizedTenantId, existing);
         return new TenantFeatureFlags(normalizedTenantId, Map.copyOf(existing));
     }
 
     public long getUserCount(String tenantId) {
+        requireJdbcContractOrMemoryTestMode();
         return requireTenant(tenantId).assignedUserCount();
     }
 
     public TenantDetails createAssignedUser(String tenantId) {
+        requireJdbcContractOrMemoryTestMode();
         TenantRecord record = requireTenant(tenantId);
         if (record.status() == TenantStatus.SUSPENDED) {
             throw new TenantRegistrationException(409, "TENANT_SUSPENDED", "Suspended tenant cannot accept new user creation.");
@@ -236,17 +263,34 @@ public class TenantRegistrationService {
         }
 
         TenantRecord updated = record.withAssignedUserCount(record.assignedUserCount() + 1, Instant.now(clock));
-        tenantsById.put(updated.tenantId(), updated);
+        requireTestStore().saveTenant(normalizeName(updated.name()), updated);
         return updated.toDetails();
     }
 
     int tenantCount() {
-        return tenantsById.size();
+        requireJdbcContractOrMemoryTestMode();
+        return requireTestStore().tenantCount();
+    }
+
+    private void requireJdbcContractOrMemoryTestMode() {
+        if (jdbcTemplate != null) {
+            throw new TenantRegistrationException(503, "TENANT_REGISTRATION_PERSISTENCE_CONTRACT_MISSING",
+                "tenant.tenant uses UUID tenant_id while the service contract currently exposes string tenant identifiers; refusing in-memory fallback until the datasource/schema contract is reconciled.");
+        }
+        requireTestStore();
+    }
+
+    private TenantRegistrationStore requireTestStore() {
+        if (testStore == null) {
+            throw new TenantRegistrationException(503, "TENANT_REGISTRATION_PERSISTENCE_CONTRACT_MISSING",
+                "Tenant registration requires JDBC persistence or an explicit src/test fixture; refusing src/main process-local store-of-record fallback.");
+        }
+        return testStore;
     }
 
     private TenantRecord requireTenant(String tenantId) {
         String normalized = required(tenantId, "tenantId");
-        TenantRecord record = tenantsById.get(normalized);
+        TenantRecord record = requireTestStore().tenantById(normalized).orElse(null);
         if (record == null) {
             throw new TenantRegistrationException(404, "NOT_FOUND", "Tenant was not found.");
         }
@@ -278,10 +322,17 @@ public class TenantRegistrationService {
 
     private String nextTenantId() {
         String tenantId = required(tenantIdSupplier.get(), "tenantId");
-        if (tenantsById.containsKey(tenantId)) {
+        if (requireTestStore().tenantById(tenantId).isPresent()) {
             throw new TenantRegistrationException(409, "TENANT_ID_EXISTS", "Generated tenant identifier already exists.");
         }
         return tenantId;
+    }
+
+    private LinkedHashMap<String, FeatureFlag> featureFlagsFor(String tenantId, String updatedBy) {
+        TenantRegistrationStore store = requireTestStore();
+        LinkedHashMap<String, FeatureFlag> flags = store.featureFlagsByTenantId(tenantId).orElseGet(() -> defaultFeatureFlags(updatedBy));
+        store.saveFeatureFlags(tenantId, flags);
+        return flags;
     }
 
     private static String normalizeName(String name) {
@@ -323,7 +374,7 @@ public class TenantRegistrationService {
         return candidate == null ? fallback : candidate.trim();
     }
 
-    private record TenantRecord(
+    record TenantRecord(
         String tenantId,
         String name,
         String displayName,
@@ -533,5 +584,15 @@ public class TenantRegistrationService {
         public Map<String, String> fieldErrors() {
             return fieldErrors;
         }
+    }
+
+    interface TenantRegistrationStore {
+        Optional<TenantRecord> tenantById(String tenantId);
+        Optional<String> tenantIdByNormalizedName(String normalizedName);
+        List<TenantRecord> tenants();
+        void saveTenant(String normalizedName, TenantRecord tenant);
+        Optional<LinkedHashMap<String, FeatureFlag>> featureFlagsByTenantId(String tenantId);
+        void saveFeatureFlags(String tenantId, LinkedHashMap<String, FeatureFlag> flags);
+        int tenantCount();
     }
 }

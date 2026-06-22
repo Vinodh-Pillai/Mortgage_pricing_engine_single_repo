@@ -27,7 +27,7 @@ public class LockPeriodComparisonService {
   private final Clock clock;
 
   public LockPeriodComparisonService() {
-    this(new InMemoryLockPeriodComparisonRepository(), Clock.systemUTC());
+    throw FailClosedPersistence.notConfigured("lock period comparison store");
   }
 
   LockPeriodComparisonService(LockPeriodComparisonRepository repository, Clock clock) {
@@ -383,35 +383,6 @@ public class LockPeriodComparisonService {
     Optional<StoredLockPeriodComparisonRun> findByAnalysisId(String tenantId, UUID analysisId);
 
     void save(StoredLockPeriodComparisonRun run);
-  }
-
-  static class InMemoryLockPeriodComparisonRepository implements LockPeriodComparisonRepository {
-    private final Map<String, StoredLockPeriodComparisonRun> runsByTenantAndIdempotency = new ConcurrentHashMap<>();
-    private final Map<String, StoredLockPeriodComparisonRun> runsByTenantAndAnalysisId = new ConcurrentHashMap<>();
-
-    @Override
-    public Optional<StoredLockPeriodComparisonRun> findByIdempotencyKeyHash(String tenantId, String idempotencyKeyHash) {
-      return Optional.ofNullable(runsByTenantAndIdempotency.get(key(tenantId, idempotencyKeyHash)));
-    }
-
-    @Override
-    public Optional<StoredLockPeriodComparisonRun> findByAnalysisId(String tenantId, UUID analysisId) {
-      return Optional.ofNullable(runsByTenantAndAnalysisId.get(key(tenantId, analysisId.toString())));
-    }
-
-    @Override
-    public void save(StoredLockPeriodComparisonRun run) {
-      runsByTenantAndIdempotency.put(key(run.tenantId(), run.idempotencyKeyHash()), run);
-      runsByTenantAndAnalysisId.put(key(run.tenantId(), run.analysisId().toString()), run);
-    }
-
-    int size() {
-      return runsByTenantAndAnalysisId.size();
-    }
-
-    private static String key(String tenantId, String id) {
-      return tenantId + ':' + id;
-    }
   }
 
   public static class ValidationException extends RuntimeException {

@@ -1,6 +1,19 @@
 spring:
   application:
     name: lock-service
+  datasource:
+    url: ${LOCK_SERVICE_DB_URL:}
+    username: ${LOCK_SERVICE_DB_USERNAME:}
+    password: ${LOCK_SERVICE_DB_PASSWORD:}
+    driver-class-name: org.postgresql.Driver
+  flyway:
+    enabled: ${LOCK_SERVICE_FLYWAY_ENABLED:true}
+    locations: classpath:db/migration
+
+lock:
+  persistence:
+    mode: ${LOCK_SERVICE_PERSISTENCE_MODE:fail-closed}
+    readiness-message: ${LOCK_SERVICE_PERSISTENCE_READINESS_MESSAGE:Durable JDBC persistence adapter is not enabled; process-local storage is disabled and lifecycle routes fail closed.}
 
 server:
   port: ${SERVER_PORT:8080}

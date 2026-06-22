@@ -29,11 +29,11 @@ public class SavedWhatIfAnalysisService {
   private final Clock clock;
 
   public SavedWhatIfAnalysisService() {
-    this(new InMemorySavedAnalysisRepository(), new InMemorySelectionAvailabilityChecker(), Clock.systemUTC());
+    throw FailClosedPersistence.notConfigured("saved what-if analysis store");
   }
 
   SavedWhatIfAnalysisService(SavedAnalysisRepository repository, Clock clock) {
-    this(repository, new InMemorySelectionAvailabilityChecker(), clock);
+    this(repository, new FailClosedSelectionAvailabilityChecker(), clock);
   }
 
   SavedWhatIfAnalysisService(SavedAnalysisRepository repository, SelectionAvailabilityChecker selectionAvailabilityChecker, Clock clock) {
@@ -557,112 +557,14 @@ public class SavedWhatIfAnalysisService {
     }
   }
 
-  public static class InMemorySelectionAvailabilityChecker implements SelectionAvailabilityChecker {
-    private final Set<String> missingVariants = ConcurrentHashMap.newKeySet();
-    private final Set<String> expiredVariants = ConcurrentHashMap.newKeySet();
-    private final Set<String> missingGridCells = ConcurrentHashMap.newKeySet();
-    private final Set<String> expiredGridCells = ConcurrentHashMap.newKeySet();
-
-    public void markVariantMissing(String tenantId, String sourceQuoteId, String variantId) {
-      missingVariants.add(selectionKey(tenantId, sourceQuoteId, variantId));
-    }
-
-    public void markVariantExpired(String tenantId, String sourceQuoteId, String variantId) {
-      expiredVariants.add(selectionKey(tenantId, sourceQuoteId, variantId));
-    }
-
-    public void markGridCellMissing(String tenantId, String sourceQuoteId, String gridCellId) {
-      missingGridCells.add(selectionKey(tenantId, sourceQuoteId, gridCellId));
-    }
-
-    public void markGridCellExpired(String tenantId, String sourceQuoteId, String gridCellId) {
-      expiredGridCells.add(selectionKey(tenantId, sourceQuoteId, gridCellId));
-    }
-
+  private static class FailClosedSelectionAvailabilityChecker implements SelectionAvailabilityChecker {
     @Override
     public SelectionAvailabilityResult validateSelections(String tenantId, String sourceQuoteId, List<String> variantIds, List<String> gridCellIds) {
       return new SelectionAvailabilityResult(
-          unavailable(tenantId, sourceQuoteId, variantIds, missingVariants),
-          unavailable(tenantId, sourceQuoteId, variantIds, expiredVariants),
-          unavailable(tenantId, sourceQuoteId, gridCellIds, missingGridCells),
-          unavailable(tenantId, sourceQuoteId, gridCellIds, expiredGridCells));
-    }
-
-    private static List<String> unavailable(String tenantId, String sourceQuoteId, List<String> ids, Set<String> unavailableKeys) {
-      return ids.stream()
-          .filter(id -> unavailableKeys.contains(selectionKey(tenantId, sourceQuoteId, id)))
-          .toList();
-    }
-
-    private static String selectionKey(String tenantId, String sourceQuoteId, String id) {
-      return tenantId + ':' + sourceQuoteId + ':' + id;
-    }
-  }
-
-  public static class InMemorySavedAnalysisRepository implements SavedAnalysisRepository {
-    private final Map<String, StoredAnalysis> analysesByTenantAndId = new ConcurrentHashMap<>();
-    private final Map<String, StoredAnalysis> analysesByTenantAndIdempotency = new ConcurrentHashMap<>();
-
-    @Override
-    public Optional<StoredAnalysis> findByIdempotencyKeyHash(String tenantId, String idempotencyKeyHash) {
-      return Optional.ofNullable(analysesByTenantAndIdempotency.get(key(tenantId, idempotencyKeyHash)));
-    }
-
-    @Override
-    public Optional<StoredAnalysis> findByAnalysisId(String tenantId, UUID analysisId) {
-      return Optional.ofNullable(analysesByTenantAndId.get(key(tenantId, analysisId.toString())));
-    }
-
-    @Override
-    public List<StoredAnalysis> findByTenant(String tenantId) {
-      return analysesByTenantAndId.values().stream()
-          .filter(analysis -> analysis.tenantId().equals(tenantId))
-          .toList();
-    }
-
-    @Override
-    public boolean activeNameExists(String tenantId, String sourceQuoteId, String createdBy, String name, UUID excludingAnalysisId) {
-      String normalizedName = name.trim().toLowerCase();
-      return analysesByTenantAndId.values().stream()
-          .filter(analysis -> analysis.tenantId().equals(tenantId))
-          .filter(analysis -> excludingAnalysisId == null || !analysis.analysisId().equals(excludingAnalysisId))
-          .filter(analysis -> "SAVED".equals(analysis.response().status()))
-          .anyMatch(analysis -> analysis.createdBy().equals(createdBy)
-              && analysis.response().sourceQuoteId().equals(sourceQuoteId)
-              && analysis.response().name().trim().toLowerCase().equals(normalizedName));
-    }
-
-    @Override
-    public void save(StoredAnalysis analysis) {
-      analysesByTenantAndId.put(key(analysis.tenantId(), analysis.analysisId().toString()), analysis);
-      analysesByTenantAndIdempotency.put(key(analysis.tenantId(), analysis.idempotencyKeyHash()), analysis);
-    }
-
-    @Override
-    public void update(StoredAnalysis current, AnalysisResponse response, String notesHash, List<NoteHistoryEntry> noteHistory, SavedAnalysisEvent event) {
-      List<SavedAnalysisEvent> events = new ArrayList<>(current.events());
-      events.add(event);
-      StoredAnalysis updated = new StoredAnalysis(
-          current.tenantId(),
-          current.analysisId(),
-          current.requestHash(),
-          current.idempotencyKeyHash(),
-          current.createdBy(),
-          response,
-          notesHash,
-          noteHistory,
-          List.copyOf(events),
-          current.createdAt());
-      analysesByTenantAndId.put(key(updated.tenantId(), updated.analysisId().toString()), updated);
-      analysesByTenantAndIdempotency.put(key(updated.tenantId(), updated.idempotencyKeyHash()), updated);
-    }
-
-    public int size() {
-      return analysesByTenantAndId.size();
-    }
-
-    private static String key(String tenantId, String id) {
-      return tenantId + ':' + id;
+          List.copyOf(variantIds),
+          List.of(),
+          List.copyOf(gridCellIds),
+          List.of());
     }
   }
 

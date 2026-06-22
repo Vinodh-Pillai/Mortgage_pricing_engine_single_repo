@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.wcpe.scenarioanalysis.FicoSensitivityService.FicoSensitivityCommand;
 import com.wcpe.scenarioanalysis.FicoSensitivityService.IdempotencyConflictException;
-import com.wcpe.scenarioanalysis.FicoSensitivityService.InMemoryFicoSensitivityRepository;
 import com.wcpe.scenarioanalysis.FicoSensitivityService.PolicyNotSatisfiedException;
 import com.wcpe.scenarioanalysis.FicoSensitivityService.SourceFicoRequiredException;
 import java.time.Clock;
@@ -16,12 +15,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class FicoSensitivityServiceTest {
-  private InMemoryFicoSensitivityRepository repository;
+  private TestOnlyInMemoryFicoSensitivityRepository repository;
   private FicoSensitivityService service;
 
   @BeforeEach
   void setUp() {
-    repository = new InMemoryFicoSensitivityRepository();
+    repository = new TestOnlyInMemoryFicoSensitivityRepository();
     service = new FicoSensitivityService(
         repository,
         Clock.fixed(Instant.parse("2026-06-01T12:00:00Z"), ZoneOffset.UTC));

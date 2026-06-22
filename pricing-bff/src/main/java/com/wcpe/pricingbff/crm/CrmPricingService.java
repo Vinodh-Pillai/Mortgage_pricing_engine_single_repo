@@ -27,7 +27,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -45,8 +44,6 @@ class CrmPricingService {
   private final ObjectMapper objectMapper;
   private final CrmQuoteServiceClient quoteClient;
   private final CrmWebhookRegistry webhookRegistry;
-  private final Map<String, CrmPricingResponse> pricingRequests = new ConcurrentHashMap<>();
-  private final Map<String, ScenarioSaveResponse> scenarios = new ConcurrentHashMap<>();
 
   CrmPricingService(ObjectMapper objectMapper, CrmQuoteServiceClient quoteClient, CrmWebhookRegistry webhookRegistry) {
     this.objectMapper = objectMapper;
@@ -85,22 +82,17 @@ class CrmPricingService {
         missing, blockers, unsupported, replayRefs, sourceRefs,
         "/api/v1/tenants/" + tenantId + "/integrations/crm/pricing-requests/" + pricingRequestId,
         quoteJob == null ? null : quoteJob.jobId(), Instant.now(), correlationId);
-    pricingRequests.put(key(tenantId, pricingRequestId), response);
-    dispatchPricingUpdate(response, "crm.pricing.updated", correlationId);
     return response;
   }
 
   CrmPricingResponse getPricingRequest(String tenantId, String requestId) {
-    return pricingRequests.getOrDefault(key(tenantId, requestId), notFound(tenantId, requestId));
+    throw new CrmValidationException("CRM_PRICING_READ_MODEL_REQUIRED",
+        "CRM pricing request status requires a durable downstream read model; process-local CRM pricing state is disabled");
   }
 
   PipelinePromotionResponse continueRequest(String tenantId, String requestId, String correlationId) {
-    CrmPricingResponse response = getExisting(tenantId, requestId);
-    if (!response.missingFacts().isEmpty() || !response.eligibilityBlockers().isEmpty()) {
-      return new PipelinePromotionResponse(requestId, tenantId, "BLOCKED", null, response.missingFacts(), response.eligibilityBlockers(), correlationId);
-    }
-    String pipelineRef = "pipeline:intake:" + UUID.nameUUIDFromBytes((tenantId + ":" + requestId).getBytes(StandardCharsets.UTF_8));
-    return new PipelinePromotionResponse(requestId, tenantId, "PROMOTED", pipelineRef, List.of(), List.of(), correlationId);
+    throw new CrmValidationException("CRM_PRICING_READ_MODEL_REQUIRED",
+        "CRM pipeline promotion requires a durable pricing request read model; process-local CRM pricing state is disabled");
   }
 
   CrmWebhookRegistrationResponse registerWebhook(String tenantId, String sourceSystem, CrmWebhookRegistrationRequest request) {
@@ -108,37 +100,24 @@ class CrmPricingService {
   }
 
   List<WebhookDeliveryReceipt> pushPricingUpdate(String tenantId, String sourceSystem, String requestId, String correlationId) {
-    CrmPricingResponse response = getExisting(tenantId, requestId);
-    return dispatchPricingUpdate(response, "crm.pricing.updated", correlationId == null ? response.correlationId() : correlationId);
+    throw new CrmValidationException("CRM_PRICING_READ_MODEL_REQUIRED",
+        "CRM pricing webhook push requires a durable pricing request read model; process-local CRM pricing state is disabled");
   }
 
   CrmDashboardResponse dashboard(String tenantId, String sourceSystem) {
-    List<CrmPricingResponse> requests = pricingRequests.entrySet().stream()
-        .filter(entry -> entry.getKey().startsWith(tenantId + ":"))
-        .map(Map.Entry::getValue)
-        .filter(response -> sourceSystem == null || sourceSystem.equalsIgnoreCase(response.sourceSystem()))
-        .toList();
-    long needsFacts = requests.stream().filter(response -> !response.missingFacts().isEmpty()).count();
-    long quoteJobs = requests.stream().filter(response -> response.quoteJobId() != null).count();
-    Map<String, Object> summary = Map.of("productFamily", "NON_QM", "requestCount", requests.size(),
-        "needsFactsCount", needsFacts, "quoteJobCount", quoteJobs, "pricingBoundary", "quote-service");
-    return new CrmDashboardResponse(tenantId, sourceSystem, requests, summary, Instant.now());
+    Map<String, Object> summary = Map.of("requestCount", 0, "needsFactsCount", 0, "quoteJobCount", 0,
+        "pricingBoundary", "quote-service", "dependencyStatus", "CRM_PRICING_READ_MODEL_REQUIRED");
+    return new CrmDashboardResponse(tenantId, sourceSystem, List.of(), summary, Instant.now());
   }
 
   ScenarioSaveResponse saveScenario(String tenantId, String requestId) {
-    CrmPricingResponse response = getExisting(tenantId, requestId);
-    String scenarioId = response.replayRefs().get("scenarioRef");
-    ScenarioSaveResponse saved = new ScenarioSaveResponse(scenarioId, requestId, tenantId, "SAVED", response.replayRefs(), Instant.now());
-    scenarios.put(key(tenantId, scenarioId), saved);
-    return saved;
+    throw new CrmValidationException("CRM_SCENARIO_PERSISTENCE_REQUIRED",
+        "CRM scenario save requires durable scenario persistence; process-local CRM scenario state is disabled");
   }
 
   ScenarioShareResponse shareScenario(String tenantId, String scenarioId, String correlationId) {
-    if (!scenarios.containsKey(key(tenantId, scenarioId))) {
-      throw new CrmValidationException("CRM_SCENARIO_NOT_FOUND", "CRM pricing scenario not found");
-    }
-    String shareRef = "/api/v1/tenants/" + tenantId + "/integrations/crm/scenarios/" + scenarioId + "/shared";
-    return new ScenarioShareResponse(scenarioId, shareRef, "SHARE_READY", "tenant-configured-expiry-required", correlationId);
+    throw new CrmValidationException("CRM_SCENARIO_PERSISTENCE_REQUIRED",
+        "CRM scenario share requires durable scenario persistence; process-local CRM scenario state is disabled");
   }
 
   List<WebhookDeliveryReceipt> deliveries() {
@@ -290,25 +269,8 @@ class CrmPricingService {
     return Optional.empty();
   }
 
-  private CrmPricingResponse getExisting(String tenantId, String requestId) {
-    CrmPricingResponse response = pricingRequests.get(key(tenantId, requestId));
-    if (response == null) {
-      throw new CrmValidationException("CRM_PRICING_REQUEST_NOT_FOUND", "CRM pricing request not found");
-    }
-    return response;
-  }
-
-  private CrmPricingResponse notFound(String tenantId, String requestId) {
-    return new CrmPricingResponse(requestId, tenantId, null, null, "NOT_FOUND", Map.of(), List.of(), List.of(), List.of(), Map.of(), Map.of(),
-        "/api/v1/tenants/" + tenantId + "/integrations/crm/pricing-requests/" + requestId, null, Instant.now(), null);
-  }
-
   private String scenarioId(String tenantId, String requestId) {
     return UUID.nameUUIDFromBytes((tenantId + ":crm-scenario:" + requestId).getBytes(StandardCharsets.UTF_8)).toString();
-  }
-
-  private String key(String tenantId, String requestId) {
-    return tenantId + ":" + requestId;
   }
 
   String hash(Object value) {

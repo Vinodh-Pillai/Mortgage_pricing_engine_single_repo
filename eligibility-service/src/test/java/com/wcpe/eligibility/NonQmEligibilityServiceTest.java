@@ -2,12 +2,16 @@ package com.wcpe.eligibility;
 
 import com.wcpe.eligibility.nonqm.NonQmEligibilityModels.*;
 import com.wcpe.eligibility.nonqm.NonQmEligibilityService;
+import com.wcpe.eligibility.repository.NonQmRuleSetStore;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static com.wcpe.eligibility.DscrFactCalculatorTest.rule;
 import static org.junit.jupiter.api.Assertions.*;
@@ -57,6 +61,7 @@ class NonQmEligibilityServiceTest {
 
     @Test
     void importedLoanPassRuleSetSelectionUsesQuoteDateAndReturnsSafeConfigRefsAndFieldMessages() {
+        NonQmEligibilityService service = new NonQmEligibilityService(new FakeRuleSetStore());
         service.importRuleSet(new PpeRuleSetImportRequest(RuleSetSource.LOANPASS, "LP-MATRIX-OLD", "DSCR_30YR", "DSCR", "INV-A", "BROKER", 1,
             Instant.parse("2026-01-01T00:00:00Z"), Instant.parse("2026-06-01T00:00:00Z"), List.of(Map.of(
                 "ruleId", "LP-OLD", "priority", 1, "factPath", "nonQm.dscr.ratio", "operator", "GTE", "value", "1.0",
@@ -79,10 +84,53 @@ class NonQmEligibilityServiceTest {
         assertFalse(result.ruleConfigRefs().toString().contains("configuredValue"));
     }
 
+    @Test
+    void importFailsClosedWhenNoDurableRuleSetStoreIsConfigured() {
+        IllegalStateException failure = assertThrows(IllegalStateException.class, () -> service.importRuleSet(
+            new PpeRuleSetImportRequest(RuleSetSource.LOANPASS, "LP-MATRIX", "DSCR_30YR", "DSCR", "INV-A", "BROKER", 1, List.of())
+        ));
+
+        assertTrue(failure.getMessage().contains("Durable Non-QM rule-set repository is required"));
+    }
+
     private NonQmEligibilityRequest request(String code, String type, NonQmScenarioFacts facts, EligibilityRule rule) {
         NonQmEligibilityRuleSet ruleSet = new NonQmEligibilityRuleSet("rs-" + code, code, type, "INV-A", "BROKER", 1, null, null,
             List.of(rule), RuleSetSource.CATALOG, "catalog:" + code);
         return new NonQmEligibilityRequest(code, "INV-A", "BROKER", null, new ScenarioFacts(null, null, facts, null, null),
             new ProductDefinition(code, type, "INV-A", "BROKER", Map.of(), ruleSet), null);
+    }
+
+    private static final class FakeRuleSetStore implements NonQmRuleSetStore {
+        private final List<NonQmEligibilityRuleSet> ruleSets = new ArrayList<>();
+
+        @Override
+        public void save(NonQmEligibilityRuleSet ruleSet) {
+            ruleSets.removeIf(existing -> existing.ruleSetId().equals(ruleSet.ruleSetId()));
+            ruleSets.add(ruleSet);
+        }
+
+        @Override
+        public Optional<NonQmEligibilityRuleSet> findById(String ruleSetId) {
+            return ruleSets.stream().filter(ruleSet -> ruleSet.ruleSetId().equals(ruleSetId)).findFirst();
+        }
+
+        @Override
+        public Optional<NonQmEligibilityRuleSet> resolve(String productCode, String investorCode, String channelCode, Instant asOf) {
+            return ruleSets.stream()
+                .filter(ruleSet -> matches(ruleSet.productCode(), productCode))
+                .filter(ruleSet -> matches(ruleSet.investorCode(), investorCode))
+                .filter(ruleSet -> matches(ruleSet.channelCode(), channelCode))
+                .filter(ruleSet -> activeAt(ruleSet, asOf))
+                .max(Comparator.comparingInt(NonQmEligibilityRuleSet::version));
+        }
+
+        private static boolean activeAt(NonQmEligibilityRuleSet ruleSet, Instant asOf) {
+            Instant start = ruleSet.effectiveStart() == null ? Instant.EPOCH : ruleSet.effectiveStart();
+            return !asOf.isBefore(start) && (ruleSet.effectiveEnd() == null || asOf.isBefore(ruleSet.effectiveEnd()));
+        }
+
+        private static boolean matches(String configured, String requested) {
+            return configured == null || configured.isBlank() || requested == null || configured.equalsIgnoreCase(requested);
+        }
     }
 }

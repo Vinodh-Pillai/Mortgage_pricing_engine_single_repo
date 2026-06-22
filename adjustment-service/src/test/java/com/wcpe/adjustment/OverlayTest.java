@@ -6,10 +6,10 @@ import com.wcpe.adjustment.AdjustmentRuleBook.EffectiveWindow;
 import com.wcpe.adjustment.AdjustmentRuleBook.PricingPrecisionPolicy;
 import com.wcpe.adjustment.AdjustmentRuleBook.RuleBookSelector;
 import com.wcpe.adjustment.AdjustmentRuleBook.RuleBookStatus;
-import com.wcpe.adjustment.RuleBookResolver.InMemoryRuleBookRepository;
+import com.wcpe.adjustment.RuleBookResolver.StaticRuleBookRepository;
 import com.wcpe.adjustment.overlay.OverlayPolicyType;
 import com.wcpe.adjustment.overlay.OverlayRule;
-import com.wcpe.adjustment.overlay.OverlayRuleRepository.InMemoryOverlayRuleRepository;
+import com.wcpe.adjustment.overlay.OverlayRuleRepository.StaticOverlayRuleRepository;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
@@ -119,10 +119,10 @@ class OverlayTest {
 
     private static AdjustmentCalculationResult calculate(List<OverlayRule> overlays, Map<String, Object> facts) {
         AdjustmentService service = new AdjustmentService(
-            new RuleBookResolver(new InMemoryRuleBookRepository(List.of(publishedBook()))),
+            new RuleBookResolver(new StaticRuleBookRepository(List.of(publishedBook()))),
             new RuleIndexer(),
             new RuleEvaluationEngine(new RuleIndexer(), new PrecisionNormalizer()),
-            new InMemoryOverlayRuleRepository(overlays));
+            new StaticOverlayRuleRepository(overlays));
         return service.calculate(new AdjustmentCalculationRequest(
             new BasePriceDecisionStub("SCN-OVERLAY-034", "BP-OVERLAY-034", "fixed-rate-30yr", 450000.0, "USD", "pricing-service"),
             Map.of(), List.of(), "rulebook-overlays-v1", TENANT_ID, SELECTOR, QUOTE_DATE, facts));

@@ -5,9 +5,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-public class InMemoryRateLimitPolicyStore {
+public class TestOnlyInMemoryRateLimitPolicyStore implements RateLimitPolicyStore {
     private final List<RateLimitPolicy> policies = new ArrayList<>();
 
+    @Override
     public synchronized RateLimitPolicy save(RateLimitPolicy policy) {
         for (RateLimitPolicy existing : policies) {
             if (policy.status() == PolicyStatus.ACTIVE
@@ -24,6 +25,7 @@ public class InMemoryRateLimitPolicyStore {
         return policy;
     }
 
+    @Override
     public synchronized Optional<RateLimitPolicy> activePolicy(
         String tenantId,
         String channel,
@@ -40,6 +42,7 @@ public class InMemoryRateLimitPolicyStore {
             .findFirst();
     }
 
+    @Override
     public synchronized List<RateLimitPolicy> listByTenant(String tenantId) {
         String normalizedTenant = trim(tenantId);
         return policies.stream()

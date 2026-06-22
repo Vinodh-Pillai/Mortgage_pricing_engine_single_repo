@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.wcpe.scenarioanalysis.WhatIfReplayService.IdempotencyConflictException;
-import com.wcpe.scenarioanalysis.WhatIfReplayService.InMemoryReplayRepository;
 import com.wcpe.scenarioanalysis.WhatIfReplayService.ReplayDiff;
 import com.wcpe.scenarioanalysis.WhatIfReplayService.ReplayPackage;
 import com.wcpe.scenarioanalysis.WhatIfReplayService.ReplayPackageIncompleteException;
@@ -19,12 +18,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class WhatIfReplayServiceTest {
-  private InMemoryReplayRepository repository;
+  private TestOnlyInMemoryReplayRepository repository;
   private WhatIfReplayService service;
 
   @BeforeEach
   void setUp() {
-    repository = new InMemoryReplayRepository();
+    repository = new TestOnlyInMemoryReplayRepository();
     service = new WhatIfReplayService(repository, Clock.fixed(Instant.parse("2026-06-01T12:00:00Z"), ZoneOffset.UTC));
   }
 

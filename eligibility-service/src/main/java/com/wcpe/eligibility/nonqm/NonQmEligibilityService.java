@@ -2,6 +2,8 @@ package com.wcpe.eligibility.nonqm;
 
 import com.wcpe.eligibility.domain.hashing.Hashing;
 import com.wcpe.eligibility.nonqm.NonQmEligibilityModels.*;
+import com.wcpe.eligibility.repository.NonQmRuleSetStore;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -16,11 +18,19 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class NonQmEligibilityService {
-    private final Map<String, NonQmEligibilityRuleSet> importedRuleSets = new ConcurrentHashMap<>();
+    private final NonQmRuleSetStore ruleSetStore;
+
+    public NonQmEligibilityService() {
+        this.ruleSetStore = null;
+    }
+
+    @Autowired
+    public NonQmEligibilityService(NonQmRuleSetStore ruleSetStore) {
+        this.ruleSetStore = Objects.requireNonNull(ruleSetStore, "ruleSetStore is required");
+    }
 
     public NonQmEligibilityResult evaluate(NonQmEligibilityRequest request) {
         Objects.requireNonNull(request, "request is required");
@@ -52,13 +62,13 @@ public class NonQmEligibilityService {
             .toList();
         NonQmEligibilityRuleSet ruleSet = new NonQmEligibilityRuleSet(ruleSetId, request.productCode(), request.productType(), request.investorCode(),
             request.channelCode(), request.version(), request.effectiveStart() == null ? Instant.EPOCH : request.effectiveStart(), request.effectiveEnd(), rules, source, request.sourceSystemRef());
-        importedRuleSets.put(ruleSetId, ruleSet);
+        requireDurableRuleSetStore("import").save(ruleSet);
         return ruleSet;
     }
 
     public PpeRuleSetExportResponse exportRuleSet(String ruleSetId, String format) {
-        NonQmEligibilityRuleSet ruleSet = importedRuleSets.get(ruleSetId);
-        if (ruleSet == null) throw new IllegalArgumentException("Unknown ruleSetId: " + ruleSetId);
+        NonQmEligibilityRuleSet ruleSet = requireDurableRuleSetStore("export").findById(ruleSetId)
+            .orElseThrow(() -> new IllegalArgumentException("Unknown ruleSetId: " + ruleSetId));
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("format", format == null ? ruleSet.source().name() : format.toUpperCase(Locale.ROOT));
         payload.put("sourceSystemRef", ruleSet.sourceSystemRef());
@@ -109,13 +119,14 @@ public class NonQmEligibilityService {
         if (request.ruleSet() != null) return activeAt(request.ruleSet(), asOf) ? request.ruleSet() : null;
         if (product != null && product.eligibilityRuleSet() != null && activeAt(product.eligibilityRuleSet(), asOf)) return product.eligibilityRuleSet();
         String productCode = firstNonBlank(request.productCode(), product == null ? null : product.productCode());
-        return importedRuleSets.values().stream()
-            .filter(ruleSet -> matches(ruleSet.productCode(), productCode))
-            .filter(ruleSet -> matches(ruleSet.investorCode(), request.investorCode()))
-            .filter(ruleSet -> matches(ruleSet.channelCode(), request.channelCode()))
-            .filter(ruleSet -> activeAt(ruleSet, asOf))
-            .max(Comparator.comparingInt(NonQmEligibilityRuleSet::version))
-            .orElse(null);
+        return ruleSetStore == null ? null : ruleSetStore.resolve(productCode, request.investorCode(), request.channelCode(), asOf).orElse(null);
+    }
+
+    private NonQmRuleSetStore requireDurableRuleSetStore(String operation) {
+        if (ruleSetStore == null) {
+            throw new IllegalStateException("Durable Non-QM rule-set repository is required for " + operation + "; in-memory rule-set storage is disabled.");
+        }
+        return ruleSetStore;
     }
 
     private static Instant asOf(LocalDate quoteDate) {

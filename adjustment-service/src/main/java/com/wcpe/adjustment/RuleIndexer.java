@@ -6,6 +6,7 @@ import com.wcpe.adjustment.AdjustmentRuleBook.AdjustmentRule;
 import com.wcpe.adjustment.AdjustmentRuleBook.PricingPrecisionPolicy;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -16,6 +17,10 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class RuleIndexer {
+    private static final Comparator<CompiledRule> RULE_ORDER = Comparator
+        .comparingInt(CompiledRule::priority)
+        .thenComparing(CompiledRule::ruleId);
+
     private final ConditionCompiler conditionCompiler;
     private final PrecisionNormalizer normalizer;
 
@@ -52,9 +57,21 @@ public class RuleIndexer {
         }
         Map<String, Set<UUID>> immutableDimensionIndex = new HashMap<>();
         dimensionIndex.forEach((dimension, ids) -> immutableDimensionIndex.put(dimension, Set.copyOf(ids)));
+        List<CompiledRule> orderedEnabledRules = compiledRules.values().stream()
+            .filter(CompiledRule::enabled)
+            .sorted(RULE_ORDER)
+            .toList();
+        Map<String, List<CompiledRule>> dimensionRulesByPriority = new HashMap<>();
+        dimensionIndex.forEach((dimension, ids) -> dimensionRulesByPriority.put(dimension, orderedEnabledRules.stream()
+            .filter(rule -> ids.contains(rule.ruleId()))
+            .toList()));
+        List<CompiledRule> rulesWithNoRequiredDimensionsByPriority = orderedEnabledRules.stream()
+            .filter(rule -> rulesWithNoRequiredDimensions.contains(rule.ruleId()))
+            .toList();
         return new RuleBookIndex(ruleBook.ruleBookId(), ruleBook.version(), ruleBook.contentHash(), Map.copyOf(compiledRules),
             Map.copyOf(immutableDimensionIndex), Set.copyOf(rulesWithNoRequiredDimensions), ruleBook.precisionPolicy(),
-            ruleBook.minTotalPointsDelta(), ruleBook.maxTotalPointsDelta());
+            ruleBook.minTotalPointsDelta(), ruleBook.maxTotalPointsDelta(), orderedEnabledRules,
+            Map.copyOf(dimensionRulesByPriority), rulesWithNoRequiredDimensionsByPriority);
     }
 
     private CompiledOutput compileOutput(AdjustmentOutput output, PricingPrecisionPolicy policy) {
@@ -70,7 +87,9 @@ public class RuleIndexer {
                                  int bpsScale, int moneyScale, RoundingMode rounding) {}
 
     public record RuleBookIndex(UUID ruleBookId, String version, String contentHash, Map<UUID, CompiledRule> rules,
-                                Map<String, Set<UUID>> dimensionIndex, Set<UUID> rulesWithNoRequiredDimensions,
-                                PricingPrecisionPolicy precisionPolicy, BigDecimal minTotalPointsDelta,
-                                BigDecimal maxTotalPointsDelta) {}
+                                 Map<String, Set<UUID>> dimensionIndex, Set<UUID> rulesWithNoRequiredDimensions,
+                                 PricingPrecisionPolicy precisionPolicy, BigDecimal minTotalPointsDelta,
+                                 BigDecimal maxTotalPointsDelta, List<CompiledRule> orderedEnabledRules,
+                                 Map<String, List<CompiledRule>> dimensionRulesByPriority,
+                                 List<CompiledRule> rulesWithNoRequiredDimensionsByPriority) {}
 }

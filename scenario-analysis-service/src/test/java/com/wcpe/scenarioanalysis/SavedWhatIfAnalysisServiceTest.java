@@ -6,8 +6,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.wcpe.scenarioanalysis.SavedWhatIfAnalysisService.AnalysisVersionConflictException;
 import com.wcpe.scenarioanalysis.SavedWhatIfAnalysisService.CreateAnalysisCommand;
 import com.wcpe.scenarioanalysis.SavedWhatIfAnalysisService.IdempotencyConflictException;
-import com.wcpe.scenarioanalysis.SavedWhatIfAnalysisService.InMemorySelectionAvailabilityChecker;
-import com.wcpe.scenarioanalysis.SavedWhatIfAnalysisService.InMemorySavedAnalysisRepository;
 import com.wcpe.scenarioanalysis.SavedWhatIfAnalysisService.PatchAnalysisCommand;
 import com.wcpe.scenarioanalysis.SavedWhatIfAnalysisService.SelectionNotAvailableException;
 import com.wcpe.scenarioanalysis.SavedWhatIfAnalysisService.SharePermission;
@@ -21,14 +19,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class SavedWhatIfAnalysisServiceTest {
-  private InMemorySavedAnalysisRepository repository;
+  private TestOnlyInMemorySavedAnalysisRepository repository;
   private SavedWhatIfAnalysisService service;
 
   @BeforeEach
   void setUp() {
-    repository = new InMemorySavedAnalysisRepository();
+    repository = new TestOnlyInMemorySavedAnalysisRepository();
     service = new SavedWhatIfAnalysisService(
         repository,
+        new InMemorySelectionAvailabilityChecker(),
         Clock.fixed(Instant.parse("2026-06-01T12:00:00Z"), ZoneOffset.UTC));
   }
 

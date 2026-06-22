@@ -26,26 +26,27 @@ public final class BrokerCompensationService {
   public final AtomicInteger brokerAssignmentOverlapRejectedTotal = new AtomicInteger();
 
   private final Clock clock;
-  private final Map<PlanKey, BrokerCompensationPlan> plans = new HashMap<>();
-  private final Map<String, IdempotencyRecord> idempotencyReceipts = new HashMap<>();
-  private final List<BrokerCompensationAssignment> assignments = new ArrayList<>();
-  private final List<Object> outbox = new ArrayList<>();
-  private final List<AuditRecord> auditRecords = new ArrayList<>();
-  private final Map<String, BrokerVisibilityPolicy> resultVisibility = new HashMap<>();
+  private final Store store;
 
   public BrokerCompensationService(Clock clock) {
+    this(clock, Store.failClosed("BrokerCompensationService"));
+  }
+
+  BrokerCompensationService(Clock clock, Store store) {
     this.clock = Objects.requireNonNull(clock, "clock is required");
+    this.store = Objects.requireNonNull(store, "store is required");
   }
 
   public CommandReceipt createDraftPlan(String tenantId, String requestId, String actorId, String idempotencyKey,
       String correlationId, String name, int versionNumber, List<BrokerCompensationRule> rules) {
+    requireDurableStoreOrExplicitTestHarness();
     requireCommand(tenantId, actorId, idempotencyKey, correlationId);
     requireText(requestId, "requestId");
     requireText(name, "name");
     List<BrokerCompensationRule> safeRules = List.copyOf(Objects.requireNonNull(rules, "rules is required"));
     String requestHash = requestHash(requestId, actorId, name, versionNumber, safeRules);
     String idemKey = idempotencyKey(tenantId, idempotencyKey);
-    IdempotencyRecord existing = idempotencyReceipts.get(idemKey);
+    IdempotencyRecord existing = store.idempotencyReceipts().get(idemKey);
     if (existing != null) {
       if (!existing.requestHash().equals(requestHash)) {
         throw new BrokerCompException("IDEMPOTENCY_CONFLICT");
@@ -60,11 +61,11 @@ public final class BrokerCompensationService {
         null, stableHash(safeRules), PlanStatus.DRAFT.name(), null, null, safeRules);
     BrokerCompensationPlan plan = new BrokerCompensationPlan(tenantId, planId, BROKER_PLAN_TYPE, name,
         PlanStatus.DRAFT, List.of(version), actorId, actorId, now, now);
-    plans.put(new PlanKey(tenantId, planId), plan);
+    store.plans().put(new PlanKey(tenantId, planId), plan);
     CommandReceipt receipt = new CommandReceipt(planId, plan.status(), version.versionNumber(), correlationId, List.of(),
         "audit:" + planId);
-    idempotencyReceipts.put(idemKey, new IdempotencyRecord(requestHash, receipt));
-    auditRecords.add(AuditRecord.completed(tenantId, planId, actorId, correlationId,
+    store.idempotencyReceipts().put(idemKey, new IdempotencyRecord(requestHash, receipt));
+    store.auditRecords().add(AuditRecord.completed(tenantId, planId, actorId, correlationId,
         "BROKER_COMP_DRAFT_CREATED", clock));
     return receipt;
   }
@@ -85,7 +86,7 @@ public final class BrokerCompensationService {
     BrokerCompensationPlanVersion current = approved.currentVersion();
     BrokerCompensationPlanVersion approvedVersion = current.withApproval(PlanStatus.APPROVED.name(), actorId,
         Instant.now(clock));
-    plans.put(new PlanKey(tenantId, planId), approved.withVersion(approvedVersion, actorId, Instant.now(clock)));
+    store.plans().put(new PlanKey(tenantId, planId), approved.withVersion(approvedVersion, actorId, Instant.now(clock)));
     return receipt;
   }
 
@@ -103,11 +104,11 @@ public final class BrokerCompensationService {
         now);
     BrokerCompensationPlan published = plan.withVersion(version, actorId, now).withStatus(PlanStatus.PUBLISHED,
         actorId, now);
-    plans.put(new PlanKey(tenantId, planId), published);
+    store.plans().put(new PlanKey(tenantId, planId), published);
     BrokerCompensationPlanPublishedEvent event = new BrokerCompensationPlanPublishedEvent(tenantId, planId,
         version.versionId(), version.configHash(), actorId, correlationId, now);
-    outbox.add(event);
-    auditRecords.add(AuditRecord.completed(tenantId, planId, actorId, correlationId,
+    store.outbox().add(event);
+    store.auditRecords().add(AuditRecord.completed(tenantId, planId, actorId, correlationId,
         "BROKER_COMPENSATION_PLAN_PUBLISHED", clock));
     return new CommandReceipt(planId, PlanStatus.PUBLISHED, version.versionNumber(), correlationId, List.of(event),
         "audit:" + planId);
@@ -124,7 +125,7 @@ public final class BrokerCompensationService {
     }
     String requestHash = requestHash(planId, versionNumber, assignment);
     String idemKey = idempotencyKey(tenantId, idempotencyKey);
-    IdempotencyRecord existing = idempotencyReceipts.get(idemKey);
+    IdempotencyRecord existing = store.idempotencyReceipts().get(idemKey);
     if (existing != null) {
       if (!existing.requestHash().equals(requestHash)) {
         throw new BrokerCompException("IDEMPOTENCY_CONFLICT");
@@ -135,20 +136,20 @@ public final class BrokerCompensationService {
     validateAssignment(version, changed);
     if (assignmentOverlaps(tenantId, changed)) {
       brokerAssignmentOverlapRejectedTotal.incrementAndGet();
-      auditRecords.add(AuditRecord.completed(tenantId, planId, actorId, correlationId,
+      store.auditRecords().add(AuditRecord.completed(tenantId, planId, actorId, correlationId,
           "BROKER_COMP_ASSIGNMENT_OVERLAP_REJECTED", clock));
       throw new BrokerCompException("BROKER_ASSIGNMENT_OVERLAP");
     }
-    assignments.add(changed);
+    store.assignments().add(changed);
     BrokerCompensationAssignmentChangedEvent event = new BrokerCompensationAssignmentChangedEvent(tenantId,
         changed.assignmentId(), version.versionId(), changed.payeeType(), changed.payeeId(), changed.channel(),
         scopeHash(changed), actorId, correlationId, Instant.now(clock));
-    outbox.add(event);
-    auditRecords.add(AuditRecord.completed(tenantId, planId, actorId, correlationId,
+    store.outbox().add(event);
+    store.auditRecords().add(AuditRecord.completed(tenantId, planId, actorId, correlationId,
         "BROKER_COMPENSATION_ASSIGNMENT_CHANGED", clock));
     CommandReceipt receipt = new CommandReceipt(planId, plan.status(), version.versionNumber(), correlationId,
         List.of(event), "audit:" + planId);
-    idempotencyReceipts.put(idemKey, new IdempotencyRecord(requestHash, receipt));
+    store.idempotencyReceipts().put(idemKey, new IdempotencyRecord(requestHash, receipt));
     return receipt;
   }
 
@@ -198,20 +199,21 @@ public final class BrokerCompensationService {
     BrokerCompensationResult result = new BrokerCompensationResult(planId, version.versionId(), assignment.assignmentId(),
         brokerId, channel, paymentResponsibility, rule.basis(), rawAmount, floorAmount, capAmount, bounded,
         pricePoints.movePointRight(2), priceAfterBrokerComp, List.of(step), rule.disclosureLabel());
-    resultVisibility.put(replayHash, new BrokerVisibilityPolicy(rule.visibilityClassification(), rule.disclosureLabel(),
+    store.resultVisibility().put(replayHash, new BrokerVisibilityPolicy(rule.visibilityClassification(), rule.disclosureLabel(),
         SENSITIVE_PERMISSION));
-    auditRecords.add(AuditRecord.completed(tenantId, planId, "system", "broker-comp-resolve",
+    store.auditRecords().add(AuditRecord.completed(tenantId, planId, "system", "broker-comp-resolve",
         "BROKER_COMPENSATION_RESOLVED", clock));
     return result;
   }
 
   public Optional<BrokerCompensationAssignment> resolveActiveAssignment(String tenantId, String payeeId,
       String channel, Instant effectiveAt) {
+    requireDurableStoreOrExplicitTestHarness();
     requireText(tenantId, "tenantId");
     requireText(payeeId, "payeeId");
     requireText(channel, "channel");
     Objects.requireNonNull(effectiveAt, "effectiveAt is required");
-    List<BrokerCompensationAssignment> matches = assignments.stream()
+    List<BrokerCompensationAssignment> matches = store.assignments().stream()
         .filter(assignment -> BROKER_PAYEE_TYPE.equals(assignment.payeeType()))
         .filter(assignment -> assignment.payeeId().equals(payeeId))
         .filter(assignment -> assignment.channel().equals(channel))
@@ -230,7 +232,7 @@ public final class BrokerCompensationService {
       return result;
     }
     BrokerVisibilityPolicy policy = result.steps().stream()
-        .map(step -> resultVisibility.get(step.replayHash()))
+        .map(step -> store.resultVisibility().get(step.replayHash()))
         .filter(Objects::nonNull)
         .findFirst()
         .orElse(new BrokerVisibilityPolicy("SENSITIVE", result.disclosureLabel(), SENSITIVE_PERMISSION));
@@ -244,19 +246,27 @@ public final class BrokerCompensationService {
   }
 
   public Optional<BrokerCompensationPlan> findPlan(String tenantId, String planId) {
-    return Optional.ofNullable(plans.get(new PlanKey(tenantId, planId)));
+    requireDurableStoreOrExplicitTestHarness();
+    return Optional.ofNullable(store.plans().get(new PlanKey(tenantId, planId)));
   }
 
   public List<BrokerCompensationAssignment> assignments() {
-    return List.copyOf(assignments);
+    requireDurableStoreOrExplicitTestHarness();
+    return List.copyOf(store.assignments());
   }
 
   public List<Object> outboxEvents() {
-    return List.copyOf(outbox);
+    requireDurableStoreOrExplicitTestHarness();
+    return List.copyOf(store.outbox());
   }
 
   public List<AuditRecord> auditRecords() {
-    return List.copyOf(auditRecords);
+    requireDurableStoreOrExplicitTestHarness();
+    return List.copyOf(store.auditRecords());
+  }
+
+  private void requireDurableStoreOrExplicitTestHarness() {
+    store.requireAvailable();
   }
 
   private CommandReceipt transition(String tenantId, String planId, String actorId, String correlationId,
@@ -269,8 +279,8 @@ public final class BrokerCompensationService {
       throw new BrokerCompException("VERSION_CONFLICT");
     }
     BrokerCompensationPlan changed = plan.withStatus(to, actorId, Instant.now(clock));
-    plans.put(new PlanKey(tenantId, planId), changed);
-    auditRecords.add(AuditRecord.completed(tenantId, planId, actorId, correlationId, action, clock));
+    store.plans().put(new PlanKey(tenantId, planId), changed);
+    store.auditRecords().add(AuditRecord.completed(tenantId, planId, actorId, correlationId, action, clock));
     return new CommandReceipt(planId, to, changed.currentVersion().versionNumber(), correlationId, List.of(),
         "audit:" + planId);
   }
@@ -353,7 +363,7 @@ public final class BrokerCompensationService {
   }
 
   private boolean assignmentOverlaps(String tenantId, BrokerCompensationAssignment candidate) {
-    return assignments.stream()
+    return store.assignments().stream()
         .filter(assignment -> assignmentTenantMatches(tenantId, assignment))
         .filter(assignment -> BROKER_PAYEE_TYPE.equals(assignment.payeeType()))
         .filter(assignment -> assignment.payeeId().equals(candidate.payeeId()))
@@ -363,7 +373,7 @@ public final class BrokerCompensationService {
   }
 
   private boolean assignmentTenantMatches(String tenantId, BrokerCompensationAssignment assignment) {
-    return plans.values().stream()
+    return store.plans().values().stream()
         .filter(plan -> plan.tenantId().equals(tenantId))
         .flatMap(plan -> plan.versions().stream())
         .anyMatch(version -> version.versionId().equals(assignment.planVersionId()));
@@ -371,7 +381,7 @@ public final class BrokerCompensationService {
 
   private void rejectPublishedOverlap(BrokerCompensationPlan candidate) {
     BrokerCompensationPlanVersion candidateVersion = candidate.currentVersion();
-    boolean overlap = plans.values().stream()
+    boolean overlap = store.plans().values().stream()
         .filter(plan -> !plan.planId().equals(candidate.planId()))
         .filter(plan -> plan.tenantId().equals(candidate.tenantId()))
         .filter(plan -> BROKER_PLAN_TYPE.equals(plan.planType()))
@@ -385,8 +395,9 @@ public final class BrokerCompensationService {
   }
 
   private BrokerCompensationPlan findById(String tenantId, String planId) {
+    requireDurableStoreOrExplicitTestHarness();
     requireText(planId, "planId");
-    return Optional.ofNullable(plans.get(new PlanKey(tenantId, planId)))
+    return Optional.ofNullable(store.plans().get(new PlanKey(tenantId, planId)))
         .orElseThrow(() -> new BrokerCompException("NOT_FOUND"));
   }
 
@@ -399,13 +410,13 @@ public final class BrokerCompensationService {
 
   private BrokerCompException failClosed(String tenantId, String planId, String action) {
     brokerCompFailClosedTotal.incrementAndGet();
-    auditRecords.add(AuditRecord.completed(tenantId, planId, "system", "fail-closed", action, clock));
+    store.auditRecords().add(AuditRecord.completed(tenantId, planId, "system", "fail-closed", action, clock));
     return new BrokerCompException("POLICY_NOT_SATISFIED");
   }
 
   private BrokerCompException channelInvalid(String tenantId, String planId) {
     brokerCompFailClosedTotal.incrementAndGet();
-    auditRecords.add(AuditRecord.completed(tenantId, planId, "system", "fail-closed", "BROKER_COMP_CHANNEL_INVALID", clock));
+    store.auditRecords().add(AuditRecord.completed(tenantId, planId, "system", "fail-closed", "BROKER_COMP_CHANNEL_INVALID", clock));
     return new BrokerCompException("BROKER_COMP_CHANNEL_INVALID");
   }
 
@@ -475,9 +486,38 @@ public final class BrokerCompensationService {
         rule.floorRef(), before.stripTrailingZeros(), amount.stripTrailingZeros(), after.stripTrailingZeros()));
   }
 
-  private record PlanKey(String tenantId, String planId) {}
+  interface Store {
+    Map<PlanKey, BrokerCompensationPlan> plans();
+    Map<String, IdempotencyRecord> idempotencyReceipts();
+    List<BrokerCompensationAssignment> assignments();
+    List<Object> outbox();
+    List<AuditRecord> auditRecords();
+    Map<String, BrokerVisibilityPolicy> resultVisibility();
 
-  private record IdempotencyRecord(String requestHash, CommandReceipt receipt) {}
+    default void requireAvailable() {}
+
+    static Store failClosed(String component) {
+      return new Store() {
+        @Override public void requireAvailable() {
+          ProcessLocalStatePolicy.requireDurableStoreOrExplicitTestHarness(false, component);
+        }
+        @Override public Map<PlanKey, BrokerCompensationPlan> plans() { return unavailable(); }
+        @Override public Map<String, IdempotencyRecord> idempotencyReceipts() { return unavailable(); }
+        @Override public List<BrokerCompensationAssignment> assignments() { return unavailable(); }
+        @Override public List<Object> outbox() { return unavailable(); }
+        @Override public List<AuditRecord> auditRecords() { return unavailable(); }
+        @Override public Map<String, BrokerVisibilityPolicy> resultVisibility() { return unavailable(); }
+        private <T> T unavailable() {
+          requireAvailable();
+          throw new AssertionError("unreachable");
+        }
+      };
+    }
+  }
+
+  record PlanKey(String tenantId, String planId) {}
+
+  record IdempotencyRecord(String requestHash, CommandReceipt receipt) {}
 
   public enum CompBasis { LOAN_AMOUNT, PRICE_POINTS, FIXED_DOLLARS }
 

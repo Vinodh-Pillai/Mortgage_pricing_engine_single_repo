@@ -11,26 +11,19 @@ import org.junit.jupiter.api.Test;
 class RiskEventMapperTest {
 
   @Test
-  void mapsConcessionAppliedWithConfiguredSeverity() {
+  void mappingFailsClosedBeforePersistingWithoutDurableRepository() {
     ExceptionService service = new ExceptionService(new ExceptionRepository());
 
-    ExceptionModels.RiskMonitoringEventEnvelope event = service.publishRiskMonitoringEvent(
-      sourceEvent("RISK-IDEMP-001", Map.of("concessionStatus", "APPLIED", "amountBucket", "configured-small")),
-      mappingVersion(),
-      false
+    ExceptionServiceException error = assertThrows(
+      ExceptionServiceException.class,
+      () -> service.publishRiskMonitoringEvent(
+        sourceEvent("RISK-IDEMP-001", Map.of("concessionStatus", "APPLIED", "amountBucket", "configured-small")),
+        mappingVersion(),
+        false
+      )
     );
 
-    assertEquals("pricing.risk-monitoring.events", event.topic());
-    assertEquals(ExceptionModels.MonitoringSignalType.OVERRIDE_USAGE, event.signalType());
-    assertEquals(ExceptionModels.AlertSeverity.HIGH, event.severity());
-    assertEquals(ExceptionModels.RiskMonitoringEventStatus.READY, event.status());
-    assertEquals("risk_monitoring_events.completed.v1", event.outboxEventType());
-    assertEquals(event.riskEventId(), event.headers().get("eventId"));
-    assertEquals("RISK-MAPPING-V1", event.headers().get("mappingVersionId"));
-    assertEquals("schema://risk-events/concession-applied/v1", event.headers().get("schemaVersion"));
-    assertEquals("11111111-1111-1111-1111-111111111111:QUOTE-PII11", event.eventKey());
-    assertEquals("NON_PII_REFS_ONLY", event.redactionManifest().get("mode"));
-    assertEquals(event.payloadHash(), event.payload().get("payloadHash"));
+    assertEquals("PERSISTENCE_BACKEND_REQUIRED", error.code());
   }
 
   static ExceptionModels.MapRiskMonitoringEventCommand sourceEvent(String idempotencyKey, Map<String, String> payload) {

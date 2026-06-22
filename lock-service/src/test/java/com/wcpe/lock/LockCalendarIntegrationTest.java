@@ -27,7 +27,7 @@ class LockCalendarIntegrationTest {
       LocalDate.parse("2026-01-01"),
       LocalDate.parse("2026-12-31")
     );
-    service = new LockService(new LockRepository(), new BusinessDayCalculator(tenantClient));
+    service = new LockService(new InMemoryLockRepository(), new BusinessDayCalculator(tenantClient));
   }
 
   @Test

@@ -13,7 +13,7 @@ import com.wcpe.margin.CompanyMarginPolicyService.MarginUnit;
 import com.wcpe.margin.overlay.OverlayInputs;
 import com.wcpe.margin.overlay.OverlayPolicyType;
 import com.wcpe.margin.overlay.OverlayRule;
-import com.wcpe.margin.overlay.OverlayRuleRepository.InMemoryOverlayRuleRepository;
+import com.wcpe.margin.overlay.OverlayRuleRepository;
 import com.wcpe.margin.srp.SrpCalculationService;
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -136,8 +136,9 @@ class OverlayTest {
   }
 
   private static CompanyMarginPolicyService service(List<OverlayRule> rules) {
-    return new CompanyMarginPolicyService(Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC),
-        new SrpCalculationService(), new InMemoryOverlayRuleRepository(rules));
+    return MarginServiceTestStores.companyMarginPolicyService(
+        Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC),
+        new SrpCalculationService(), MarginServiceTestStores.staticOverlayRules(rules));
   }
 
   private static CreatePolicyCommand command(String idempotencyKey, MarginPolicyVersion version) {

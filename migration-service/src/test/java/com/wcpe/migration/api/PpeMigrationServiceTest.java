@@ -3,6 +3,7 @@ package com.wcpe.migration.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -18,7 +19,7 @@ class PpeMigrationServiceTest {
     @Test
     void optimalBlueImportMapsProductsAndRateSheetsReportsUnsupportedFieldsAndMigratesV1() {
         PpeMigrationService.ImportResponse response = service.importPackage(tenantId, new PpeMigrationService.ImportRequest(
-                "Optimal Blue", "v1", false,
+                "Optimal Blue", "v1", true,
                 new PpeMigrationService.PpeMigrationPackage(
                         List.of(),
                         List.of(),
@@ -36,7 +37,8 @@ class PpeMigrationServiceTest {
                 "consultant-1", "corr-ob"));
 
         assertTrue(response.validationReport().blockers().isEmpty());
-        assertTrue(response.loaded());
+        assertFalse(response.loaded());
+        assertTrue(response.dryRun());
         assertTrue(response.validationReport().versionCheck().migrated());
         assertEquals("v2", response.validationReport().schemaVersion());
         assertTrue(response.validationReport().warnings().stream().anyMatch(issue -> "UNSUPPORTED_FIELD".equals(issue.code())));
@@ -51,7 +53,7 @@ class PpeMigrationServiceTest {
     @Test
     void pollyEligibilityAndAdjustmentsCompileOnlyAfterValidationSucceeds() {
         PpeMigrationService.ImportResponse response = service.importPackage(tenantId, new PpeMigrationService.ImportRequest(
-                "POLLY", "v2", false,
+                "POLLY", "v2", true,
                 new PpeMigrationService.PpeMigrationPackage(
                         List.of(),
                         List.of(),
@@ -72,7 +74,7 @@ class PpeMigrationServiceTest {
         assertTrue(response.integrationCommands().stream().anyMatch(command -> "adjustment-service".equals(command.targetService())));
 
         PpeMigrationService.ImportResponse blocked = service.importPackage(tenantId, new PpeMigrationService.ImportRequest(
-                "POLLY", "v2", false,
+                "POLLY", "v2", true,
                 new PpeMigrationService.PpeMigrationPackage(
                         List.of(), List.of(), List.of(),
                         List.of(Map.of("matrix_id", "POLLY-BLOCKED")),
@@ -86,7 +88,7 @@ class PpeMigrationServiceTest {
     @Test
     void loanPassNonQmProgramMapsToCanonicalPii39AndPii40Dimensions() {
         PpeMigrationService.ImportResponse response = service.importPackage(tenantId, new PpeMigrationService.ImportRequest(
-                "LoanPASS", "v2", false,
+                "LoanPASS", "v2", true,
                 new PpeMigrationService.PpeMigrationPackage(
                         List.of(), List.of(), List.of(), List.of(), List.of(),
                         List.of(Map.of(
@@ -109,7 +111,7 @@ class PpeMigrationServiceTest {
     }
 
     @Test
-    void dryRunAndMissingFieldsBlockPublishWithoutLoadingPricingUsableData() {
+    void dryRunAndMissingFieldsReturnValidationWithoutLoadingPricingUsableData() {
         PpeMigrationService.ImportResponse response = service.importPackage(tenantId, new PpeMigrationService.ImportRequest(
                 "POLLY", "v2", true,
                 new PpeMigrationService.PpeMigrationPackage(
@@ -122,26 +124,43 @@ class PpeMigrationServiceTest {
         assertTrue(response.dryRun());
         assertTrue(response.validationReport().publishBlocked());
         assertTrue(response.validationReport().blockers().stream().anyMatch(issue -> "MISSING_CANONICAL_FIELD".equals(issue.code())));
-
-        PpeMigrationService.PublishRequestResult publish = service.requestPublish(tenantId, response.importId());
-        assertEquals("REJECTED_VALIDATION_BLOCKED", publish.status());
-        assertFalse(publish.pricingUsable());
     }
 
     @Test
-    void publishRequestRequiresGovernanceApprovalBeforePricingUse() {
+    void nonDryRunImportAndPublishFailClosedWithoutDurableStore() {
+        PpeMigrationService.MigrationException importFailure = assertThrows(PpeMigrationService.MigrationException.class,
+                () -> service.importPackage(tenantId, new PpeMigrationService.ImportRequest(
+                        "OPTIMAL_BLUE", "v2", false,
+                        new PpeMigrationService.PpeMigrationPackage(
+                                List.of(Map.of("rule_id", "RULE-1", "rule_expression", "configured-rule-ref")),
+                                List.of(), List.of(), List.of(), List.of(), List.of()),
+                        "governance-user", "corr-publish")));
+
+        assertEquals("PERSISTENT_IMPORT_STORE_REQUIRED", importFailure.getMessage());
+
+        PpeMigrationService.MigrationException publishFailure = assertThrows(PpeMigrationService.MigrationException.class,
+                () -> service.requestPublish(tenantId, "ppe-import-existing"));
+
+        assertEquals("PERSISTENT_IMPORT_STORE_REQUIRED", publishFailure.getMessage());
+    }
+
+    @Test
+    void validationReportAndTenantAuditFailClosedWithoutDurableStore() {
         PpeMigrationService.ImportResponse response = service.importPackage(tenantId, new PpeMigrationService.ImportRequest(
-                "OPTIMAL_BLUE", "v2", false,
+                "OPTIMAL_BLUE", "v2", true,
                 new PpeMigrationService.PpeMigrationPackage(
                         List.of(Map.of("rule_id", "RULE-1", "rule_expression", "configured-rule-ref")),
                         List.of(), List.of(), List.of(), List.of(), List.of()),
-                "governance-user", "corr-publish"));
+                "governance-user", "corr-validation"));
 
-        PpeMigrationService.PublishRequestResult publish = service.requestPublish(tenantId, response.importId());
+        PpeMigrationService.MigrationException reportFailure = assertThrows(PpeMigrationService.MigrationException.class,
+                () -> service.validationReport(tenantId, response.importId()));
+        PpeMigrationService.MigrationException auditFailure = assertThrows(PpeMigrationService.MigrationException.class,
+                () -> service.auditTrail(tenantId));
 
-        assertEquals("PENDING_GOVERNANCE_APPROVAL", publish.status());
-        assertFalse(publish.pricingUsable());
-        assertTrue(publish.integrationCommands().stream().anyMatch(command -> "governance-service".equals(command.targetService())));
+        assertEquals("PERSISTENT_IMPORT_STORE_REQUIRED", reportFailure.getMessage());
+        assertEquals("PERSISTENT_AUDIT_STORE_REQUIRED", auditFailure.getMessage());
+        assertTrue(response.auditTrail().stream().anyMatch(event -> "IMPORT_VALIDATE".equals(event.operation())));
     }
 
     @Test

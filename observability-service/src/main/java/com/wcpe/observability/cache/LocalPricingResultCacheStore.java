@@ -4,7 +4,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
-public final class InMemoryPricingResultCacheStore implements PricingResultCacheStore {
+public final class LocalPricingResultCacheStore implements PricingResultCacheStore {
   private final Map<CacheKey, CachedPricingResult> results = new ConcurrentHashMap<>();
 
   @Override

@@ -1,6 +1,9 @@
 package com.wcpe.pricingbff.los;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -14,6 +17,7 @@ import java.security.Principal;
 import java.security.PublicKey;
 import java.security.cert.X509Certificate;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Date;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,6 +25,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -33,11 +38,38 @@ class LosApiTest {
   @Autowired LosWebhookRegistry webhookRegistry;
   @Autowired LosPricingService losPricingService;
   @Autowired LosFeatureFlagService featureFlagService;
+  @MockBean LosQuoteServiceClient quoteClient;
+  @MockBean LosLockServiceClient lockClient;
 
   @BeforeEach
   void configureLoanPassTenantFlags() {
     featureFlagService.clear();
     featureFlagService.configure(flags("tenant-los", true, true, true, 2));
+    stubDownstreamClients();
+  }
+
+  private void stubDownstreamClients() {
+    when(quoteClient.submitQuoteJob(any(LosApiModels.QuoteServiceRequest.class))).thenAnswer(invocation -> {
+      LosApiModels.QuoteServiceRequest request = invocation.getArgument(0);
+      return new LosApiModels.QuoteServiceResponse("job-" + request.requestId(), "QUEUED",
+          "/api/v1/los/quote-requests/job-" + request.requestId(), request.correlationId());
+    });
+    when(lockClient.requestLock(any(), any(LosApiModels.LosLockRequest.class), any(), any(), any())).thenAnswer(invocation -> {
+      LosApiModels.LosLockRequest request = invocation.getArgument(1);
+      String lockId = "lock-" + request.pricingRequestId();
+      int days = request.lockPeriodDays() == null ? 30 : request.lockPeriodDays();
+      return new LosApiModels.LosLockResponse(lockId, request.pricingRequestId(), request.offerId(), "CONFIRMED",
+          Instant.parse("2026-06-18T08:00:00Z").plus(days, ChronoUnit.DAYS), "PENDING",
+          "test-lock-ref-" + request.offerId(), new LosApiModels.LockTerms(null, null, null), invocation.getArgument(4));
+    });
+    when(lockClient.extendLock(any(), any(LosApiModels.LosLockResponse.class), any(LosApiModels.LosLockExtendRequest.class), any(), any()))
+        .thenAnswer(invocation -> {
+          LosApiModels.LosLockResponse existing = invocation.getArgument(1);
+          LosApiModels.LosLockExtendRequest request = invocation.getArgument(2);
+          return new LosApiModels.LosLockResponse(existing.lockId(), existing.pricingRequestId(), existing.offerId(), "EXTENDED",
+              existing.lockExpiration().plus(request.extendByDays(), ChronoUnit.DAYS), existing.investor(),
+              existing.investorLockReference(), existing.terms(), invocation.getArgument(4));
+        });
   }
 
   @Test
@@ -82,7 +114,7 @@ class LosApiTest {
     LosFeatureFlagService flagService = new LosFeatureFlagService();
     flagService.configure(flags("tenant-los", true, true, true, 2));
     LosPricingService service = new LosPricingService(new ObjectMapper(), new LosScenarioAdapter(), quoteClient,
-        new LosLockServiceClient(), new LosWebhookRegistry(new ObjectMapper(), false), new LosIdempotencyStore(), flagService);
+        new LosLockServiceClient(org.springframework.web.client.RestClient.builder(), ""), new LosWebhookRegistry(new ObjectMapper(), false), new LosIdempotencyStore(), flagService);
 
     LosApiModels.LosPricingResponse response = service.createPricingRequest(sampleRequest("los-no-scenario", null, null),
         "idem-no-scenario", "corr-no-scenario");
@@ -102,7 +134,7 @@ class LosApiTest {
     LosFeatureFlagService flagService = new LosFeatureFlagService();
     flagService.configure(flags("tenant-los", true, true, true, 2));
     LosPricingService service = new LosPricingService(new ObjectMapper(), new LosScenarioAdapter(), quoteClient,
-        new LosLockServiceClient(), new LosWebhookRegistry(new ObjectMapper(), false), new LosIdempotencyStore(), flagService);
+        new LosLockServiceClient(org.springframework.web.client.RestClient.builder(), ""), new LosWebhookRegistry(new ObjectMapper(), false), new LosIdempotencyStore(), flagService);
 
     service.createPricingRequest(sampleRequest("los-with-scenario", "scenario-los-123", 3),
         "idem-with-scenario", "corr-with-scenario");
@@ -153,7 +185,10 @@ class LosApiTest {
         .andExpect(jsonPath("$.code").value("LOS_COMPATIBILITY_DISABLED"))
         .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("tenant-feature-flags:tenant-los:v3")));
 
-    assertThat(losPricingService.getPricingRequest("los-req-compat-disabled").status()).isEqualTo("NOT_FOUND");
+    assertThatThrownBy(() -> losPricingService.getPricingRequest("los-req-compat-disabled"))
+        .isInstanceOf(LosValidationException.class)
+        .extracting(ex -> ((LosValidationException) ex).code())
+        .isEqualTo("PRICING_REQUEST_READ_MODEL_REQUIRED");
   }
 
   @Test
@@ -182,14 +217,14 @@ class LosApiTest {
   }
 
   @Test
-  void webhookDeliveryRetry() throws Exception {
+  void pricingCompletionFailsClosedWithoutDurableReadModel() throws Exception {
     mockMvc.perform(post("/api/v1/los/webhooks")
             .headers(Headers.auth())
             .header("X-Request-ID", "webhook-reg-001")
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"tenantId\":\"tenant-los\",\"url\":\"https://los.example.test/webhooks\",\"events\":[\"pricing.completed\"],\"secret\":\"not-recorded\"}"))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.status").value("ACTIVE"));
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("WEBHOOK_PERSISTENCE_REQUIRED"));
 
     MvcResult accepted = mockMvc.perform(post("/api/v1/los/pricing-requests")
             .headers(Headers.auth())
@@ -200,11 +235,11 @@ class LosApiTest {
         .andReturn();
 
     JsonNode body = objectMapper.readTree(accepted.getResponse().getContentAsString());
-    losPricingService.completePricingRequest(body.path("pricingRequestId").asText(), body.path("quoteJobId").asText(),
-        List.of("product-result-ref"), List.of(), "corr-los-test");
-
-    assertThat(webhookRegistry.deliveries()).anyMatch(receipt -> receipt.eventType().equals("pricing.completed")
-        && receipt.status().equals("QUEUED") && receipt.attemptCount() == 0);
+    assertThatThrownBy(() -> losPricingService.completePricingRequest(body.path("pricingRequestId").asText(), body.path("quoteJobId").asText(),
+        List.of("product-result-ref"), List.of(), "corr-los-test"))
+        .isInstanceOf(LosValidationException.class)
+        .extracting(ex -> ((LosValidationException) ex).code())
+        .isEqualTo("PRICING_REQUEST_PERSISTENCE_REQUIRED");
   }
 
   @Test
@@ -214,8 +249,8 @@ class LosApiTest {
             .header("X-Request-ID", "webhook-reg-initial-accepted")
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"tenantId\":\"tenant-los\",\"url\":\"https://los.example.test/webhooks-initial\",\"events\":[\"pricing.completed\"],\"signingCredentialRef\":\"tenant-signing-ref-initial\"}"))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.status").value("ACTIVE"));
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("WEBHOOK_PERSISTENCE_REQUIRED"));
 
     MvcResult accepted = mockMvc.perform(post("/api/v1/los/pricing-requests")
             .headers(Headers.auth())
@@ -235,16 +270,14 @@ class LosApiTest {
   }
 
   @Test
-  void asyncQuoteCompletionWebhookIsSignedAndIdempotent() throws Exception {
+  void asyncQuoteCompletionDoesNotUseProcessLocalCallbackState() throws Exception {
     mockMvc.perform(post("/api/v1/los/webhooks")
             .headers(Headers.auth())
             .header("X-Request-ID", "webhook-reg-signed")
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"tenantId\":\"tenant-los\",\"url\":\"https://los.example.test/webhooks\",\"events\":[\"pricing.completed\"],\"signingCredentialRef\":\"tenant-signing-ref\"}"))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.status").value("ACTIVE"))
-        .andExpect(jsonPath("$.secret").doesNotExist())
-        .andExpect(jsonPath("$.signingCredentialRef").doesNotExist());
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("WEBHOOK_PERSISTENCE_REQUIRED"));
 
     MvcResult accepted = mockMvc.perform(post("/api/v1/los/pricing-requests")
             .headers(Headers.auth())
@@ -255,29 +288,22 @@ class LosApiTest {
         .andReturn();
 
     JsonNode body = objectMapper.readTree(accepted.getResponse().getContentAsString());
-    losPricingService.completePricingRequest(body.path("pricingRequestId").asText(), body.path("quoteJobId").asText(),
-        List.of("product-result-ref"), List.of(), "corr-los-test");
-
-    var matching = webhookRegistry.deliveries().stream()
-        .filter(receipt -> receipt.eventType().equals("pricing.completed"))
-        .filter(receipt -> receipt.idempotencyKey().contains("COMPLETED"))
-        .filter(receipt -> receipt.idempotencyKey().contains(body.path("quoteJobId").asText()))
-        .toList();
-    assertThat(matching).anySatisfy(receipt -> {
-      assertThat(receipt.status()).isEqualTo("QUEUED");
-      assertThat(receipt.signatureHeader()).startsWith("sha256=");
-      assertThat(receipt.auditRef()).startsWith("webhook-delivery:");
-    });
+    assertThatThrownBy(() -> losPricingService.completePricingRequest(body.path("pricingRequestId").asText(), body.path("quoteJobId").asText(),
+        List.of("product-result-ref"), List.of(), "corr-los-test"))
+        .isInstanceOf(LosValidationException.class)
+        .extracting(ex -> ((LosValidationException) ex).code())
+        .isEqualTo("PRICING_REQUEST_PERSISTENCE_REQUIRED");
   }
 
   @Test
-  void webhookDeliveryBlocksWhenSigningConfigMissing() throws Exception {
+  void webhookDeliveryCannotCompleteWithoutDurablePricingReadModel() throws Exception {
     mockMvc.perform(post("/api/v1/los/webhooks")
             .headers(Headers.auth())
             .header("X-Request-ID", "webhook-reg-missing-signing")
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"tenantId\":\"tenant-los\",\"url\":\"https://los.example.test/webhooks-missing\",\"events\":[\"pricing.completed\"]}"))
-        .andExpect(status().isCreated());
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("WEBHOOK_PERSISTENCE_REQUIRED"));
 
     MvcResult accepted = mockMvc.perform(post("/api/v1/los/pricing-requests")
             .headers(Headers.auth())
@@ -288,26 +314,23 @@ class LosApiTest {
         .andReturn();
 
     JsonNode body = objectMapper.readTree(accepted.getResponse().getContentAsString());
-    losPricingService.completePricingRequest(body.path("pricingRequestId").asText(), body.path("quoteJobId").asText(),
-        List.of(), List.of(), "corr-los-test");
-
-    assertThat(webhookRegistry.deliveries().stream()
-        .filter(receipt -> receipt.eventType().equals("pricing.completed"))
-        .filter(receipt -> "BLOCKED".equals(receipt.status()))
-        .filter(receipt -> receipt.idempotencyKey().contains(body.path("quoteJobId").asText()))
-        .toList())
-        .anySatisfy(receipt -> assertThat(receipt.lastError()).contains("signing credential"));
+    assertThatThrownBy(() -> losPricingService.completePricingRequest(body.path("pricingRequestId").asText(), body.path("quoteJobId").asText(),
+        List.of(), List.of(), "corr-los-test"))
+        .isInstanceOf(LosValidationException.class)
+        .extracting(ex -> ((LosValidationException) ex).code())
+        .isEqualTo("PRICING_REQUEST_PERSISTENCE_REQUIRED");
   }
 
   @Test
-  void callbackDeliveryDisabledRecordsAuditableDisabledReceiptWithoutExternalAttempt() throws Exception {
+  void callbackDeliveryDisabledStillRequiresDurablePricingReadModel() throws Exception {
     featureFlagService.configure(flags("tenant-los", true, true, false, 5));
     mockMvc.perform(post("/api/v1/los/webhooks")
             .headers(Headers.auth())
             .header("X-Request-ID", "webhook-reg-callback-disabled")
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"tenantId\":\"tenant-los\",\"url\":\"https://los.example.test/webhooks-disabled\",\"events\":[\"pricing.completed\"],\"signingCredentialRef\":\"tenant-signing-ref\"}"))
-        .andExpect(status().isCreated());
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("WEBHOOK_PERSISTENCE_REQUIRED"));
 
     MvcResult accepted = mockMvc.perform(post("/api/v1/los/pricing-requests")
             .headers(Headers.auth())
@@ -318,26 +341,23 @@ class LosApiTest {
         .andReturn();
 
     JsonNode body = objectMapper.readTree(accepted.getResponse().getContentAsString());
-    var receipts = losPricingService.completePricingRequest(body.path("pricingRequestId").asText(), body.path("quoteJobId").asText(),
-        List.of("product-result-ref"), List.of(), "corr-los-test");
-
-    assertThat(receipts).anySatisfy(receipt -> {
-      assertThat(receipt.status()).isEqualTo("DISABLED");
-      assertThat(receipt.attemptCount()).isZero();
-      assertThat(receipt.auditRef()).contains("tenant-feature-flags:audit:tenant-los:v5");
-      assertThat(receipt.lastError()).contains("callback delivery disabled");
-    });
+    assertThatThrownBy(() -> losPricingService.completePricingRequest(body.path("pricingRequestId").asText(), body.path("quoteJobId").asText(),
+        List.of("product-result-ref"), List.of(), "corr-los-test"))
+        .isInstanceOf(LosValidationException.class)
+        .extracting(ex -> ((LosValidationException) ex).code())
+        .isEqualTo("PRICING_REQUEST_PERSISTENCE_REQUIRED");
   }
 
   @Test
-  void lockCallbacksHonorTenantCallbackDeliveryDisabledFlag() throws Exception {
+  void lockRequestFailsClosedWithoutDurablePricingAndOfferReadModels() throws Exception {
     featureFlagService.configure(flags("tenant-los", true, true, false, 6));
     mockMvc.perform(post("/api/v1/los/webhooks")
             .headers(Headers.auth())
             .header("X-Request-ID", "webhook-reg-lock-callback-disabled")
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"tenantId\":\"tenant-los\",\"url\":\"https://los.example.test/webhooks-lock-disabled\",\"events\":[\"lock.confirmed\",\"lock.extended\"],\"signingCredentialRef\":\"tenant-signing-ref\"}"))
-        .andExpect(status().isCreated());
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("WEBHOOK_PERSISTENCE_REQUIRED"));
 
     MvcResult accepted = mockMvc.perform(post("/api/v1/los/pricing-requests")
             .headers(Headers.auth())
@@ -348,7 +368,7 @@ class LosApiTest {
         .andReturn();
 
     JsonNode body = objectMapper.readTree(accepted.getResponse().getContentAsString());
-    MvcResult lockResult = mockMvc.perform(post("/api/v1/los/locks")
+    mockMvc.perform(post("/api/v1/los/locks")
             .headers(Headers.auth())
             .header("X-Request-ID", "lock-callback-disabled-confirm")
             .contentType(MediaType.APPLICATION_JSON)
@@ -360,39 +380,8 @@ class LosApiTest {
                   "requestedBy": "loan-officer"
                 }
                 """.formatted(body.path("pricingRequestId").asText())))
-        .andExpect(status().isAccepted())
-        .andReturn();
-
-    JsonNode lockBody = objectMapper.readTree(lockResult.getResponse().getContentAsString());
-    String lockId = lockBody.path("lockId").asText();
-    assertThat(webhookRegistry.deliveries().stream()
-        .filter(receipt -> receipt.eventType().equals("lock.confirmed"))
-        .filter(receipt -> receipt.idempotencyKey().contains(body.path("pricingRequestId").asText()))
-        .toList())
-        .anySatisfy(receipt -> {
-          assertThat(receipt.status()).isEqualTo("DISABLED");
-          assertThat(receipt.attemptCount()).isZero();
-          assertThat(receipt.auditRef()).contains("tenant-feature-flags:audit:tenant-los:v6");
-          assertThat(receipt.lastError()).contains("callback delivery disabled");
-        });
-
-    mockMvc.perform(post("/api/v1/los/locks/{id}/extend", lockId)
-            .headers(Headers.auth())
-            .header("X-Request-ID", "lock-callback-disabled-extend")
-            .contentType(MediaType.APPLICATION_JSON)
-            .content("{\"extendByDays\":7,\"requestedBy\":\"loan-officer\",\"reason\":\"borrower requested extension\"}"))
-        .andExpect(status().isOk());
-
-    assertThat(webhookRegistry.deliveries().stream()
-        .filter(receipt -> receipt.eventType().equals("lock.extended"))
-        .filter(receipt -> receipt.idempotencyKey().contains(body.path("pricingRequestId").asText()))
-        .toList())
-        .anySatisfy(receipt -> {
-          assertThat(receipt.status()).isEqualTo("DISABLED");
-          assertThat(receipt.attemptCount()).isZero();
-          assertThat(receipt.auditRef()).contains("tenant-feature-flags:audit:tenant-los:v6");
-          assertThat(receipt.lastError()).contains("callback delivery disabled");
-        });
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("LOCK_REQUEST_READ_MODEL_REQUIRED"));
   }
 
   @Test
@@ -400,9 +389,9 @@ class LosApiTest {
     mockMvc.perform(get("/api/v1/los/pricing-requests/missing")
             .header("X-LOS-System", "ENCOMPASS")
             .header("X-LOS-Scopes", "los:pricing-request:read")
-            .requestAttr("jakarta.servlet.request.X509Certificate", new X509Certificate[] { new StubCertificate() }))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.status").value("NOT_FOUND"));
+        .requestAttr("jakarta.servlet.request.X509Certificate", new X509Certificate[] { new StubCertificate() }))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("PRICING_REQUEST_READ_MODEL_REQUIRED"));
   }
 
   @Test
@@ -431,7 +420,10 @@ class LosApiTest {
         .andExpect(jsonPath("$.code").value("LOS_SCOPE_REQUIRED"))
         .andExpect(jsonPath("$.message").value("los:pricing-request:write scope is required for POST /api/v1/los/pricing-requests"));
 
-    assertThat(losPricingService.getPricingRequest("los-req-missing-write-scope").status()).isEqualTo("NOT_FOUND");
+    assertThatThrownBy(() -> losPricingService.getPricingRequest("los-req-missing-write-scope"))
+        .isInstanceOf(LosValidationException.class)
+        .extracting(ex -> ((LosValidationException) ex).code())
+        .isEqualTo("PRICING_REQUEST_READ_MODEL_REQUIRED");
   }
 
   @Test
@@ -456,9 +448,9 @@ class LosApiTest {
             .header("X-LOS-System", "ENCOMPASS")
             .header("Authorization", "Bearer service-token")
             .header("X-LOS-Service-Account", "true")
-            .header("X-LOS-Service-Scopes", "los:pricing-request:read"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.status").value("NOT_FOUND"));
+        .header("X-LOS-Service-Scopes", "los:pricing-request:read"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("PRICING_REQUEST_READ_MODEL_REQUIRED"));
   }
 
   @Test

@@ -6,8 +6,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.wcpe.scenarioanalysis.WhatIfExportService.ExportExpiredException;
 import com.wcpe.scenarioanalysis.WhatIfExportService.ExportRevokedException;
 import com.wcpe.scenarioanalysis.WhatIfExportService.IdempotencyConflictException;
-import com.wcpe.scenarioanalysis.WhatIfExportService.InMemoryExportRepository;
-import com.wcpe.scenarioanalysis.WhatIfExportService.InMemoryExportStorage;
 import com.wcpe.scenarioanalysis.WhatIfExportService.PolicyNotSatisfiedException;
 import com.wcpe.scenarioanalysis.WhatIfExportService.ValidationException;
 import java.io.IOException;
@@ -21,14 +19,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class WhatIfExportServiceTest {
-  private InMemoryExportRepository repository;
-  private InMemoryExportStorage storage;
+  private TestOnlyInMemoryExportRepository repository;
+  private TestOnlyInMemoryExportStorage storage;
   private WhatIfExportService service;
 
   @BeforeEach
   void setUp() {
-    repository = new InMemoryExportRepository();
-    storage = new InMemoryExportStorage();
+    repository = new TestOnlyInMemoryExportRepository();
+    storage = new TestOnlyInMemoryExportStorage();
     service = new WhatIfExportService(repository, storage, Clock.fixed(Instant.parse("2026-06-01T12:00:00Z"), ZoneOffset.UTC));
   }
 

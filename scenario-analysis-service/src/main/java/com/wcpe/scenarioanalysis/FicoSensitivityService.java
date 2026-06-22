@@ -26,7 +26,7 @@ public class FicoSensitivityService {
   private final Clock clock;
 
   public FicoSensitivityService() {
-    this(new InMemoryFicoSensitivityRepository(), Clock.systemUTC());
+    throw FailClosedPersistence.notConfigured("FICO sensitivity store");
   }
 
   FicoSensitivityService(FicoSensitivityRepository repository, Clock clock) {
@@ -335,35 +335,6 @@ public class FicoSensitivityService {
     Optional<StoredFicoSensitivityRun> findByAnalysisId(String tenantId, UUID analysisId);
 
     void save(StoredFicoSensitivityRun run);
-  }
-
-  static class InMemoryFicoSensitivityRepository implements FicoSensitivityRepository {
-    private final Map<String, StoredFicoSensitivityRun> runsByTenantAndIdempotency = new ConcurrentHashMap<>();
-    private final Map<String, StoredFicoSensitivityRun> runsByTenantAndAnalysisId = new ConcurrentHashMap<>();
-
-    @Override
-    public Optional<StoredFicoSensitivityRun> findByIdempotencyKeyHash(String tenantId, String idempotencyKeyHash) {
-      return Optional.ofNullable(runsByTenantAndIdempotency.get(key(tenantId, idempotencyKeyHash)));
-    }
-
-    @Override
-    public Optional<StoredFicoSensitivityRun> findByAnalysisId(String tenantId, UUID analysisId) {
-      return Optional.ofNullable(runsByTenantAndAnalysisId.get(key(tenantId, analysisId.toString())));
-    }
-
-    @Override
-    public void save(StoredFicoSensitivityRun run) {
-      runsByTenantAndIdempotency.put(key(run.tenantId(), run.idempotencyKeyHash()), run);
-      runsByTenantAndAnalysisId.put(key(run.tenantId(), run.analysisId().toString()), run);
-    }
-
-    int size() {
-      return runsByTenantAndAnalysisId.size();
-    }
-
-    private static String key(String tenantId, String id) {
-      return tenantId + ':' + id;
-    }
   }
 
   public static class ValidationException extends RuntimeException {

@@ -61,7 +61,6 @@ class RateFeedService {
   private final ApplicationEventPublisher eventPublisher;
   private final MappingWizardService mappingWizardService;
   private final LlpaGridToRuleBookMapper ruleBookMapper = new LlpaGridToRuleBookMapper();
-  private final Map<UUID, RateFeedModels.PipelineStatusRow> pipelineRows = new LinkedHashMap<>();
 
   RateFeedService(RateFeedRepository repository, JdbcTemplate jdbc, ObjectMapper mapper,
                    ActivationService activationService, VersionManager versionManager,
@@ -1836,7 +1835,7 @@ class RateFeedService {
 
   public RateFeedModels.PipelineStatusResponse pipelineStatus(UUID tenantId) {
     RateFeedRoles.require(RateFeedRoles.RATE_FEED_VIEW);
-    return new RateFeedModels.PipelineStatusResponse(List.copyOf(pipelineRows.values()), pipelineRows.size(), Instant.now());
+    throw new RateFeedException(HttpStatus.SERVICE_UNAVAILABLE, "PIPELINE_PROJECTION_STORE_UNAVAILABLE", "Pipeline status requires a durable projection table; in-memory pipeline status storage is disabled.");
   }
 
   private void recordPipelineRow(UUID sheetId, RateFeedModels.MapToRuleBookResponse response, String actor, String correlationId) {
@@ -1849,8 +1848,7 @@ class RateFeedService {
         new RateFeedModels.PipelineGovernanceStage("SIMULATE", "READY", Instant.now(), "governance-service", correlationId),
         new RateFeedModels.PipelineGovernanceStage("APPROVE", "WAITING_FOR_ADMIN", Instant.now(), "pricing-admin", "manual-approval-required"),
         new RateFeedModels.PipelineGovernanceStage("PUBLISH", "WAITING_ON_APPROVAL", Instant.now(), "governance-service", "RuleBookPublished.v1"));
-    pipelineRows.put(sheetId, new RateFeedModels.PipelineStatusRow(sheetId, response.ruleBookId(), response.businessKey(), response.selector().investor(),
-        "DRAFT", response.ruleCount(), "Mapped to draft rule book by " + actor, response.gridHash(), response.sourceRowCount(), response.warnings().size(), dimensions, history, sample));
+    throw new RateFeedException(HttpStatus.SERVICE_UNAVAILABLE, "PIPELINE_PROJECTION_STORE_UNAVAILABLE", "Cannot record pipeline status without a durable projection table; in-memory pipeline status storage is disabled.");
   }
 
   private RateSheet getSheet(UUID sheetId) {

@@ -38,7 +38,15 @@ public final class QuoteTestSupport {
     }
 
     public static QuoteApplicationService service(QuoteDependencies dependencies, InMemoryQuoteCache cache) {
-        return new QuoteApplicationService(new InMemoryQuoteRepository(), dependencies, cache, new BestExecutionRanker(), CLOCK);
+        return new QuoteApplicationService(
+            new InMemoryQuoteRepository(),
+            new InMemoryQuoteJobRepository(),
+            new InMemoryQuoteSnapshotRepository(),
+            dependencies,
+            cache,
+            new BestExecutionRanker(),
+            CLOCK
+        );
     }
 
     public static ComparisonViewConfig comparisonView() {

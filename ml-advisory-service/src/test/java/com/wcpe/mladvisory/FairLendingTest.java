@@ -2,6 +2,7 @@ package com.wcpe.mladvisory;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.wcpe.mladvisory.FairLendingAnalysisService.AIRTable;
@@ -20,6 +21,13 @@ import org.junit.jupiter.api.Test;
 
 class FairLendingTest {
   private static final UUID TENANT = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+
+  @Test
+  void productionDefaultConstructorFailsClosedWithoutDataSource() {
+    IllegalStateException failure = assertThrows(IllegalStateException.class, FairLendingAnalysisService::new);
+
+    assertTrue(failure.getMessage().contains("JDBC/PostgreSQL DataSource"));
+  }
 
   @Test
   void airCalculation() {
@@ -41,7 +49,7 @@ class FairLendingTest {
 
   @Test
   void regressionSignificance() {
-    FairLendingAnalysisService service = new FairLendingAnalysisService();
+    FairLendingAnalysisService service = inMemoryService();
 
     RegressionResult result = service.runProtectedClassRegression(regressionOutcomes(), OutcomeMeasure.NOTE_RATE, ProtectedClass.RACE, List.of());
 
@@ -89,9 +97,13 @@ class FairLendingTest {
   }
 
   private static FairLendingAnalysisService loadedService() {
-    FairLendingAnalysisService service = new FairLendingAnalysisService();
+    FairLendingAnalysisService service = inMemoryService();
     regressionOutcomes().forEach(service::recordPricingOutcome);
     return service;
+  }
+
+  private static FairLendingAnalysisService inMemoryService() {
+    return new FairLendingAnalysisService(new TestFairLendingOutcomeRepository(), new TestFairLendingEventRepository());
   }
 
   private static List<PricingOutcome> sampleOutcomes() {

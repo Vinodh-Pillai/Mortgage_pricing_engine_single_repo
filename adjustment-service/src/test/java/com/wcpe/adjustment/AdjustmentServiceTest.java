@@ -11,7 +11,7 @@ import com.wcpe.adjustment.AdjustmentRuleBook.EffectiveWindow;
 import com.wcpe.adjustment.AdjustmentRuleBook.PricingPrecisionPolicy;
 import com.wcpe.adjustment.AdjustmentRuleBook.RuleBookSelector;
 import com.wcpe.adjustment.AdjustmentRuleBook.RuleBookStatus;
-import com.wcpe.adjustment.RuleBookResolver.InMemoryRuleBookRepository;
+import com.wcpe.adjustment.RuleBookResolver.StaticRuleBookRepository;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
@@ -29,7 +29,7 @@ class AdjustmentServiceTest {
     void calculateExecutesResolvedRuleBookInsteadOfMockFactors() {
         AdjustmentRuleBook book = publishedBook(List.of(rule("00000000-0000-0000-0000-000000000101", 1,
             "ficoBandKey", ConditionOperator.RANGE_CLOSED, List.of("740", "759"), AdjustmentOutputType.POINTS_DELTA, "-0.125000", "LLPA-FICO")));
-        AdjustmentService service = new AdjustmentService(new RuleBookResolver(new InMemoryRuleBookRepository(List.of(book))));
+        AdjustmentService service = new AdjustmentService(new RuleBookResolver(new StaticRuleBookRepository(List.of(book))));
 
         AdjustmentCalculationResult result = service.calculate(request(Map.of("ficoBandKey", 745)));
 
@@ -46,7 +46,7 @@ class AdjustmentServiceTest {
 
     @Test
     void noPublishedRuleBookReturnsBlockingResult() {
-        AdjustmentService service = new AdjustmentService(new RuleBookResolver(new InMemoryRuleBookRepository(List.of())));
+        AdjustmentService service = new AdjustmentService(new RuleBookResolver(new StaticRuleBookRepository(List.of())));
 
         AdjustmentCalculationResult result = service.calculate(request(Map.of("ficoBandKey", 745)));
 
@@ -61,7 +61,7 @@ class AdjustmentServiceTest {
             rule("00000000-0000-0000-0000-000000000102", 1, "ficoBandKey", ConditionOperator.RANGE_CLOSED, List.of("740", "759"), AdjustmentOutputType.POINTS_DELTA, "-0.125000", "LLPA-FICO"),
             rule("00000000-0000-0000-0000-000000000103", 2, "ltv", ConditionOperator.RANGE_CLOSED, List.of("80.01", "85.00"), AdjustmentOutputType.POINTS_DELTA, "0.250000", "LLPA-LTV")
         ));
-        AdjustmentService service = new AdjustmentService(new RuleBookResolver(new InMemoryRuleBookRepository(List.of(book))));
+        AdjustmentService service = new AdjustmentService(new RuleBookResolver(new StaticRuleBookRepository(List.of(book))));
 
         AdjustmentCalculationRequest request = request(Map.of("ficoBandKey", 745, "ltv", new BigDecimal("82.5")));
         AdjustmentCalculationResult first = service.calculate(request);

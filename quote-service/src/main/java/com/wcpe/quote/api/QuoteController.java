@@ -6,6 +6,7 @@ import com.wcpe.quote.QuoteApplicationService;
 import com.wcpe.quote.QuoteComparisonExport;
 import com.wcpe.quote.QuoteComparisonResponse;
 import com.wcpe.quote.QuoteCreateRequest;
+import com.wcpe.quote.QuoteCreateException;
 import com.wcpe.quote.QuoteExplanationResponse;
 import com.wcpe.quote.QuoteJobResponse;
 import com.wcpe.quote.QuoteJobStartRequest;
@@ -17,10 +18,24 @@ import com.wcpe.quote.RankingPreviewRequest;
 import com.wcpe.quote.RankingPreviewResponse;
 import com.wcpe.quote.QuoteSelectionResponse;
 import com.wcpe.quote.SelectQuoteOptionCommand;
+import java.util.Map;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
+@RestController
+@RequestMapping("/api/v1/tenants/{tenantId}")
 public class QuoteController {
     private final QuoteApplicationService applicationService;
 
@@ -28,7 +43,13 @@ public class QuoteController {
         this.applicationService = applicationService;
     }
 
-    public QuoteCreateResponse postTenantQuote(UUID tenantId, String idempotencyKey, String correlationId, QuoteCreateRequest body) {
+    @PostMapping("/quotes")
+    public QuoteCreateResponse postTenantQuote(
+        @PathVariable UUID tenantId,
+        @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+        @RequestHeader(value = "X-Correlation-ID", required = false) String correlationId,
+        @RequestBody QuoteCreateRequest body
+    ) {
         QuoteCreateRequest requestScopedBody = new QuoteCreateRequest(
             tenantId,
             body.scenarioId(),
@@ -45,11 +66,19 @@ public class QuoteController {
         return QuoteCreateResponse.from(applicationService.createQuote(requestScopedBody));
     }
 
-    public QuoteCreateResponse getTenantQuote(UUID tenantId, UUID quoteId) {
+    @GetMapping("/quotes/{quoteId}")
+    public QuoteCreateResponse getTenantQuote(@PathVariable UUID tenantId, @PathVariable UUID quoteId) {
         return QuoteCreateResponse.from(applicationService.getQuote(tenantId, quoteId));
     }
 
-    public QuoteJobResponse postTenantQuoteJob(UUID tenantId, String idempotencyKey, String correlationId, boolean preferAsync, QuoteJobStartRequest body) {
+    @PostMapping("/quote-jobs")
+    public QuoteJobResponse postTenantQuoteJob(
+        @PathVariable UUID tenantId,
+        @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+        @RequestHeader(value = "X-Correlation-ID", required = false) String correlationId,
+        @RequestParam(defaultValue = "false") boolean preferAsync,
+        @RequestBody QuoteJobStartRequest body
+    ) {
         QuoteJobStartRequest tenantScopedBody = new QuoteJobStartRequest(
             tenantId,
             body.scenarioId(),
@@ -67,15 +96,27 @@ public class QuoteController {
         return QuoteJobResponse.from(applicationService.startQuoteJob(tenantScopedBody));
     }
 
-    public QuoteJobResponse getTenantQuoteJob(UUID tenantId, UUID jobId) {
+    @GetMapping("/quote-jobs/{jobId}")
+    public QuoteJobResponse getTenantQuoteJob(@PathVariable UUID tenantId, @PathVariable UUID jobId) {
         return QuoteJobResponse.from(applicationService.getQuoteJob(tenantId, jobId));
     }
 
-    public QuoteJobResponse postTenantQuoteJobCancel(UUID tenantId, UUID jobId, String actorId, String correlationId) {
+    @PostMapping("/quote-jobs/{jobId}/cancel")
+    public QuoteJobResponse postTenantQuoteJobCancel(
+        @PathVariable UUID tenantId,
+        @PathVariable UUID jobId,
+        @RequestHeader(value = "X-Actor-Id", required = false) String actorId,
+        @RequestHeader(value = "X-Correlation-ID", required = false) String correlationId
+    ) {
         return QuoteJobResponse.from(applicationService.cancelQuoteJob(tenantId, jobId, actorId, correlationId));
     }
 
-    public RankingPreviewResponse postTenantRankingPreview(UUID tenantId, String correlationId, RankingPreviewRequest body) {
+    @PostMapping("/quotes/ranking-preview")
+    public RankingPreviewResponse postTenantRankingPreview(
+        @PathVariable UUID tenantId,
+        @RequestHeader(value = "X-Correlation-ID", required = false) String correlationId,
+        @RequestBody RankingPreviewRequest body
+    ) {
         RankingPreviewRequest tenantScopedBody = new RankingPreviewRequest(
             tenantId,
             body.actorId(),
@@ -86,57 +127,74 @@ public class QuoteController {
         return applicationService.previewRanking(tenantScopedBody);
     }
 
+    @GetMapping("/quotes/{quoteId}/comparison")
     public QuoteComparisonResponse getTenantQuoteComparison(
-        UUID tenantId,
-        UUID quoteId,
+        @PathVariable UUID tenantId,
+        @PathVariable UUID quoteId,
         ComparisonViewConfig config,
-        Set<String> allowedFields,
-        String actorId,
-        String correlationId
+        @RequestParam(required = false) Set<String> allowedFields,
+        @RequestHeader(value = "X-Actor-Id", required = false) String actorId,
+        @RequestHeader(value = "X-Correlation-ID", required = false) String correlationId
     ) {
         return applicationService.compareQuoteOptions(tenantId, quoteId, config, allowedFields, actorId, correlationId);
     }
 
+    @PostMapping("/quotes/{quoteId}/comparison/export")
     public QuoteComparisonExport postTenantQuoteComparisonExport(
-        UUID tenantId,
-        UUID quoteId,
-        String idempotencyKey,
-        ComparisonViewConfig config,
-        Set<String> allowedFields,
-        String actorId,
-        String correlationId,
-        String format
+        @PathVariable UUID tenantId,
+        @PathVariable UUID quoteId,
+        @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+        @RequestBody ComparisonViewConfig config,
+        @RequestParam(required = false) Set<String> allowedFields,
+        @RequestHeader(value = "X-Actor-Id", required = false) String actorId,
+        @RequestHeader(value = "X-Correlation-ID", required = false) String correlationId,
+        @RequestParam(defaultValue = "json") String format
     ) {
         return applicationService.exportComparison(tenantId, quoteId, config, allowedFields, actorId, correlationId, idempotencyKey, format);
     }
 
+    @GetMapping("/quotes/{quoteId}/options/{optionId}/explanation")
     public QuoteExplanationResponse getTenantQuoteOptionExplanation(
-        UUID tenantId,
-        UUID quoteId,
-        UUID optionId,
-        Set<String> allowedFields,
-        String actorId,
-        String correlationId
+        @PathVariable UUID tenantId,
+        @PathVariable UUID quoteId,
+        @PathVariable UUID optionId,
+        @RequestParam(required = false) Set<String> allowedFields,
+        @RequestHeader(value = "X-Actor-Id", required = false) String actorId,
+        @RequestHeader(value = "X-Correlation-ID", required = false) String correlationId
     ) {
         return applicationService.explainQuoteOption(tenantId, quoteId, optionId, allowedFields, actorId, correlationId);
     }
 
-    public QuoteSnapshot getTenantQuoteSnapshot(UUID tenantId, UUID quoteId, String actorId, String correlationId) {
+    @GetMapping("/quotes/{quoteId}/snapshot")
+    public QuoteSnapshot getTenantQuoteSnapshot(
+        @PathVariable UUID tenantId,
+        @PathVariable UUID quoteId,
+        @RequestHeader(value = "X-Actor-Id", required = false) String actorId,
+        @RequestHeader(value = "X-Correlation-ID", required = false) String correlationId
+    ) {
         return applicationService.getQuoteSnapshot(tenantId, quoteId, actorId, correlationId);
     }
 
+    @PostMapping("/quotes/{quoteId}/snapshot/export")
     public QuoteSnapshotExport postTenantQuoteSnapshotExport(
-        UUID tenantId,
-        UUID quoteId,
-        String redactionProfile,
-        boolean nonRedacted,
-        String actorId,
-        String correlationId
+        @PathVariable UUID tenantId,
+        @PathVariable UUID quoteId,
+        @RequestParam String redactionProfile,
+        @RequestParam(defaultValue = "false") boolean nonRedacted,
+        @RequestHeader(value = "X-Actor-Id", required = false) String actorId,
+        @RequestHeader(value = "X-Correlation-ID", required = false) String correlationId
     ) {
         return applicationService.exportQuoteSnapshot(tenantId, quoteId, redactionProfile, nonRedacted, actorId, correlationId);
     }
 
-    public QuoteSelectionResponse postTenantQuoteSelection(UUID tenantId, UUID quoteId, String idempotencyKey, String correlationId, SelectQuoteOptionCommand body) {
+    @PostMapping("/quotes/{quoteId}/selection")
+    public QuoteSelectionResponse postTenantQuoteSelection(
+        @PathVariable UUID tenantId,
+        @PathVariable UUID quoteId,
+        @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+        @RequestHeader(value = "X-Correlation-ID", required = false) String correlationId,
+        @RequestBody SelectQuoteOptionCommand body
+    ) {
         SelectQuoteOptionCommand tenantScopedBody = new SelectQuoteOptionCommand(
             tenantId,
             quoteId,
@@ -153,11 +211,25 @@ public class QuoteController {
         return QuoteSelectionResponse.from(applicationService.selectQuoteOption(tenantScopedBody));
     }
 
-    public List<OutboxEvent> getTenantQuoteEvents(UUID tenantId, UUID quoteId) {
+    @GetMapping("/quotes/{quoteId}/events")
+    public List<OutboxEvent> getTenantQuoteEvents(@PathVariable UUID tenantId, @PathVariable UUID quoteId) {
         return applicationService.quoteEvents(tenantId, quoteId);
     }
 
-    public QuoteEventReplayResult postTenantQuoteEventReplay(UUID tenantId, String eventId, String actorId, String correlationId, String reasonForAccess) {
+    @PostMapping("/quote-events/{eventId}/replay")
+    public QuoteEventReplayResult postTenantQuoteEventReplay(
+        @PathVariable UUID tenantId,
+        @PathVariable String eventId,
+        @RequestHeader(value = "X-Actor-Id", required = false) String actorId,
+        @RequestHeader(value = "X-Correlation-ID", required = false) String correlationId,
+        @RequestParam String reasonForAccess
+    ) {
         return applicationService.replayQuoteEvent(tenantId, eventId, actorId, correlationId, reasonForAccess);
+    }
+
+    @ExceptionHandler(QuoteCreateException.class)
+    public ResponseEntity<Map<String, String>> quoteError(QuoteCreateException ex) {
+        HttpStatus status = "NOT_FOUND".equals(ex.code()) ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+        return ResponseEntity.status(status).body(Map.of("code", ex.code(), "message", ex.getMessage()));
     }
 }

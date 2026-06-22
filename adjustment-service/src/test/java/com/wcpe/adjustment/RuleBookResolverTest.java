@@ -30,7 +30,7 @@ class RuleBookResolverTest {
         AdjustmentRuleBook older = book("20000000-0000-0000-0000-000000000001", "v1", Instant.parse("2026-05-01T00:00:00Z"));
         AdjustmentRuleBook newer = book("20000000-0000-0000-0000-000000000002", "v2", Instant.parse("2026-06-01T00:00:00Z"));
 
-        RuleBookResolver resolver = new RuleBookResolver(new RuleBookResolver.InMemoryRuleBookRepository(List.of(older, newer)));
+        RuleBookResolver resolver = new RuleBookResolver(new RuleBookResolver.StaticRuleBookRepository(List.of(older, newer)));
 
         assertThat(resolver.resolve(TENANT_ID, SELECTOR, QUOTE_DATE)).get().extracting(AdjustmentRuleBook::version).isEqualTo("v2");
     }

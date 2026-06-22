@@ -1,17 +1,48 @@
 package com.wcpe.ratefeed.normalization;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class MappingWizardServiceTest {
   private final ObjectMapper mapper = new ObjectMapper();
   private final MappingWizardHeuristicAnalyzer analyzer = new MappingWizardHeuristicAnalyzer();
-  private final MappingWizardService service = new MappingWizardService(analyzer, new LLMMappingProposer(analyzer), mapper);
+  private final NormalizationProfileRepository repository = mock(NormalizationProfileRepository.class);
+  private final Map<UUID, NormalizationProfile> storedProfiles = new HashMap<>();
+  private final MappingWizardService service = new MappingWizardService(analyzer, new LLMMappingProposer(analyzer), mapper, repository);
+
+  @BeforeEach
+  void setUpRepository() {
+    storedProfiles.clear();
+    when(repository.save(any(NormalizationProfile.class))).thenAnswer(invocation -> {
+      NormalizationProfile profile = invocation.getArgument(0);
+      storedProfiles.put(profile.getProfileId(), profile);
+      return profile;
+    });
+    when(repository.findById(any(UUID.class))).thenAnswer(invocation -> Optional.ofNullable(storedProfiles.get(invocation.getArgument(0))));
+    when(repository.findByTenantId(any(UUID.class))).thenAnswer(invocation -> {
+      UUID tenantId = invocation.getArgument(0);
+      return storedProfiles.values().stream().filter(profile -> tenantId.equals(profile.getTenantId())).toList();
+    });
+    when(repository.findAllPublishedByTenant(any(UUID.class))).thenAnswer(invocation -> {
+      UUID tenantId = invocation.getArgument(0);
+      return storedProfiles.values().stream()
+          .filter(profile -> tenantId.equals(profile.getTenantId()))
+          .filter(profile -> "PUBLISHED".equals(profile.getStatus()))
+          .toList();
+    });
+  }
 
   @Test
   void createsDraftProfileAndPublishesThroughGovernanceLifecycle() {

@@ -8,15 +8,23 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.wcpe.quote.InMemoryQuoteJobRepository;
+import com.wcpe.quote.InMemoryQuoteRepository;
+import com.wcpe.quote.InMemoryQuoteSnapshotRepository;
+import com.wcpe.quote.QuoteJobRepository;
+import com.wcpe.quote.QuoteRepository;
+import com.wcpe.quote.QuoteSnapshotRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
-@SpringBootTest
+@SpringBootTest(properties = "quote.persistence.mode=in-memory")
 @AutoConfigureMockMvc
 class LosQuoteIntegrationControllerTest {
   @Autowired MockMvc mockMvc;
@@ -107,5 +115,23 @@ class LosQuoteIntegrationControllerTest {
     return """
         {"tenantId":"tenant-los","requestId":"quote-001","scenarioId":"scenario-los-001","scenarioVersion":1,"requestedLockPeriods":[30],"clientContext":{"source":"LOS"},"actorId":"los:request","idempotencyKey":"idem-los","correlationId":"corr-los","preferAsync":true,"quoteBorrowerInfo":{"borrowerLastName":"Rivera","loanNumber":"LN-001","numberOfBorrowers":1},"quoteAddressDTO":{"state":"TX","zip":"78701"},"requestedLoanAmount":450000,"transactionType":"purchase","propertyInformationType":"single-family","occupancyType":"primary-residence","numberOfUnits":1,"incomeDocumentationType":"full-documentation","creditScore":745,"mortgageType":"conventional","amortizationType":"fixed","loanTermType":"30-year","desiredRateLockPeriod":30,"lockPeriodType":"30-day","creditApplicationFields":[{"fieldId":"field@base-loan-amount","value":{"type":"number","value":450000}},{"fieldId":"field@decision-credit-score","value":{"type":"number","value":745}}]}
         """;
+  }
+
+  @TestConfiguration(proxyBeanMethods = false)
+  static class TestOnlyInMemoryPersistenceConfiguration {
+    @Bean
+    QuoteRepository testQuoteRepository() {
+      return new InMemoryQuoteRepository();
+    }
+
+    @Bean
+    QuoteJobRepository testQuoteJobRepository() {
+      return new InMemoryQuoteJobRepository();
+    }
+
+    @Bean
+    QuoteSnapshotRepository testQuoteSnapshotRepository() {
+      return new InMemoryQuoteSnapshotRepository();
+    }
   }
 }

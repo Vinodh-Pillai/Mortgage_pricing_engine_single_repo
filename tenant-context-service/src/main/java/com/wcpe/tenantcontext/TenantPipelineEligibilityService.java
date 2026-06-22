@@ -2,7 +2,6 @@ package com.wcpe.tenantcontext;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -10,22 +9,37 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class TenantPipelineEligibilityService {
     private static final String METADATA_READ_SCOPE = TenantAccessPolicy.DEFAULT_CONTEXT_READ_SCOPE;
 
     private final TenantFieldConfigurationStoreService fieldConfigurationStore;
-    private final Map<String, TenantPipelineConfiguration> configurationsByTenant = new ConcurrentHashMap<>();
-    private final Map<String, UserTenantAssignment> userAssignments = new ConcurrentHashMap<>();
-    private final List<TenantPipelineAccessAuditRecord> accessAuditRecords = Collections.synchronizedList(new ArrayList<>());
+    private final JdbcTemplate jdbcTemplate;
+    private final TenantPipelineEligibilityStore testStore;
 
-    public TenantPipelineEligibilityService(TenantFieldConfigurationStoreService fieldConfigurationStore) {
+    @Autowired
+    public TenantPipelineEligibilityService(TenantFieldConfigurationStoreService fieldConfigurationStore, JdbcTemplate jdbcTemplate) {
         this.fieldConfigurationStore = Objects.requireNonNull(fieldConfigurationStore, "fieldConfigurationStore is required");
+        this.jdbcTemplate = Objects.requireNonNull(jdbcTemplate, "jdbcTemplate is required");
+        this.testStore = null;
     }
 
+    TenantPipelineEligibilityService(TenantFieldConfigurationStoreService fieldConfigurationStore) {
+        throw new IllegalStateException("TenantPipelineEligibilityService test memory state must be supplied by a src/test fixture; refusing src/main process-local store-of-record fallback");
+    }
+
+    TenantPipelineEligibilityService(TenantFieldConfigurationStoreService fieldConfigurationStore, TenantPipelineEligibilityStore testStore) {
+        this.fieldConfigurationStore = Objects.requireNonNull(fieldConfigurationStore, "fieldConfigurationStore is required");
+        this.jdbcTemplate = null;
+        this.testStore = Objects.requireNonNull(testStore, "testStore is required");
+    }
+
+    @Transactional
     public TenantPipelineConfiguration configureTenant(TenantPipelineConfiguration command) {
         if (command == null) {
             throw pipelineError("TENANT_PIPELINE_CONFIGURATION_REQUIRED", "configuration", "Tenant pipeline configuration is required.");
@@ -46,18 +60,62 @@ public class TenantPipelineEligibilityService {
             .toList();
 
         TenantPipelineConfiguration validated = new TenantPipelineConfiguration(tenantId, products, investors, companySettings, userSettings);
-        configurationsByTenant.put(key(tenantId), validated);
+        if (jdbcBacked()) {
+            jdbcTemplate.update("DELETE FROM tenant.tenant_pipeline_product_field_ref WHERE tenant_id = ?", tenantId);
+            jdbcTemplate.update("DELETE FROM tenant.tenant_pipeline_investor_field_ref WHERE tenant_id = ?", tenantId);
+            jdbcTemplate.update("DELETE FROM tenant.tenant_pipeline_product WHERE tenant_id = ?", tenantId);
+            jdbcTemplate.update("DELETE FROM tenant.tenant_pipeline_investor WHERE tenant_id = ?", tenantId);
+            jdbcTemplate.update("DELETE FROM tenant.tenant_pipeline_company_setting WHERE tenant_id = ?", tenantId);
+            jdbcTemplate.update("DELETE FROM tenant.tenant_pipeline_user_setting WHERE tenant_id = ?", tenantId);
+            for (TenantProductOption product : products) {
+                jdbcTemplate.update("INSERT INTO tenant.tenant_pipeline_product (tenant_id, product_id, display_name, enabled) VALUES (?, ?, ?, ?)", tenantId, product.productId(), product.displayName(), product.enabled());
+                for (FieldReference ref : product.fieldRefs()) {
+                    jdbcTemplate.update("INSERT INTO tenant.tenant_pipeline_product_field_ref (tenant_id, product_id, surface, field_id) VALUES (?, ?, ?, ?)", tenantId, product.productId(), ref.surface(), ref.fieldId());
+                }
+            }
+            for (TenantInvestorOption investor : investors) {
+                jdbcTemplate.update("INSERT INTO tenant.tenant_pipeline_investor (tenant_id, investor_id, display_name, enabled) VALUES (?, ?, ?, ?)", tenantId, investor.investorId(), investor.displayName(), investor.enabled());
+                for (FieldReference ref : investor.fieldRefs()) {
+                    jdbcTemplate.update("INSERT INTO tenant.tenant_pipeline_investor_field_ref (tenant_id, investor_id, surface, field_id) VALUES (?, ?, ?, ?)", tenantId, investor.investorId(), ref.surface(), ref.fieldId());
+                }
+            }
+            companySettings.forEach((settingKey, settingValue) -> jdbcTemplate.update("INSERT INTO tenant.tenant_pipeline_company_setting (tenant_id, setting_key, setting_value) VALUES (?, ?, ?)", tenantId, settingKey, settingValue));
+            for (TenantUserSettings settings : userSettings) {
+                assignUser(tenantId, settings.userId());
+                settings.settings().forEach((settingKey, settingValue) -> jdbcTemplate.update("INSERT INTO tenant.tenant_pipeline_user_setting (tenant_id, user_id, setting_key, setting_value) VALUES (?, ?, ?, ?)", tenantId, settings.userId(), settingKey, settingValue));
+            }
+            return validated;
+        }
+        requireTestStore().saveConfiguration(validated);
         userSettings.forEach(settings -> assignUser(tenantId, settings.userId()));
         return validated;
     }
 
     public UserTenantAssignment assignUser(String tenantId, String userId) {
         UserTenantAssignment assignment = new UserTenantAssignment(required(userId, "userId"), required(tenantId, "tenantId"));
-        UserTenantAssignment existing = userAssignments.putIfAbsent(key(assignment.userId()), assignment);
+        if (jdbcBacked()) {
+            List<UserTenantAssignment> existing = jdbcTemplate.query("SELECT user_id, tenant_id FROM tenant.tenant_pipeline_user_assignment WHERE user_id = ?",
+                (rs, rowNum) -> new UserTenantAssignment(rs.getString("user_id"), rs.getString("tenant_id")), assignment.userId());
+            if (!existing.isEmpty()) {
+                UserTenantAssignment current = existing.get(0);
+                if (!same(current.tenantId(), assignment.tenantId())) {
+                    throw pipelineError("TENANT_PIPELINE_USER_TENANT_MISMATCH", "userId", "User is already assigned to a different tenant.");
+                }
+                return current;
+            }
+            jdbcTemplate.update("INSERT INTO tenant.tenant_pipeline_user_assignment (user_id, tenant_id) VALUES (?, ?)", assignment.userId(), assignment.tenantId());
+            return assignment;
+        }
+        TenantPipelineEligibilityStore store = requireTestStore();
+        UserTenantAssignment existing = store.assignmentForUser(assignment.userId()).orElse(null);
         if (existing != null && !same(existing.tenantId(), assignment.tenantId())) {
             throw pipelineError("TENANT_PIPELINE_USER_TENANT_MISMATCH", "userId", "User is already assigned to a different tenant.");
         }
-        return userAssignments.get(key(assignment.userId()));
+        if (existing == null) {
+            store.saveAssignment(assignment);
+            return assignment;
+        }
+        return existing;
     }
 
     public TenantPipelineEligibility eligibleForUser(TenantPipelineEligibilityRequest request) {
@@ -75,14 +133,13 @@ public class TenantPipelineEligibilityService {
         if (!same(tenantId, actorTenantId)) {
             throwDeniedWithAudit(tenantContext, request, "TENANT_PIPELINE_ACCESS_DENIED", "tenantId", "Actor tenant cannot query another tenant's pipeline configuration.", "tenant", actorTenantId);
         }
-        UserTenantAssignment assignment = Optional.ofNullable(userAssignments.get(key(userId)))
+        UserTenantAssignment assignment = assignmentFor(userId)
             .orElseThrow(() -> pipelineError("TENANT_PIPELINE_USER_NOT_ASSIGNED", "userId", "User must be assigned to the tenant before querying pipeline configuration."));
         if (!same(assignment.tenantId(), tenantId)) {
             throwDeniedWithAudit(tenantContext, request, "TENANT_PIPELINE_ACCESS_DENIED", "userId", "User cannot query another tenant's products or investors.", "user", userId);
         }
 
-        TenantPipelineConfiguration configuration = Optional.ofNullable(configurationsByTenant.get(key(tenantId)))
-            .orElse(new TenantPipelineConfiguration(tenantId, List.of(), List.of(), Map.of(), List.of()));
+        TenantPipelineConfiguration configuration = configurationFor(tenantId);
         List<TenantProductOption> activeProducts = configuration.products().stream().filter(TenantProductOption::enabled).toList();
         List<TenantInvestorOption> activeInvestors = configuration.investors().stream().filter(TenantInvestorOption::enabled).toList();
 
@@ -112,11 +169,15 @@ public class TenantPipelineEligibilityService {
 
     public List<TenantPipelineAccessAuditRecord> accessAuditRecordsForTenant(String tenantId) {
         String normalizedTenantId = required(tenantId, "tenantId");
-        synchronized (accessAuditRecords) {
-            return accessAuditRecords.stream()
-                .filter(record -> same(record.tenantId(), normalizedTenantId))
-                .toList();
+        if (jdbcBacked()) {
+            return jdbcTemplate.query("""
+                SELECT tenant_id, user_id, actor_id, actor_type, code, entity_type, entity_id
+                  FROM tenant.tenant_pipeline_access_audit WHERE tenant_id = ? ORDER BY audit_id
+                """, (rs, rowNum) -> new TenantPipelineAccessAuditRecord(rs.getString("tenant_id"), rs.getString("user_id"),
+                    rs.getString("actor_id"), rs.getString("actor_type"), rs.getString("code"), rs.getString("entity_type"),
+                    rs.getString("entity_id")), normalizedTenantId);
         }
+        return requireTestStore().accessAuditRecordsForTenant(normalizedTenantId);
     }
 
     private void requireTenantMetadataContext(TenantContext tenantContext, TenantPipelineEligibilityRequest request) {
@@ -150,11 +211,19 @@ public class TenantPipelineEligibilityService {
         String userId = request == null || !hasText(request.userId()) ? "" : request.userId().trim();
         String actorId = tenantContext == null || tenantContext.actor() == null ? "" : optional(tenantContext.actor().actorId());
         String actorType = tenantContext == null || tenantContext.actor() == null ? "" : optional(tenantContext.actor().actorType());
-        accessAuditRecords.add(new TenantPipelineAccessAuditRecord(tenantId, userId, actorId, actorType, code, optional(entityType), optional(entityId)));
+        TenantPipelineAccessAuditRecord record = new TenantPipelineAccessAuditRecord(tenantId, userId, actorId, actorType, code, optional(entityType), optional(entityId));
+        if (jdbcBacked()) {
+            jdbcTemplate.update("""
+                INSERT INTO tenant.tenant_pipeline_access_audit (tenant_id, user_id, actor_id, actor_type, code, entity_type, entity_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, record.tenantId(), record.userId(), record.actorId(), record.actorType(), record.code(), record.entityType(), record.entityId());
+            return;
+        }
+        requireTestStore().appendAccessAuditRecord(record);
     }
 
     private void recordMetadataEvaluation(TenantContext tenantContext, TenantPipelineEligibilityRequest request) {
-        accessAuditRecords.add(new TenantPipelineAccessAuditRecord(
+        TenantPipelineAccessAuditRecord record = new TenantPipelineAccessAuditRecord(
             required(request.tenantId(), "tenantId"),
             required(request.userId(), "userId"),
             optional(tenantContext.actor().actorId()),
@@ -162,7 +231,65 @@ public class TenantPipelineEligibilityService {
             "TENANT_PIPELINE_METADATA_EVALUATED",
             "tenant",
             required(request.tenantId(), "tenantId")
-        ));
+        );
+        if (jdbcBacked()) {
+            jdbcTemplate.update("""
+                INSERT INTO tenant.tenant_pipeline_access_audit (tenant_id, user_id, actor_id, actor_type, code, entity_type, entity_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, record.tenantId(), record.userId(), record.actorId(), record.actorType(), record.code(), record.entityType(), record.entityId());
+            return;
+        }
+        requireTestStore().appendAccessAuditRecord(record);
+    }
+
+    private Optional<UserTenantAssignment> assignmentFor(String userId) {
+        if (!jdbcBacked()) return requireTestStore().assignmentForUser(userId);
+        return jdbcTemplate.query("SELECT user_id, tenant_id FROM tenant.tenant_pipeline_user_assignment WHERE user_id = ?",
+            (rs, rowNum) -> new UserTenantAssignment(rs.getString("user_id"), rs.getString("tenant_id")), userId).stream().findFirst();
+    }
+
+    private TenantPipelineConfiguration configurationFor(String tenantId) {
+        if (!jdbcBacked()) {
+            return requireTestStore().configurationForTenant(tenantId).orElse(new TenantPipelineConfiguration(tenantId, List.of(), List.of(), Map.of(), List.of()));
+        }
+        List<TenantProductOption> products = jdbcTemplate.query("SELECT product_id, display_name, enabled FROM tenant.tenant_pipeline_product WHERE tenant_id = ? ORDER BY product_id",
+            (rs, rowNum) -> new TenantProductOption(rs.getString("product_id"), rs.getString("display_name"), fieldRefs("tenant_pipeline_product_field_ref", "product_id", tenantId, rs.getString("product_id")), rs.getBoolean("enabled")), tenantId);
+        List<TenantInvestorOption> investors = jdbcTemplate.query("SELECT investor_id, display_name, enabled FROM tenant.tenant_pipeline_investor WHERE tenant_id = ? ORDER BY investor_id",
+            (rs, rowNum) -> new TenantInvestorOption(rs.getString("investor_id"), rs.getString("display_name"), fieldRefs("tenant_pipeline_investor_field_ref", "investor_id", tenantId, rs.getString("investor_id")), rs.getBoolean("enabled")), tenantId);
+        Map<String, String> companySettings = jdbcTemplate.query("SELECT setting_key, setting_value FROM tenant.tenant_pipeline_company_setting WHERE tenant_id = ?",
+            rs -> {
+                Map<String, String> values = new LinkedHashMap<>();
+                while (rs.next()) values.put(rs.getString("setting_key"), rs.getString("setting_value"));
+                return values;
+            }, tenantId);
+        List<TenantUserSettings> userSettings = jdbcTemplate.query("SELECT DISTINCT user_id FROM tenant.tenant_pipeline_user_setting WHERE tenant_id = ? ORDER BY user_id",
+            (rs, rowNum) -> new TenantUserSettings(rs.getString("user_id"), tenantId, userSettings(tenantId, rs.getString("user_id"))), tenantId);
+        return new TenantPipelineConfiguration(tenantId, products, investors, companySettings, userSettings);
+    }
+
+    private List<FieldReference> fieldRefs(String tableName, String idColumn, String tenantId, String id) {
+        String sql = "SELECT surface, field_id FROM tenant." + tableName + " WHERE tenant_id = ? AND " + idColumn + " = ? ORDER BY surface, field_id";
+        return jdbcTemplate.query(sql, (rs, rowNum) -> new FieldReference(rs.getString("surface"), rs.getString("field_id")), tenantId, id);
+    }
+
+    private Map<String, String> userSettings(String tenantId, String userId) {
+        return jdbcTemplate.query("SELECT setting_key, setting_value FROM tenant.tenant_pipeline_user_setting WHERE tenant_id = ? AND user_id = ?",
+            rs -> {
+                Map<String, String> values = new LinkedHashMap<>();
+                while (rs.next()) values.put(rs.getString("setting_key"), rs.getString("setting_value"));
+                return values;
+            }, tenantId, userId);
+    }
+
+    private boolean jdbcBacked() {
+        return jdbcTemplate != null;
+    }
+
+    private TenantPipelineEligibilityStore requireTestStore() {
+        if (testStore == null) {
+            throw pipelineError("TENANT_PIPELINE_PERSISTENCE_CONTRACT_MISSING", "persistence", "Tenant pipeline eligibility requires JDBC persistence or an explicit src/test fixture; refusing src/main process-local store-of-record fallback.");
+        }
+        return testStore;
     }
 
     private TenantProductOption validatedProduct(String tenantId, TenantProductOption product) {
@@ -305,7 +432,7 @@ public class TenantPipelineEligibilityService {
         TenantPipelineException(String code, List<FieldError> fieldErrors) {
             super(code);
             this.code = code;
-            this.fieldErrors = List.copyOf(Optional.ofNullable(fieldErrors).orElseGet(ArrayList::new));
+            this.fieldErrors = List.copyOf(Optional.ofNullable(fieldErrors).orElseGet(java.util.ArrayList::new));
         }
 
         public String code() {
@@ -315,5 +442,14 @@ public class TenantPipelineEligibilityService {
         public List<FieldError> fieldErrors() {
             return fieldErrors;
         }
+    }
+
+    interface TenantPipelineEligibilityStore {
+        void saveConfiguration(TenantPipelineConfiguration configuration);
+        Optional<TenantPipelineConfiguration> configurationForTenant(String tenantId);
+        Optional<UserTenantAssignment> assignmentForUser(String userId);
+        void saveAssignment(UserTenantAssignment assignment);
+        void appendAccessAuditRecord(TenantPipelineAccessAuditRecord record);
+        List<TenantPipelineAccessAuditRecord> accessAuditRecordsForTenant(String tenantId);
     }
 }

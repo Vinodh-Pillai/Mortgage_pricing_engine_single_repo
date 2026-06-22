@@ -16,7 +16,7 @@ import java.util.UUID;
 
 class AuditLogServiceTest {
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-06-08T01:45:00Z"), ZoneOffset.UTC);
-    private final InMemoryAuditLogStore store = new InMemoryAuditLogStore();
+    private final TestOnlyInMemoryAuditLogStore store = new TestOnlyInMemoryAuditLogStore();
     private final AuditLogService service = new AuditLogService(store, CLOCK);
 
     @Test

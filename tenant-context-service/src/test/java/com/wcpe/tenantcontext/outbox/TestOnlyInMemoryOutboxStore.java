@@ -8,14 +8,16 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
-public class InMemoryOutboxStore {
+public class TestOnlyInMemoryOutboxStore implements OutboxStore {
     private final Map<UUID, OutboxEvent> eventsById = new HashMap<>();
     private final Map<String, UUID> idempotencyByTenantAndKey = new HashMap<>();
 
+    @Override
     public synchronized Optional<OutboxEvent> findByEventId(UUID eventId) {
         return Optional.ofNullable(eventsById.get(eventId));
     }
 
+    @Override
     public synchronized Optional<OutboxEvent> findByIdempotencyKey(String tenantId, String idempotencyKey) {
         if (tenantId == null || idempotencyKey == null || idempotencyKey.isBlank()) {
             return Optional.empty();
@@ -24,6 +26,7 @@ public class InMemoryOutboxStore {
         return eventId == null ? Optional.empty() : Optional.ofNullable(eventsById.get(eventId));
     }
 
+    @Override
     public synchronized OutboxEvent save(OutboxEvent event) {
         eventsById.put(event.eventId(), event);
         if (event.idempotencyKey() != null && !event.idempotencyKey().isBlank()) {
@@ -32,6 +35,7 @@ public class InMemoryOutboxStore {
         return event;
     }
 
+    @Override
     public synchronized List<OutboxEvent> dueForPublish(String tenantId) {
         return eventsById.values().stream()
             .filter(event -> event.tenantId().equals(tenantId))
@@ -40,6 +44,7 @@ public class InMemoryOutboxStore {
             .toList();
     }
 
+    @Override
     public synchronized List<OutboxEvent> listByTenant(String tenantId) {
         return new ArrayList<>(eventsById.values()).stream()
             .filter(event -> event.tenantId().equals(tenantId))

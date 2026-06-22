@@ -40,10 +40,22 @@ class SelectQuoteOptionTest {
     @Test
     void rejectsExpiredQuoteAndReplaysIdempotentSelection() {
         InMemoryQuoteRepository repository = new InMemoryQuoteRepository();
-        QuoteApplicationService service = new QuoteApplicationService(repository, QuoteTestSupport.dependenciesWithPolicy(), new InMemoryQuoteCache(), new BestExecutionRanker(), QuoteTestSupport.CLOCK);
+        InMemoryQuoteJobRepository jobRepository = new InMemoryQuoteJobRepository();
+        InMemoryQuoteSnapshotRepository snapshotRepository = new InMemoryQuoteSnapshotRepository();
+        QuoteApplicationService service = new QuoteApplicationService(
+            repository,
+            jobRepository,
+            snapshotRepository,
+            QuoteTestSupport.dependenciesWithPolicy(),
+            new InMemoryQuoteCache(),
+            new BestExecutionRanker(),
+            QuoteTestSupport.CLOCK
+        );
         Quote quote = service.createQuote(QuoteTestSupport.request("selection-expired"));
         QuoteApplicationService expiredService = new QuoteApplicationService(
             repository,
+            jobRepository,
+            snapshotRepository,
             new QuoteTestSupport.FixtureDependencies(true, List.of(QuoteTestSupport.candidate("A"))),
             new InMemoryQuoteCache(),
             new BestExecutionRanker(),

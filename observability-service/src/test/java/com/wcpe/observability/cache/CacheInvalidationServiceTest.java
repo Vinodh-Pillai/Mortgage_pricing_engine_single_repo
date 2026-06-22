@@ -134,7 +134,7 @@ class CacheInvalidationServiceTest {
   private static CacheInvalidationService service() {
     return new CacheInvalidationService(
         Clock.fixed(NOW, ZoneOffset.UTC),
-        new InMemoryCacheInvalidationRepository());
+        new TestCacheInvalidationRepository());
   }
 
   private static CacheInvalidationSourceEvent sourceEvent(String eventId, int schemaVersion) {

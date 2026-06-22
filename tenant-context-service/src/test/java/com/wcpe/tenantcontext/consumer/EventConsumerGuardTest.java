@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 class EventConsumerGuardTest {
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-06-07T18:30:00Z"), ZoneOffset.UTC);
-    private final InMemoryConsumerInboxStore store = new InMemoryConsumerInboxStore();
+    private final TestOnlyInMemoryConsumerInboxStore store = new TestOnlyInMemoryConsumerInboxStore();
     private final EventConsumerGuard guard = new EventConsumerGuard(store, CLOCK);
 
     @Test

@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 class MarginVersionRepositoryIT {
   @Test
   void publishedVersionsImmutable() {
-    MarginVersioningService service = new MarginVersioningService(
+    MarginVersioningService service = MarginServiceTestStores.marginVersioningService(
         Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC));
     service.publishPolicyVersion("tenant-a", "admin-a", "corr-1",
         MarginVersionResolverTest.version("COMPANY", "company-policy", "company-v1", 1,

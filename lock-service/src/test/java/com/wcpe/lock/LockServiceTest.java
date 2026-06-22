@@ -19,7 +19,7 @@ class LockServiceTest {
 
   @BeforeEach
   void setUp() {
-    service = new LockService();
+    service = new LockService(new InMemoryLockRepository());
   }
 
   @Test

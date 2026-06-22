@@ -56,7 +56,7 @@ public final class NonQmQuickPricerApi {
 
     public NonQmQuickPricerApi() {
         this(new StaticQuickCandidateProvider(List.of()), new AlwaysReferableEligibilityAdapter(), new RequestSuppliedTierResolver(),
-                new InMemoryQuickQuoteRepository(), new InMemoryScenarioDraftClient(), Clock.systemUTC());
+                new FailClosedQuickQuoteRepository(), new FailClosedScenarioDraftClient(), Clock.systemUTC());
     }
 
     public NonQmQuickPricerApi(QuickCandidateProvider candidateProvider, QuickEligibilityAdapter eligibilityAdapter,
@@ -398,17 +398,17 @@ public final class NonQmQuickPricerApi {
         Optional<QuickQuoteResult> findById(String quickQuoteId);
     }
 
-    public static final class InMemoryQuickQuoteRepository implements QuickQuoteRepository {
-        private final Map<String, QuickQuoteResult> quotes = new ConcurrentHashMap<>();
+    public static final class FailClosedQuickQuoteRepository implements QuickQuoteRepository {
+        private static final String MESSAGE = "Non-QM quick quote durable schema is not configured; refusing in-memory source-of-truth fallback";
 
         @Override
         public void save(QuickQuoteResult result) {
-            quotes.put(result.quickQuoteId(), result);
+            throw new QuickQuoteValidationException(MESSAGE);
         }
 
         @Override
         public Optional<QuickQuoteResult> findById(String quickQuoteId) {
-            return Optional.ofNullable(quotes.get(quickQuoteId));
+            throw new QuickQuoteValidationException(MESSAGE);
         }
     }
 
@@ -416,10 +416,11 @@ public final class NonQmQuickPricerApi {
         ScenarioReference createFromQuickQuote(QuickQuoteResult result);
     }
 
-    public static final class InMemoryScenarioDraftClient implements ScenarioDraftClient {
+    public static final class FailClosedScenarioDraftClient implements ScenarioDraftClient {
         @Override
         public ScenarioReference createFromQuickQuote(QuickQuoteResult result) {
-            return new ScenarioReference("scenario-from-" + result.quickQuoteId(), result.quickQuoteId(), result.assumptions());
+            throw new QuickQuoteValidationException(
+                    "Non-QM quick quote scenario-draft datasource/schema contract is not configured; refusing in-memory fallback");
         }
     }
 

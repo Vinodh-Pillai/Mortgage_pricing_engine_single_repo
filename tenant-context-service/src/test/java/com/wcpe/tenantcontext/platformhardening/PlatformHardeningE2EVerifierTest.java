@@ -5,20 +5,21 @@ import static org.assertj.core.api.Assertions.*;
 import com.wcpe.tenantcontext.TenantContextInput;
 import com.wcpe.tenantcontext.TenantContextService;
 import com.wcpe.tenantcontext.audit.AuditLogService;
-import com.wcpe.tenantcontext.audit.InMemoryAuditLogStore;
+import com.wcpe.tenantcontext.audit.TestOnlyInMemoryAuditLogStore;
 import com.wcpe.tenantcontext.cache.CacheInvalidationService;
 import com.wcpe.tenantcontext.cache.InvalidationScope;
 import com.wcpe.tenantcontext.consumer.ConsumerGuardDecision;
 import com.wcpe.tenantcontext.consumer.EventConsumerGuard;
-import com.wcpe.tenantcontext.consumer.InMemoryConsumerInboxStore;
+import com.wcpe.tenantcontext.consumer.ConsumerInboxStore;
+import com.wcpe.tenantcontext.consumer.TestOnlyInMemoryConsumerInboxStore;
 import com.wcpe.tenantcontext.health.DependencyStatus;
 import com.wcpe.tenantcontext.health.HealthStatus;
 import com.wcpe.tenantcontext.health.ReadinessAggregator;
 import com.wcpe.tenantcontext.health.ReadinessComponent;
-import com.wcpe.tenantcontext.outbox.InMemoryOutboxStore;
+import com.wcpe.tenantcontext.outbox.TestOnlyInMemoryOutboxStore;
 import com.wcpe.tenantcontext.outbox.OutboxWriter;
 import com.wcpe.tenantcontext.ratelimit.EnforcementMode;
-import com.wcpe.tenantcontext.ratelimit.InMemoryRateLimitCounter;
+import com.wcpe.tenantcontext.ratelimit.LocalRateLimitCounterCache;
 import com.wcpe.tenantcontext.ratelimit.RateLimitEvaluator;
 import com.wcpe.tenantcontext.ratelimit.RateLimitOutcome;
 import com.wcpe.tenantcontext.ratelimit.RateLimitPolicy;
@@ -41,9 +42,9 @@ class PlatformHardeningE2EVerifierTest {
 
     @Test
     void verifiesTenantIsolationOutboxAuditCacheReplayRateLimitReadinessAndRedactionTogether() {
-        InMemoryOutboxStore outboxStore = new InMemoryOutboxStore();
-        InMemoryAuditLogStore auditStore = new InMemoryAuditLogStore();
-        InMemoryConsumerInboxStore inboxStore = new InMemoryConsumerInboxStore();
+        TestOnlyInMemoryOutboxStore outboxStore = new TestOnlyInMemoryOutboxStore();
+        TestOnlyInMemoryAuditLogStore auditStore = new TestOnlyInMemoryAuditLogStore();
+        TestOnlyInMemoryConsumerInboxStore inboxStore = new TestOnlyInMemoryConsumerInboxStore();
         OutboxWriter outboxWriter = new OutboxWriter(outboxStore, CLOCK);
         AuditLogService auditLogService = new AuditLogService(auditStore, CLOCK);
         PlatformHardeningE2EVerifier verifier = verifier(outboxWriter, auditLogService, inboxStore);
@@ -70,9 +71,9 @@ class PlatformHardeningE2EVerifierTest {
 
     @Test
     void failsClosedForCrossTenantAttemptBeforeWritingSideEffects() {
-        InMemoryOutboxStore outboxStore = new InMemoryOutboxStore();
-        InMemoryAuditLogStore auditStore = new InMemoryAuditLogStore();
-        InMemoryConsumerInboxStore inboxStore = new InMemoryConsumerInboxStore();
+        TestOnlyInMemoryOutboxStore outboxStore = new TestOnlyInMemoryOutboxStore();
+        TestOnlyInMemoryAuditLogStore auditStore = new TestOnlyInMemoryAuditLogStore();
+        TestOnlyInMemoryConsumerInboxStore inboxStore = new TestOnlyInMemoryConsumerInboxStore();
         OutboxWriter outboxWriter = new OutboxWriter(outboxStore, CLOCK);
         AuditLogService auditLogService = new AuditLogService(auditStore, CLOCK);
         PlatformHardeningE2EVerifier verifier = verifier(outboxWriter, auditLogService, inboxStore);
@@ -88,8 +89,8 @@ class PlatformHardeningE2EVerifierTest {
 
     @Test
     void rejectsUnredactedSyntheticEvidenceMarkers() {
-        PlatformHardeningE2EVerifier verifier = verifier(new OutboxWriter(new InMemoryOutboxStore(), CLOCK),
-            new AuditLogService(new InMemoryAuditLogStore(), CLOCK), new InMemoryConsumerInboxStore());
+        PlatformHardeningE2EVerifier verifier = verifier(new OutboxWriter(new TestOnlyInMemoryOutboxStore(), CLOCK),
+            new AuditLogService(new TestOnlyInMemoryAuditLogStore(), CLOCK), new TestOnlyInMemoryConsumerInboxStore());
 
         assertThatThrownBy(() -> verifier.verify(command("synthetic-tenant-alpha", validInput("synthetic-tenant-alpha"), List.of("Authorization header leaked"))))
             .isInstanceOf(PlatformHardeningException.class)
@@ -97,11 +98,11 @@ class PlatformHardeningE2EVerifierTest {
             .isEqualTo("PLATFORM_HARDENING_EVIDENCE_NOT_REDACTED");
     }
 
-    private PlatformHardeningE2EVerifier verifier(OutboxWriter outboxWriter, AuditLogService auditLogService, InMemoryConsumerInboxStore inboxStore) {
+    private PlatformHardeningE2EVerifier verifier(OutboxWriter outboxWriter, AuditLogService auditLogService, ConsumerInboxStore inboxStore) {
         CacheInvalidationService cacheInvalidationService = new CacheInvalidationService(outboxWriter, auditLogService, CLOCK);
         return new PlatformHardeningE2EVerifier(new TenantContextService(), outboxWriter, auditLogService,
             cacheInvalidationService, new EventConsumerGuard(inboxStore, CLOCK),
-            new PlatformHardeningE2EVerifier.RateLimitEvaluatorAdapter(new RateLimitEvaluator(new InMemoryRateLimitCounter())),
+            new PlatformHardeningE2EVerifier.RateLimitEvaluatorAdapter(new RateLimitEvaluator(new LocalRateLimitCounterCache())),
             readinessAggregator()::readiness, CLOCK);
     }
 

@@ -220,7 +220,7 @@ class TenantFieldConfigurationStoreServiceTest {
     }
 
     private static TenantFieldConfigurationStoreService service() {
-        return new TenantFieldConfigurationStoreService(Clock.fixed(NOW, ZoneOffset.UTC));
+        return new TenantFieldConfigurationStoreService(Clock.fixed(NOW, ZoneOffset.UTC), new TestOnlyTenantFieldConfigurationStore());
     }
 
     private static TenantFieldConfiguration nativeField(String tenantId, String surface, String fieldId, String alias) {

@@ -136,6 +136,15 @@ class RateFeedServiceTest {
     verify(repository, never()).session(any(), any());
   }
 
+  @Test
+  void pipelineStatusFailsClosedWithoutDurableProjectionStore() {
+    RequestContext.roles("RATE_FEED_VIEW");
+
+    assertThatThrownBy(() -> service.pipelineStatus(tenant()))
+        .isInstanceOf(RateFeedException.class)
+        .satisfies(ex -> assertRateFeedException(ex, "PIPELINE_PROJECTION_STORE_UNAVAILABLE", HttpStatus.SERVICE_UNAVAILABLE));
+  }
+
   private static void assertRateFeedException(Throwable ex, String code, HttpStatus status) {
     RateFeedException rateFeedException = (RateFeedException) ex;
     assertThat(rateFeedException.code()).isEqualTo(code);

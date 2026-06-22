@@ -1,60 +1,16 @@
 package com.wcpe.lock;
 
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
-final class LockRepository {
-  private final Map<String, LockModels.RateLockRecord> locksByTenantAndId = new HashMap<>();
-  private final Map<String, String> activeQuoteIndex = new HashMap<>();
-  private final Map<String, IdempotencyRecord> idempotency = new HashMap<>();
-  private final Map<String, DecisionIdempotencyRecord> decisionIdempotency = new HashMap<>();
-  private final Map<String, FreshnessIdempotencyRecord> freshnessIdempotency = new HashMap<>();
-  private final Map<String, ConfirmationIdempotencyRecord> confirmationIdempotency = new HashMap<>();
-  private final Map<String, ExtensionIdempotencyRecord> extensionIdempotency = new HashMap<>();
-  private final Map<String, RelockIdempotencyRecord> relockIdempotency = new HashMap<>();
-  private final Map<String, LockModels.FreshnessCheckRecord> freshnessChecksByTenantAndId = new HashMap<>();
-  private final Map<String, LockModels.LockConfirmationRecord> confirmationsByTenantAndId = new HashMap<>();
-  private final Map<String, LockModels.LockExtensionRecord> extensionsByTenantAndId = new HashMap<>();
-  private final Map<String, LockModels.RelockRecord> relocksByTenantAndId = new HashMap<>();
-  private final Map<String, LockModels.LockExpirationSchedule> expirationSchedulesByTenantAndLock = new HashMap<>();
-  private final Map<String, LockModels.LockExpirationRunRecord> expirationRunsByTenantAndId = new HashMap<>();
-  private final Map<String, LockModels.LockSyncAttempt> syncAttemptsByTenantAndId = new HashMap<>();
-  private final Map<String, String> syncAttemptByTenantEventTarget = new HashMap<>();
-  private final Map<String, LockModels.LockSyncAcknowledgement> syncAcksByTenantAndId = new HashMap<>();
-  private final Map<String, LockModels.LockReconciliationRecord> reconciliationByTenantAndId = new HashMap<>();
-  private final Map<String, LockModels.LockAuditReportRecord> auditReportsByTenantAndId = new HashMap<>();
-  private final Map<String, AuditReportIdempotencyRecord> auditReportIdempotency = new HashMap<>();
-  private final Map<String, LockModels.LockReplayResult> replayResultsByTenantAndId = new HashMap<>();
-  private final Map<String, ReplayIdempotencyRecord> replayIdempotency = new HashMap<>();
-  private final Map<String, LockModels.LockCancellationRecord> cancellationsByTenantAndId = new HashMap<>();
-  private final Map<String, CancellationIdempotencyRecord> cancellationIdempotency = new HashMap<>();
-  private final Map<String, LockModels.LockEvidenceExportRecord> evidenceExportsByTenantAndId = new HashMap<>();
-  private final Map<String, EvidenceExportIdempotencyRecord> evidenceExportIdempotency = new HashMap<>();
-  private final Map<String, String> activeConfirmationByLock = new HashMap<>();
-  private final Map<String, String> openExtensionByLock = new HashMap<>();
-  private final Map<String, String> openRelockBySourceLock = new HashMap<>();
-  private final Map<String, String> lockNumberIndex = new HashMap<>();
-  private final Map<String, String> investorExternalRefIndex = new HashMap<>();
-  private final List<LockModels.LockEvent> outboxEvents = new ArrayList<>();
-  private final List<LockModels.AuditSnapshot> auditSnapshots = new ArrayList<>();
-
+class LockRepository {
   Optional<LockModels.LockRequestResponse> findIdempotency(UUID tenantId, String idempotencyKey, String requestHash) {
-    IdempotencyRecord record = idempotency.get(tenantId + ":" + idempotencyKey);
-    if (record == null) {
-      return Optional.empty();
-    }
-    if (!record.requestHash.equals(requestHash)) {
-      throw new LockServiceException("IDEMPOTENCY_CONFLICT", "Idempotency key was reused with a different payload");
-    }
-    return Optional.of(record.response);
+    return unavailable();
   }
 
   boolean hasActiveQuote(UUID tenantId, String quoteId) {
-    return activeQuoteIndex.containsKey(tenantId + ":" + quoteId);
+    return unavailable();
   }
 
   void saveCommitted(
@@ -63,36 +19,19 @@ final class LockRepository {
     LockModels.LockEvent event,
     LockModels.AuditSnapshot audit
   ) {
-    locksByTenantAndId.put(key(record.tenantId(), record.lockId()), record);
-    if (record.status().active()) {
-      activeQuoteIndex.put(record.tenantId() + ":" + record.quoteId(), record.lockId());
-    }
-    idempotency.put(record.tenantId() + ":" + record.idempotencyKey(), new IdempotencyRecord(record.requestHash(), response));
-    outboxEvents.add(event);
-    auditSnapshots.add(audit);
+    unavailable();
   }
 
   Optional<LockModels.RateLockRecord> find(UUID tenantId, String lockId) {
-    return Optional.ofNullable(locksByTenantAndId.get(key(tenantId, lockId)));
+    return unavailable();
   }
 
   void replace(LockModels.RateLockRecord record) {
-    locksByTenantAndId.put(key(record.tenantId(), record.lockId()), record);
-    if (!record.status().active()) {
-      activeQuoteIndex.remove(record.tenantId() + ":" + record.quoteId());
-      activeConfirmationByLock.remove(record.tenantId() + ":" + record.lockId());
-    }
+    unavailable();
   }
 
   Optional<LockModels.LockDecisionResponse> findDecisionIdempotency(UUID tenantId, String idempotencyKey, String decisionHash) {
-    DecisionIdempotencyRecord record = decisionIdempotency.get(tenantId + ":" + idempotencyKey);
-    if (record == null) {
-      return Optional.empty();
-    }
-    if (!record.decisionHash.equals(decisionHash)) {
-      throw new LockServiceException("IDEMPOTENCY_CONFLICT", "Decision idempotency key was reused with a different payload");
-    }
-    return Optional.of(record.response);
+    return unavailable();
   }
 
   void saveDecision(
@@ -102,21 +41,11 @@ final class LockRepository {
     LockModels.LockEvent event,
     LockModels.AuditSnapshot audit
   ) {
-    replace(record);
-    decisionIdempotency.put(record.tenantId() + ":" + idempotencyKey, new DecisionIdempotencyRecord(response.decisionHash(), response));
-    outboxEvents.add(event);
-    auditSnapshots.add(audit);
+    unavailable();
   }
 
   Optional<LockModels.FreshnessCheckResponse> findFreshnessIdempotency(UUID tenantId, String idempotencyKey, String resultHash) {
-    FreshnessIdempotencyRecord record = freshnessIdempotency.get(tenantId + ":" + idempotencyKey);
-    if (record == null) {
-      return Optional.empty();
-    }
-    if (!record.resultHash.equals(resultHash)) {
-      throw new LockServiceException("IDEMPOTENCY_CONFLICT", "Freshness idempotency key was reused with a different payload");
-    }
-    return Optional.of(record.response);
+    return unavailable();
   }
 
   void saveFreshnessCheck(
@@ -126,64 +55,35 @@ final class LockRepository {
     LockModels.LockEvent event,
     LockModels.AuditSnapshot audit
   ) {
-    freshnessChecksByTenantAndId.put(key(record.tenantId(), record.checkId()), record);
-    freshnessIdempotency.put(record.tenantId() + ":" + idempotencyKey, new FreshnessIdempotencyRecord(record.resultHash(), response));
-    if (event != null) {
-      outboxEvents.add(event);
-    }
-    if (audit != null) {
-      auditSnapshots.add(audit);
-    }
+    unavailable();
   }
 
   Optional<LockModels.FreshnessCheckRecord> findFreshnessCheck(UUID tenantId, String checkId) {
-    return Optional.ofNullable(freshnessChecksByTenantAndId.get(key(tenantId, checkId)));
+    return unavailable();
   }
 
   Optional<LockModels.LockConfirmationResponse> findConfirmationIdempotency(UUID tenantId, String idempotencyKey, String confirmationHash) {
-    ConfirmationIdempotencyRecord record = confirmationIdempotency.get(tenantId + ":" + idempotencyKey);
-    if (record == null) {
-      return Optional.empty();
-    }
-    if (!record.confirmationHash.equals(confirmationHash)) {
-      throw new LockServiceException("IDEMPOTENCY_CONFLICT", "Confirmation idempotency key was reused with a different payload");
-    }
-    return Optional.of(record.response);
+    return unavailable();
   }
 
   Optional<LockModels.LockExtensionResponse> findExtensionIdempotency(UUID tenantId, String idempotencyKey, String resultHash) {
-    ExtensionIdempotencyRecord record = extensionIdempotency.get(tenantId + ":" + idempotencyKey);
-    if (record == null) {
-      return Optional.empty();
-    }
-    if (!record.resultHash.equals(resultHash)) {
-      throw new LockServiceException("IDEMPOTENCY_CONFLICT", "Extension idempotency key was reused with a different payload");
-    }
-    return Optional.of(record.response);
+    return unavailable();
   }
 
   Optional<LockModels.RelockResponse> findRelockIdempotency(UUID tenantId, String idempotencyKey, String resultHash) {
-    RelockIdempotencyRecord record = relockIdempotency.get(tenantId + ":" + idempotencyKey);
-    if (record == null) {
-      return Optional.empty();
-    }
-    if (!record.resultHash.equals(resultHash)) {
-      throw new LockServiceException("IDEMPOTENCY_CONFLICT", "Relock idempotency key was reused with a different payload");
-    }
-    return Optional.of(record.response);
+    return unavailable();
   }
 
   boolean hasActiveConfirmation(UUID tenantId, String lockId) {
-    return activeConfirmationByLock.containsKey(tenantId + ":" + lockId);
+    return unavailable();
   }
 
   boolean hasLockNumber(UUID tenantId, String lockNumber) {
-    return lockNumber != null && lockNumberIndex.containsKey(tenantId + ":" + lockNumber);
+    return unavailable();
   }
 
   boolean hasInvestorExternalRef(UUID tenantId, String investorId, String investorConfirmationRef) {
-    return investorId != null && investorConfirmationRef != null
-      && investorExternalRefIndex.containsKey(tenantId + ":" + investorId + ":" + investorConfirmationRef);
+    return unavailable();
   }
 
   void saveConfirmation(
@@ -194,46 +94,27 @@ final class LockRepository {
     LockModels.LockEvent event,
     LockModels.AuditSnapshot audit
   ) {
-    replace(lockRecord);
-    confirmationsByTenantAndId.put(key(confirmation.tenantId(), confirmation.confirmationId()), confirmation);
-    confirmationIdempotency.put(confirmation.tenantId() + ":" + confirmation.idempotencyKey(), new ConfirmationIdempotencyRecord(confirmationHash, response));
-    if (confirmation.status() == LockModels.RateLockStatus.ACTIVE) {
-      activeConfirmationByLock.put(confirmation.tenantId() + ":" + confirmation.lockId(), confirmation.confirmationId());
-      lockNumberIndex.put(confirmation.tenantId() + ":" + confirmation.lockNumber(), confirmation.confirmationId());
-      if (!LockModels.normalized(confirmation.investorId()).isEmpty() && !LockModels.normalized(confirmation.investorConfirmationRef()).isEmpty()) {
-        investorExternalRefIndex.put(confirmation.tenantId() + ":" + confirmation.investorId() + ":" + confirmation.investorConfirmationRef(), confirmation.confirmationId());
-      }
-      expirationSchedulesByTenantAndLock.put(
-        confirmation.tenantId() + ":" + confirmation.lockId(),
-        new LockModels.LockExpirationSchedule(
-          confirmation.tenantId(), confirmation.lockId(), confirmation.expiresAt(), confirmation.expirationBusinessDays(),
-          confirmation.expirationCalculatedAt(), confirmation.calendarConfigHash(), confirmation.expirationBreakdown(),
-          null, lockRecord.lockPolicyVersionId(), null
-        )
-      );
-    }
-    outboxEvents.add(event);
-    auditSnapshots.add(audit);
+    unavailable();
   }
 
   Optional<LockModels.LockConfirmationRecord> findConfirmation(UUID tenantId, String confirmationId) {
-    return Optional.ofNullable(confirmationsByTenantAndId.get(key(tenantId, confirmationId)));
+    return unavailable();
   }
 
   boolean hasOpenExtension(UUID tenantId, String lockId) {
-    return openExtensionByLock.containsKey(tenantId + ":" + lockId);
+    return unavailable();
   }
 
   boolean hasOpenRelock(UUID tenantId, String sourceLockId) {
-    return openRelockBySourceLock.containsKey(tenantId + ":" + sourceLockId);
+    return unavailable();
   }
 
   Optional<LockModels.LockExtensionRecord> findExtension(UUID tenantId, String extensionId) {
-    return Optional.ofNullable(extensionsByTenantAndId.get(key(tenantId, extensionId)));
+    return unavailable();
   }
 
   Optional<LockModels.RelockRecord> findRelock(UUID tenantId, String relockId) {
-    return Optional.ofNullable(relocksByTenantAndId.get(key(tenantId, relockId)));
+    return unavailable();
   }
 
   void saveExtensionRequest(
@@ -244,12 +125,7 @@ final class LockRepository {
     LockModels.LockEvent event,
     LockModels.AuditSnapshot audit
   ) {
-    replace(lockRecord);
-    extensionsByTenantAndId.put(key(extension.tenantId(), extension.extensionId()), extension);
-    openExtensionByLock.put(extension.tenantId() + ":" + extension.lockId(), extension.extensionId());
-    extensionIdempotency.put(extension.tenantId() + ":" + extension.idempotencyKey(), new ExtensionIdempotencyRecord(resultHash, response));
-    outboxEvents.add(event);
-    auditSnapshots.add(audit);
+    unavailable();
   }
 
   void saveExtensionUpdate(
@@ -261,27 +137,7 @@ final class LockRepository {
     LockModels.LockEvent event,
     LockModels.AuditSnapshot audit
   ) {
-    replace(lockRecord);
-    extensionsByTenantAndId.put(key(extension.tenantId(), extension.extensionId()), extension);
-    if (extension.status() == LockModels.LockExtensionStatus.CONFIRMED
-      || extension.status() == LockModels.LockExtensionStatus.REJECTED
-      || extension.status() == LockModels.LockExtensionStatus.CANCELLED) {
-      openExtensionByLock.remove(extension.tenantId() + ":" + extension.lockId());
-      if (extension.status() == LockModels.LockExtensionStatus.CONFIRMED && lockRecord.status() == LockModels.RateLockStatus.ACTIVE) {
-        expirationSchedulesByTenantAndLock.put(
-          extension.tenantId() + ":" + extension.lockId(),
-          new LockModels.LockExpirationSchedule(
-            extension.tenantId(), extension.lockId(), extension.requestedExpiresAt(), response.requestedDays(),
-            extension.confirmedAt(), response.calendarConfigHash(), response.expirationBreakdown(), null, extension.policyVersionId(), null
-          )
-        );
-      }
-    } else {
-      openExtensionByLock.put(extension.tenantId() + ":" + extension.lockId(), extension.extensionId());
-    }
-    extensionIdempotency.put(extension.tenantId() + ":" + idempotencyKey, new ExtensionIdempotencyRecord(resultHash, response));
-    outboxEvents.add(event);
-    auditSnapshots.add(audit);
+    unavailable();
   }
 
   void saveRelockRequest(
@@ -293,16 +149,7 @@ final class LockRepository {
     LockModels.LockEvent event,
     LockModels.AuditSnapshot audit
   ) {
-    replace(sourceLock);
-    locksByTenantAndId.put(key(replacementLock.tenantId(), replacementLock.lockId()), replacementLock);
-    if (replacementLock.status().active()) {
-      activeQuoteIndex.put(replacementLock.tenantId() + ":" + replacementLock.quoteId(), replacementLock.lockId());
-    }
-    relocksByTenantAndId.put(key(relock.tenantId(), relock.relockId()), relock);
-    openRelockBySourceLock.put(relock.tenantId() + ":" + relock.sourceLockId(), relock.relockId());
-    relockIdempotency.put(relock.tenantId() + ":" + relock.idempotencyKey(), new RelockIdempotencyRecord(resultHash, response));
-    outboxEvents.add(event);
-    auditSnapshots.add(audit);
+    unavailable();
   }
 
   void saveRelockUpdate(
@@ -315,31 +162,15 @@ final class LockRepository {
     LockModels.LockEvent event,
     LockModels.AuditSnapshot audit
   ) {
-    replace(sourceLock);
-    replace(replacementLock);
-    relocksByTenantAndId.put(key(relock.tenantId(), relock.relockId()), relock);
-    if (relock.status() == LockModels.RelockStatus.CONFIRMED
-      || relock.status() == LockModels.RelockStatus.REJECTED
-      || relock.status() == LockModels.RelockStatus.CANCELLED) {
-      openRelockBySourceLock.remove(relock.tenantId() + ":" + relock.sourceLockId());
-    } else {
-      openRelockBySourceLock.put(relock.tenantId() + ":" + relock.sourceLockId(), relock.relockId());
-    }
-    relockIdempotency.put(relock.tenantId() + ":" + idempotencyKey, new RelockIdempotencyRecord(resultHash, response));
-    outboxEvents.add(event);
-    auditSnapshots.add(audit);
+    unavailable();
   }
 
   List<LockModels.LockConfirmationRecord> activeConfirmations(UUID tenantId) {
-    return activeConfirmationByLock.entrySet().stream()
-      .filter(entry -> entry.getKey().startsWith(tenantId + ":"))
-      .map(entry -> confirmationsByTenantAndId.get(key(tenantId, entry.getValue())))
-      .filter(record -> record != null && record.status() == LockModels.RateLockStatus.ACTIVE)
-      .toList();
+    return unavailable();
   }
 
   Optional<LockModels.LockExpirationSchedule> findExpirationSchedule(UUID tenantId, String lockId) {
-    return Optional.ofNullable(expirationSchedulesByTenantAndLock.get(tenantId + ":" + lockId));
+    return unavailable();
   }
 
   void saveExpirationEvaluation(
@@ -348,38 +179,27 @@ final class LockRepository {
     LockModels.LockEvent event,
     LockModels.AuditSnapshot audit
   ) {
-    replace(lockRecord);
-    expirationSchedulesByTenantAndLock.put(schedule.tenantId() + ":" + schedule.lockId(), schedule);
-    outboxEvents.add(event);
-    auditSnapshots.add(audit);
+    unavailable();
   }
 
   void saveExpirationRun(LockModels.LockExpirationRunRecord runRecord) {
-    expirationRunsByTenantAndId.put(key(runRecord.tenantId(), runRecord.runId()), runRecord);
+    unavailable();
   }
 
   Optional<LockModels.LockExpirationRunRecord> findExpirationRun(UUID tenantId, String runId) {
-    return Optional.ofNullable(expirationRunsByTenantAndId.get(key(tenantId, runId)));
+    return unavailable();
   }
 
   Optional<LockModels.LockSyncAttempt> findSyncAttempt(UUID tenantId, String attemptId) {
-    return Optional.ofNullable(syncAttemptsByTenantAndId.get(key(tenantId, attemptId)));
+    return unavailable();
   }
 
   Optional<LockModels.LockSyncAttempt> findSyncAttemptByEventTarget(UUID tenantId, String eventId, String targetId) {
-    String attemptId = syncAttemptByTenantEventTarget.get(tenantId + ":" + eventId + ":" + targetId);
-    return attemptId == null ? Optional.empty() : findSyncAttempt(tenantId, attemptId);
+    return unavailable();
   }
 
   Optional<LockModels.LockAuditReportResponse> findAuditReportIdempotency(UUID tenantId, String idempotencyKey, String reportHash) {
-    AuditReportIdempotencyRecord record = auditReportIdempotency.get(tenantId + ":" + idempotencyKey);
-    if (record == null) {
-      return Optional.empty();
-    }
-    if (!record.reportHash.equals(reportHash)) {
-      throw new LockServiceException("IDEMPOTENCY_CONFLICT", "Audit report idempotency key was reused with a different payload");
-    }
-    return Optional.of(record.response);
+    return unavailable();
   }
 
   void saveAuditReport(
@@ -389,25 +209,15 @@ final class LockRepository {
     LockModels.LockEvent event,
     LockModels.AuditSnapshot audit
   ) {
-    auditReportsByTenantAndId.put(key(report.tenantId(), report.reportId()), report);
-    auditReportIdempotency.put(report.tenantId() + ":" + report.idempotencyKey(), new AuditReportIdempotencyRecord(reportHash, response));
-    outboxEvents.add(event);
-    auditSnapshots.add(audit);
+    unavailable();
   }
 
   Optional<LockModels.LockAuditReportRecord> findAuditReport(UUID tenantId, String reportId) {
-    return Optional.ofNullable(auditReportsByTenantAndId.get(key(tenantId, reportId)));
+    return unavailable();
   }
 
   Optional<LockModels.LockReplayResponse> findReplayIdempotency(UUID tenantId, String idempotencyKey, String replayHash) {
-    ReplayIdempotencyRecord record = replayIdempotency.get(tenantId + ":" + idempotencyKey);
-    if (record == null) {
-      return Optional.empty();
-    }
-    if (!record.replayHash.equals(replayHash)) {
-      throw new LockServiceException("IDEMPOTENCY_CONFLICT", "Lock replay idempotency key was reused with a different payload");
-    }
-    return Optional.of(record.response);
+    return unavailable();
   }
 
   void saveReplayResult(
@@ -417,25 +227,15 @@ final class LockRepository {
     LockModels.LockEvent event,
     LockModels.AuditSnapshot audit
   ) {
-    replayResultsByTenantAndId.put(key(result.tenantId(), result.replayId()), result);
-    replayIdempotency.put(result.tenantId() + ":" + result.idempotencyKey(), new ReplayIdempotencyRecord(replayHash, response));
-    outboxEvents.add(event);
-    auditSnapshots.add(audit);
+    unavailable();
   }
 
   Optional<LockModels.LockReplayResult> findReplayResult(UUID tenantId, String replayId) {
-    return Optional.ofNullable(replayResultsByTenantAndId.get(key(tenantId, replayId)));
+    return unavailable();
   }
 
   Optional<LockModels.LockCancellationResponse> findCancellationIdempotency(UUID tenantId, String idempotencyKey, String cancellationHash) {
-    CancellationIdempotencyRecord record = cancellationIdempotency.get(tenantId + ":" + idempotencyKey);
-    if (record == null) {
-      return Optional.empty();
-    }
-    if (!record.cancellationHash.equals(cancellationHash)) {
-      throw new LockServiceException("IDEMPOTENCY_CONFLICT", "Lock cancellation idempotency key was reused with a different payload");
-    }
-    return Optional.of(record.response);
+    return unavailable();
   }
 
   void saveCancellation(
@@ -446,26 +246,15 @@ final class LockRepository {
     LockModels.LockEvent event,
     LockModels.AuditSnapshot audit
   ) {
-    replace(lockRecord);
-    cancellationsByTenantAndId.put(key(cancellation.tenantId(), cancellation.cancellationId()), cancellation);
-    cancellationIdempotency.put(cancellation.tenantId() + ":" + cancellation.idempotencyKey(), new CancellationIdempotencyRecord(cancellationHash, response));
-    outboxEvents.add(event);
-    auditSnapshots.add(audit);
+    unavailable();
   }
 
   Optional<LockModels.LockCancellationRecord> findCancellation(UUID tenantId, String cancellationId) {
-    return Optional.ofNullable(cancellationsByTenantAndId.get(key(tenantId, cancellationId)));
+    return unavailable();
   }
 
   Optional<LockModels.LockEvidenceExportResponse> findEvidenceExportIdempotency(UUID tenantId, String idempotencyKey, String manifestHash) {
-    EvidenceExportIdempotencyRecord record = evidenceExportIdempotency.get(tenantId + ":" + idempotencyKey);
-    if (record == null) {
-      return Optional.empty();
-    }
-    if (!record.manifestHash.equals(manifestHash)) {
-      throw new LockServiceException("IDEMPOTENCY_CONFLICT", "Evidence export idempotency key was reused with a different payload");
-    }
-    return Optional.of(record.response);
+    return unavailable();
   }
 
   void saveEvidenceExport(
@@ -475,20 +264,15 @@ final class LockRepository {
     LockModels.LockEvent event,
     LockModels.AuditSnapshot audit
   ) {
-    evidenceExportsByTenantAndId.put(key(export.tenantId(), export.exportId()), export);
-    evidenceExportIdempotency.put(export.tenantId() + ":" + export.idempotencyKey(), new EvidenceExportIdempotencyRecord(manifestHash, response));
-    outboxEvents.add(event);
-    auditSnapshots.add(audit);
+    unavailable();
   }
 
   Optional<LockModels.LockEvidenceExportRecord> findEvidenceExport(UUID tenantId, String exportId) {
-    return Optional.ofNullable(evidenceExportsByTenantAndId.get(key(tenantId, exportId)));
+    return unavailable();
   }
 
   List<LockModels.LockSyncAttempt> syncAttemptsForLock(UUID tenantId, String lockId) {
-    return syncAttemptsByTenantAndId.values().stream()
-      .filter(attempt -> attempt.tenantId().equals(tenantId) && attempt.lockId().equals(lockId))
-      .toList();
+    return unavailable();
   }
 
   void saveSyncAttempt(
@@ -496,10 +280,7 @@ final class LockRepository {
     LockModels.LockEvent event,
     LockModels.AuditSnapshot audit
   ) {
-    syncAttemptsByTenantAndId.put(key(attempt.tenantId(), attempt.attemptId()), attempt);
-    syncAttemptByTenantEventTarget.put(attempt.tenantId() + ":" + attempt.eventId() + ":" + attempt.targetId(), attempt.attemptId());
-    outboxEvents.add(event);
-    auditSnapshots.add(audit);
+    unavailable();
   }
 
   void saveSyncAcknowledgement(
@@ -510,105 +291,81 @@ final class LockRepository {
     LockModels.LockEvent event,
     LockModels.AuditSnapshot audit
   ) {
-    replace(lockRecord);
-    syncAttemptsByTenantAndId.put(key(attempt.tenantId(), attempt.attemptId()), attempt);
-    syncAcksByTenantAndId.put(key(acknowledgement.tenantId(), acknowledgement.ackId()), acknowledgement);
-    if (reconciliation != null) {
-      reconciliationByTenantAndId.put(key(reconciliation.tenantId(), reconciliation.recordId()), reconciliation);
-    }
-    outboxEvents.add(event);
-    auditSnapshots.add(audit);
+    unavailable();
   }
 
   Optional<LockModels.LockSyncAcknowledgement> findSyncAcknowledgement(UUID tenantId, String ackId) {
-    return Optional.ofNullable(syncAcksByTenantAndId.get(key(tenantId, ackId)));
+    return unavailable();
   }
 
   Optional<LockModels.LockReconciliationRecord> findReconciliation(UUID tenantId, String recordId) {
-    return Optional.ofNullable(reconciliationByTenantAndId.get(key(tenantId, recordId)));
+    return unavailable();
   }
 
   int lockCount() {
-    return locksByTenantAndId.size();
+    return unavailable();
   }
 
   int freshnessCheckCount() {
-    return freshnessChecksByTenantAndId.size();
+    return unavailable();
   }
 
   int confirmationCount() {
-    return confirmationsByTenantAndId.size();
+    return unavailable();
   }
 
   int expirationRunCount() {
-    return expirationRunsByTenantAndId.size();
+    return unavailable();
   }
 
   int extensionCount() {
-    return extensionsByTenantAndId.size();
+    return unavailable();
   }
 
   int relockCount() {
-    return relocksByTenantAndId.size();
+    return unavailable();
   }
 
   int syncAttemptCount() {
-    return syncAttemptsByTenantAndId.size();
+    return unavailable();
   }
 
   int syncAcknowledgementCount() {
-    return syncAcksByTenantAndId.size();
+    return unavailable();
   }
 
   int reconciliationCount() {
-    return reconciliationByTenantAndId.size();
+    return unavailable();
   }
 
   int auditReportCount() {
-    return auditReportsByTenantAndId.size();
+    return unavailable();
   }
 
   int replayResultCount() {
-    return replayResultsByTenantAndId.size();
+    return unavailable();
   }
 
   int cancellationCount() {
-    return cancellationsByTenantAndId.size();
+    return unavailable();
   }
 
   int evidenceExportCount() {
-    return evidenceExportsByTenantAndId.size();
+    return unavailable();
   }
 
   List<LockModels.LockEvent> outboxEvents() {
-    return List.copyOf(outboxEvents);
+    return unavailable();
   }
 
   List<LockModels.AuditSnapshot> auditSnapshots() {
-    return List.copyOf(auditSnapshots);
+    return unavailable();
   }
 
-  private static String key(UUID tenantId, String lockId) {
-    return tenantId + ":" + lockId;
+  private static <T> T unavailable() {
+    throw new LockServiceException(
+      "PERSISTENCE_NOT_DURABLE",
+      "Durable lock repository is not wired; production lock state cannot use process-local storage."
+    );
   }
-
-  private record IdempotencyRecord(String requestHash, LockModels.LockRequestResponse response) {}
-
-  private record DecisionIdempotencyRecord(String decisionHash, LockModels.LockDecisionResponse response) {}
-
-  private record FreshnessIdempotencyRecord(String resultHash, LockModels.FreshnessCheckResponse response) {}
-
-  private record ConfirmationIdempotencyRecord(String confirmationHash, LockModels.LockConfirmationResponse response) {}
-
-  private record ExtensionIdempotencyRecord(String resultHash, LockModels.LockExtensionResponse response) {}
-
-  private record RelockIdempotencyRecord(String resultHash, LockModels.RelockResponse response) {}
-
-  private record AuditReportIdempotencyRecord(String reportHash, LockModels.LockAuditReportResponse response) {}
-
-  private record ReplayIdempotencyRecord(String replayHash, LockModels.LockReplayResponse response) {}
-
-  private record CancellationIdempotencyRecord(String cancellationHash, LockModels.LockCancellationResponse response) {}
-
-  private record EvidenceExportIdempotencyRecord(String manifestHash, LockModels.LockEvidenceExportResponse response) {}
 }

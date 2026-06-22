@@ -78,10 +78,10 @@ public final class RuleBookResolver {
         List<AdjustmentRuleBook> findPublished(UUID tenantId, RuleBookSelector selector, Instant quoteDate);
     }
 
-    public static final class InMemoryRuleBookRepository implements RuleBookRepository {
+    public static final class StaticRuleBookRepository implements RuleBookRepository {
         private final List<AdjustmentRuleBook> ruleBooks;
 
-        public InMemoryRuleBookRepository(List<AdjustmentRuleBook> ruleBooks) {
+        public StaticRuleBookRepository(List<AdjustmentRuleBook> ruleBooks) {
             this.ruleBooks = List.copyOf(ruleBooks == null ? List.of() : ruleBooks);
         }
 

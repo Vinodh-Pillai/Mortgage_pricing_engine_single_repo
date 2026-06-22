@@ -29,16 +29,19 @@ public final class MarginGovernanceService {
   public final AtomicInteger marginGovernancePublishLatencyMs = new AtomicInteger();
 
   private final Clock clock;
-  private final Map<ChangeKey, MarginGovernanceChangeRequest> changes = new HashMap<>();
-  private final Map<String, GovernanceReceipt> idempotencyReceipts = new HashMap<>();
-  private final List<Object> outbox = new ArrayList<>();
-  private final List<AuditRecord> auditRecords = new ArrayList<>();
+  private final Store store;
 
   public MarginGovernanceService(Clock clock) {
+    this(clock, Store.failClosed("MarginGovernanceService"));
+  }
+
+  MarginGovernanceService(Clock clock, Store store) {
     this.clock = Objects.requireNonNull(clock, "clock is required");
+    this.store = Objects.requireNonNull(store, "store is required");
   }
 
   public GovernanceReceipt createChangeRequest(ChangeRequestCommand command) {
+    requireDurableStoreOrExplicitTestHarness();
     requireCommand(command.tenantId(), command.actorId(), command.idempotencyKey(), command.correlationId());
     requireText(command.targetType(), "targetType");
     requireText(command.targetId(), "targetId");
@@ -50,7 +53,7 @@ public final class MarginGovernanceService {
       throw new MarginGovernanceException("APPROVAL_ROUTE_MISSING");
     }
     String idempotencyKey = idempotencyKey(command.tenantId(), command.idempotencyKey());
-    GovernanceReceipt existing = idempotencyReceipts.get(idempotencyKey);
+    GovernanceReceipt existing = store.idempotencyReceipts().get(idempotencyKey);
     if (existing != null) {
       if (!existing.requestHash().equals(command.requestHash())) {
         throw new MarginGovernanceException("IDEMPOTENCY_CONFLICT");
@@ -63,12 +66,12 @@ public final class MarginGovernanceService {
         command.targetType(), command.targetId(), command.targetVersionId(), command.expectedVersion(),
         command.configHash(), command.diffHash(), command.riskTier(), ChangeStatus.DRAFT, command.actorId(), null,
         null, now, now, command.approvalRoute(), List.of(), Optional.empty());
-    changes.put(new ChangeKey(command.tenantId(), changeId), change);
+    store.changes().put(new ChangeKey(command.tenantId(), changeId), change);
     marginGovernanceChangeTotal.incrementAndGet();
-    auditRecords.add(AuditRecord.recorded(command.tenantId(), changeId, command.actorId(), command.correlationId(),
+    store.auditRecords().add(AuditRecord.recorded(command.tenantId(), changeId, command.actorId(), command.correlationId(),
         "MARGIN_GOVERNANCE_CHANGE_DRAFTED", replayHash(change)));
     GovernanceReceipt receipt = receipt(change, command.correlationId(), command.requestHash(), List.of());
-    idempotencyReceipts.put(idempotencyKey, receipt);
+    store.idempotencyReceipts().put(idempotencyKey, receipt);
     return receipt;
   }
 
@@ -89,12 +92,12 @@ public final class MarginGovernanceService {
       throw new MarginGovernanceException("APPROVAL_ROUTE_MISSING");
     }
     MarginGovernanceChangeRequest submitted = change.withStatus(ChangeStatus.SUBMITTED, now()).withSimulation(simulationEvidence);
-    changes.put(new ChangeKey(tenantId, changeId), submitted);
+    store.changes().put(new ChangeKey(tenantId, changeId), submitted);
     MarginGovernanceChangeSubmittedEvent event = new MarginGovernanceChangeSubmittedEvent(tenantId, changeId,
         submitted.targetType(), submitted.targetId(), submitted.targetVersionId(), submitted.diffHash(),
         simulationEvidence.simulationHash(), actorId, correlationId, Instant.now(clock));
-    outbox.add(event);
-    auditRecords.add(AuditRecord.recorded(tenantId, changeId, actorId, correlationId,
+    store.outbox().add(event);
+    store.auditRecords().add(AuditRecord.recorded(tenantId, changeId, actorId, correlationId,
         "MARGIN_GOVERNANCE_CHANGE_SUBMITTED", replayHash(submitted)));
     return receipt(submitted, correlationId, "submit:" + changeId, List.of(event));
   }
@@ -123,13 +126,13 @@ public final class MarginGovernanceService {
         ? ChangeStatus.APPROVED
         : ChangeStatus.PARTIALLY_APPROVED;
     MarginGovernanceChangeRequest approved = change.withApprovals(approvals).withStatus(status, now());
-    changes.put(new ChangeKey(tenantId, changeId), approved);
+    store.changes().put(new ChangeKey(tenantId, changeId), approved);
     MarginGovernanceChangeApprovedEvent event = new MarginGovernanceChangeApprovedEvent(tenantId, changeId,
         approved.targetType(), approved.targetId(), approved.targetVersionId(), approved.diffHash(),
         approved.simulationEvidence().map(SimulationEvidence::simulationHash).orElse(""), decision.actorId(),
         decision.correlationId(), Instant.now(clock));
-    outbox.add(event);
-    auditRecords.add(AuditRecord.recorded(tenantId, changeId, decision.actorId(), decision.correlationId(),
+    store.outbox().add(event);
+    store.auditRecords().add(AuditRecord.recorded(tenantId, changeId, decision.actorId(), decision.correlationId(),
         "MARGIN_GOVERNANCE_CHANGE_APPROVED", replayHash(approved)));
     return receipt(approved, decision.correlationId(), "approve:" + changeId + ":" + decision.step(), List.of(event));
   }
@@ -144,12 +147,12 @@ public final class MarginGovernanceService {
     approvals.add(new ApprovalStep(UUID.randomUUID().toString(), decision.step(), ApprovalDecisionType.REJECTED,
         decision.actorId(), decision.comments(), decision.evidenceRefs(), Instant.now(clock)));
     MarginGovernanceChangeRequest rejected = change.withApprovals(approvals).withStatus(ChangeStatus.REJECTED, now());
-    changes.put(new ChangeKey(tenantId, changeId), rejected);
+    store.changes().put(new ChangeKey(tenantId, changeId), rejected);
     MarginGovernanceChangeRejectedEvent event = new MarginGovernanceChangeRejectedEvent(tenantId, changeId,
         rejected.targetType(), rejected.targetId(), rejected.targetVersionId(), rejected.diffHash(),
         decision.actorId(), decision.correlationId(), Instant.now(clock));
-    outbox.add(event);
-    auditRecords.add(AuditRecord.recorded(tenantId, changeId, decision.actorId(), decision.correlationId(),
+    store.outbox().add(event);
+    store.auditRecords().add(AuditRecord.recorded(tenantId, changeId, decision.actorId(), decision.correlationId(),
         "MARGIN_GOVERNANCE_CHANGE_REJECTED", replayHash(rejected)));
     return receipt(rejected, decision.correlationId(), "reject:" + changeId + ":" + decision.step(), List.of(event));
   }
@@ -167,13 +170,13 @@ public final class MarginGovernanceService {
       throw new MarginGovernanceException("CHANGE_REQUEST_STALE");
     }
     MarginGovernanceChangeRequest published = change.withStatus(ChangeStatus.PUBLISHED, now()).withPublisher(actorId);
-    changes.put(new ChangeKey(tenantId, changeId), published);
+    store.changes().put(new ChangeKey(tenantId, changeId), published);
     MarginGovernanceChangePublishedEvent event = new MarginGovernanceChangePublishedEvent(tenantId, changeId,
         published.targetType(), published.targetId(), published.targetVersionId(), published.diffHash(),
         published.simulationEvidence().map(SimulationEvidence::simulationHash).orElse(""), actorId, correlationId,
         Instant.now(clock));
-    outbox.add(event);
-    auditRecords.add(AuditRecord.recorded(tenantId, changeId, actorId, correlationId,
+    store.outbox().add(event);
+    store.auditRecords().add(AuditRecord.recorded(tenantId, changeId, actorId, correlationId,
         "MARGIN_GOVERNANCE_CHANGE_PUBLISHED", replayHash(published)));
     marginGovernancePublishLatencyMs.set((int) Math.max(0, published.updatedAt().toEpochMilli() - published.createdAt().toEpochMilli()));
     return receipt(published, correlationId, "publish:" + changeId, List.of(event));
@@ -197,24 +200,31 @@ public final class MarginGovernanceService {
     MarginGovernanceChangeRequest created = find(tenantId, receipt.changeId())
         .withRollbackReference(new RollbackReference(publishedChangeId, published.targetVersionId(), command.priorVersionId(),
             command.reasonCode()));
-    changes.put(new ChangeKey(tenantId, receipt.changeId()), created);
-    auditRecords.add(AuditRecord.recorded(tenantId, receipt.changeId(), command.actorId(), command.correlationId(),
+    store.changes().put(new ChangeKey(tenantId, receipt.changeId()), created);
+    store.auditRecords().add(AuditRecord.recorded(tenantId, receipt.changeId(), command.actorId(), command.correlationId(),
         "MARGIN_GOVERNANCE_ROLLBACK_DRAFTED", replayHash(created)));
     return receipt(created, command.correlationId(), command.requestHash(), List.of());
   }
 
   public Optional<MarginGovernanceChangeRequest> readChange(String tenantId, String changeId) {
+    requireDurableStoreOrExplicitTestHarness();
     requireText(tenantId, "tenantId");
     requireText(changeId, "changeId");
-    return Optional.ofNullable(changes.get(new ChangeKey(tenantId, changeId)));
+    return Optional.ofNullable(store.changes().get(new ChangeKey(tenantId, changeId)));
   }
 
   public List<Object> outboxEvents() {
-    return List.copyOf(outbox);
+    requireDurableStoreOrExplicitTestHarness();
+    return List.copyOf(store.outbox());
   }
 
   public List<AuditRecord> auditRecords() {
-    return List.copyOf(auditRecords);
+    requireDurableStoreOrExplicitTestHarness();
+    return List.copyOf(store.auditRecords());
+  }
+
+  private void requireDurableStoreOrExplicitTestHarness() {
+    store.requireAvailable();
   }
 
   private void validateSimulation(MarginGovernanceChangeRequest change, SimulationEvidence evidence) {
@@ -228,9 +238,10 @@ public final class MarginGovernanceService {
   }
 
   private MarginGovernanceChangeRequest find(String tenantId, String changeId) {
+    requireDurableStoreOrExplicitTestHarness();
     requireText(tenantId, "tenantId");
     requireText(changeId, "changeId");
-    MarginGovernanceChangeRequest change = changes.get(new ChangeKey(tenantId, changeId));
+    MarginGovernanceChangeRequest change = store.changes().get(new ChangeKey(tenantId, changeId));
     if (change == null) {
       throw new MarginGovernanceException("NOT_FOUND");
     }
@@ -269,7 +280,32 @@ public final class MarginGovernanceService {
         change.targetVersionId(), change.configHash(), change.diffHash(), change.status(), change.approvals()));
   }
 
-  private record ChangeKey(String tenantId, String changeId) {}
+  interface Store {
+    Map<ChangeKey, MarginGovernanceChangeRequest> changes();
+    Map<String, GovernanceReceipt> idempotencyReceipts();
+    List<Object> outbox();
+    List<AuditRecord> auditRecords();
+
+    default void requireAvailable() {}
+
+    static Store failClosed(String component) {
+      return new Store() {
+        @Override public void requireAvailable() {
+          ProcessLocalStatePolicy.requireDurableStoreOrExplicitTestHarness(false, component);
+        }
+        @Override public Map<ChangeKey, MarginGovernanceChangeRequest> changes() { return unavailable(); }
+        @Override public Map<String, GovernanceReceipt> idempotencyReceipts() { return unavailable(); }
+        @Override public List<Object> outbox() { return unavailable(); }
+        @Override public List<AuditRecord> auditRecords() { return unavailable(); }
+        private <T> T unavailable() {
+          requireAvailable();
+          throw new AssertionError("unreachable");
+        }
+      };
+    }
+  }
+
+  record ChangeKey(String tenantId, String changeId) {}
 
   public enum ChangeStatus { DRAFT, SUBMITTED, PARTIALLY_APPROVED, APPROVED, REJECTED, PUBLISHED }
 

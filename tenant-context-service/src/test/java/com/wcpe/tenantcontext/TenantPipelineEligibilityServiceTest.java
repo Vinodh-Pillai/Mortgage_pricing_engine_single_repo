@@ -170,12 +170,12 @@ class TenantPipelineEligibilityServiceTest {
     }
 
     private static TenantPipelineEligibilityService serviceWithActiveFields() {
-        TenantFieldConfigurationStoreService fieldStore = new TenantFieldConfigurationStoreService(Clock.fixed(NOW, ZoneOffset.UTC));
+        TenantFieldConfigurationStoreService fieldStore = new TenantFieldConfigurationStoreService(Clock.fixed(NOW, ZoneOffset.UTC), new TestOnlyTenantFieldConfigurationStore());
         fieldStore.save(systemField("tenant-alpha", "PRODUCT_SPEC", "loan-type"));
         fieldStore.save(systemField("tenant-alpha", "PRODUCT_SPEC", "investor-code"));
         fieldStore.save(systemField("tenant-beta", "PRODUCT_SPEC", "loan-type"));
         fieldStore.save(systemField("tenant-beta", "PRODUCT_SPEC", "investor-code"));
-        return new TenantPipelineEligibilityService(fieldStore);
+        return new TenantPipelineEligibilityService(fieldStore, new TestOnlyTenantPipelineEligibilityStore());
     }
 
     private static TenantPipelineConfiguration configuration(

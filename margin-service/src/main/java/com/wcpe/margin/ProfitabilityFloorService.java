@@ -28,18 +28,20 @@ public final class ProfitabilityFloorService {
   public final AtomicInteger profitabilityVisibilityRedactionTotal = new AtomicInteger();
 
   private final Clock clock;
-  private final Map<PolicyKey, ProfitabilityPolicy> policies = new HashMap<>();
-  private final Map<String, IdempotencyRecord> idempotencyReceipts = new HashMap<>();
-  private final List<Object> outbox = new ArrayList<>();
-  private final List<AuditRecord> auditRecords = new ArrayList<>();
-  private final List<ProfitabilityEvaluation> evaluations = new ArrayList<>();
+  private final Store store;
 
   public ProfitabilityFloorService(Clock clock) {
+    this(clock, Store.failClosed("ProfitabilityFloorService"));
+  }
+
+  ProfitabilityFloorService(Clock clock, Store store) {
     this.clock = Objects.requireNonNull(clock, "clock is required");
+    this.store = Objects.requireNonNull(store, "store is required");
   }
 
   public CommandReceipt createDraftPolicy(String tenantId, String requestId, String actorId, String idempotencyKey,
       String correlationId, String name, ProfitabilityPolicyVersion version) {
+    requireDurableStoreOrExplicitTestHarness();
     requireCommand(tenantId, actorId, idempotencyKey, correlationId);
     requireText(requestId, "requestId");
     requireText(name, "name");
@@ -47,7 +49,7 @@ public final class ProfitabilityFloorService {
     validateVersion(version);
     String requestHash = requestHash(requestId, actorId, name, version);
     String idemKey = idempotencyKey(tenantId, idempotencyKey);
-    IdempotencyRecord existing = idempotencyReceipts.get(idemKey);
+    IdempotencyRecord existing = store.idempotencyReceipts().get(idemKey);
     if (existing != null) {
       if (!existing.requestHash().equals(requestHash)) {
         throw new ProfitabilityFloorException("IDEMPOTENCY_CONFLICT");
@@ -58,11 +60,11 @@ public final class ProfitabilityFloorService {
     Instant now = Instant.now(clock);
     ProfitabilityPolicy policy = new ProfitabilityPolicy(tenantId, policyId, name, PolicyStatus.DRAFT,
         List.of(version), actorId, actorId, now, now);
-    policies.put(new PolicyKey(tenantId, policyId), policy);
+    store.policies().put(new PolicyKey(tenantId, policyId), policy);
     CommandReceipt receipt = new CommandReceipt(policyId, PolicyStatus.DRAFT, version.versionNumber(), correlationId,
         requestHash, List.of(), "audit:" + policyId);
-    idempotencyReceipts.put(idemKey, new IdempotencyRecord(requestHash, receipt));
-    auditRecords.add(AuditRecord.completed(tenantId, policyId, actorId, correlationId,
+    store.idempotencyReceipts().put(idemKey, new IdempotencyRecord(requestHash, receipt));
+    store.auditRecords().add(AuditRecord.completed(tenantId, policyId, actorId, correlationId,
         "PROFITABILITY_FLOOR_DRAFT_CREATED", clock));
     return receipt;
   }
@@ -92,13 +94,13 @@ public final class ProfitabilityFloorService {
     rejectPublishedOverlap(policy);
     Instant now = Instant.now(clock);
     ProfitabilityPolicy published = policy.withStatus(PolicyStatus.PUBLISHED, actorId, now);
-    policies.put(new PolicyKey(tenantId, policyId), published);
+    store.policies().put(new PolicyKey(tenantId, policyId), published);
     ProfitabilityPolicyVersion version = published.currentVersion();
     ProfitabilityPolicyPublishedEvent event = new ProfitabilityPolicyPublishedEvent(tenantId, policyId,
         version.versionId(), version.scope().stableHash(), version.effectiveWindow().effectiveFromUtc(),
         version.configHash(), actorId, correlationId, now);
-    outbox.add(event);
-    auditRecords.add(AuditRecord.completed(tenantId, policyId, actorId, correlationId,
+    store.outbox().add(event);
+    store.auditRecords().add(AuditRecord.completed(tenantId, policyId, actorId, correlationId,
         "PROFITABILITY_POLICY_PUBLISHED", clock));
     return new CommandReceipt(policyId, PolicyStatus.PUBLISHED, version.versionNumber(), correlationId,
         "publish:" + policyId, List.of(event), "audit:" + policyId);
@@ -135,7 +137,8 @@ public final class ProfitabilityFloorService {
   }
 
   public Optional<ProfitabilityPolicy> resolvePublished(String tenantId, ProfitabilityScope scope, Instant effectiveAtUtc) {
-    List<ProfitabilityPolicy> matches = policies.values().stream()
+    requireDurableStoreOrExplicitTestHarness();
+    List<ProfitabilityPolicy> matches = store.policies().values().stream()
         .filter(policy -> policy.tenantId().equals(tenantId))
         .filter(policy -> policy.status() == PolicyStatus.PUBLISHED)
         .filter(policy -> policy.currentVersion().effectiveWindow().contains(effectiveAtUtc))
@@ -148,15 +151,22 @@ public final class ProfitabilityFloorService {
   }
 
   public List<Object> outboxEvents() {
-    return List.copyOf(outbox);
+    requireDurableStoreOrExplicitTestHarness();
+    return List.copyOf(store.outbox());
   }
 
   public List<AuditRecord> auditRecords() {
-    return List.copyOf(auditRecords);
+    requireDurableStoreOrExplicitTestHarness();
+    return List.copyOf(store.auditRecords());
   }
 
   public List<ProfitabilityEvaluation> evaluations() {
-    return List.copyOf(evaluations);
+    requireDurableStoreOrExplicitTestHarness();
+    return List.copyOf(store.evaluations());
+  }
+
+  private void requireDurableStoreOrExplicitTestHarness() {
+    store.requireAvailable();
   }
 
   private ProfitabilityDecision evaluatePolicy(ProfitabilityPolicy policy, ConfigResolver configResolver,
@@ -175,7 +185,7 @@ public final class ProfitabilityFloorService {
     ProfitabilityEvaluation evaluation = new ProfitabilityEvaluation(input.quoteId(), input.quoteOptionId(),
         policy.policyId(), version.versionId(), rule.floorBasis(), metric, rule.thresholdRef(), rule.action(), decision,
         replayHash);
-    evaluations.add(evaluation);
+    store.evaluations().add(evaluation);
     ProfitabilityDecision result = new ProfitabilityDecision(input.quoteId(), input.quoteOptionId(), policy.policyId(),
         version.versionId(), rule.floorBasis(), loadedPrice, metric, threshold, rule.thresholdRef(), rule.action(),
         decision, decisionCode, rule.exceptionRouteRef(), replayHash,
@@ -184,14 +194,14 @@ public final class ProfitabilityFloorService {
     if (breached) {
       profitabilityFloorBreachTotal.incrementAndGet();
       if (emitBreachEvent) {
-        outbox.add(new ProfitabilityFloorBreachedEvent(input.quoteId(), input.quoteOptionId(), policy.policyId(),
+        store.outbox().add(new ProfitabilityFloorBreachedEvent(input.quoteId(), input.quoteOptionId(), policy.policyId(),
             version.versionId(), rule.floorBasis(), rule.thresholdRef(), rule.action(), decision, input.correlationId(),
             Instant.now(clock)));
       }
-      auditRecords.add(AuditRecord.completed(policy.tenantId(), policy.policyId(), "system", input.correlationId(),
+      store.auditRecords().add(AuditRecord.completed(policy.tenantId(), policy.policyId(), "system", input.correlationId(),
           "PROFITABILITY_FLOOR_BREACHED", clock));
     } else {
-      auditRecords.add(AuditRecord.completed(policy.tenantId(), policy.policyId(), "system", input.correlationId(),
+      store.auditRecords().add(AuditRecord.completed(policy.tenantId(), policy.policyId(), "system", input.correlationId(),
           "PROFITABILITY_FLOOR_EVALUATED", clock));
     }
     return result;
@@ -199,7 +209,7 @@ public final class ProfitabilityFloorService {
 
   private ProfitabilityFloorException failClosedPolicyMissing(String tenantId, String quoteOptionId, String correlationId) {
     profitabilityPolicyMissingTotal.incrementAndGet();
-    auditRecords.add(AuditRecord.completed(tenantId, quoteOptionId, "system", correlationId,
+    store.auditRecords().add(AuditRecord.completed(tenantId, quoteOptionId, "system", correlationId,
         "PROFITABILITY_POLICY_MISSING", clock));
     return new ProfitabilityFloorException(POLICY_MISSING_CODE);
   }
@@ -259,14 +269,14 @@ public final class ProfitabilityFloorService {
       throw new ProfitabilityFloorException("VERSION_CONFLICT");
     }
     ProfitabilityPolicy changed = policy.withStatus(to, actorId, Instant.now(clock));
-    policies.put(new PolicyKey(tenantId, policyId), changed);
-    auditRecords.add(AuditRecord.completed(tenantId, policyId, actorId, correlationId, action, clock));
+    store.policies().put(new PolicyKey(tenantId, policyId), changed);
+    store.auditRecords().add(AuditRecord.completed(tenantId, policyId, actorId, correlationId, action, clock));
     return new CommandReceipt(policyId, to, changed.currentVersion().versionNumber(), correlationId,
         action + ":" + policyId, List.of(), "audit:" + policyId);
   }
 
   private void rejectPublishedOverlap(ProfitabilityPolicy candidate) {
-    boolean overlap = policies.values().stream()
+    boolean overlap = store.policies().values().stream()
         .filter(policy -> !policy.policyId().equals(candidate.policyId()))
         .filter(policy -> policy.tenantId().equals(candidate.tenantId()))
         .filter(policy -> policy.status() == PolicyStatus.PUBLISHED)
@@ -278,7 +288,8 @@ public final class ProfitabilityFloorService {
   }
 
   private ProfitabilityPolicy findById(String tenantId, String policyId) {
-    return policies.values().stream()
+    requireDurableStoreOrExplicitTestHarness();
+    return store.policies().values().stream()
         .filter(policy -> policy.tenantId().equals(tenantId))
         .filter(policy -> policy.policyId().equals(policyId))
         .findFirst()
@@ -346,9 +357,36 @@ public final class ProfitabilityFloorService {
     return Integer.toHexString(Objects.hash(values));
   }
 
-  private record PolicyKey(String tenantId, String policyId) {}
+  interface Store {
+    Map<PolicyKey, ProfitabilityPolicy> policies();
+    Map<String, IdempotencyRecord> idempotencyReceipts();
+    List<Object> outbox();
+    List<AuditRecord> auditRecords();
+    List<ProfitabilityEvaluation> evaluations();
 
-  private record IdempotencyRecord(String requestHash, CommandReceipt receipt) {}
+    default void requireAvailable() {}
+
+    static Store failClosed(String component) {
+      return new Store() {
+        @Override public void requireAvailable() {
+          ProcessLocalStatePolicy.requireDurableStoreOrExplicitTestHarness(false, component);
+        }
+        @Override public Map<PolicyKey, ProfitabilityPolicy> policies() { return unavailable(); }
+        @Override public Map<String, IdempotencyRecord> idempotencyReceipts() { return unavailable(); }
+        @Override public List<Object> outbox() { return unavailable(); }
+        @Override public List<AuditRecord> auditRecords() { return unavailable(); }
+        @Override public List<ProfitabilityEvaluation> evaluations() { return unavailable(); }
+        private <T> T unavailable() {
+          requireAvailable();
+          throw new AssertionError("unreachable");
+        }
+      };
+    }
+  }
+
+  record PolicyKey(String tenantId, String policyId) {}
+
+  record IdempotencyRecord(String requestHash, CommandReceipt receipt) {}
 
   public enum PolicyStatus { DRAFT, PENDING_APPROVAL, APPROVED, PUBLISHED, SUSPENDED }
 

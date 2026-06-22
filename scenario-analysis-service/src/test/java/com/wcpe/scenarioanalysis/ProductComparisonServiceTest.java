@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.wcpe.scenarioanalysis.ProductComparisonService.IdempotencyConflictException;
-import com.wcpe.scenarioanalysis.ProductComparisonService.InMemoryProductComparisonRepository;
 import com.wcpe.scenarioanalysis.ProductComparisonService.PolicyNotSatisfiedException;
 import com.wcpe.scenarioanalysis.ProductComparisonService.ProductComparisonCommand;
 import com.wcpe.scenarioanalysis.ProductComparisonService.ProductPromotionCommand;
@@ -17,12 +16,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class ProductComparisonServiceTest {
-  private InMemoryProductComparisonRepository repository;
+  private TestOnlyInMemoryProductComparisonRepository repository;
   private ProductComparisonService service;
 
   @BeforeEach
   void setUp() {
-    repository = new InMemoryProductComparisonRepository();
+    repository = new TestOnlyInMemoryProductComparisonRepository();
     service = new ProductComparisonService(
         repository,
         Clock.fixed(Instant.parse("2026-06-01T12:00:00Z"), ZoneOffset.UTC));

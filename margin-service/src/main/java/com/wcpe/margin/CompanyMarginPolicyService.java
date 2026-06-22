@@ -33,10 +33,7 @@ public final class CompanyMarginPolicyService {
   private final Clock clock;
   private final SrpCalculationService srpCalculationService;
   private final OverlayRuleRepository overlayRuleRepository;
-  private final Map<PolicyKey, MarginPolicy> policies = new HashMap<>();
-  private final Map<String, CommandReceipt> idempotencyReceipts = new HashMap<>();
-  private final List<MarginPolicyPublishedEvent> outbox = new ArrayList<>();
-  private final List<AuditRecord> auditRecords = new ArrayList<>();
+  private final Store store;
 
   public CompanyMarginPolicyService(Clock clock) {
     this(clock, new SrpCalculationService());
@@ -48,15 +45,22 @@ public final class CompanyMarginPolicyService {
 
   public CompanyMarginPolicyService(Clock clock, SrpCalculationService srpCalculationService,
       OverlayRuleRepository overlayRuleRepository) {
+    this(clock, srpCalculationService, overlayRuleRepository, Store.failClosed("CompanyMarginPolicyService"));
+  }
+
+  CompanyMarginPolicyService(Clock clock, SrpCalculationService srpCalculationService,
+      OverlayRuleRepository overlayRuleRepository, Store store) {
     this.clock = Objects.requireNonNull(clock, "clock is required");
     this.srpCalculationService = Objects.requireNonNull(srpCalculationService, "srpCalculationService is required");
     this.overlayRuleRepository = Objects.requireNonNull(overlayRuleRepository, "overlayRuleRepository is required");
+    this.store = Objects.requireNonNull(store, "store is required");
   }
 
   public CommandReceipt createDraft(CreatePolicyCommand command) {
+    requireDurableStoreOrExplicitTestHarness();
     requireCommand(command.tenantId(), command.actorId(), command.idempotencyKey(), command.correlationId());
     String idemKey = idempotencyKey(command.tenantId(), command.idempotencyKey());
-    CommandReceipt existing = idempotencyReceipts.get(idemKey);
+    CommandReceipt existing = store.idempotencyReceipts().get(idemKey);
     if (existing != null) {
       if (!existing.requestHash().equals(command.requestHash())) {
         throw new MarginPolicyException("IDEMPOTENCY_CONFLICT");
@@ -79,11 +83,11 @@ public final class CompanyMarginPolicyService {
         command.actorId(),
         Instant.now(clock),
         Instant.now(clock));
-    policies.put(new PolicyKey(command.tenantId(), policyId), policy);
+    store.policies().put(new PolicyKey(command.tenantId(), policyId), policy);
     CommandReceipt receipt = new CommandReceipt(policy.policyId(), policy.status(), policy.currentVersion().versionNumber(),
         command.correlationId(), command.requestHash(), List.of(), "audit:" + policy.policyId());
-    idempotencyReceipts.put(idemKey, receipt);
-    auditRecords.add(AuditRecord.completed(command.tenantId(), policy.policyId(), command.actorId(), command.correlationId(), "DRAFT_CREATED"));
+    store.idempotencyReceipts().put(idemKey, receipt);
+    store.auditRecords().add(AuditRecord.completed(command.tenantId(), policy.policyId(), command.actorId(), command.correlationId(), "DRAFT_CREATED"));
     return receipt;
   }
 
@@ -179,6 +183,7 @@ public final class CompanyMarginPolicyService {
 
   public ProfitabilityOverlayEvaluationResult evaluateProfitabilityOverlays(String tenantId, String policyId,
       BigDecimal priceBeforeOverlay, OverlayInputs inputs, List<String> downstreamConsumers) {
+    requireDurableStoreOrExplicitTestHarness();
     requireText(tenantId, "tenantId");
     requireText(policyId, "policyId");
     Objects.requireNonNull(priceBeforeOverlay, "priceBeforeOverlay is required");
@@ -210,6 +215,7 @@ public final class CompanyMarginPolicyService {
 
   public MarginRuleEvaluationResult evaluateActiveMarginRules(String tenantId, MarginScope quoteScope,
       Instant pricedAtUtc, RuleEvaluationContext context, BigDecimal priceBeforeMargin) {
+    requireDurableStoreOrExplicitTestHarness();
     requireText(tenantId, "tenantId");
     Objects.requireNonNull(quoteScope, "quoteScope is required");
     Objects.requireNonNull(pricedAtUtc, "pricedAtUtc is required");
@@ -227,7 +233,7 @@ public final class CompanyMarginPolicyService {
     }
     List<DependencyError> dependencyErrors = dependencyErrors(rules, context);
     if (!dependencyErrors.isEmpty()) {
-      auditRecords.add(AuditRecord.completed(tenantId, policy.policyId(), "system", context.correlationId(),
+      store.auditRecords().add(AuditRecord.completed(tenantId, policy.policyId(), "system", context.correlationId(),
           "MARGIN_RULE_DEPENDENCY_ERROR"));
       return new MarginRuleEvaluationResult(tenantId, context.quoteId(), policy.policyId(), version.versionId(),
           "DEPENDENCY_ERROR", priceBeforeMargin, priceBeforeMargin, List.of(), dependencyErrors,
@@ -240,7 +246,7 @@ public final class CompanyMarginPolicyService {
       steps.add(step);
       runningPrice = step.priceAfterMargin();
     }
-    auditRecords.add(AuditRecord.completed(tenantId, policy.policyId(), "system", context.correlationId(),
+    store.auditRecords().add(AuditRecord.completed(tenantId, policy.policyId(), "system", context.correlationId(),
         "MARGIN_RULES_EVALUATED"));
     return new MarginRuleEvaluationResult(tenantId, context.quoteId(), policy.policyId(), version.versionId(),
         "MARGIN_RULES_EVALUATED", priceBeforeMargin, runningPrice, steps, List.of(), referencedMetadataRefs(rules),
@@ -248,10 +254,11 @@ public final class CompanyMarginPolicyService {
   }
 
   public List<MarginRule> activeRules(String tenantId, MarginScope quoteScope, Instant pricedAtUtc) {
+    requireDurableStoreOrExplicitTestHarness();
     requireText(tenantId, "tenantId");
     Objects.requireNonNull(quoteScope, "quoteScope is required");
     Objects.requireNonNull(pricedAtUtc, "pricedAtUtc is required");
-    return policies.values().stream()
+    return store.policies().values().stream()
         .filter(policy -> policy.tenantId().equals(tenantId))
         .filter(policy -> COMPANY_POLICY_TYPE.equals(policy.policyType()))
         .filter(policy -> policy.status() == PolicyStatus.PUBLISHED)
@@ -293,7 +300,7 @@ public final class CompanyMarginPolicyService {
     }
     rejectPublishedOverlap(policy);
     MarginPolicy published = policy.withStatus(PolicyStatus.PUBLISHED, actorId, Instant.now(clock));
-    policies.put(new PolicyKey(tenantId, policy.policyId()), published);
+    store.policies().put(new PolicyKey(tenantId, policy.policyId()), published);
     MarginPolicyVersion version = published.currentVersion();
     MarginPolicyPublishedEvent event = new MarginPolicyPublishedEvent(
         tenantId,
@@ -305,11 +312,11 @@ public final class CompanyMarginPolicyService {
         version.configHash(),
         actorId,
         correlationId);
-    outbox.add(event);
+    store.outbox().add(event);
     String action = BRANCH_OVERLAY_POLICY_TYPE.equals(policy.policyType())
         ? "BRANCH_OVERLAY_POLICY_PUBLISHED"
         : "MARGIN_POLICY_PUBLISHED";
-    auditRecords.add(AuditRecord.completed(tenantId, policyId, actorId, correlationId, action));
+    store.auditRecords().add(AuditRecord.completed(tenantId, policyId, actorId, correlationId, action));
     return new CommandReceipt(policyId, PolicyStatus.PUBLISHED, version.versionNumber(), correlationId, "publish:" + policyId, List.of(event), "audit:" + policyId);
   }
 
@@ -318,7 +325,8 @@ public final class CompanyMarginPolicyService {
   }
 
   public Optional<MarginPolicy> resolvePublished(String tenantId, MarginScope scope, Instant pricedAtUtc) {
-    List<MarginPolicy> matches = policies.values().stream()
+    requireDurableStoreOrExplicitTestHarness();
+    List<MarginPolicy> matches = store.policies().values().stream()
         .filter(policy -> policy.tenantId().equals(tenantId))
         .filter(policy -> policy.status() == PolicyStatus.PUBLISHED)
         .filter(policy -> policy.currentVersion().scope().matches(scope))
@@ -331,11 +339,17 @@ public final class CompanyMarginPolicyService {
   }
 
   public List<MarginPolicyPublishedEvent> outboxEvents() {
-    return List.copyOf(outbox);
+    requireDurableStoreOrExplicitTestHarness();
+    return List.copyOf(store.outbox());
   }
 
   public List<AuditRecord> auditRecords() {
-    return List.copyOf(auditRecords);
+    requireDurableStoreOrExplicitTestHarness();
+    return List.copyOf(store.auditRecords());
+  }
+
+  private void requireDurableStoreOrExplicitTestHarness() {
+    store.requireAvailable();
   }
 
   private CommandReceipt transition(String tenantId, String policyId, String actorId, String correlationId,
@@ -348,8 +362,8 @@ public final class CompanyMarginPolicyService {
       throw new MarginPolicyException("MARGIN_VERSION_STALE");
     }
     MarginPolicy changed = policy.withStatus(to, actorId, Instant.now(clock));
-    policies.put(new PolicyKey(tenantId, changed.policyId()), changed);
-    auditRecords.add(AuditRecord.completed(tenantId, policyId, actorId, correlationId, action));
+    store.policies().put(new PolicyKey(tenantId, changed.policyId()), changed);
+    store.auditRecords().add(AuditRecord.completed(tenantId, policyId, actorId, correlationId, action));
     return new CommandReceipt(policyId, to, changed.currentVersion().versionNumber(), correlationId, action + ":" + policyId, List.of(), "audit:" + policyId);
   }
 
@@ -482,7 +496,7 @@ public final class CompanyMarginPolicyService {
   }
 
   private Optional<MarginPolicy> resolvePublishedRulePolicy(String tenantId, MarginScope scope, Instant pricedAtUtc) {
-    List<MarginPolicy> matches = policies.values().stream()
+    List<MarginPolicy> matches = store.policies().values().stream()
         .filter(policy -> policy.tenantId().equals(tenantId))
         .filter(policy -> COMPANY_POLICY_TYPE.equals(policy.policyType()))
         .filter(policy -> policy.status() == PolicyStatus.PUBLISHED)
@@ -584,7 +598,7 @@ public final class CompanyMarginPolicyService {
   }
 
   private void rejectPublishedOverlap(MarginPolicy candidate) {
-    boolean overlap = policies.values().stream()
+    boolean overlap = store.policies().values().stream()
         .filter(policy -> !policy.policyId().equals(candidate.policyId()))
         .filter(policy -> policy.tenantId().equals(candidate.tenantId()))
         .filter(policy -> policy.policyType().equals(candidate.policyType()))
@@ -600,7 +614,7 @@ public final class CompanyMarginPolicyService {
   }
 
   private boolean activePolicyNameExists(String tenantId, String name, String policyType) {
-    return policies.values().stream()
+    return store.policies().values().stream()
         .filter(policy -> policy.tenantId().equals(tenantId))
         .filter(policy -> policy.name().equals(name))
         .filter(policy -> policy.policyType().equals(policyType))
@@ -618,7 +632,8 @@ public final class CompanyMarginPolicyService {
   }
 
   private MarginPolicy findById(String tenantId, String policyId) {
-    return policies.values().stream()
+    requireDurableStoreOrExplicitTestHarness();
+    return store.policies().values().stream()
         .filter(policy -> policy.tenantId().equals(tenantId))
         .filter(policy -> policy.policyId().equals(policyId))
         .findFirst()
@@ -656,7 +671,32 @@ public final class CompanyMarginPolicyService {
         before.stripTrailingZeros(), after.stripTrailingZeros()));
   }
 
-  private record PolicyKey(String tenantId, String name) {}
+  interface Store {
+    Map<PolicyKey, MarginPolicy> policies();
+    Map<String, CommandReceipt> idempotencyReceipts();
+    List<MarginPolicyPublishedEvent> outbox();
+    List<AuditRecord> auditRecords();
+
+    default void requireAvailable() {}
+
+    static Store failClosed(String component) {
+      return new Store() {
+        @Override public void requireAvailable() {
+          ProcessLocalStatePolicy.requireDurableStoreOrExplicitTestHarness(false, component);
+        }
+        @Override public Map<PolicyKey, MarginPolicy> policies() { return unavailable(); }
+        @Override public Map<String, CommandReceipt> idempotencyReceipts() { return unavailable(); }
+        @Override public List<MarginPolicyPublishedEvent> outbox() { return unavailable(); }
+        @Override public List<AuditRecord> auditRecords() { return unavailable(); }
+        private <T> T unavailable() {
+          requireAvailable();
+          throw new AssertionError("unreachable");
+        }
+      };
+    }
+  }
+
+  record PolicyKey(String tenantId, String name) {}
 
   public enum PolicyStatus { DRAFT, PENDING_APPROVAL, APPROVED, PUBLISHED, SUSPENDED }
 

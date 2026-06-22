@@ -23,6 +23,10 @@ import org.springframework.stereotype.Service;
 /** Priority-ordered real LLPA rule evaluator backed by compiled conditions and a dimension index. */
 @Service
 public final class RuleEvaluationEngine {
+    private static final Comparator<CompiledRule> RULE_ORDER = Comparator
+        .comparingInt(CompiledRule::priority)
+        .thenComparing(CompiledRule::ruleId);
+
     private final RuleIndexer indexer;
     private final PrecisionNormalizer normalizer;
 
@@ -51,13 +55,7 @@ public final class RuleEvaluationEngine {
             alreadyBlocked.add(rule.ruleId());
         }
 
-        List<CompiledRule> candidates = getCandidateRules(index, facts).stream()
-            .filter(ruleId -> !alreadyBlocked.contains(ruleId))
-            .map(index.rules()::get)
-            .filter(Objects::nonNull)
-            .filter(CompiledRule::enabled)
-            .sorted(Comparator.comparingInt(CompiledRule::priority).thenComparing(CompiledRule::ruleId))
-            .toList();
+        List<CompiledRule> candidates = candidateRules(index, facts, alreadyBlocked);
 
         Map<String, UUID> exclusiveWinners = new LinkedHashMap<>();
         List<RuleEvaluation> matchedEvaluations = new ArrayList<>();
@@ -124,11 +122,25 @@ public final class RuleEvaluationEngine {
     }
 
     private List<CompiledRule> missingFactRules(RuleBookIndex index, FactMap facts) {
-        return index.rules().values().stream()
-            .filter(CompiledRule::enabled)
-            .filter(rule -> rule.conditions().stream().flatMap(condition -> condition.requiredDimensions().stream()).distinct().anyMatch(dimension -> !facts.exists(dimension)))
-            .sorted(Comparator.comparingInt(CompiledRule::priority).thenComparing(CompiledRule::ruleId))
-            .toList();
+        if (index.dimensionRulesByPriority().isEmpty()) {
+            return List.of();
+        }
+        List<CompiledRule> missingRules = new ArrayList<>();
+        Set<UUID> added = new HashSet<>();
+        for (Map.Entry<String, List<CompiledRule>> entry : index.dimensionRulesByPriority().entrySet()) {
+            if (facts.exists(entry.getKey())) {
+                continue;
+            }
+            for (CompiledRule rule : entry.getValue()) {
+                if (added.add(rule.ruleId())) {
+                    missingRules.add(rule);
+                }
+            }
+        }
+        if (missingRules.size() > 1) {
+            missingRules.sort(RULE_ORDER);
+        }
+        return missingRules;
     }
 
     private String firstMissingReason(CompiledRule rule, FactMap facts) {
@@ -140,15 +152,41 @@ public final class RuleEvaluationEngine {
             .orElse("missing_fact");
     }
 
-    private Set<UUID> getCandidateRules(RuleBookIndex index, FactMap facts) {
-        Set<UUID> candidates = new HashSet<>(index.rulesWithNoRequiredDimensions());
+    private List<CompiledRule> candidateRules(RuleBookIndex index, FactMap facts, Set<UUID> alreadyBlocked) {
+        List<CompiledRule> noRequiredRules = index.rulesWithNoRequiredDimensionsByPriority();
+        if (noRequiredRules.isEmpty() && facts.asMap().size() == 1) {
+            String dimension = facts.asMap().keySet().iterator().next();
+            List<CompiledRule> singleDimensionRules = index.dimensionRulesByPriority().get(dimension);
+            if (singleDimensionRules == null || singleDimensionRules.isEmpty()) {
+                return List.of();
+            }
+            if (alreadyBlocked.isEmpty()) {
+                return singleDimensionRules;
+            }
+            return singleDimensionRules.stream()
+                .filter(rule -> !alreadyBlocked.contains(rule.ruleId()))
+                .toList();
+        }
+
+        Set<UUID> candidates = new HashSet<>();
+        for (CompiledRule rule : noRequiredRules) {
+            candidates.add(rule.ruleId());
+        }
         for (String dimension : facts.asMap().keySet()) {
-            Set<UUID> ruleIds = index.dimensionIndex().get(dimension);
-            if (ruleIds != null) {
-                candidates.addAll(ruleIds);
+            List<CompiledRule> rules = index.dimensionRulesByPriority().get(dimension);
+            if (rules != null) {
+                for (CompiledRule rule : rules) {
+                    candidates.add(rule.ruleId());
+                }
             }
         }
-        return candidates;
+        List<CompiledRule> orderedCandidates = new ArrayList<>(candidates.size());
+        for (CompiledRule rule : index.orderedEnabledRules()) {
+            if (candidates.contains(rule.ruleId()) && !alreadyBlocked.contains(rule.ruleId())) {
+                orderedCandidates.add(rule);
+            }
+        }
+        return orderedCandidates;
     }
 
     private RuleEvaluation evaluateRule(CompiledRule rule, FactMap facts, PricingPrecisionPolicy policy) {

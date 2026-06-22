@@ -275,20 +275,6 @@ public final class QuoteApi {
         Optional<QuoteResponse> findById(String quoteId);
     }
 
-    public static final class InMemoryQuoteRepository implements QuoteRepository {
-        private final Map<String, QuoteResponse> quotes = new ConcurrentHashMap<>();
-
-        @Override
-        public void save(QuoteResponse response) {
-            quotes.put(response.quoteId(), response);
-        }
-
-        @Override
-        public Optional<QuoteResponse> findById(String quoteId) {
-            return Optional.ofNullable(quotes.get(quoteId));
-        }
-    }
-
     public static final class DurableQuoteRepository implements QuoteRepository {
         private final Path storageDirectory;
 

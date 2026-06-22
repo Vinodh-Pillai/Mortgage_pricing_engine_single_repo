@@ -24,7 +24,7 @@ class ReferenceDataCacheServiceTest {
 
   @Test
   void resolvesDeterministicKeyAndCachesOnlyPublishedReferenceData() {
-    InMemoryReferenceDataCacheStore store = new InMemoryReferenceDataCacheStore();
+    LocalReferenceDataCacheStore store = new LocalReferenceDataCacheStore();
     ReferenceDataCacheService service = service(store, source(List.of(
         record(ReferenceDataStatus.DRAFT, "draft-digest"),
         record(ReferenceDataStatus.SUSPENDED, "suspended-digest"),
@@ -44,7 +44,7 @@ class ReferenceDataCacheServiceTest {
 
   @Test
   void failsClosedWhenPublishedReferenceDataIsAmbiguous() {
-    ReferenceDataCacheService service = service(new InMemoryReferenceDataCacheStore(), source(List.of(
+    ReferenceDataCacheService service = service(new LocalReferenceDataCacheStore(), source(List.of(
         record(ReferenceDataStatus.PUBLISHED, "sha256-a"),
         record(ReferenceDataStatus.PUBLISHED, "sha256-b"))));
 
@@ -69,7 +69,7 @@ class ReferenceDataCacheServiceTest {
 
   @Test
   void buildsInvalidationContractForPublishedSuspendedAndRollbackEvents() {
-    ReferenceDataCacheService service = service(new InMemoryReferenceDataCacheStore(), source(List.of(
+    ReferenceDataCacheService service = service(new LocalReferenceDataCacheStore(), source(List.of(
         record(ReferenceDataStatus.PUBLISHED, "sha256-published"))));
     ReferenceDataChangeEvent event = new ReferenceDataChangeEvent(
         TENANT_ID,

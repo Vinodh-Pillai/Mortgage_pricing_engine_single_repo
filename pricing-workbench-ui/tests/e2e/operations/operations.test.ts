@@ -1,9 +1,11 @@
 ﻿// Operations E2E Tests
-import { test, expect, describe, beforeAll, afterAll, beforeEach, afterEach } from "@playwright/test";
+import { test, expect } from "@playwright/test";
 import { apiHelper, type ApiResponse, type TestContext } from "../core/helpers/api-helper";
 import { uiHelper, type NavigationResult } from "../core/helpers/ui-helper";
 import { driftDetector, type DriftFinding, type DriftReport, type BaselineExpectation } from "../core/drift/drift-detector";
 import { personas, type PersonaRole, getPersona, getTestScenarios, getAccessibleRoutes, getRestrictedRoutes } from "../core/personas/personas";
+
+const { describe, beforeAll, afterAll, beforeEach, afterEach } = test;
 
 const OPS_PERSONAS = ["OPERATIONS_LEAD", "LOAN_OFFICER", "ADMIN", "PARTNER_MANAGER"] as PersonaRole[];
 const HEADLESS_MODE = process.env.HEADED !== "true";

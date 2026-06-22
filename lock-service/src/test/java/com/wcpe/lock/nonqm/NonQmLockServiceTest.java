@@ -21,7 +21,7 @@ class NonQmLockServiceTest {
 
   @BeforeEach
   void setUp() {
-    service = new NonQmLockService(new BusinessDayCalculator(TenantCalendarClient.configuredLocalDefault()));
+    service = new NonQmLockService(new BusinessDayCalculator(TenantCalendarClient.configuredLocalDefault()), new InMemoryNonQmLockRepository());
     service.importDeliveryProfile(activeDeliveryProfile("PROFILE-INV-A-PRIVATE-POOL", "INV-A"));
     service.importPolicy(policy("POLICY-INV-A-DSCR", "INV-A", NonQmProductType.DSCR, 2, activeDeliveryProfile("PROFILE-INV-A-PRIVATE-POOL", "INV-A")));
   }

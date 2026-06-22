@@ -37,13 +37,19 @@ public interface OverlayRuleRepository {
     }
 
     static OverlayRuleRepository empty() {
-        return new InMemoryOverlayRuleRepository(List.of());
+        return new StaticOverlayRuleRepository(List.of());
     }
 
-    final class InMemoryOverlayRuleRepository implements OverlayRuleRepository {
+    static OverlayRuleRepository failClosed(String reason) {
+        return inputs -> {
+            throw new IllegalStateException(reason);
+        };
+    }
+
+    final class StaticOverlayRuleRepository implements OverlayRuleRepository {
         private final List<OverlayRule> rules;
 
-        public InMemoryOverlayRuleRepository(List<OverlayRule> rules) {
+        public StaticOverlayRuleRepository(List<OverlayRule> rules) {
             this.rules = List.copyOf(rules == null ? List.of() : rules);
         }
 

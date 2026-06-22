@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 class MarginReplayIT {
   @Test
   void replaysHistoricalCompanyChannelBranchComp() {
-    var service = new MarginReplayService(MarginReplayTestFixtures.CLOCK);
+    var service = MarginServiceTestStores.marginReplayService(MarginReplayTestFixtures.CLOCK);
     var fixture = MarginReplayTestFixtures.fullStackFixture();
     service.registerFixture(MarginReplayTestFixtures.TENANT, fixture);
 
@@ -24,7 +24,7 @@ class MarginReplayIT {
 
   @Test
   void classifiesHashMismatchByStep() {
-    var service = new MarginReplayService(MarginReplayTestFixtures.CLOCK);
+    var service = MarginServiceTestStores.marginReplayService(MarginReplayTestFixtures.CLOCK);
     service.registerFixture(MarginReplayTestFixtures.TENANT, MarginReplayTestFixtures.fullStackFixture());
     var changedManifest = new MarginReplayService.VersionManifest(
         MarginReplayTestFixtures.fullStackManifest().manifestId(),
@@ -44,7 +44,7 @@ class MarginReplayIT {
 
   @Test
   void auditEvidenceContainsVersionManifest() {
-    var service = new MarginReplayService(MarginReplayTestFixtures.CLOCK);
+    var service = MarginServiceTestStores.marginReplayService(MarginReplayTestFixtures.CLOCK);
     service.registerFixture(MarginReplayTestFixtures.TENANT, MarginReplayTestFixtures.fullStackFixture());
 
     var result = service.runFixtureReplay(

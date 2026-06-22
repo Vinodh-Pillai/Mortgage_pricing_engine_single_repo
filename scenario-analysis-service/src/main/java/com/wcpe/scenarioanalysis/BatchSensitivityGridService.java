@@ -23,7 +23,7 @@ public class BatchSensitivityGridService {
   private final Clock clock;
 
   public BatchSensitivityGridService() {
-    this(new InMemoryBatchGridRepository(), Clock.systemUTC());
+    throw FailClosedPersistence.notConfigured("batch sensitivity grid store");
   }
 
   BatchSensitivityGridService(BatchGridRepository repository, Clock clock) {
@@ -454,42 +454,6 @@ public class BatchSensitivityGridService {
     void save(StoredBatchGrid grid);
 
     void update(StoredBatchGrid current, BatchGridResponse response, ProductEvent event);
-  }
-
-  static class InMemoryBatchGridRepository implements BatchGridRepository {
-    private final Map<String, StoredBatchGrid> gridsByTenantAndIdempotency = new ConcurrentHashMap<>();
-    private final Map<String, StoredBatchGrid> gridsByTenantAndGridId = new ConcurrentHashMap<>();
-
-    @Override
-    public Optional<StoredBatchGrid> findByIdempotencyKeyHash(String tenantId, String idempotencyKeyHash) {
-      return Optional.ofNullable(gridsByTenantAndIdempotency.get(key(tenantId, idempotencyKeyHash)));
-    }
-
-    @Override
-    public Optional<StoredBatchGrid> findByGridId(String tenantId, UUID gridId) {
-      return Optional.ofNullable(gridsByTenantAndGridId.get(key(tenantId, gridId.toString())));
-    }
-
-    @Override
-    public void save(StoredBatchGrid grid) {
-      gridsByTenantAndIdempotency.put(key(grid.tenantId(), grid.idempotencyKeyHash()), grid);
-      gridsByTenantAndGridId.put(key(grid.tenantId(), grid.gridId().toString()), grid);
-    }
-
-    @Override
-    public void update(StoredBatchGrid current, BatchGridResponse response, ProductEvent event) {
-      List<ProductEvent> events = new ArrayList<>(current.events());
-      events.add(event);
-      save(new StoredBatchGrid(current.tenantId(), current.gridId(), current.requestHash(), current.idempotencyKeyHash(), response, List.copyOf(events), current.createdAt()));
-    }
-
-    int size() {
-      return gridsByTenantAndGridId.size();
-    }
-  }
-
-  private static String key(String tenantId, String id) {
-    return tenantId + ':' + id;
   }
 
   public static class ValidationException extends RuntimeException {

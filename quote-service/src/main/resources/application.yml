@@ -1,6 +1,13 @@
 spring:
   application:
     name: quote-service
+  flyway:
+    enabled: ${QUOTE_FLYWAY_ENABLED:false}
+    locations: classpath:db/migration
+
+quote:
+  persistence:
+    mode: ${QUOTE_PERSISTENCE_MODE:postgres}
 
 server:
   port: ${SERVER_PORT:8080}
@@ -31,3 +38,20 @@ pricing:
   bulkhead:
     max-concurrent-calls: 32
     max-wait-duration: 5s
+
+---
+spring:
+  config:
+    activate:
+      on-profile: postgres
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+  flyway:
+    enabled: ${QUOTE_FLYWAY_ENABLED:true}
+
+quote:
+  persistence:
+    mode: postgres

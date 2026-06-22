@@ -5,7 +5,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-public class InMemoryQuoteCache implements QuoteCache {
+public class LocalQuoteCache implements QuoteCache {
     private final Map<String, Quote> values = new ConcurrentHashMap<>();
     private volatile boolean available = true;
 

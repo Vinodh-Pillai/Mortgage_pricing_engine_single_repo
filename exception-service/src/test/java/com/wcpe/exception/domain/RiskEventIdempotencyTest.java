@@ -8,37 +8,24 @@ import org.junit.jupiter.api.Test;
 class RiskEventIdempotencyTest {
 
   @Test
-  void sameSourceProducesSameEventId() {
+  void idempotencyCannotUseProcessLocalMemoryWhenPersistenceIsUnavailable() {
     ExceptionService service = new ExceptionService(new ExceptionRepository());
     ExceptionModels.MapRiskMonitoringEventCommand source = RiskEventMapperTest.sourceEvent(
       "RISK-IDEMP-REPLAY-001",
       Map.of("concessionStatus", "APPLIED", "amountBucket", "configured-small")
     );
 
-    ExceptionModels.RiskMonitoringEventEnvelope first = service.publishRiskMonitoringEvent(
-      source,
-      RiskEventMapperTest.mappingVersion(),
-      false
-    );
-    ExceptionModels.RiskMonitoringEventEnvelope replayed = service.publishRiskMonitoringEvent(
-      source,
-      RiskEventMapperTest.mappingVersion(),
-      false
+    ExceptionServiceException error = assertThrows(
+      ExceptionServiceException.class,
+      () -> service.publishRiskMonitoringEvent(source, RiskEventMapperTest.mappingVersion(), false)
     );
 
-    assertEquals(first.riskEventId(), replayed.riskEventId());
-    assertEquals(first.payloadHash(), replayed.payloadHash());
-    assertEquals(first.headers().get("sourceEventId"), replayed.headers().get("sourceEventId"));
+    assertEquals("PERSISTENCE_BACKEND_REQUIRED", error.code());
   }
 
   @Test
-  void rejectsSameIdempotencyKeyForChangedPayload() {
+  void changedPayloadConflictRequiresDurableStoreAndFailsClosedWithoutIt() {
     ExceptionService service = new ExceptionService(new ExceptionRepository());
-    service.publishRiskMonitoringEvent(
-      RiskEventMapperTest.sourceEvent("RISK-IDEMP-CONFLICT-001", Map.of("concessionStatus", "APPLIED")),
-      RiskEventMapperTest.mappingVersion(),
-      false
-    );
 
     ExceptionServiceException error = assertThrows(
       ExceptionServiceException.class,
@@ -49,6 +36,6 @@ class RiskEventIdempotencyTest {
       )
     );
 
-    assertEquals("IDEMPOTENCY_CONFLICT", error.code());
+    assertEquals("PERSISTENCE_BACKEND_REQUIRED", error.code());
   }
 }

@@ -2,6 +2,13 @@ package com.wcpe.pricing.rounding.api;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
+import java.sql.Connection;
+import java.sql.Date;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -13,6 +20,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+
+import javax.sql.DataSource;
 
 public final class RoundingPolicyApi {
     public static final String ROUNDING_READ_PERMISSION = "pricing.rounding.read";
@@ -409,17 +418,44 @@ public final class RoundingPolicyApi {
                 String channelCode);
     }
 
-    public static final class InMemoryRoundingPolicyRepository implements RoundingPolicyRepository {
-        private final Map<String, RoundingPolicyVersion> policies = new ConcurrentHashMap<>();
+    public static final class JdbcRoundingPolicyRepository implements RoundingPolicyRepository {
+        private final DataSource dataSource;
+
+        public JdbcRoundingPolicyRepository(DataSource dataSource) {
+            this.dataSource = Objects.requireNonNull(dataSource, "dataSource is required");
+        }
 
         @Override
         public void save(RoundingPolicyVersion policy) {
-            policies.put(policy.id(), policy);
+            Objects.requireNonNull(policy, "policy is required");
+            try (Connection connection = dataSource.getConnection()) {
+                boolean previousAutoCommit = connection.getAutoCommit();
+                connection.setAutoCommit(false);
+                try {
+                    upsertPolicy(connection, policy);
+                    replaceRules(connection, policy);
+                    replaceFixtures(connection, policy);
+                    connection.commit();
+                } catch (SQLException | RuntimeException ex) {
+                    connection.rollback();
+                    throw ex;
+                } finally {
+                    connection.setAutoCommit(previousAutoCommit);
+                }
+            } catch (SQLException ex) {
+                throw persistenceFailure("save rounding policy", ex);
+            }
         }
 
         @Override
         public Optional<RoundingPolicyVersion> findById(String policyVersionId) {
-            return Optional.ofNullable(policies.get(policyVersionId));
+            requireText(policyVersionId, "policy_version_id is required");
+            try (Connection connection = dataSource.getConnection()) {
+                return findPolicy(connection, "select * from rounding_policy_version where policy_version_id = ?",
+                        statement -> statement.setString(1, policyVersionId)).stream().findFirst();
+            } catch (SQLException ex) {
+                throw persistenceFailure("find rounding policy", ex);
+            }
         }
 
         @Override
@@ -429,14 +465,226 @@ public final class RoundingPolicyApi {
                 String productCode,
                 String investorCode,
                 String channelCode) {
-            return policies.values().stream()
-                    .filter(policy -> policy.status() == RoundingPolicyStatus.PUBLISHED)
-                    .filter(policy -> tenantId.equals(policy.tenantId()))
-                    .filter(policy -> Objects.equals(scope, policy.scope()))
-                    .filter(policy -> Objects.equals(productCode, policy.productCode()))
-                    .filter(policy -> Objects.equals(investorCode, policy.investorCode()))
-                    .filter(policy -> Objects.equals(channelCode, policy.channelCode()))
-                    .toList();
+            requireTenant(tenantId);
+            requireText(scope, "scope is required");
+            try (Connection connection = dataSource.getConnection()) {
+                return findPolicy(connection,
+                        "select * from rounding_policy_version where tenant_id = ? and status = ? and scope = ?",
+                        statement -> {
+                            statement.setString(1, tenantId);
+                            statement.setString(2, RoundingPolicyStatus.PUBLISHED.name());
+                            statement.setString(3, scope);
+                        }).stream()
+                        .filter(policy -> Objects.equals(productCode, policy.productCode()))
+                        .filter(policy -> Objects.equals(investorCode, policy.investorCode()))
+                        .filter(policy -> Objects.equals(channelCode, policy.channelCode()))
+                        .toList();
+            } catch (SQLException ex) {
+                throw persistenceFailure("find published rounding policies", ex);
+            }
+        }
+
+        private static void upsertPolicy(Connection connection, RoundingPolicyVersion policy) throws SQLException {
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    insert into rounding_policy_version (
+                        tenant_id, policy_version_id, version_number, status, scope, product_code, investor_code,
+                        channel_code, effective_from, effective_to, schema_version, created_by, approved_by,
+                        approved_at, audit_reference, correlation_id, validation_passed, updated_at
+                    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    on conflict (policy_version_id) do update set
+                        tenant_id = excluded.tenant_id,
+                        version_number = excluded.version_number,
+                        status = excluded.status,
+                        scope = excluded.scope,
+                        product_code = excluded.product_code,
+                        investor_code = excluded.investor_code,
+                        channel_code = excluded.channel_code,
+                        effective_from = excluded.effective_from,
+                        effective_to = excluded.effective_to,
+                        schema_version = excluded.schema_version,
+                        created_by = excluded.created_by,
+                        approved_by = excluded.approved_by,
+                        approved_at = excluded.approved_at,
+                        audit_reference = excluded.audit_reference,
+                        correlation_id = excluded.correlation_id,
+                        validation_passed = excluded.validation_passed,
+                        updated_at = excluded.updated_at
+                    """)) {
+                statement.setString(1, policy.tenantId());
+                statement.setString(2, policy.id());
+                statement.setInt(3, policy.versionNumber());
+                statement.setString(4, policy.status().name());
+                statement.setString(5, policy.scope());
+                statement.setString(6, policy.productCode());
+                statement.setString(7, policy.investorCode());
+                statement.setString(8, policy.channelCode());
+                statement.setDate(9, Date.valueOf(policy.effectiveFrom()));
+                statement.setDate(10, policy.effectiveTo() == null ? null : Date.valueOf(policy.effectiveTo()));
+                statement.setInt(11, policy.schemaVersion());
+                statement.setString(12, policy.createdBy());
+                statement.setString(13, policy.approvedBy());
+                statement.setTimestamp(14, policy.approvedAt() == null ? null : Timestamp.from(policy.approvedAt()));
+                statement.setString(15, policy.auditReference());
+                statement.setString(16, policy.correlationId());
+                statement.setBoolean(17, policy.validationPassed());
+                statement.setTimestamp(18, Timestamp.from(policy.updatedAt()));
+                statement.executeUpdate();
+            }
+        }
+
+        private static void replaceRules(Connection connection, RoundingPolicyVersion policy) throws SQLException {
+            try (PreparedStatement delete = connection.prepareStatement("delete from rounding_rule where policy_version_id = ?")) {
+                delete.setString(1, policy.id());
+                delete.executeUpdate();
+            }
+            try (PreparedStatement insert = connection.prepareStatement("""
+                    insert into rounding_rule (
+                        tenant_id, rule_id, policy_version_id, output_context, unit, scale, rounding_mode,
+                        increment, precedence, reason_code
+                    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """)) {
+                for (RoundingRule rule : policy.rules()) {
+                    requireText(rule.ruleId(), "rule_id is required for durable rounding policy persistence");
+                    insert.setString(1, policy.tenantId());
+                    insert.setString(2, rule.ruleId());
+                    insert.setString(3, policy.id());
+                    insert.setString(4, rule.outputContext());
+                    insert.setString(5, rule.unit().name());
+                    insert.setInt(6, rule.scale());
+                    insert.setString(7, rule.roundingMode().name());
+                    insert.setBigDecimal(8, rule.increment());
+                    insert.setInt(9, rule.precedence());
+                    insert.setString(10, rule.reasonCode());
+                    insert.addBatch();
+                }
+                insert.executeBatch();
+            }
+        }
+
+        private static void replaceFixtures(Connection connection, RoundingPolicyVersion policy) throws SQLException {
+            try (PreparedStatement delete = connection.prepareStatement(
+                    "delete from rounding_sample_fixture where policy_version_id = ?")) {
+                delete.setString(1, policy.id());
+                delete.executeUpdate();
+            }
+            try (PreparedStatement insert = connection.prepareStatement("""
+                    insert into rounding_sample_fixture (
+                        tenant_id, fixture_id, policy_version_id, fixture_name, output_context, input_value, expected_value
+                    ) values (?, ?, ?, ?, ?, ?, ?)
+                    """)) {
+                for (RoundingSampleFixture fixture : policy.fixtures()) {
+                    insert.setString(1, policy.tenantId());
+                    insert.setString(2, fixtureId(policy.id(), fixture));
+                    insert.setString(3, policy.id());
+                    insert.setString(4, fixture.fixtureName());
+                    insert.setString(5, fixture.outputContext());
+                    insert.setBigDecimal(6, fixture.inputValue());
+                    insert.setBigDecimal(7, fixture.expectedValue());
+                    insert.addBatch();
+                }
+                insert.executeBatch();
+            }
+        }
+
+        private List<RoundingPolicyVersion> findPolicy(Connection connection, String sql, StatementBinder binder)
+                throws SQLException {
+            List<RoundingPolicyVersion> policies = new ArrayList<>();
+            try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                binder.bind(statement);
+                try (ResultSet resultSet = statement.executeQuery()) {
+                    while (resultSet.next()) {
+                        String id = resultSet.getString("policy_version_id");
+                        policies.add(new RoundingPolicyVersion(
+                                id,
+                                resultSet.getString("tenant_id"),
+                                resultSet.getInt("version_number"),
+                                RoundingPolicyStatus.valueOf(resultSet.getString("status")),
+                                resultSet.getString("scope"),
+                                resultSet.getString("product_code"),
+                                resultSet.getString("investor_code"),
+                                resultSet.getString("channel_code"),
+                                resultSet.getDate("effective_from").toLocalDate(),
+                                resultSet.getDate("effective_to") == null ? null
+                                        : resultSet.getDate("effective_to").toLocalDate(),
+                                resultSet.getInt("schema_version"),
+                                resultSet.getString("created_by"),
+                                resultSet.getString("approved_by"),
+                                resultSet.getTimestamp("approved_at") == null ? null
+                                        : resultSet.getTimestamp("approved_at").toInstant(),
+                                resultSet.getString("audit_reference"),
+                                resultSet.getString("correlation_id"),
+                                resultSet.getTimestamp("updated_at").toInstant(),
+                                findRules(connection, id),
+                                findFixtures(connection, id),
+                                resultSet.getBoolean("validation_passed")));
+                    }
+                }
+            }
+            return List.copyOf(policies);
+        }
+
+        private static List<RoundingRule> findRules(Connection connection, String policyVersionId) throws SQLException {
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    select rule_id, output_context, unit, scale, rounding_mode, increment, precedence, reason_code
+                    from rounding_rule
+                    where policy_version_id = ?
+                    order by precedence, rule_id
+                    """)) {
+                statement.setString(1, policyVersionId);
+                try (ResultSet resultSet = statement.executeQuery()) {
+                    List<RoundingRule> rules = new ArrayList<>();
+                    while (resultSet.next()) {
+                        rules.add(new RoundingRule(
+                                resultSet.getString("rule_id"),
+                                resultSet.getString("output_context"),
+                                RoundingUnit.valueOf(resultSet.getString("unit")),
+                                resultSet.getInt("scale"),
+                                RoundingMode.valueOf(resultSet.getString("rounding_mode")),
+                                resultSet.getBigDecimal("increment"),
+                                resultSet.getInt("precedence"),
+                                resultSet.getString("reason_code")));
+                    }
+                    return List.copyOf(rules);
+                }
+            }
+        }
+
+        private static List<RoundingSampleFixture> findFixtures(Connection connection, String policyVersionId)
+                throws SQLException {
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    select fixture_name, output_context, input_value, expected_value
+                    from rounding_sample_fixture
+                    where policy_version_id = ?
+                    order by fixture_name
+                    """)) {
+                statement.setString(1, policyVersionId);
+                try (ResultSet resultSet = statement.executeQuery()) {
+                    List<RoundingSampleFixture> fixtures = new ArrayList<>();
+                    while (resultSet.next()) {
+                        fixtures.add(new RoundingSampleFixture(
+                                resultSet.getString("fixture_name"),
+                                resultSet.getString("output_context"),
+                                resultSet.getBigDecimal("input_value"),
+                                resultSet.getBigDecimal("expected_value")));
+                    }
+                    return List.copyOf(fixtures);
+                }
+            }
+        }
+
+        private static String fixtureId(String policyId, RoundingSampleFixture fixture) {
+            String source = policyId + ":" + fixture.fixtureName() + ":" + fixture.outputContext();
+            return "rounding-fixture-" + UUID.nameUUIDFromBytes(source.getBytes(StandardCharsets.UTF_8));
+        }
+
+        private static RoundingPolicyValidationException persistenceFailure(String operation, SQLException ex) {
+            return new RoundingPolicyValidationException("rounding policy JDBC persistence failed during " + operation
+                    + "; PostgreSQL datasource/schema must be configured and migrated");
+        }
+
+        @FunctionalInterface
+        private interface StatementBinder {
+            void bind(PreparedStatement statement) throws SQLException;
         }
     }
 

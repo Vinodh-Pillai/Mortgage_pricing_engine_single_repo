@@ -17,14 +17,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 @Component
 class CrmWebhookRegistry {
-  private final Map<String, Registration> registrations = new ConcurrentHashMap<>();
-  private final Map<String, WebhookDeliveryReceipt> deliveries = new ConcurrentHashMap<>();
   private final ObjectMapper objectMapper;
   private final HttpClient httpClient;
   private final boolean deliveryEnabled;
@@ -49,75 +46,20 @@ class CrmWebhookRegistry {
     }
     String resolvedTenant = blankToDefault(request.tenantId(), tenantId);
     String resolvedSystem = blankToDefault(request.sourceSystem(), sourceSystem).toUpperCase();
-    String webhookId = UUID.nameUUIDFromBytes((resolvedTenant + ":" + resolvedSystem + ":" + request.url()).getBytes(StandardCharsets.UTF_8)).toString();
-    Registration registration = new Registration(webhookId, resolvedTenant, resolvedSystem, request.url(), request.events(), request.secret(), Instant.now());
-    registrations.put(webhookId, registration);
-    return registration.toResponse();
+    throw new CrmValidationException("CRM_WEBHOOK_PERSISTENCE_REQUIRED",
+        "CRM webhook registration requires durable webhook persistence; process-local webhook registration state is disabled for " + resolvedTenant + ":" + resolvedSystem);
   }
 
   List<WebhookDeliveryReceipt> dispatch(String tenantId, String sourceSystem, WebhookEvent event) {
-    List<WebhookDeliveryReceipt> receipts = new ArrayList<>();
-    registrations.values().stream()
-        .filter(registration -> registration.tenantId().equals(tenantId))
-        .filter(registration -> registration.sourceSystem().equalsIgnoreCase(sourceSystem))
-        .filter(registration -> registration.events().contains(event.eventType()))
-        .forEach(registration -> receipts.add(deliver(registration, event)));
-    return receipts;
+    return List.of();
   }
 
   List<WebhookDeliveryReceipt> deliveries() {
-    return deliveries.values().stream().toList();
-  }
-
-  private WebhookDeliveryReceipt deliver(Registration registration, WebhookEvent event) {
-    String deliveryId = UUID.randomUUID().toString();
-    if (!deliveryEnabled) {
-      WebhookDeliveryReceipt receipt = new WebhookDeliveryReceipt(deliveryId, registration.webhookId(), event.eventType(), "QUEUED", 0, Instant.now(), "delivery disabled until local/dev endpoint is configured");
-      deliveries.put(deliveryId, receipt);
-      return receipt;
-    }
-    String lastError = null;
-    for (int attempt = 1; attempt <= 3; attempt++) {
-      try {
-        String payload = objectMapper.writeValueAsString(event.payload());
-        HttpRequest request = HttpRequest.newBuilder(URI.create(registration.url()))
-            .timeout(Duration.ofSeconds(5))
-            .header("Content-Type", "application/json")
-            .header("X-LoanWeft-Event", event.eventType())
-            .header("X-Correlation-ID", event.correlationId())
-            .POST(HttpRequest.BodyPublishers.ofString(payload))
-            .build();
-        HttpResponse<Void> response = httpClient.send(request, HttpResponse.BodyHandlers.discarding());
-        if (response.statusCode() >= 200 && response.statusCode() < 300) {
-          WebhookDeliveryReceipt receipt = new WebhookDeliveryReceipt(deliveryId, registration.webhookId(), event.eventType(), "DELIVERED", attempt, null, null);
-          deliveries.put(deliveryId, receipt);
-          return receipt;
-        }
-        lastError = "HTTP " + response.statusCode();
-      } catch (IOException | InterruptedException ex) {
-        if (ex instanceof InterruptedException) {
-          Thread.currentThread().interrupt();
-        }
-        lastError = ex.getClass().getSimpleName();
-      }
-    }
-    WebhookDeliveryReceipt receipt = new WebhookDeliveryReceipt(deliveryId, registration.webhookId(), event.eventType(), "DEAD", 3, null, lastError);
-    deliveries.put(deliveryId, receipt);
-    return receipt;
+    return List.of();
   }
 
   private String blankToDefault(String value, String fallback) {
     return value == null || value.isBlank() ? fallback : value;
   }
 
-  private record Registration(String webhookId, String tenantId, String sourceSystem, String url, List<String> events,
-      String secret, Instant registeredAt) {
-    Registration {
-      events = List.copyOf(events == null ? List.of() : events);
-    }
-
-    CrmWebhookRegistrationResponse toResponse() {
-      return new CrmWebhookRegistrationResponse(webhookId, tenantId, sourceSystem, url, events, "ACTIVE", registeredAt);
-    }
-  }
 }

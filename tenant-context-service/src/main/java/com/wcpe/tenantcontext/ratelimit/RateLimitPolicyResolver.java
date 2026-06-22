@@ -6,9 +6,9 @@ import java.time.Instant;
 import java.util.Optional;
 
 public class RateLimitPolicyResolver {
-    private final InMemoryRateLimitPolicyStore store;
+    private final RateLimitPolicyStore store;
 
-    public RateLimitPolicyResolver(InMemoryRateLimitPolicyStore store) {
+    public RateLimitPolicyResolver(RateLimitPolicyStore store) {
         if (store == null) {
             throw new RateLimitPolicyException("RATE_LIMIT_POLICY_INVALID", "policy store is required");
         }

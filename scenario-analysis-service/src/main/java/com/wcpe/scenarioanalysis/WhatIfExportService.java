@@ -31,7 +31,7 @@ public class WhatIfExportService {
   private final Clock clock;
 
   public WhatIfExportService() {
-    this(new InMemoryExportRepository(), new InMemoryExportStorage(), Clock.systemUTC());
+    throw FailClosedPersistence.notConfigured("what-if export store");
   }
 
   WhatIfExportService(ExportRepository repository, ExportStorage storage, Clock clock) {
@@ -416,70 +416,6 @@ public class WhatIfExportService {
     String store(String tenantId, UUID exportId, byte[] content, String format);
 
     Optional<byte[]> read(String storageUri);
-  }
-
-  public static class InMemoryExportRepository implements ExportRepository {
-    private final Map<String, StoredExport> exportsByTenantAndId = new ConcurrentHashMap<>();
-    private final Map<String, StoredExport> exportsByTenantAndIdempotency = new ConcurrentHashMap<>();
-
-    @Override
-    public Optional<StoredExport> findByIdempotencyKeyHash(String tenantId, String idempotencyKeyHash) {
-      return Optional.ofNullable(exportsByTenantAndIdempotency.get(key(tenantId, idempotencyKeyHash)));
-    }
-
-    @Override
-    public Optional<StoredExport> findByExportId(String tenantId, UUID exportId) {
-      return Optional.ofNullable(exportsByTenantAndId.get(key(tenantId, exportId.toString())));
-    }
-
-    @Override
-    public void save(StoredExport export) {
-      exportsByTenantAndId.put(key(export.tenantId(), export.exportId().toString()), export);
-      exportsByTenantAndIdempotency.put(key(export.tenantId(), export.idempotencyKeyHash()), export);
-    }
-
-    @Override
-    public void update(StoredExport current, ExportResponse response, ExportEvent event) {
-      List<ExportEvent> events = new ArrayList<>(current.events());
-      events.add(event);
-      StoredExport updated = new StoredExport(
-          current.tenantId(),
-          current.exportId(),
-          current.requestHash(),
-          current.idempotencyKeyHash(),
-          current.createdBy(),
-          response,
-          current.content(),
-          List.copyOf(events),
-          current.createdAt());
-      exportsByTenantAndId.put(key(updated.tenantId(), updated.exportId().toString()), updated);
-      exportsByTenantAndIdempotency.put(key(updated.tenantId(), updated.idempotencyKeyHash()), updated);
-    }
-
-    public int size() {
-      return exportsByTenantAndId.size();
-    }
-
-    private static String key(String tenantId, String id) {
-      return tenantId + ':' + id;
-    }
-  }
-
-  public static class InMemoryExportStorage implements ExportStorage {
-    private final Map<String, byte[]> contentByUri = new LinkedHashMap<>();
-
-    @Override
-    public String store(String tenantId, UUID exportId, byte[] content, String format) {
-      String uri = "memory://what-if-export/" + tenantId + '/' + exportId + '.' + format.toLowerCase();
-      contentByUri.put(uri, content.clone());
-      return uri;
-    }
-
-    @Override
-    public Optional<byte[]> read(String storageUri) {
-      byte[] content = contentByUri.get(storageUri);
-      return content == null ? Optional.empty() : Optional.of(content.clone());
-    }
   }
 
   public static class ValidationException extends RuntimeException {

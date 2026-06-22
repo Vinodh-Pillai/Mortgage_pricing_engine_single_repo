@@ -27,7 +27,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class CompanyMarginPolicyServiceTest {
-  private final CompanyMarginPolicyService service = new CompanyMarginPolicyService(
+  private final CompanyMarginPolicyService service = MarginServiceTestStores.companyMarginPolicyService(
       Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC));
 
   @Test

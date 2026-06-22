@@ -16,7 +16,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -26,8 +25,6 @@ public class PpeMigrationService {
     private static final Set<String> SUPPORTED_FORMATS = Set.of("JSON", "YAML");
 
     private final ObjectMapper mapper;
-    private final Map<UUID, Map<String, StoredImport>> importsByTenant = new ConcurrentHashMap<>();
-    private final Map<UUID, List<AuditEvent>> auditByTenant = new ConcurrentHashMap<>();
 
     public PpeMigrationService(ObjectMapper mapper) {
         this.mapper = mapper;
@@ -42,50 +39,27 @@ public class PpeMigrationService {
         String state = loaded ? "DRAFT_VALIDATED" : safeRequest.dryRun() && report.blockers().isEmpty() ? "DRY_RUN_VALIDATED" : "VALIDATION_BLOCKED";
         report = report.withDraftState(state);
         List<IntegrationCommand> commands = report.blockers().isEmpty() ? integrationCommands(tenantId, importId, report.mappings()) : List.of();
+        List<AuditEvent> auditEvents = new ArrayList<>();
 
-        recordAudit(tenantId, new AuditEvent("IMPORT_VALIDATE", importId, safeRequest.requestedBy(), Instant.now(),
+        recordAudit(auditEvents, new AuditEvent("IMPORT_VALIDATE", importId, safeRequest.requestedBy(), Instant.now(),
                 safeRequest.sourceSystem(), safeRequest.sourceVersion(), safeRequest.dryRun(), report.validationHash(),
                 report.blockers().isEmpty() ? "PASS" : "BLOCKED", List.of("migration-service")));
         if (loaded) {
-            importsByTenant.computeIfAbsent(tenantId, ignored -> new ConcurrentHashMap<>())
-                    .put(importId, new StoredImport(importId, safeRequest, report, commands, false));
-            recordAudit(tenantId, new AuditEvent("IMPORT_LOAD", importId, safeRequest.requestedBy(), Instant.now(),
-                    safeRequest.sourceSystem(), safeRequest.sourceVersion(), false, report.validationHash(), "DRAFT_LOADED",
-                    List.of("governance-service", "catalog-service", "adjustment-service", "rate-feed-service")));
-        } else {
-            importsByTenant.computeIfAbsent(tenantId, ignored -> new ConcurrentHashMap<>())
-                    .put(importId, new StoredImport(importId, safeRequest, report, commands, false));
+            throw new MigrationException("PERSISTENT_IMPORT_STORE_REQUIRED");
         }
-        return new ImportResponse(importId, report, loaded, safeRequest.dryRun(), commands, auditTrail(tenantId).events());
+        return new ImportResponse(importId, report, false, safeRequest.dryRun(), commands, List.copyOf(auditEvents));
     }
 
     public ValidationReport validationReport(UUID tenantId, String importId) {
         requireTenant(tenantId);
-        StoredImport stored = storedImport(tenantId, importId);
-        return stored.report();
+        requireImportId(importId);
+        throw new MigrationException("PERSISTENT_IMPORT_STORE_REQUIRED");
     }
 
     public PublishRequestResult requestPublish(UUID tenantId, String importId) {
         requireTenant(tenantId);
-        StoredImport stored = storedImport(tenantId, importId);
-        ValidationReport report = stored.report();
-        if (!report.blockers().isEmpty()) {
-            recordAudit(tenantId, new AuditEvent("PUBLISH_REQUEST", importId, stored.request().requestedBy(), Instant.now(),
-                    stored.request().sourceSystem(), stored.request().sourceVersion(), stored.request().dryRun(), report.validationHash(),
-                    "REJECTED_VALIDATION_BLOCKED", List.of("governance-service")));
-            return new PublishRequestResult(importId, "REJECTED_VALIDATION_BLOCKED", false,
-                    List.of(new IntegrationCommand("governance-service", "reject-publish-request", importId,
-                            Map.of("reason", "validation blockers must be resolved before governance approval"))),
-                    List.copyOf(report.blockers()));
-        }
-        StoredImport updated = stored.withPublishRequested(true);
-        importsByTenant.get(tenantId).put(importId, updated);
-        IntegrationCommand governanceCommand = new IntegrationCommand("governance-service", "request-draft-approval", importId,
-                Map.of("draftState", report.draftState(), "pricingUsable", false, "validationHash", report.validationHash()));
-        recordAudit(tenantId, new AuditEvent("PUBLISH_REQUEST", importId, stored.request().requestedBy(), Instant.now(),
-                stored.request().sourceSystem(), stored.request().sourceVersion(), stored.request().dryRun(), report.validationHash(),
-                "PENDING_GOVERNANCE_APPROVAL", List.of("governance-service")));
-        return new PublishRequestResult(importId, "PENDING_GOVERNANCE_APPROVAL", false, List.of(governanceCommand), List.of());
+        requireImportId(importId);
+        throw new MigrationException("PERSISTENT_IMPORT_STORE_REQUIRED");
     }
 
     public ExportResponse exportPackage(UUID tenantId, ExportRequest request) {
@@ -110,16 +84,17 @@ public class PpeMigrationService {
         document.put("eligibilityMatrices", artifacts.stream().filter(a -> "eligibilityMatrix".equals(a.artifactType())).toList());
         String portable = "YAML".equals(format) ? toYaml(document) : toJson(document);
         String hash = stableHash(document, portable);
-        recordAudit(tenantId, new AuditEvent("EXPORT_CREATE", exportId, safeRequest.requestedBy(), Instant.now(), targetSystem,
+        List<AuditEvent> auditEvents = new ArrayList<>();
+        recordAudit(auditEvents, new AuditEvent("EXPORT_CREATE", exportId, safeRequest.requestedBy(), Instant.now(), targetSystem,
                 CANONICAL_VERSION, false, hash, warnings.isEmpty() ? "CREATED" : "CREATED_WITH_WARNINGS",
                 List.of("catalog-service", "adjustment-service", "rate-feed-service")));
         return new ExportResponse(exportId, targetSystem, format, CANONICAL_VERSION, artifacts, portable, hash,
-                warnings, auditTrail(tenantId).events());
+                warnings, List.copyOf(auditEvents));
     }
 
     public AuditTrail auditTrail(UUID tenantId) {
         requireTenant(tenantId);
-        return new AuditTrail(List.copyOf(auditByTenant.getOrDefault(tenantId, List.of())));
+        throw new MigrationException("PERSISTENT_AUDIT_STORE_REQUIRED");
     }
 
     private ValidationReport validate(UUID tenantId, String importId, ImportRequest request) {
@@ -335,21 +310,19 @@ public class PpeMigrationService {
         return Objects.toString(value, "");
     }
 
-    private StoredImport storedImport(UUID tenantId, String importId) {
-        StoredImport stored = importsByTenant.getOrDefault(tenantId, Map.of()).get(importId);
-        if (stored == null) {
-            throw new MigrationException("IMPORT_NOT_FOUND");
-        }
-        return stored;
-    }
-
-    private void recordAudit(UUID tenantId, AuditEvent event) {
-        auditByTenant.computeIfAbsent(tenantId, ignored -> new ArrayList<>()).add(event);
+    private void recordAudit(List<AuditEvent> auditEvents, AuditEvent event) {
+        auditEvents.add(event);
     }
 
     private static void requireTenant(UUID tenantId) {
         if (tenantId == null) {
             throw new MigrationException("TENANT_ID_REQUIRED");
+        }
+    }
+
+    private static void requireImportId(String importId) {
+        if (importId == null || importId.isBlank()) {
+            throw new MigrationException("IMPORT_ID_REQUIRED");
         }
     }
 
@@ -394,13 +367,6 @@ public class PpeMigrationService {
             return HexFormat.of().formatHex(digest.digest());
         } catch (NoSuchAlgorithmException ex) {
             throw new IllegalStateException("SHA-256 unavailable", ex);
-        }
-    }
-
-    private record StoredImport(String importId, ImportRequest request, ValidationReport report,
-            List<IntegrationCommand> commands, boolean publishRequested) {
-        StoredImport withPublishRequested(boolean requested) {
-            return new StoredImport(importId, request, report, commands, requested);
         }
     }
 

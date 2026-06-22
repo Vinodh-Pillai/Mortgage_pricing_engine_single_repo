@@ -3,7 +3,7 @@ package com.wcpe.adjustment;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.wcpe.adjustment.AdjustmentRuleBook.RuleBookSelector;
-import com.wcpe.adjustment.RuleBookResolver.InMemoryRuleBookRepository;
+import com.wcpe.adjustment.RuleBookResolver.JdbcRuleBookRepository;
 import com.wcpe.adjustment.overlay.OverlayInputs;
 import com.wcpe.adjustment.overlay.OverlayPolicyType;
 import com.wcpe.adjustment.overlay.OverlayRule;
@@ -16,6 +16,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import javax.sql.DataSource;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -31,7 +33,14 @@ public class AdjustmentService {
     private final Cache<IndexCacheKey, RuleIndexer.RuleBookIndex> indexCache;
 
     public AdjustmentService() {
-        this(new RuleBookResolver(new InMemoryRuleBookRepository(List.of())));
+        throw new IllegalStateException("AdjustmentService requires a JDBC DataSource-backed rule-book repository in production");
+    }
+
+    @Autowired
+    public AdjustmentService(DataSource dataSource) {
+        this(new RuleBookResolver(new JdbcRuleBookRepository(dataSource)),
+            new RuleIndexer(),
+            OverlayRuleRepository.failClosed("overlay rule persistence schema is not configured; refusing to use a volatile overlay store of record"));
     }
 
     public AdjustmentService(RuleBookResolver resolver) {
@@ -40,6 +49,10 @@ public class AdjustmentService {
 
     public AdjustmentService(RuleBookResolver resolver, RuleIndexer indexer) {
         this(resolver, indexer, new RuleEvaluationEngine(indexer, new PrecisionNormalizer()));
+    }
+
+    public AdjustmentService(RuleBookResolver resolver, RuleIndexer indexer, OverlayRuleRepository overlayRuleRepository) {
+        this(resolver, indexer, new RuleEvaluationEngine(indexer, new PrecisionNormalizer()), overlayRuleRepository);
     }
 
     public AdjustmentService(RuleBookResolver resolver, RuleIndexer indexer, RuleEvaluationEngine engine) {
@@ -76,9 +89,14 @@ public class AdjustmentService {
     private AdjustmentCalculationResult appendOverlayAdjustments(AdjustmentCalculationRequest request,
                                                                  AdjustmentCalculationResult baseResult) {
         OverlayInputs inputs = overlayInputs(request);
-        List<OverlayRule> overlays = overlayRuleRepository.findApplicable(inputs).stream()
-            .filter(rule -> rule.type().waterfallPosition() == OverlayPolicyType.WaterfallPosition.LLPA_ADJUSTMENT)
-            .toList();
+        List<OverlayRule> overlays;
+        try {
+            overlays = overlayRuleRepository.findApplicable(inputs).stream()
+                .filter(rule -> rule.type().waterfallPosition() == OverlayPolicyType.WaterfallPosition.LLPA_ADJUSTMENT)
+                .toList();
+        } catch (IllegalStateException ex) {
+            return blocker(request, "OVERLAY_PERSISTENCE_NOT_CONFIGURED", ex.getMessage());
+        }
         if (overlays.isEmpty()) {
             return baseResult;
         }

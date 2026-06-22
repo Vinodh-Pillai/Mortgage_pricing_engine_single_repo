@@ -24,26 +24,27 @@ public final class LoCompensationService {
   public final AtomicInteger compSensitiveViewDeniedTotal = new AtomicInteger();
 
   private final Clock clock;
-  private final Map<PlanKey, CompensationPlan> plans = new HashMap<>();
-  private final Map<String, IdempotencyRecord> idempotencyReceipts = new HashMap<>();
-  private final List<CompensationAssignment> assignments = new ArrayList<>();
-  private final List<Object> outbox = new ArrayList<>();
-  private final List<AuditRecord> auditRecords = new ArrayList<>();
-  private final Map<String, String> resultVisibility = new HashMap<>();
+  private final Store store;
 
   public LoCompensationService(Clock clock) {
+    this(clock, Store.failClosed("LoCompensationService"));
+  }
+
+  LoCompensationService(Clock clock, Store store) {
     this.clock = Objects.requireNonNull(clock, "clock is required");
+    this.store = Objects.requireNonNull(store, "store is required");
   }
 
   public CommandReceipt createDraftPlan(String tenantId, String requestId, String actorId, String idempotencyKey,
       String correlationId, String name, int versionNumber, List<CompensationRule> rules) {
+    requireDurableStoreOrExplicitTestHarness();
     requireCommand(tenantId, actorId, idempotencyKey, correlationId);
     requireText(requestId, "requestId");
     requireText(name, "name");
     List<CompensationRule> safeRules = List.copyOf(Objects.requireNonNull(rules, "rules is required"));
     String requestHash = requestHash(requestId, actorId, name, versionNumber, safeRules);
     String idemKey = idempotencyKey(tenantId, idempotencyKey);
-    IdempotencyRecord existing = idempotencyReceipts.get(idemKey);
+    IdempotencyRecord existing = store.idempotencyReceipts().get(idemKey);
     if (existing != null) {
       if (!existing.requestHash().equals(requestHash)) {
         throw new CompException("IDEMPOTENCY_CONFLICT");
@@ -58,11 +59,11 @@ public final class LoCompensationService {
         stableHash(safeRules), CompPlanStatus.DRAFT.name(), null, null, safeRules);
     CompensationPlan plan = new CompensationPlan(tenantId, planId, LO_PLAN_TYPE, name, CompPlanStatus.DRAFT,
         List.of(version), actorId, actorId, now, now);
-    plans.put(new PlanKey(tenantId, planId), plan);
+    store.plans().put(new PlanKey(tenantId, planId), plan);
     CommandReceipt receipt = new CommandReceipt(planId, plan.status(), version.versionNumber(), correlationId, List.of(),
         "audit:" + planId);
-    idempotencyReceipts.put(idemKey, new IdempotencyRecord(requestHash, receipt));
-    auditRecords.add(AuditRecord.completed(tenantId, planId, actorId, correlationId, "LO_COMP_DRAFT_CREATED", clock));
+    store.idempotencyReceipts().put(idemKey, new IdempotencyRecord(requestHash, receipt));
+    store.auditRecords().add(AuditRecord.completed(tenantId, planId, actorId, correlationId, "LO_COMP_DRAFT_CREATED", clock));
     return receipt;
   }
 
@@ -82,7 +83,7 @@ public final class LoCompensationService {
     CompensationPlanVersion current = approved.currentVersion();
     CompensationPlanVersion approvedVersion = current.withApproval(CompPlanStatus.APPROVED.name(), actorId,
         Instant.now(clock));
-    plans.put(new PlanKey(tenantId, planId), approved.withVersion(approvedVersion, actorId, Instant.now(clock)));
+    store.plans().put(new PlanKey(tenantId, planId), approved.withVersion(approvedVersion, actorId, Instant.now(clock)));
     return receipt;
   }
 
@@ -98,11 +99,11 @@ public final class LoCompensationService {
     Instant now = Instant.now(clock);
     CompensationPlanVersion version = plan.currentVersion().withApproval(CompPlanStatus.PUBLISHED.name(), actorId, now);
     CompensationPlan published = plan.withVersion(version, actorId, now).withStatus(CompPlanStatus.PUBLISHED, actorId, now);
-    plans.put(new PlanKey(tenantId, planId), published);
+    store.plans().put(new PlanKey(tenantId, planId), published);
     CompPlanPublishedEvent event = new CompPlanPublishedEvent(tenantId, planId, version.versionId(),
         version.configHash(), actorId, correlationId, now);
-    outbox.add(event);
-    auditRecords.add(AuditRecord.completed(tenantId, planId, actorId, correlationId, "LO_COMP_PUBLISHED", clock));
+    store.outbox().add(event);
+    store.auditRecords().add(AuditRecord.completed(tenantId, planId, actorId, correlationId, "LO_COMP_PUBLISHED", clock));
     return new CommandReceipt(planId, CompPlanStatus.PUBLISHED, version.versionNumber(), correlationId, List.of(event),
         "audit:" + planId);
   }
@@ -123,7 +124,7 @@ public final class LoCompensationService {
     }
     String requestHash = requestHash(planId, versionNumber, assignment);
     String idemKey = idempotencyKey(tenantId, idempotencyKey);
-    IdempotencyRecord existing = idempotencyReceipts.get(idemKey);
+    IdempotencyRecord existing = store.idempotencyReceipts().get(idemKey);
     if (existing != null) {
       if (!existing.requestHash().equals(requestHash)) {
         throw new CompException("IDEMPOTENCY_CONFLICT");
@@ -134,18 +135,18 @@ public final class LoCompensationService {
     validateAssignment(changed);
     if (assignmentOverlaps(tenantId, changed)) {
       compAssignmentOverlapRejectedTotal.incrementAndGet();
-      auditRecords.add(AuditRecord.completed(tenantId, planId, actorId, correlationId, "LO_COMP_ASSIGNMENT_OVERLAP_REJECTED", clock));
+      store.auditRecords().add(AuditRecord.completed(tenantId, planId, actorId, correlationId, "LO_COMP_ASSIGNMENT_OVERLAP_REJECTED", clock));
       throw new CompException("COMP_ASSIGNMENT_OVERLAP");
     }
-    assignments.add(changed);
+    store.assignments().add(changed);
     CompAssignmentChangedEvent event = new CompAssignmentChangedEvent(tenantId, changed.assignmentId(),
         version.versionId(), changed.payeeType(), changed.payeeId(), scopeHash(changed), actorId, correlationId,
         Instant.now(clock));
-    outbox.add(event);
-    auditRecords.add(AuditRecord.completed(tenantId, planId, actorId, correlationId, "LO_COMP_ASSIGNMENT_CREATED", clock));
+    store.outbox().add(event);
+    store.auditRecords().add(AuditRecord.completed(tenantId, planId, actorId, correlationId, "LO_COMP_ASSIGNMENT_CREATED", clock));
     CommandReceipt receipt = new CommandReceipt(planId, plan.status(), version.versionNumber(), correlationId,
         List.of(event), "audit:" + planId);
-    idempotencyReceipts.put(idemKey, new IdempotencyRecord(requestHash, receipt));
+    store.idempotencyReceipts().put(idemKey, new IdempotencyRecord(requestHash, receipt));
     return receipt;
   }
 
@@ -190,16 +191,17 @@ public final class LoCompensationService {
         capAmount, floorAmount, priceAfterComp, rule.reasonCode(), replayHash(rule, priceBeforeComp, bounded, priceAfterComp));
     CompCalculationResult result = new CompCalculationResult(planId, version.versionId(), basis, rawAmount, floorAmount,
         capAmount, bounded, priceImpactBps, priceAfterComp, List.of(step), null);
-    resultVisibility.put(step.replayHash(), rule.visibilityClassification());
+    store.resultVisibility().put(step.replayHash(), rule.visibilityClassification());
     return result;
   }
 
   public Optional<CompensationAssignment> resolveActiveAssignment(String tenantId, String payeeId, String branchId,
       String channel, String productFamily, Instant effectiveAt) {
+    requireDurableStoreOrExplicitTestHarness();
     requireText(tenantId, "tenantId");
     requireText(payeeId, "payeeId");
     Objects.requireNonNull(effectiveAt, "effectiveAt is required");
-    List<CompensationAssignment> matches = assignments.stream()
+    List<CompensationAssignment> matches = store.assignments().stream()
         .filter(assignment -> LO_PAYEE_TYPE.equals(assignment.payeeType()))
         .filter(assignment -> assignment.payeeId().equals(payeeId))
         .filter(assignment -> contains(assignment.effectiveFrom(), assignment.effectiveTo(), effectiveAt))
@@ -220,7 +222,7 @@ public final class LoCompensationService {
       return compResult;
     }
     String classification = compResult.steps().stream()
-        .map(step -> resultVisibility.get(step.replayHash()))
+        .map(step -> store.resultVisibility().get(step.replayHash()))
         .filter(Objects::nonNull)
         .findFirst()
         .orElseGet(() -> compResult.steps().stream()
@@ -241,19 +243,27 @@ public final class LoCompensationService {
   }
 
   public Optional<CompensationPlan> findPlan(String tenantId, String planId) {
-    return Optional.ofNullable(plans.get(new PlanKey(tenantId, planId)));
+    requireDurableStoreOrExplicitTestHarness();
+    return Optional.ofNullable(store.plans().get(new PlanKey(tenantId, planId)));
   }
 
   public List<CompensationAssignment> assignments() {
-    return List.copyOf(assignments);
+    requireDurableStoreOrExplicitTestHarness();
+    return List.copyOf(store.assignments());
   }
 
   public List<Object> outboxEvents() {
-    return List.copyOf(outbox);
+    requireDurableStoreOrExplicitTestHarness();
+    return List.copyOf(store.outbox());
   }
 
   public List<AuditRecord> auditRecords() {
-    return List.copyOf(auditRecords);
+    requireDurableStoreOrExplicitTestHarness();
+    return List.copyOf(store.auditRecords());
+  }
+
+  private void requireDurableStoreOrExplicitTestHarness() {
+    store.requireAvailable();
   }
 
   private CommandReceipt transition(String tenantId, String planId, String actorId, String correlationId,
@@ -266,8 +276,8 @@ public final class LoCompensationService {
       throw new CompException("COMP_VERSION_STALE");
     }
     CompensationPlan changed = plan.withStatus(to, actorId, Instant.now(clock));
-    plans.put(new PlanKey(tenantId, planId), changed);
-    auditRecords.add(AuditRecord.completed(tenantId, planId, actorId, correlationId, action, clock));
+    store.plans().put(new PlanKey(tenantId, planId), changed);
+    store.auditRecords().add(AuditRecord.completed(tenantId, planId, actorId, correlationId, action, clock));
     return new CommandReceipt(planId, to, changed.currentVersion().versionNumber(), correlationId, List.of(),
         "audit:" + planId);
   }
@@ -297,19 +307,19 @@ public final class LoCompensationService {
     if (valueRef instanceof String ref && hasText(ref)) {
       return resolveRequired(configResolver, ref, tenantId, planId, auditAction);
     }
-    auditRecords.add(AuditRecord.completed(tenantId, planId, "system", "missing-config", auditAction, clock));
+    store.auditRecords().add(AuditRecord.completed(tenantId, planId, "system", "missing-config", auditAction, clock));
     throw new CompException("POLICY_NOT_SATISFIED");
   }
 
   private BigDecimal resolveRequired(ConfigResolver configResolver, String ref, String tenantId, String planId,
       String auditAction) {
     if (ref.startsWith("prohibited.") && !configResolver.allowsProhibitedTerm(ref)) {
-      auditRecords.add(AuditRecord.completed(tenantId, planId, "system", "prohibited-term", auditAction, clock));
+      store.auditRecords().add(AuditRecord.completed(tenantId, planId, "system", "prohibited-term", auditAction, clock));
       throw new CompException("COMP_BASIS_INVALID");
     }
     Optional<BigDecimal> value = configResolver.resolve(ref);
     if (value.isEmpty()) {
-      auditRecords.add(AuditRecord.completed(tenantId, planId, "system", "missing-config", auditAction, clock));
+      store.auditRecords().add(AuditRecord.completed(tenantId, planId, "system", "missing-config", auditAction, clock));
       if (ref.startsWith("prohibited.")) {
         throw new CompException("COMP_BASIS_INVALID");
       }
@@ -334,7 +344,7 @@ public final class LoCompensationService {
     Object loanAmountValue = priceContext.get("loanAmount");
     BigDecimal loanAmount = numericContextValue(loanAmountValue);
     if (loanAmount == null || loanAmount.compareTo(BigDecimal.ZERO) <= 0) {
-      auditRecords.add(AuditRecord.completed(tenantId, planId, "system", "missing-config", "LO_COMP_LOAN_AMOUNT_MISSING", clock));
+      store.auditRecords().add(AuditRecord.completed(tenantId, planId, "system", "missing-config", "LO_COMP_LOAN_AMOUNT_MISSING", clock));
       throw new CompException("POLICY_NOT_SATISFIED");
     }
     return amount.divide(loanAmount, 10, RoundingMode.HALF_UP).movePointRight(2);
@@ -382,7 +392,7 @@ public final class LoCompensationService {
   }
 
   private boolean assignmentOverlaps(String tenantId, CompensationAssignment candidate) {
-    return assignments.stream()
+    return store.assignments().stream()
         .filter(assignment -> assignmentTenantMatches(tenantId, assignment))
         .filter(assignment -> LO_PAYEE_TYPE.equals(assignment.payeeType()))
         .filter(assignment -> assignment.payeeId().equals(candidate.payeeId()))
@@ -392,7 +402,7 @@ public final class LoCompensationService {
   }
 
   private boolean assignmentTenantMatches(String tenantId, CompensationAssignment assignment) {
-    return plans.values().stream()
+    return store.plans().values().stream()
         .filter(plan -> plan.tenantId().equals(tenantId))
         .flatMap(plan -> plan.versions().stream())
         .anyMatch(version -> version.versionId().equals(assignment.planVersionId()));
@@ -400,7 +410,7 @@ public final class LoCompensationService {
 
   private void rejectPublishedOverlap(CompensationPlan candidate) {
     CompensationPlanVersion candidateVersion = candidate.currentVersion();
-    boolean overlap = plans.values().stream()
+    boolean overlap = store.plans().values().stream()
         .filter(plan -> !plan.planId().equals(candidate.planId()))
         .filter(plan -> plan.tenantId().equals(candidate.tenantId()))
         .filter(plan -> LO_PLAN_TYPE.equals(plan.planType()))
@@ -414,8 +424,9 @@ public final class LoCompensationService {
   }
 
   private CompensationPlan findById(String tenantId, String planId) {
+    requireDurableStoreOrExplicitTestHarness();
     requireText(planId, "planId");
-    return Optional.ofNullable(plans.get(new PlanKey(tenantId, planId))).orElseThrow(() -> new CompException("NOT_FOUND"));
+    return Optional.ofNullable(store.plans().get(new PlanKey(tenantId, planId))).orElseThrow(() -> new CompException("NOT_FOUND"));
   }
 
   private static CompensationPlanVersion versionByNumber(CompensationPlan plan, int versionNumber) {
@@ -494,9 +505,38 @@ public final class LoCompensationService {
         before.stripTrailingZeros(), amount.stripTrailingZeros(), after.stripTrailingZeros()));
   }
 
-  private record PlanKey(String tenantId, String planId) {}
+  interface Store {
+    Map<PlanKey, CompensationPlan> plans();
+    Map<String, IdempotencyRecord> idempotencyReceipts();
+    List<CompensationAssignment> assignments();
+    List<Object> outbox();
+    List<AuditRecord> auditRecords();
+    Map<String, String> resultVisibility();
 
-  private record IdempotencyRecord(String requestHash, CommandReceipt receipt) {}
+    default void requireAvailable() {}
+
+    static Store failClosed(String component) {
+      return new Store() {
+        @Override public void requireAvailable() {
+          ProcessLocalStatePolicy.requireDurableStoreOrExplicitTestHarness(false, component);
+        }
+        @Override public Map<PlanKey, CompensationPlan> plans() { return unavailable(); }
+        @Override public Map<String, IdempotencyRecord> idempotencyReceipts() { return unavailable(); }
+        @Override public List<CompensationAssignment> assignments() { return unavailable(); }
+        @Override public List<Object> outbox() { return unavailable(); }
+        @Override public List<AuditRecord> auditRecords() { return unavailable(); }
+        @Override public Map<String, String> resultVisibility() { return unavailable(); }
+        private <T> T unavailable() {
+          requireAvailable();
+          throw new AssertionError("unreachable");
+        }
+      };
+    }
+  }
+
+  record PlanKey(String tenantId, String planId) {}
+
+  record IdempotencyRecord(String requestHash, CommandReceipt receipt) {}
 
   public enum CompBasis { LOAN_AMOUNT, PRICE_POINTS, FIXED_DOLLARS }
 

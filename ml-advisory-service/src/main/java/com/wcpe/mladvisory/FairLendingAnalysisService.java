@@ -14,7 +14,12 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+import javax.sql.DataSource;
 
 public final class FairLendingAnalysisService {
   public static final String PRICING_OUTCOME_RECORDED_EVENT = "PricingOutcomeRecorded.v1";
@@ -25,21 +30,36 @@ public final class FairLendingAnalysisService {
   public static final int MINIMUM_GROUP_SAMPLE = 30;
 
   private final FairLendingOutcomeRepository repository;
-  private final Map<UUID, FairLendingReport> reports = new ConcurrentHashMap<>();
-  private final List<FairLendingEvent> outboxEvents = new ArrayList<>();
+  private final FairLendingEventRepository eventRepository;
+  private final boolean durableReportLookupAvailable;
+  private final Map<UUID, FairLendingReport> reports = new HashMap<>();
 
   public FairLendingAnalysisService() {
-    this(new InMemoryFairLendingOutcomeRepository());
+    throw failClosedMissingPersistence();
+  }
+
+  public FairLendingAnalysisService(DataSource dataSource) {
+    this(new JdbcFairLendingOutcomeRepository(dataSource), new JdbcFairLendingEventRepository(dataSource), false);
   }
 
   public FairLendingAnalysisService(FairLendingOutcomeRepository repository) {
+    throw failClosedMissingPersistence();
+  }
+
+  FairLendingAnalysisService(FairLendingOutcomeRepository repository, FairLendingEventRepository eventRepository) {
+    this(repository, eventRepository, true);
+  }
+
+  FairLendingAnalysisService(FairLendingOutcomeRepository repository, FairLendingEventRepository eventRepository, boolean durableReportLookupAvailable) {
     this.repository = Objects.requireNonNull(repository);
+    this.eventRepository = Objects.requireNonNull(eventRepository);
+    this.durableReportLookupAvailable = durableReportLookupAvailable;
   }
 
   public PricingOutcome recordPricingOutcome(PricingOutcome outcome) {
     PricingOutcome safe = requireOutcome(outcome);
     repository.save(safe);
-    outboxEvents.add(new FairLendingEvent(PRICING_OUTCOME_RECORDED_EVENT, safe.tenantId(), safe.outcomeId().toString(), safe.createdAt()));
+    eventRepository.save(new FairLendingEvent(PRICING_OUTCOME_RECORDED_EVENT, safe.tenantId(), safe.outcomeId().toString(), safe.createdAt()));
     return safe;
   }
 
@@ -102,19 +122,25 @@ public final class FairLendingAnalysisService {
 
     UUID reportId = UUID.nameUUIDFromBytes((safe.tenantId() + ":" + safe.startDate() + ":" + safe.endDate() + ":" + regressions.hashCode() + ":" + airTables.hashCode()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
     FairLendingReport report = new FairLendingReport(reportId, safe.tenantId(), safe.startDate(), safe.endDate(), periodOutcomes.size(), regressions, airTables, violations, recommendations(violations, dataQuality), distinct(dataQuality), Instant.now());
-    reports.put(reportId, report);
-    outboxEvents.add(new FairLendingEvent(ANALYSIS_COMPLETED_EVENT, safe.tenantId(), reportId.toString(), report.createdAt()));
+    if (durableReportLookupAvailable) reports.put(reportId, report);
+    eventRepository.save(new FairLendingEvent(ANALYSIS_COMPLETED_EVENT, safe.tenantId(), reportId.toString(), report.createdAt()));
     for (FairLendingViolation violation : violations) {
-      outboxEvents.add(new FairLendingEvent(VIOLATION_DETECTED_EVENT, safe.tenantId(), reportId + ":" + violation.outcome() + ":" + violation.protectedClass() + ":" + violation.group(), report.createdAt()));
+      eventRepository.save(new FairLendingEvent(VIOLATION_DETECTED_EVENT, safe.tenantId(), reportId + ":" + violation.outcome() + ":" + violation.protectedClass() + ":" + violation.group(), report.createdAt()));
     }
     return report;
   }
 
   public Optional<FairLendingReport> report(UUID reportId) {
+    if (!durableReportLookupAvailable) {
+      throw new IllegalStateException("Fair-lending report persistence schema is not defined; durable report lookup is disabled rather than using memory fallback.");
+    }
     return Optional.ofNullable(reports.get(reportId));
   }
 
   public List<FairLendingViolation> violations(String tenantId) {
+    if (!durableReportLookupAvailable) {
+      throw new IllegalStateException("Fair-lending violation report persistence schema is not defined; durable violation lookup is disabled rather than using memory fallback.");
+    }
     return reports.values().stream()
         .filter(report -> tenantId == null || report.tenantId().toString().equals(tenantId))
         .flatMap(report -> report.violations().stream())
@@ -123,7 +149,7 @@ public final class FairLendingAnalysisService {
   }
 
   public List<FairLendingEvent> outboxEvents() {
-    return List.copyOf(outboxEvents);
+    return eventRepository.findAll();
   }
 
   public static AIRTable calculateAirTable(List<PricingOutcome> outcomes, OutcomeMeasure outcome, ProtectedClass protectedClass, double favorableThreshold) {
@@ -427,14 +453,156 @@ public final class FairLendingAnalysisService {
     List<PricingOutcome> findByTenantAndDateRange(UUID tenantId, LocalDate startDate, LocalDate endDate);
   }
 
-  public static final class InMemoryFairLendingOutcomeRepository implements FairLendingOutcomeRepository {
-    private final List<PricingOutcome> outcomes = new ArrayList<>();
-    @Override public void save(PricingOutcome outcome) { outcomes.add(requireOutcome(outcome)); }
-    @Override public List<PricingOutcome> findByTenantAndDateRange(UUID tenantId, LocalDate startDate, LocalDate endDate) {
-      return outcomes.stream().filter(outcome -> outcome.tenantId().equals(tenantId)).filter(outcome -> {
-        LocalDate date = outcome.pricingDate().atZone(ZoneOffset.UTC).toLocalDate();
-        return (date.isEqual(startDate) || date.isAfter(startDate)) && (date.isEqual(endDate) || date.isBefore(endDate));
-      }).toList();
+  public interface FairLendingEventRepository {
+    void save(FairLendingEvent event);
+    List<FairLendingEvent> findAll();
+  }
+
+  public static final class JdbcFairLendingOutcomeRepository implements FairLendingOutcomeRepository {
+    private final DataSource dataSource;
+
+    public JdbcFairLendingOutcomeRepository(DataSource dataSource) {
+      this.dataSource = Objects.requireNonNull(dataSource);
     }
+
+    @Override public void save(PricingOutcome outcome) {
+      PricingOutcome safe = requireOutcome(outcome);
+      try (Connection connection = dataSource.getConnection();
+          PreparedStatement statement = connection.prepareStatement(
+              "insert into fair_lending.pricing_outcome (outcome_id, tenant_id, run_id, quote_id, scenario_id, applicant_race, applicant_ethnicity, applicant_sex, applicant_age, co_applicant_race, co_applicant_ethnicity, co_applicant_sex, fico, ltv, dti, loan_amount, loan_purpose, property_type, occupancy_type, state, channel, product_family, investor, note_rate, price, total_llpa_bps, margin_bps, lock_period_days, pricing_date, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)") ) {
+        statement.setObject(1, safe.outcomeId());
+        statement.setObject(2, safe.tenantId());
+        statement.setObject(3, safe.runId());
+        statement.setObject(4, safe.quoteId());
+        statement.setObject(5, safe.scenarioId());
+        statement.setString(6, safe.applicantRace());
+        statement.setString(7, safe.applicantEthnicity());
+        statement.setString(8, safe.applicantSex());
+        statement.setObject(9, safe.applicantAge());
+        statement.setString(10, safe.coApplicantRace());
+        statement.setString(11, safe.coApplicantEthnicity());
+        statement.setString(12, safe.coApplicantSex());
+        statement.setObject(13, safe.fico());
+        statement.setObject(14, safe.ltv());
+        statement.setObject(15, safe.dti());
+        statement.setObject(16, safe.loanAmount());
+        statement.setString(17, safe.loanPurpose());
+        statement.setString(18, safe.propertyType());
+        statement.setString(19, safe.occupancyType());
+        statement.setString(20, safe.state());
+        statement.setString(21, safe.channel());
+        statement.setString(22, safe.productFamily());
+        statement.setString(23, safe.investor());
+        statement.setObject(24, safe.noteRate());
+        statement.setObject(25, safe.price());
+        statement.setObject(26, safe.totalLlpaBps());
+        statement.setObject(27, safe.marginBps());
+        statement.setObject(28, safe.lockPeriodDays());
+        statement.setTimestamp(29, Timestamp.from(safe.pricingDate()));
+        statement.setTimestamp(30, Timestamp.from(safe.createdAt() == null ? Instant.now() : safe.createdAt()));
+        statement.executeUpdate();
+      } catch (SQLException ex) {
+        throw new IllegalStateException("Unable to persist fair-lending pricing outcome", ex);
+      }
+    }
+
+    @Override public List<PricingOutcome> findByTenantAndDateRange(UUID tenantId, LocalDate startDate, LocalDate endDate) {
+      try (Connection connection = dataSource.getConnection();
+          PreparedStatement statement = connection.prepareStatement(
+              "select * from fair_lending.pricing_outcome where tenant_id = ? and pricing_date >= ? and pricing_date < ? order by pricing_date asc, created_at asc")) {
+        statement.setObject(1, tenantId);
+        statement.setTimestamp(2, Timestamp.from(startDate.atStartOfDay().toInstant(ZoneOffset.UTC)));
+        statement.setTimestamp(3, Timestamp.from(endDate.plusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC)));
+        try (ResultSet resultSet = statement.executeQuery()) {
+          List<PricingOutcome> outcomes = new ArrayList<>();
+          while (resultSet.next()) outcomes.add(readOutcome(resultSet));
+          return List.copyOf(outcomes);
+        }
+      } catch (SQLException ex) {
+        throw new IllegalStateException("Unable to read fair-lending pricing outcomes", ex);
+      }
+    }
+
+    private PricingOutcome readOutcome(ResultSet resultSet) throws SQLException {
+      return new PricingOutcome(
+          (UUID) resultSet.getObject("outcome_id"),
+          (UUID) resultSet.getObject("tenant_id"),
+          (UUID) resultSet.getObject("run_id"),
+          (UUID) resultSet.getObject("quote_id"),
+          (UUID) resultSet.getObject("scenario_id"),
+          resultSet.getString("applicant_race"),
+          resultSet.getString("applicant_ethnicity"),
+          resultSet.getString("applicant_sex"),
+          (Integer) resultSet.getObject("applicant_age"),
+          resultSet.getString("co_applicant_race"),
+          resultSet.getString("co_applicant_ethnicity"),
+          resultSet.getString("co_applicant_sex"),
+          (Integer) resultSet.getObject("fico"),
+          doubleValue(resultSet, "ltv"),
+          doubleValue(resultSet, "dti"),
+          doubleValue(resultSet, "loan_amount"),
+          resultSet.getString("loan_purpose"),
+          resultSet.getString("property_type"),
+          resultSet.getString("occupancy_type"),
+          resultSet.getString("state"),
+          resultSet.getString("channel"),
+          resultSet.getString("product_family"),
+          resultSet.getString("investor"),
+          doubleValue(resultSet, "note_rate"),
+          doubleValue(resultSet, "price"),
+          (Integer) resultSet.getObject("total_llpa_bps"),
+          (Integer) resultSet.getObject("margin_bps"),
+          (Integer) resultSet.getObject("lock_period_days"),
+          resultSet.getTimestamp("pricing_date").toInstant(),
+          resultSet.getTimestamp("created_at").toInstant());
+    }
+
+    private Double doubleValue(ResultSet resultSet, String column) throws SQLException {
+      Number value = (Number) resultSet.getObject(column);
+      return value == null ? null : value.doubleValue();
+    }
+  }
+
+  public static final class JdbcFairLendingEventRepository implements FairLendingEventRepository {
+    private final DataSource dataSource;
+
+    public JdbcFairLendingEventRepository(DataSource dataSource) {
+      this.dataSource = Objects.requireNonNull(dataSource);
+    }
+
+    @Override public void save(FairLendingEvent event) {
+      try (Connection connection = dataSource.getConnection();
+          PreparedStatement statement = connection.prepareStatement(
+              "insert into fair_lending.event_outbox (event_id, event_type, tenant_id, aggregate_id, occurred_at) values (?, ?, ?, ?, ?) on conflict (event_id) do nothing")) {
+        statement.setObject(1, UUID.nameUUIDFromBytes((event.eventType() + ":" + event.tenantId() + ":" + event.aggregateId() + ":" + event.occurredAt()).getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        statement.setString(2, event.eventType());
+        statement.setObject(3, event.tenantId());
+        statement.setString(4, event.aggregateId());
+        statement.setTimestamp(5, Timestamp.from(event.occurredAt()));
+        statement.executeUpdate();
+      } catch (SQLException ex) {
+        throw new IllegalStateException("Unable to persist fair-lending event outbox state", ex);
+      }
+    }
+
+    @Override public List<FairLendingEvent> findAll() {
+      try (Connection connection = dataSource.getConnection();
+          PreparedStatement statement = connection.prepareStatement("select event_type, tenant_id, aggregate_id, occurred_at from fair_lending.event_outbox order by occurred_at asc")) {
+        try (ResultSet resultSet = statement.executeQuery()) {
+          List<FairLendingEvent> events = new ArrayList<>();
+          while (resultSet.next()) {
+            events.add(new FairLendingEvent(resultSet.getString("event_type"), (UUID) resultSet.getObject("tenant_id"), resultSet.getString("aggregate_id"), resultSet.getTimestamp("occurred_at").toInstant()));
+          }
+          return List.copyOf(events);
+        }
+      } catch (SQLException ex) {
+        throw new IllegalStateException("Unable to read fair-lending event outbox state", ex);
+      }
+    }
+  }
+
+  private static IllegalStateException failClosedMissingPersistence() {
+    return new IllegalStateException(
+        "Fair-lending analysis persistence requires an explicit JDBC/PostgreSQL DataSource; in-memory production fallback is disabled.");
   }
 }

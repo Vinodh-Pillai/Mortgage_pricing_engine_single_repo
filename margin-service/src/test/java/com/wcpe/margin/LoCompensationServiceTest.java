@@ -30,7 +30,7 @@ import org.junit.jupiter.api.Test;
 class LoCompensationServiceTest {
   private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");
 
-  private final LoCompensationService service = new LoCompensationService(Clock.fixed(NOW, ZoneOffset.UTC));
+  private final LoCompensationService service = MarginServiceTestStores.loCompensationService(Clock.fixed(NOW, ZoneOffset.UTC));
 
   @Test
   void appliesConfiguredBasisAndBounds() {

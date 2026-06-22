@@ -6,6 +6,7 @@ import com.wcpe.mladvisory.FairLendingAnalysisService.PricingOutcome;
 import com.wcpe.mladvisory.FairLendingAnalysisService.PricingOutcomeRecordedEvent;
 import java.util.List;
 import java.util.UUID;
+import javax.sql.DataSource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,8 +22,8 @@ import org.springframework.web.bind.annotation.RestController;
 public final class FairLendingController {
   private final FairLendingAnalysisService service;
 
-  public FairLendingController() {
-    this(new FairLendingAnalysisService());
+  public FairLendingController(DataSource dataSource) {
+    this(new FairLendingAnalysisService(dataSource));
   }
 
   FairLendingController(FairLendingAnalysisService service) {

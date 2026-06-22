@@ -9,12 +9,14 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.function.Supplier;
+import org.springframework.stereotype.Service;
 
+@Service
 public class EventConsumerGuard {
-    private final InMemoryConsumerInboxStore store;
+    private final ConsumerInboxStore store;
     private final Clock clock;
 
-    public EventConsumerGuard(InMemoryConsumerInboxStore store, Clock clock) {
+    public EventConsumerGuard(ConsumerInboxStore store, Clock clock) {
         if (store == null) {
             throw new ConsumerInboxException("CONSUMER_INBOX_VALIDATION_FAILED", "store is required");
         }

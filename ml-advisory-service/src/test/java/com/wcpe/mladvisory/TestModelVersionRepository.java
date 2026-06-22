@@ -1,13 +1,13 @@
 package com.wcpe.mladvisory;
 
-import java.util.Comparator;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-final class InMemoryModelVersionRepository implements ModelVersionRepository {
+final class TestModelVersionRepository implements ModelVersionRepository {
   private final Map<String, ModelVersion> versions = new HashMap<>();
   private final Map<String, ModelVersionIdempotencyRecord> idempotencyRecords = new HashMap<>();
   private final List<ModelVersionStatusHistory> statusHistory = new ArrayList<>();

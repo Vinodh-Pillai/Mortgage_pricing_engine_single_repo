@@ -4,7 +4,13 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 
-public class InMemoryRateLimitCounter implements RateLimitCounter {
+/**
+ * Local process counter cache for rate-limit decisions.
+ *
+ * <p>This class is intentionally not a policy/configuration source of truth. Durable policy state must be supplied
+ * through a {@link RateLimitPolicyStore}; this cache only tracks transient window usage for the active process.</p>
+ */
+public class LocalRateLimitCounterCache implements RateLimitCounter {
     private final Map<String, Integer> counters = new HashMap<>();
 
     @Override

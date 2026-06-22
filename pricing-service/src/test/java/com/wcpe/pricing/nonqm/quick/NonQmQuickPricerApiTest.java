@@ -10,7 +10,6 @@ import com.wcpe.pricing.nonqm.NonQmPricingApi.NonQmRateRow;
 import com.wcpe.pricing.nonqm.NonQmPricingApi.NonQmRateSheet;
 import com.wcpe.pricing.nonqm.NonQmPricingApi.RateSheetSource;
 import com.wcpe.pricing.nonqm.NonQmPricingApi.RateSheetStatus;
-import com.wcpe.pricing.nonqm.quick.NonQmQuickPricerApi.InMemoryQuickQuoteRepository;
 import com.wcpe.pricing.nonqm.quick.NonQmQuickPricerApi.NonQmQuickQuoteHeaders;
 import com.wcpe.pricing.nonqm.quick.NonQmQuickPricerApi.NonQmQuickQuoteRequest;
 import com.wcpe.pricing.nonqm.quick.NonQmQuickPricerApi.QuickQuoteResult;
@@ -154,7 +153,7 @@ class NonQmQuickPricerApiTest {
     private static NonQmQuickPricerApi api(InMemoryQuickQuoteRepository repository,
             StaticQuickCandidateProvider candidateProvider, NonQmQuickPricerApi.QuickEligibilityAdapter eligibilityAdapter) {
         return new NonQmQuickPricerApi(candidateProvider, eligibilityAdapter, new NonQmQuickPricerApi.RequestSuppliedTierResolver(),
-                repository, new NonQmQuickPricerApi.InMemoryScenarioDraftClient(), CLOCK);
+                repository, new InMemoryScenarioDraftClient(), CLOCK);
     }
 
     private static NonQmQuickQuoteHeaders headers(String correlationId) {

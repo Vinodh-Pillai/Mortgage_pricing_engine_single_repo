@@ -32,7 +32,7 @@ public class LtvSensitivityService {
   private final Clock clock;
 
   public LtvSensitivityService() {
-    this(new InMemoryLtvSensitivityRepository(), Clock.systemUTC());
+    throw FailClosedPersistence.notConfigured("LTV sensitivity store");
   }
 
   LtvSensitivityService(LtvSensitivityRepository repository, Clock clock) {
@@ -465,35 +465,6 @@ public class LtvSensitivityService {
     Optional<StoredLtvSensitivityRun> findByAnalysisId(String tenantId, UUID analysisId);
 
     void save(StoredLtvSensitivityRun run);
-  }
-
-  static class InMemoryLtvSensitivityRepository implements LtvSensitivityRepository {
-    private final Map<String, StoredLtvSensitivityRun> runsByTenantAndIdempotency = new ConcurrentHashMap<>();
-    private final Map<String, StoredLtvSensitivityRun> runsByTenantAndAnalysisId = new ConcurrentHashMap<>();
-
-    @Override
-    public Optional<StoredLtvSensitivityRun> findByIdempotencyKeyHash(String tenantId, String idempotencyKeyHash) {
-      return Optional.ofNullable(runsByTenantAndIdempotency.get(key(tenantId, idempotencyKeyHash)));
-    }
-
-    @Override
-    public Optional<StoredLtvSensitivityRun> findByAnalysisId(String tenantId, UUID analysisId) {
-      return Optional.ofNullable(runsByTenantAndAnalysisId.get(key(tenantId, analysisId.toString())));
-    }
-
-    @Override
-    public void save(StoredLtvSensitivityRun run) {
-      runsByTenantAndIdempotency.put(key(run.tenantId(), run.idempotencyKeyHash()), run);
-      runsByTenantAndAnalysisId.put(key(run.tenantId(), run.analysisId().toString()), run);
-    }
-
-    int size() {
-      return runsByTenantAndAnalysisId.size();
-    }
-
-    private static String key(String tenantId, String id) {
-      return tenantId + ':' + id;
-    }
   }
 
   public static class ValidationException extends RuntimeException {

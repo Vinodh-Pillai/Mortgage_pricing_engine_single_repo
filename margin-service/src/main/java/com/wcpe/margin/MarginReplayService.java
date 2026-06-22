@@ -42,29 +42,33 @@ public final class MarginReplayService {
   public final AtomicInteger marginReplayUnauthorizedTotal = new AtomicInteger();
 
   private final Clock clock;
-  private final Map<FixtureKey, ReplayFixture> fixtureCatalog = new HashMap<>();
-  private final Map<String, ReplayRun> replayRuns = new HashMap<>();
-  private final List<DecisionReplayedEvent> outbox = new ArrayList<>();
-  private final List<AuditEvidence> auditPackages = new ArrayList<>();
+  private final Store store;
 
   public MarginReplayService(Clock clock) {
+    this(clock, Store.failClosed("MarginReplayService"));
+  }
+
+  MarginReplayService(Clock clock, Store store) {
     this.clock = Objects.requireNonNull(clock, "clock is required");
+    this.store = Objects.requireNonNull(store, "store is required");
   }
 
   public ReplayFixture registerFixture(String tenantId, ReplayFixture fixture) {
+    requireDurableStoreOrExplicitTestHarness();
     requireText(tenantId, "tenantId");
     Objects.requireNonNull(fixture, "fixture is required");
     if (!tenantId.equals(fixture.tenantId())) {
       throw new MarginReplayException("TENANT_ACCESS_DENIED");
     }
-    fixtureCatalog.put(new FixtureKey(tenantId, fixture.fixtureId()), fixture);
+    store.fixtureCatalog().put(new FixtureKey(tenantId, fixture.fixtureId()), fixture);
     return fixture;
   }
 
   public ReplayResult runFixtureReplay(ReplayCommand command) {
+    requireDurableStoreOrExplicitTestHarness();
     Objects.requireNonNull(command, "command is required");
     requireText(command.fixtureId(), "fixtureId");
-    ReplayFixture fixture = fixtureCatalog.get(new FixtureKey(command.tenantId(), command.fixtureId()));
+    ReplayFixture fixture = store.fixtureCatalog().get(new FixtureKey(command.tenantId(), command.fixtureId()));
     if (fixture == null || !fixture.active()) {
       throw new MarginReplayException("REPLAY_FIXTURE_MISSING");
     }
@@ -72,10 +76,11 @@ public final class MarginReplayService {
   }
 
   public ReplayResult runQuoteReplay(ReplayCommand command) {
+    requireDurableStoreOrExplicitTestHarness();
     Objects.requireNonNull(command, "command is required");
     requireText(command.quoteId(), "quoteId");
     ReplayFixture fixture = Optional.ofNullable(command.fixtureId())
-        .map(fixtureId -> fixtureCatalog.get(new FixtureKey(command.tenantId(), fixtureId)))
+        .map(fixtureId -> store.fixtureCatalog().get(new FixtureKey(command.tenantId(), fixtureId)))
         .orElseThrow(() -> new MarginReplayException("REPLAY_FIXTURE_MISSING"));
     return runReplay(command, fixture);
   }
@@ -101,17 +106,24 @@ public final class MarginReplayService {
   }
 
   public Optional<ReplayRun> replayRun(String tenantId, String replayId) {
+    requireDurableStoreOrExplicitTestHarness();
     requireText(tenantId, "tenantId");
     requireText(replayId, "replayId");
-    return Optional.ofNullable(replayRuns.get(replayId)).filter(run -> tenantId.equals(run.tenantId()));
+    return Optional.ofNullable(store.replayRuns().get(replayId)).filter(run -> tenantId.equals(run.tenantId()));
   }
 
   public List<DecisionReplayedEvent> outboxEvents() {
-    return List.copyOf(outbox);
+    requireDurableStoreOrExplicitTestHarness();
+    return List.copyOf(store.outbox());
   }
 
   public List<AuditEvidence> auditPackages() {
-    return List.copyOf(auditPackages);
+    requireDurableStoreOrExplicitTestHarness();
+    return List.copyOf(store.auditPackages());
+  }
+
+  private void requireDurableStoreOrExplicitTestHarness() {
+    store.requireAvailable();
   }
 
   public static void assertRequiredWaterfallOrder(List<WaterfallStep> steps) {
@@ -169,18 +181,18 @@ public final class MarginReplayService {
     ReplayRun run = new ReplayRun(command.tenantId(), replayId, command.quoteId(), command.fixtureId(), command.mode(),
         matchStatus, fixture.expectedResultHash(), actualResultHash, mismatches, evidenceId, started,
         Instant.now(clock));
-    replayRuns.put(replayId, run);
+    store.replayRuns().put(replayId, run);
     marginReplayRunTotal.incrementAndGet();
     DecisionReplayedEvent event = new DecisionReplayedEvent(command.tenantId(), replayId, DOMAIN, matchStatus,
         fixture.expectedResultHash(), actualResultHash, mismatchClass(mismatches), command.correlationId(),
         Instant.now(clock));
-    outbox.add(event);
+    store.outbox().add(event);
     AuditEvidence evidence = new AuditEvidence(evidenceId, command.tenantId(), replayId, fixture.fixturePath(),
         command.versionManifest(), command.versionManifest().waterfallSteps(),
         RoleFilteredQuoteResponse.from(command.versionManifest().waterfallSteps()), command.versionManifest().eventsObserved(),
         command.versionManifest().runEnvironment(), actualResultHash, true,
         Duration.between(started, Instant.now(clock)).toMillis());
-    auditPackages.add(evidence);
+    store.auditPackages().add(evidence);
     return new ReplayResult(replayId, matchStatus, fixture.expectedResultHash(), actualResultHash, mismatches,
         command.versionManifest(), evidenceId, evidence.roleFilteredOutputs(), command.correlationId());
   }
@@ -258,7 +270,32 @@ public final class MarginReplayService {
     }
   }
 
-  private record FixtureKey(String tenantId, String fixtureId) {}
+  interface Store {
+    Map<FixtureKey, ReplayFixture> fixtureCatalog();
+    Map<String, ReplayRun> replayRuns();
+    List<DecisionReplayedEvent> outbox();
+    List<AuditEvidence> auditPackages();
+
+    default void requireAvailable() {}
+
+    static Store failClosed(String component) {
+      return new Store() {
+        @Override public void requireAvailable() {
+          ProcessLocalStatePolicy.requireDurableStoreOrExplicitTestHarness(false, component);
+        }
+        @Override public Map<FixtureKey, ReplayFixture> fixtureCatalog() { return unavailable(); }
+        @Override public Map<String, ReplayRun> replayRuns() { return unavailable(); }
+        @Override public List<DecisionReplayedEvent> outbox() { return unavailable(); }
+        @Override public List<AuditEvidence> auditPackages() { return unavailable(); }
+        private <T> T unavailable() {
+          requireAvailable();
+          throw new AssertionError("unreachable");
+        }
+      };
+    }
+  }
+
+  record FixtureKey(String tenantId, String fixtureId) {}
 
   public record ReplayFixture(String tenantId, String fixtureId, String name, String fixturePath,
       String expectedManifestHash, String expectedResultHash, Map<String, String> expectedStepHashes,

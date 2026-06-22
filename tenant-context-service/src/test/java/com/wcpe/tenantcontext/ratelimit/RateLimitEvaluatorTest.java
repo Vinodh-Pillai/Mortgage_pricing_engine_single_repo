@@ -13,7 +13,7 @@ class RateLimitEvaluatorTest {
 
     @Test
     void allowsWithinConfiguredLimitAndEmitsSafeRateHeaders() {
-        RateLimitEvaluator evaluator = new RateLimitEvaluator(new InMemoryRateLimitCounter());
+        RateLimitEvaluator evaluator = new RateLimitEvaluator(new LocalRateLimitCounterCache());
 
         RateLimitDecision decision = evaluator.evaluate(RateLimitPolicyResolverTest.policy("tenant-alpha", NOW.minusSeconds(60), NOW.plusSeconds(60)), RateLimitPolicyResolverTest.context("tenant-alpha"), NOW);
 
@@ -25,7 +25,7 @@ class RateLimitEvaluatorTest {
 
     @Test
     void returns429ProblemDetailWhenConfiguredLimitIsExceeded() {
-        RateLimitEvaluator evaluator = new RateLimitEvaluator(new InMemoryRateLimitCounter());
+        RateLimitEvaluator evaluator = new RateLimitEvaluator(new LocalRateLimitCounterCache());
         RateLimitPolicy policy = RateLimitPolicyResolverTest.policy("tenant-alpha", NOW.minusSeconds(60), NOW.plusSeconds(60));
 
         evaluator.evaluate(policy, RateLimitPolicyResolverTest.context("tenant-alpha"), NOW);
@@ -55,7 +55,7 @@ class RateLimitEvaluatorTest {
 
     @Test
     void missingPolicyFailsClosedWithoutInventingDefaults() {
-        RateLimitEvaluator evaluator = new RateLimitEvaluator(new InMemoryRateLimitCounter());
+        RateLimitEvaluator evaluator = new RateLimitEvaluator(new LocalRateLimitCounterCache());
 
         RateLimitDecision decision = evaluator.evaluate(null, RateLimitPolicyResolverTest.context("tenant-alpha"), NOW);
 

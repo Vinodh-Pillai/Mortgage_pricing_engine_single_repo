@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.wcpe.ratefeed.domain.RateFeedModels.RateFeedException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -16,7 +17,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class MappingWizardService {
@@ -27,12 +27,18 @@ public class MappingWizardService {
   private final MappingWizardHeuristicAnalyzer heuristicAnalyzer;
   private final LLMMappingProposer llmMappingProposer;
   private final ObjectMapper mapper;
-  private final Map<UUID, NormalizationProfile> profiles = new ConcurrentHashMap<>();
+  private final NormalizationProfileRepository profileRepository;
 
   public MappingWizardService(MappingWizardHeuristicAnalyzer heuristicAnalyzer, LLMMappingProposer llmMappingProposer, ObjectMapper mapper) {
+    this(heuristicAnalyzer, llmMappingProposer, mapper, null);
+  }
+
+  public MappingWizardService(MappingWizardHeuristicAnalyzer heuristicAnalyzer, LLMMappingProposer llmMappingProposer, ObjectMapper mapper,
+                              NormalizationProfileRepository profileRepository) {
     this.heuristicAnalyzer = heuristicAnalyzer;
     this.llmMappingProposer = llmMappingProposer;
     this.mapper = mapper;
+    this.profileRepository = profileRepository;
   }
 
   public MappingWizardModels.MappingProposal analyze(String fileName, byte[] content, MappingWizardModels.AnalysisMode mode) throws IOException {
@@ -64,6 +70,7 @@ public class MappingWizardService {
     return new MappingWizardModels.PreviewResponse(output, sample, List.of());
   }
 
+  @Transactional
   public MappingWizardModels.ProfileResponse createProfile(UUID tenantId, MappingWizardModels.CreateProfileRequest request, String actor) {
     requireText(request.name(), "Profile name is required.");
     requireText(request.investorCode(), "Investor code is required.");
@@ -72,65 +79,71 @@ public class MappingWizardService {
     String formatType = request.formatFingerprint() == null ? "UNKNOWN" : request.formatFingerprint().path("formatType").asText("UNKNOWN");
     NormalizationProfile profile = new NormalizationProfile(tenantId, request.name(), formatType, request.investorCode(), request.productCode(), request.mappingConfig(), request.formatFingerprint(), actor);
     profile.setSampleOutput(request.sampleOutput());
-    profiles.put(profile.getProfileId(), profile);
-    return toResponse(profile);
+    return toResponse(requireRepository().save(profile));
   }
 
+  @Transactional(readOnly = true)
   public MappingWizardModels.ProfileListResponse listProfiles(UUID tenantId) {
-    List<MappingWizardModels.ProfileResponse> list = profiles.values().stream()
-        .filter(p -> p.getTenantId().equals(tenantId))
+    List<MappingWizardModels.ProfileResponse> list = requireRepository().findByTenantId(tenantId).stream()
         .sorted(Comparator.comparing(NormalizationProfile::getName).thenComparing(NormalizationProfile::getVersion))
         .map(this::toResponse)
         .toList();
     return new MappingWizardModels.ProfileListResponse(list, list.size());
   }
 
+  @Transactional(readOnly = true)
   public MappingWizardModels.ProfileResponse getProfile(UUID tenantId, UUID profileId) { return toResponse(findProfile(tenantId, profileId)); }
 
+  @Transactional
   public MappingWizardModels.ProfileResponse updateDraft(UUID tenantId, UUID profileId, MappingWizardModels.UpdateProfileRequest request, String actor) {
     NormalizationProfile profile = findProfile(tenantId, profileId);
     requireStatus(profile, "DRAFT");
     rejectUnsafeJson(request.mappingConfig());
     profile.newVersion(request.mappingConfig(), actor);
     profile.setSampleOutput(request.sampleOutput());
-    return toResponse(profile);
+    return toResponse(requireRepository().save(profile));
   }
 
+  @Transactional
   public MappingWizardModels.GovernanceResponse simulate(UUID tenantId, UUID profileId) {
     NormalizationProfile profile = findProfile(tenantId, profileId);
     requireStatus(profile, "DRAFT");
     profile.simulate();
+    requireRepository().save(profile);
     return new MappingWizardModels.GovernanceResponse(profile.getProfileId(), profile.getStatus(), profile.getVersion(), List.of("Review normalized preview output", "Approve profile when simulation evidence is acceptable"));
   }
 
+  @Transactional
   public MappingWizardModels.GovernanceResponse approve(UUID tenantId, UUID profileId, String actor) {
     NormalizationProfile profile = findProfile(tenantId, profileId);
     requireStatus(profile, "SIMULATE");
     profile.approve(actor);
+    requireRepository().save(profile);
     return new MappingWizardModels.GovernanceResponse(profile.getProfileId(), profile.getStatus(), profile.getVersion(), List.of("Publish approved profile"));
   }
 
+  @Transactional
   public MappingWizardModels.GovernanceResponse publish(UUID tenantId, UUID profileId) {
     NormalizationProfile profile = findProfile(tenantId, profileId);
     requireStatus(profile, "APPROVED");
     profile.publish();
+    requireRepository().save(profile);
     return new MappingWizardModels.GovernanceResponse(profile.getProfileId(), profile.getStatus(), profile.getVersion(), List.of("Auto-match future imports at score >= " + AUTO_MATCH_THRESHOLD));
   }
 
+  @Transactional
   public MappingWizardModels.ProfileResponse newVersion(UUID tenantId, UUID profileId, MappingWizardModels.UpdateProfileRequest request, String actor) {
     NormalizationProfile source = findProfile(tenantId, profileId);
     rejectUnsafeJson(request.mappingConfig());
     NormalizationProfile next = new NormalizationProfile(tenantId, source.getName(), source.getFormatType(), source.getInvestorCode(), source.getProductCode(), request.mappingConfig(), source.getFormatFingerprint(), actor);
     while (next.getVersion() < source.getVersion() + 1) next.newVersion(request.mappingConfig(), actor);
     next.setSampleOutput(request.sampleOutput());
-    profiles.put(next.getProfileId(), next);
-    return toResponse(next);
+    return toResponse(requireRepository().save(next));
   }
 
+  @Transactional(readOnly = true)
   public MappingWizardModels.AutoMatchResponse autoMatch(UUID tenantId, JsonNode incomingFingerprint) {
-    List<ScoredProfile> scored = profiles.values().stream()
-        .filter(profile -> tenantId.equals(profile.getTenantId()))
-        .filter(profile -> "PUBLISHED".equals(profile.getStatus()))
+    List<ScoredProfile> scored = requireRepository().findAllPublishedByTenant(tenantId).stream()
         .map(profile -> scoreProfile(profile, incomingFingerprint))
         .sorted(Comparator.comparing(ScoredProfile::score).reversed()
             .thenComparing(candidate -> candidate.profile().getName())
@@ -222,8 +235,7 @@ public class MappingWizardService {
   }
 
   private List<MappingWizardModels.GoldenProfileExample> approvedGoldenProfiles(UUID tenantId) {
-    return profiles.values().stream()
-        .filter(profile -> tenantId.equals(profile.getTenantId()))
+    return requireRepository().findByTenantId(tenantId).stream()
         .filter(profile -> "APPROVED".equals(profile.getStatus()) || "PUBLISHED".equals(profile.getStatus()))
         .sorted(Comparator.comparing(NormalizationProfile::getName).thenComparing(NormalizationProfile::getVersion))
         .map(LLMMappingProposer::approvedProfileExample)
@@ -231,9 +243,18 @@ public class MappingWizardService {
   }
 
   private NormalizationProfile findProfile(UUID tenantId, UUID profileId) {
-    NormalizationProfile profile = profiles.get(profileId);
-    if (profile == null || !tenantId.equals(profile.getTenantId())) throw new RateFeedException(HttpStatus.NOT_FOUND, "NORMALIZATION_PROFILE_NOT_FOUND", "Normalization profile was not found.");
+    NormalizationProfile profile = requireRepository().findById(profileId)
+        .filter(candidate -> tenantId.equals(candidate.getTenantId()))
+        .orElse(null);
+    if (profile == null) throw new RateFeedException(HttpStatus.NOT_FOUND, "NORMALIZATION_PROFILE_NOT_FOUND", "Normalization profile was not found.");
     return profile;
+  }
+
+  private NormalizationProfileRepository requireRepository() {
+    if (profileRepository == null) {
+      throw new RateFeedException(HttpStatus.SERVICE_UNAVAILABLE, "NORMALIZATION_PROFILE_STORE_UNAVAILABLE", "Normalization profile persistence is required; in-memory profile storage is disabled.");
+    }
+    return profileRepository;
   }
 
   private void requireStatus(NormalizationProfile profile, String status) {

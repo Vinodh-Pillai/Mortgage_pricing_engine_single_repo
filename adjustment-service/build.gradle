@@ -34,5 +34,16 @@ tasks.named('bootJar') {
 }
 
 tasks.named('test') {
-  useJUnitPlatform()
+  useJUnitPlatform {
+    excludeTags 'benchmark'
+  }
+}
+
+tasks.register('benchmarkTest', Test) {
+  description = 'Runs benchmark-tagged performance tests for adjustment-service.'
+  group = 'verification'
+  useJUnitPlatform {
+    includeTags 'benchmark'
+  }
+  shouldRunAfter tasks.named('test')
 }

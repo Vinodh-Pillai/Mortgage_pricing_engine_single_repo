@@ -21,7 +21,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class MarginGovernanceServiceTest {
-  private final MarginGovernanceService service = new MarginGovernanceService(
+  private final MarginGovernanceService service = MarginServiceTestStores.marginGovernanceService(
       Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC));
 
   @Test

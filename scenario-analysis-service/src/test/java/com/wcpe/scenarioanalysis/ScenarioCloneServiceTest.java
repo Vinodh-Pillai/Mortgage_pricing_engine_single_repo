@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.wcpe.scenarioanalysis.ScenarioCloneService.CloneScenarioRequest;
-import com.wcpe.scenarioanalysis.ScenarioCloneService.InMemoryScenarioLineageRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -12,12 +11,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class ScenarioCloneServiceTest {
-  private InMemoryScenarioLineageRepository repository;
+  private TestOnlyInMemoryScenarioLineageRepository repository;
   private ScenarioCloneService service;
 
   @BeforeEach
   void setUp() {
-    repository = new InMemoryScenarioLineageRepository();
+    repository = new TestOnlyInMemoryScenarioLineageRepository();
     service = new ScenarioCloneService(
         repository,
         Clock.fixed(Instant.parse("2026-05-31T00:00:00Z"), ZoneOffset.UTC));

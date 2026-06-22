@@ -22,7 +22,8 @@ class TenantRegistrationServiceTest {
     private final AtomicInteger idSequence = new AtomicInteger(1);
     private final TenantRegistrationService service = new TenantRegistrationService(
         Clock.fixed(Instant.parse("2026-06-10T13:00:00Z"), ZoneOffset.UTC),
-        () -> "tenant-" + idSequence.getAndIncrement()
+        () -> "tenant-" + idSequence.getAndIncrement(),
+        new TestOnlyTenantRegistrationStore()
     );
 
     @Test

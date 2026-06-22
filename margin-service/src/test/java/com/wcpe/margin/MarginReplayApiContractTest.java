@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 class MarginReplayApiContractTest {
   @Test
   void exactManifestReplay() {
-    var service = new MarginReplayService(MarginReplayTestFixtures.CLOCK);
+    var service = MarginServiceTestStores.marginReplayService(MarginReplayTestFixtures.CLOCK);
     service.registerFixture(MarginReplayTestFixtures.TENANT, MarginReplayTestFixtures.fullStackFixture());
 
     var result = service.runFixtureReplay(
@@ -26,7 +26,7 @@ class MarginReplayApiContractTest {
 
   @Test
   void unauthorizedReplayFailsClosed() {
-    var service = new MarginReplayService(MarginReplayTestFixtures.CLOCK);
+    var service = MarginServiceTestStores.marginReplayService(MarginReplayTestFixtures.CLOCK);
     service.registerFixture(MarginReplayTestFixtures.TENANT, MarginReplayTestFixtures.fullStackFixture());
     var denied = new MarginReplayService.ReplayCommand(MarginReplayTestFixtures.TENANT, "viewer", "quote-a",
         MarginReplayTestFixtures.FIXTURE_ID, MarginReplayService.EXACT_MARGIN_COMP_MANIFEST, List.of(),
@@ -41,7 +41,7 @@ class MarginReplayApiContractTest {
 
   @Test
   void roleFilteredReplayResponseRedactsSensitiveFields() {
-    var service = new MarginReplayService(MarginReplayTestFixtures.CLOCK);
+    var service = MarginServiceTestStores.marginReplayService(MarginReplayTestFixtures.CLOCK);
     service.registerFixture(MarginReplayTestFixtures.TENANT, MarginReplayTestFixtures.fullStackFixture());
     var result = service.runFixtureReplay(
         MarginReplayTestFixtures.fullStackCommand(MarginReplayTestFixtures.fullStackManifest()));

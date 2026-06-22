@@ -16,7 +16,7 @@ class RateLimitPolicyResolverTest {
 
     @Test
     void resolvesActiveTenantActorChannelEndpointPolicy() {
-        InMemoryRateLimitPolicyStore store = new InMemoryRateLimitPolicyStore();
+        TestOnlyInMemoryRateLimitPolicyStore store = new TestOnlyInMemoryRateLimitPolicyStore();
         RateLimitPolicy policy = policy("tenant-alpha", NOW.minusSeconds(60), NOW.plusSeconds(60));
         store.save(policy);
 
@@ -27,7 +27,7 @@ class RateLimitPolicyResolverTest {
 
     @Test
     void rejectsOverlappingActivePoliciesForSameTenantSelector() {
-        InMemoryRateLimitPolicyStore store = new InMemoryRateLimitPolicyStore();
+        TestOnlyInMemoryRateLimitPolicyStore store = new TestOnlyInMemoryRateLimitPolicyStore();
         store.save(policy("tenant-alpha", NOW.minusSeconds(60), NOW.plusSeconds(60)));
 
         assertThatThrownBy(() -> store.save(policy("tenant-alpha", NOW.minusSeconds(30), NOW.plusSeconds(120))))
@@ -38,7 +38,7 @@ class RateLimitPolicyResolverTest {
 
     @Test
     void allowsSameEndpointPolicyForDifferentTenantWithoutCrossTenantVisibility() {
-        InMemoryRateLimitPolicyStore store = new InMemoryRateLimitPolicyStore();
+        TestOnlyInMemoryRateLimitPolicyStore store = new TestOnlyInMemoryRateLimitPolicyStore();
         RateLimitPolicy alpha = policy("tenant-alpha", NOW.minusSeconds(60), NOW.plusSeconds(60));
         RateLimitPolicy beta = policy("tenant-beta", NOW.minusSeconds(60), NOW.plusSeconds(60));
         store.save(alpha);

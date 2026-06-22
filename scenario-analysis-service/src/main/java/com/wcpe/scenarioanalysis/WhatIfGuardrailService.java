@@ -21,7 +21,7 @@ public class WhatIfGuardrailService {
   private final Clock clock;
 
   public WhatIfGuardrailService() {
-    this(new InMemoryWhatIfGuardrailRepository(), Clock.systemUTC());
+    throw FailClosedPersistence.notConfigured("what-if guardrail policy store");
   }
 
   public WhatIfGuardrailService(WhatIfGuardrailRepository repository, Clock clock) {
@@ -387,52 +387,6 @@ public class WhatIfGuardrailService {
     void appendDecision(StoredDecision decision);
 
     void appendEvent(GuardrailEvent event);
-  }
-
-  public static class InMemoryWhatIfGuardrailRepository implements WhatIfGuardrailRepository {
-    private final Map<String, GuardrailPolicy> policies = new ConcurrentHashMap<>();
-    private final List<StoredDecision> decisions = new ArrayList<>();
-    private final List<GuardrailEvent> events = new ArrayList<>();
-
-    @Override
-    public Optional<GuardrailPolicy> findById(String tenantId, UUID policyId) {
-      return Optional.ofNullable(policies.get(key(tenantId, policyId)));
-    }
-
-    @Override
-    public Optional<GuardrailPolicy> findPublished(String tenantId) {
-      return policies.values().stream()
-          .filter(policy -> policy.tenantId().equals(tenantId))
-          .filter(policy -> "PUBLISHED".equals(policy.status()))
-          .findFirst();
-    }
-
-    @Override
-    public void save(GuardrailPolicy policy) {
-      policies.put(key(policy.tenantId(), policy.policyId()), policy);
-    }
-
-    @Override
-    public void appendDecision(StoredDecision decision) {
-      decisions.add(decision);
-    }
-
-    @Override
-    public void appendEvent(GuardrailEvent event) {
-      events.add(event);
-    }
-
-    public List<StoredDecision> decisions() {
-      return List.copyOf(decisions);
-    }
-
-    public List<GuardrailEvent> events() {
-      return List.copyOf(events);
-    }
-
-    private static String key(String tenantId, UUID policyId) {
-      return tenantId + ':' + policyId;
-    }
   }
 
   public static class ValidationException extends RuntimeException {

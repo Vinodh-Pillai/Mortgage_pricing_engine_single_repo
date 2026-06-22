@@ -9,12 +9,14 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
+import org.springframework.stereotype.Service;
 
+@Service
 public class OutboxWriter {
-    private final InMemoryOutboxStore store;
+    private final OutboxStore store;
     private final Clock clock;
 
-    public OutboxWriter(InMemoryOutboxStore store, Clock clock) {
+    public OutboxWriter(OutboxStore store, Clock clock) {
         if (store == null) {
             throw new OutboxException("OUTBOX_VALIDATION_FAILED", "store is required");
         }

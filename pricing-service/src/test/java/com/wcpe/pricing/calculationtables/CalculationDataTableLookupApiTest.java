@@ -10,7 +10,7 @@ import com.wcpe.pricing.calculationtables.CalculationDataTableLookupApi.Calculat
 import com.wcpe.pricing.calculationtables.CalculationDataTableLookupApi.CreateLookupRequest;
 import com.wcpe.pricing.calculationtables.CalculationDataTableLookupApi.EditLookupOptionsRequest;
 import com.wcpe.pricing.calculationtables.CalculationDataTableLookupApi.HistoricalLookupValueRequest;
-import com.wcpe.pricing.calculationtables.CalculationDataTableLookupApi.InMemoryCalculationDataTableLookupRepository;
+import com.wcpe.pricing.calculationtables.InMemoryCalculationDataTableLookupRepository;
 import com.wcpe.pricing.calculationtables.CalculationDataTableLookupApi.LookupCreateResponse;
 import com.wcpe.pricing.calculationtables.CalculationDataTableLookupApi.LookupHeaders;
 import com.wcpe.pricing.calculationtables.CalculationDataTableLookupApi.LookupOptionDraft;

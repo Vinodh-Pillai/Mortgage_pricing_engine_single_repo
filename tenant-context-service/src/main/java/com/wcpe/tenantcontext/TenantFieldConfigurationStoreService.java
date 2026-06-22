@@ -4,7 +4,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -13,36 +12,71 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 @Service
 public class TenantFieldConfigurationStoreService {
-    private final Map<TenantFieldKey, TenantFieldConfiguration> configurations = new ConcurrentHashMap<>();
-    private final Map<TenantSurfaceKey, TenantFieldConfigurationDraft> drafts = new ConcurrentHashMap<>();
-    private final Map<TenantSurfaceKey, List<TenantFieldConfigurationVersion>> versions = new ConcurrentHashMap<>();
-    private final Map<TenantSurfaceKey, Integer> currentVersions = new ConcurrentHashMap<>();
-    private final List<TenantFieldConfigurationAuditRecord> auditRecords = Collections.synchronizedList(new ArrayList<>());
     private final Clock clock;
+    private final JdbcTemplate jdbcTemplate;
+    private final TenantFieldConfigurationStore testStore;
 
     public TenantFieldConfigurationStoreService() {
-        this(Clock.systemUTC());
+        throw new IllegalStateException("TenantFieldConfigurationStoreService requires a JDBC DataSource-backed constructor in production; refusing in-memory store-of-record fallback");
+    }
+
+    @Autowired
+    public TenantFieldConfigurationStoreService(JdbcTemplate jdbcTemplate, Clock clock) {
+        this.clock = Objects.requireNonNull(clock, "clock is required");
+        this.jdbcTemplate = Objects.requireNonNull(jdbcTemplate, "jdbcTemplate is required");
+        this.testStore = null;
     }
 
     TenantFieldConfigurationStoreService(Clock clock) {
+        throw new IllegalStateException("TenantFieldConfigurationStoreService test memory state must be supplied by a src/test fixture; refusing src/main process-local store-of-record fallback");
+    }
+
+    TenantFieldConfigurationStoreService(Clock clock, TenantFieldConfigurationStore testStore) {
         this.clock = Objects.requireNonNull(clock, "clock is required");
+        this.jdbcTemplate = null;
+        this.testStore = Objects.requireNonNull(testStore, "testStore is required");
     }
 
     public TenantFieldConfiguration save(TenantFieldConfiguration command) {
         TenantFieldConfiguration validated = validated(command, clock.instant());
-        configurations.put(key(validated.tenantId(), validated.surface(), validated.fieldId()), validated);
+        if (jdbcBacked()) {
+            jdbcTemplate.update("""
+                INSERT INTO tenant.tenant_field_configuration (tenant_id, surface, field_id, configuration_id, origin, system_field_ref,
+                  name_alias, description_alias, enabled, omitted, updated_at, audit_ref)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (tenant_id, surface, field_id) DO UPDATE SET configuration_id = EXCLUDED.configuration_id,
+                  origin = EXCLUDED.origin, system_field_ref = EXCLUDED.system_field_ref, name_alias = EXCLUDED.name_alias,
+                  description_alias = EXCLUDED.description_alias, enabled = EXCLUDED.enabled, omitted = EXCLUDED.omitted,
+                  updated_at = EXCLUDED.updated_at, audit_ref = EXCLUDED.audit_ref
+                """,
+                validated.tenantId(), validated.surface(), validated.fieldId(), validated.configurationId(), validated.origin().name(),
+                validated.systemFieldRef(), validated.nameAlias(), validated.descriptionAlias(), validated.enabled(), validated.omitted(),
+                java.sql.Timestamp.from(validated.updatedAt()), validated.auditRef());
+            return validated;
+        }
+        requireTestStore().saveConfiguration(validated);
         return validated;
     }
 
     public List<TenantFieldConfiguration> replaceTenantSurface(String tenantId, String surface, Collection<TenantFieldConfiguration> commands) {
         String normalizedTenantId = required(tenantId, "tenantId");
         String normalizedSurface = normalizedSurface(surface);
-        configurations.keySet().removeIf(key -> same(key.tenantId(), normalizedTenantId) && same(key.surface(), normalizedSurface));
+        if (jdbcBacked()) {
+            jdbcTemplate.update("DELETE FROM tenant.tenant_field_configuration WHERE tenant_id = ? AND surface = ?", normalizedTenantId, normalizedSurface);
+            if (commands != null) {
+                commands.stream()
+                    .map(command -> scopedToTenantSurface(normalizedTenantId, normalizedSurface, command))
+                    .forEach(this::save);
+            }
+            return storedForTenantSurface(normalizedTenantId, normalizedSurface);
+        }
+        requireTestStore().removeConfigurationsForTenantSurface(normalizedTenantId, normalizedSurface);
         if (commands != null) {
             commands.stream()
                 .map(command -> scopedToTenantSurface(normalizedTenantId, normalizedSurface, command))
@@ -54,11 +88,16 @@ public class TenantFieldConfigurationStoreService {
     public List<TenantFieldConfiguration> storedForTenantSurface(String tenantId, String surface) {
         String normalizedTenantId = required(tenantId, "tenantId");
         String normalizedSurface = normalizedSurface(surface);
-        return configurations.values().stream()
-            .filter(configuration -> same(configuration.tenantId(), normalizedTenantId))
-            .filter(configuration -> same(configuration.surface(), normalizedSurface))
-            .sorted(Comparator.comparing(TenantFieldConfiguration::fieldId))
-            .toList();
+        if (jdbcBacked()) {
+            return jdbcTemplate.query("""
+                SELECT * FROM tenant.tenant_field_configuration WHERE tenant_id = ? AND surface = ? ORDER BY field_id
+                """, (rs, rowNum) -> new TenantFieldConfiguration(
+                    rs.getString("configuration_id"), rs.getString("tenant_id"), rs.getString("surface"), rs.getString("field_id"),
+                    FieldOrigin.valueOf(rs.getString("origin")), rs.getString("system_field_ref"), rs.getString("name_alias"),
+                    rs.getString("description_alias"), rs.getBoolean("enabled"), rs.getBoolean("omitted"),
+                    rs.getTimestamp("updated_at").toInstant(), rs.getString("audit_ref")), normalizedTenantId, normalizedSurface);
+        }
+        return requireTestStore().configurationsForTenantSurface(normalizedTenantId, normalizedSurface);
     }
 
     public List<TenantFieldConfiguration> activeForTenantSurface(String tenantId, String surface) {
@@ -68,6 +107,9 @@ public class TenantFieldConfigurationStoreService {
     }
 
     public TenantFieldConfigurationDraft saveDraft(String tenantId, String surface, Collection<TenantFieldConfiguration> commands, String userId) {
+        if (jdbcBacked()) {
+            throw fieldConfigError("TENANT_FIELD_PERSISTENCE_CONTRACT_MISSING", "draft", "Tenant field draft persistence schema is not implemented; refusing in-memory fallback.");
+        }
         String normalizedTenantId = required(tenantId, "tenantId");
         String normalizedSurface = normalizedSurface(surface);
         Instant now = clock.instant();
@@ -83,7 +125,7 @@ public class TenantFieldConfigurationStoreService {
             now,
             required(userId, "userId")
         );
-        drafts.put(surfaceKey(normalizedTenantId, normalizedSurface), draft);
+        requireTestStore().saveDraft(normalizedTenantId, normalizedSurface, draft);
         return draft;
     }
 
@@ -98,21 +140,26 @@ public class TenantFieldConfigurationStoreService {
             draft.savedAt(),
             draft.userId()
         );
-        drafts.put(surfaceKey(draft.tenantId(), draft.surface()), draftWithConditions);
+        requireTestStore().saveDraft(draft.tenantId(), draft.surface(), draftWithConditions);
         return draftWithConditions;
     }
 
     public Optional<TenantFieldConfigurationDraft> draftForTenantSurface(String tenantId, String surface) {
         String normalizedTenantId = required(tenantId, "tenantId");
         String normalizedSurface = normalizedSurface(surface);
-        return Optional.ofNullable(drafts.get(surfaceKey(normalizedTenantId, normalizedSurface)));
+        if (jdbcBacked()) {
+            throw fieldConfigError("TENANT_FIELD_PERSISTENCE_CONTRACT_MISSING", "draft", "Tenant field draft persistence schema is not implemented; refusing in-memory fallback.");
+        }
+        return requireTestStore().draftForTenantSurface(normalizedTenantId, normalizedSurface);
     }
 
     public TenantFieldConfigurationVersion publishDraft(String tenantId, String surface, String userId) {
+        if (jdbcBacked()) {
+            throw fieldConfigError("TENANT_FIELD_PERSISTENCE_CONTRACT_MISSING", "draft", "Tenant field publish/version persistence schema is not implemented; refusing in-memory fallback.");
+        }
         String normalizedTenantId = required(tenantId, "tenantId");
         String normalizedSurface = normalizedSurface(surface);
-        TenantSurfaceKey tenantSurfaceKey = surfaceKey(normalizedTenantId, normalizedSurface);
-        TenantFieldConfigurationDraft draft = Optional.ofNullable(drafts.get(tenantSurfaceKey))
+        TenantFieldConfigurationDraft draft = requireTestStore().draftForTenantSurface(normalizedTenantId, normalizedSurface)
             .orElseThrow(() -> fieldConfigError("TENANT_FIELD_DRAFT_MISSING", "draft", "A draft is required before publishing tenant field configuration."));
         validatePublishable(draft);
 
@@ -120,21 +167,23 @@ public class TenantFieldConfigurationStoreService {
         List<TenantFieldConfiguration> newPublished = draft.configurations().stream()
             .map(command -> validated(scopedToTenantSurface(normalizedTenantId, normalizedSurface, command), clock.instant()))
             .toList();
-        int versionNumber = currentVersions.getOrDefault(tenantSurfaceKey, 0) + 1;
+        int versionNumber = requireTestStore().currentVersion(normalizedTenantId, normalizedSurface) + 1;
         applyPublishedSnapshot(normalizedTenantId, normalizedSurface, newPublished);
         TenantFieldConfigurationVersion version = new TenantFieldConfigurationVersion(versionNumber, normalizedTenantId, normalizedSurface, newPublished, oldPublished, clock.instant(), required(userId, "userId"));
-        versions.computeIfAbsent(tenantSurfaceKey, ignored -> Collections.synchronizedList(new ArrayList<>())).add(version);
-        currentVersions.put(tenantSurfaceKey, versionNumber);
-        drafts.remove(tenantSurfaceKey);
-        auditRecords.add(auditRecord(normalizedTenantId, required(userId, "userId"), oldPublished, newPublished, normalizedSurface, "PUBLISH"));
+        requireTestStore().appendVersion(normalizedTenantId, normalizedSurface, version);
+        requireTestStore().saveCurrentVersion(normalizedTenantId, normalizedSurface, versionNumber);
+        requireTestStore().removeDraft(normalizedTenantId, normalizedSurface);
+        requireTestStore().appendAuditRecord(auditRecord(normalizedTenantId, required(userId, "userId"), oldPublished, newPublished, normalizedSurface, "PUBLISH"));
         return version;
     }
 
     public TenantFieldConfigurationVersion rollbackToPreviousVersion(String tenantId, String surface, String userId) {
+        if (jdbcBacked()) {
+            throw fieldConfigError("TENANT_FIELD_PERSISTENCE_CONTRACT_MISSING", "version", "Tenant field rollback persistence schema is not implemented; refusing in-memory fallback.");
+        }
         String normalizedTenantId = required(tenantId, "tenantId");
         String normalizedSurface = normalizedSurface(surface);
-        TenantSurfaceKey tenantSurfaceKey = surfaceKey(normalizedTenantId, normalizedSurface);
-        List<TenantFieldConfigurationVersion> history = versions.getOrDefault(tenantSurfaceKey, List.of());
+        List<TenantFieldConfigurationVersion> history = requireTestStore().versionsForTenantSurface(normalizedTenantId, normalizedSurface);
         if (history.isEmpty()) {
             throw fieldConfigError("TENANT_FIELD_VERSION_MISSING", "version", "A published version is required before rollback.");
         }
@@ -146,37 +195,59 @@ public class TenantFieldConfigurationStoreService {
             throw fieldConfigError("TENANT_FIELD_PREVIOUS_VERSION_MISSING", "version", "A prior published version is required before rollback.");
         }
         List<TenantFieldConfiguration> oldPublished = storedForTenantSurface(normalizedTenantId, normalizedSurface);
-        int rollbackVersionNumber = currentVersions.getOrDefault(tenantSurfaceKey, current.versionNumber()) + 1;
+        int rollbackVersionNumber = Math.max(requireTestStore().currentVersion(normalizedTenantId, normalizedSurface), current.versionNumber()) + 1;
         applyPublishedSnapshot(normalizedTenantId, normalizedSurface, restored);
         TenantFieldConfigurationVersion rollbackVersion = new TenantFieldConfigurationVersion(rollbackVersionNumber, normalizedTenantId, normalizedSurface, restored, oldPublished, clock.instant(), required(userId, "userId"));
-        versions.computeIfAbsent(tenantSurfaceKey, ignored -> Collections.synchronizedList(new ArrayList<>())).add(rollbackVersion);
-        currentVersions.put(tenantSurfaceKey, rollbackVersionNumber);
-        auditRecords.add(auditRecord(normalizedTenantId, required(userId, "userId"), oldPublished, restored, normalizedSurface, "ROLLBACK"));
+        requireTestStore().appendVersion(normalizedTenantId, normalizedSurface, rollbackVersion);
+        requireTestStore().saveCurrentVersion(normalizedTenantId, normalizedSurface, rollbackVersionNumber);
+        requireTestStore().appendAuditRecord(auditRecord(normalizedTenantId, required(userId, "userId"), oldPublished, restored, normalizedSurface, "ROLLBACK"));
         return rollbackVersion;
     }
 
     public List<TenantFieldConfigurationVersion> publishedVersions(String tenantId, String surface) {
         String normalizedTenantId = required(tenantId, "tenantId");
         String normalizedSurface = normalizedSurface(surface);
-        return List.copyOf(versions.getOrDefault(surfaceKey(normalizedTenantId, normalizedSurface), List.of()));
+        if (jdbcBacked()) {
+            throw fieldConfigError("TENANT_FIELD_PERSISTENCE_CONTRACT_MISSING", "version", "Tenant field version history persistence schema is not implemented; refusing in-memory fallback.");
+        }
+        return requireTestStore().versionsForTenantSurface(normalizedTenantId, normalizedSurface);
     }
 
     public List<TenantFieldConfigurationAuditRecord> auditRecordsForTenant(String tenantId) {
         String normalizedTenantId = required(tenantId, "tenantId");
-        synchronized (auditRecords) {
-            return auditRecords.stream()
-                .filter(record -> same(record.tenantId(), normalizedTenantId))
-                .sorted(Comparator.comparing(TenantFieldConfigurationAuditRecord::timestamp))
-                .toList();
+        if (jdbcBacked()) {
+            throw fieldConfigError("TENANT_FIELD_PERSISTENCE_CONTRACT_MISSING", "audit", "Tenant field audit persistence schema is not implemented; refusing in-memory fallback.");
         }
+        return requireTestStore().auditRecordsForTenant(normalizedTenantId);
     }
 
     public Optional<TenantFieldConfiguration> activeField(String tenantId, String surface, String fieldId) {
         String normalizedTenantId = required(tenantId, "tenantId");
         String normalizedSurface = normalizedSurface(surface);
         String normalizedFieldId = required(fieldId, "fieldId");
-        return Optional.ofNullable(configurations.get(key(normalizedTenantId, normalizedSurface, normalizedFieldId)))
+        if (jdbcBacked()) {
+            return jdbcTemplate.query("""
+                SELECT * FROM tenant.tenant_field_configuration WHERE tenant_id = ? AND surface = ? AND field_id = ? AND enabled = true AND omitted = false
+                """, (rs, rowNum) -> new TenantFieldConfiguration(
+                    rs.getString("configuration_id"), rs.getString("tenant_id"), rs.getString("surface"), rs.getString("field_id"),
+                    FieldOrigin.valueOf(rs.getString("origin")), rs.getString("system_field_ref"), rs.getString("name_alias"),
+                    rs.getString("description_alias"), rs.getBoolean("enabled"), rs.getBoolean("omitted"),
+                    rs.getTimestamp("updated_at").toInstant(), rs.getString("audit_ref")), normalizedTenantId, normalizedSurface, normalizedFieldId)
+                .stream().findFirst();
+        }
+        return requireTestStore().configuration(normalizedTenantId, normalizedSurface, normalizedFieldId)
             .filter(TenantFieldConfiguration::active);
+    }
+
+    private boolean jdbcBacked() {
+        return jdbcTemplate != null;
+    }
+
+    private TenantFieldConfigurationStore requireTestStore() {
+        if (testStore == null) {
+            throw fieldConfigError("TENANT_FIELD_PERSISTENCE_CONTRACT_MISSING", "persistence", "Tenant field configuration requires JDBC persistence or an explicit src/test fixture; refusing src/main process-local store-of-record fallback.");
+        }
+        return testStore;
     }
 
     private TenantFieldConfiguration validated(TenantFieldConfiguration command, Instant now) {
@@ -216,17 +287,9 @@ public class TenantFieldConfigurationStoreService {
         return new TenantFieldConfiguration(command.configurationId(), tenantId, surface, command.fieldId(), command.origin(), command.systemFieldRef(), command.nameAlias(), command.descriptionAlias(), command.enabled(), command.omitted(), command.updatedAt(), command.auditRef());
     }
 
-    private static TenantFieldKey key(String tenantId, String surface, String fieldId) {
-        return new TenantFieldKey(normalize(tenantId), normalize(surface), normalize(fieldId));
-    }
-
-    private static TenantSurfaceKey surfaceKey(String tenantId, String surface) {
-        return new TenantSurfaceKey(normalize(tenantId), normalize(surface));
-    }
-
     private void applyPublishedSnapshot(String tenantId, String surface, Collection<TenantFieldConfiguration> snapshot) {
-        configurations.keySet().removeIf(key -> same(key.tenantId(), tenantId) && same(key.surface(), surface));
-        snapshot.forEach(configuration -> configurations.put(key(configuration.tenantId(), configuration.surface(), configuration.fieldId()), configuration));
+        requireTestStore().removeConfigurationsForTenantSurface(tenantId, surface);
+        snapshot.forEach(configuration -> requireTestStore().saveConfiguration(configuration));
     }
 
     private static void validatePublishable(TenantFieldConfigurationDraft draft) {
@@ -308,10 +371,6 @@ public class TenantFieldConfigurationStoreService {
     private static TenantFieldConfigException fieldConfigError(String code, String field, String message) {
         return new TenantFieldConfigException(code, List.of(new FieldError(field, code, message)));
     }
-
-    private record TenantFieldKey(String tenantId, String surface, String fieldId) { }
-
-    private record TenantSurfaceKey(String tenantId, String surface) { }
 
     public enum TenantFieldSurface {
         APPLICATION_FORM,
@@ -404,5 +463,21 @@ public class TenantFieldConfigurationStoreService {
         public List<FieldError> fieldErrors() {
             return fieldErrors;
         }
+    }
+
+    interface TenantFieldConfigurationStore {
+        void saveConfiguration(TenantFieldConfiguration configuration);
+        void removeConfigurationsForTenantSurface(String tenantId, String surface);
+        List<TenantFieldConfiguration> configurationsForTenantSurface(String tenantId, String surface);
+        Optional<TenantFieldConfiguration> configuration(String tenantId, String surface, String fieldId);
+        void saveDraft(String tenantId, String surface, TenantFieldConfigurationDraft draft);
+        Optional<TenantFieldConfigurationDraft> draftForTenantSurface(String tenantId, String surface);
+        void removeDraft(String tenantId, String surface);
+        int currentVersion(String tenantId, String surface);
+        void saveCurrentVersion(String tenantId, String surface, int version);
+        void appendVersion(String tenantId, String surface, TenantFieldConfigurationVersion version);
+        List<TenantFieldConfigurationVersion> versionsForTenantSurface(String tenantId, String surface);
+        void appendAuditRecord(TenantFieldConfigurationAuditRecord auditRecord);
+        List<TenantFieldConfigurationAuditRecord> auditRecordsForTenant(String tenantId);
     }
 }

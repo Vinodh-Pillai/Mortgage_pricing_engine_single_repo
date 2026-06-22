@@ -6,7 +6,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
@@ -21,11 +20,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 @Component
 class PricingBffUiFallbackAdapter {
-  private final Map<String, PipelineSettingsView> pipelineSettingsByTenant = new ConcurrentHashMap<>();
-  private final Map<String, ClientSettingsView> clientSettingsByTenant = new ConcurrentHashMap<>();
-  private final Map<String, NotificationSettingsView> notificationSettingsByTenant = new ConcurrentHashMap<>();
-  private final Map<String, PricingAccessSettingsView> pricingAccessSettingsByTenant = new ConcurrentHashMap<>();
-  private final Map<String, Map<String, DraftScenarioView>> draftScenariosByTenant = new ConcurrentHashMap<>();
+  private static final String DURABLE_UI_STORE_REQUIRED =
+      "Durable UI persistence is not configured; process-local tenant and draft state is disabled.";
 
   @GetMapping("/api/ui/health")
   UiHealth health(@RequestHeader(value = "X-Correlation-Id", required = false) String correlationId) {
@@ -154,8 +150,7 @@ class PricingBffUiFallbackAdapter {
 
   PipelineSettingsView pipelineSettings(String tenantId, String uiTraceId) {
     String tenantKey = normalizedTenantKey(tenantId);
-    return pipelineSettingsByTenant.getOrDefault(tenantKey,
-        PipelineSettingsView.unconfigured(tenantKey, normalizeTrace(uiTraceId)));
+    return PipelineSettingsView.unconfigured(tenantKey, normalizeTrace(uiTraceId));
   }
 
   ResponseEntity<PipelineSettingsView> savePipelineSettings(String tenantId, String uiTraceId,
@@ -187,19 +182,17 @@ class PricingBffUiFallbackAdapter {
       validationMessages.add("lockingFields has no configured lock action field IDs.");
     }
     PipelineSettingsView view = new PipelineSettingsView(tenantKey,
-        validationMessages.isEmpty() ? "CONFIGURED" : "PARTIAL", true,
+        "BLOCKED", false,
         pipelineFields, priceScenarioTable, defaultFilters, lockingFields, bindingSummary,
-        validationMessages.isEmpty() ? "PIPELINE_SETTINGS_STORED" : "PIPELINE_SETTINGS_PARTIAL",
-        validationMessages, traceId, List.of("PipelineSettingsSaved", "PipelineSettingsFieldsBound"),
-        "Pricing-bff stores tenant-supplied field IDs only; UI rendering and lock desk business rules remain downstream-owned.");
-    pipelineSettingsByTenant.put(tenantKey, view);
-    return ResponseEntity.status(HttpStatus.CREATED).body(view);
+        "PIPELINE_SETTINGS_PERSISTENCE_REQUIRED",
+        appendPersistenceBlocked(validationMessages), traceId, List.of("PipelineSettingsPersistenceBlocked"),
+        DURABLE_UI_STORE_REQUIRED);
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(view);
   }
 
   ClientSettingsView clientSettings(String tenantId, String uiTraceId) {
     String tenantKey = normalizedTenantKey(tenantId);
-    return clientSettingsByTenant.getOrDefault(tenantKey,
-        ClientSettingsView.unconfigured(tenantKey, normalizeTrace(uiTraceId)));
+    return ClientSettingsView.unconfigured(tenantKey, normalizeTrace(uiTraceId));
   }
 
   ResponseEntity<ClientSettingsView> saveClientSettings(String tenantId, String uiTraceId,
@@ -215,37 +208,33 @@ class PricingBffUiFallbackAdapter {
     String activeVersion = normalizedRaw(request.activeVersion());
     List<String> validationMessages = clientSettingsValidation(systemFields, fieldValues, activeVersion);
     ClientSettingsView view = new ClientSettingsView(tenantKey,
-        validationMessages.isEmpty() ? "CONFIGURED" : "PARTIAL", true, activeVersion,
-        systemFields, fieldValues, validationMessages,
-        validationMessages.isEmpty() ? "CLIENT_SETTINGS_ACTIVE_VERSION_STORED" : "CLIENT_SETTINGS_VALIDATION_PENDING",
-        traceId, List.of("ClientSettingsSaved", "ClientSettingsFieldsReferenced"),
-        "Pricing-bff stores tenant-supplied client setting values and references system field IDs only; it does not infer client-level pricing defaults.");
-    clientSettingsByTenant.put(tenantKey, view);
-    return ResponseEntity.status(HttpStatus.CREATED).body(view);
+        "BLOCKED", false, activeVersion,
+        systemFields, fieldValues, appendPersistenceBlocked(validationMessages),
+        "CLIENT_SETTINGS_PERSISTENCE_REQUIRED",
+        traceId, List.of("ClientSettingsPersistenceBlocked"),
+        DURABLE_UI_STORE_REQUIRED);
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(view);
   }
 
   ResponseEntity<ClientSettingsView> publishClientSettings(String tenantId, String uiTraceId) {
     String tenantKey = normalizedTenantKey(tenantId);
     String traceId = normalizeTrace(uiTraceId);
-    ClientSettingsView existing = clientSettingsByTenant.getOrDefault(tenantKey,
-        ClientSettingsView.unconfigured(tenantKey, traceId));
+    ClientSettingsView existing = ClientSettingsView.unconfigured(tenantKey, traceId);
     List<String> validationMessages = clientSettingsValidation(existing.systemFields(), existing.clientFieldValues(),
         existing.activeVersion());
     if (!validationMessages.isEmpty()) {
       ClientSettingsView blocked = existing.withStatus("BLOCKED", "CLIENT_SETTINGS_PUBLISH_BLOCKED", traceId,
           validationMessages, List.of("ClientSettingsPublishBlocked"));
-      return ResponseEntity.badRequest().body(blocked);
+      return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(blocked);
     }
-    ClientSettingsView published = existing.withStatus("PUBLISHED", "CLIENT_SETTINGS_ACTIVE_VERSION_PUBLISHED", traceId,
-        List.of(), List.of("ClientSettingsPublished"));
-    clientSettingsByTenant.put(tenantKey, published);
-    return ResponseEntity.ok(published);
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(existing.withStatus("BLOCKED",
+        "CLIENT_SETTINGS_PERSISTENCE_REQUIRED", traceId, List.of(DURABLE_UI_STORE_REQUIRED),
+        List.of("ClientSettingsPersistenceBlocked")));
   }
 
   NotificationSettingsView notificationSettings(String tenantId, String uiTraceId) {
     String tenantKey = normalizedTenantKey(tenantId);
-    return notificationSettingsByTenant.getOrDefault(tenantKey,
-        NotificationSettingsView.unconfigured(tenantKey, normalizeTrace(uiTraceId)));
+    return NotificationSettingsView.unconfigured(tenantKey, normalizeTrace(uiTraceId));
   }
 
   ResponseEntity<NotificationSettingsView> saveNotificationSettings(String tenantId, String uiTraceId,
@@ -263,37 +252,33 @@ class PricingBffUiFallbackAdapter {
     List<String> validationMessages = notificationSettingsValidation(activeFieldLibrary, notificationFields,
         activeVersion);
     NotificationSettingsView view = new NotificationSettingsView(tenantKey,
-        validationMessages.isEmpty() ? "CONFIGURED" : "PARTIAL", true, activeVersion,
-        activeFieldLibrary, notificationFields, validationMessages,
-        validationMessages.isEmpty() ? "PRICING_NOTIFICATION_SETTINGS_STORED" : "PRICING_NOTIFICATION_VALIDATION_PENDING",
-        traceId, List.of("PricingNotificationSettingsSaved", "PricingNotificationFieldsReferenced"),
-        "Pricing-bff stores tenant-supplied notification aliases, field IDs, references, and condition expressions only; delivery transport and pricing decisions remain downstream-owned.");
-    notificationSettingsByTenant.put(tenantKey, view);
-    return ResponseEntity.status(HttpStatus.CREATED).body(view);
+        "BLOCKED", false, activeVersion,
+        activeFieldLibrary, notificationFields, appendPersistenceBlocked(validationMessages),
+        "PRICING_NOTIFICATION_PERSISTENCE_REQUIRED",
+        traceId, List.of("PricingNotificationPersistenceBlocked"),
+        DURABLE_UI_STORE_REQUIRED);
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(view);
   }
 
   ResponseEntity<NotificationSettingsView> publishNotificationSettings(String tenantId, String uiTraceId) {
     String tenantKey = normalizedTenantKey(tenantId);
     String traceId = normalizeTrace(uiTraceId);
-    NotificationSettingsView existing = notificationSettingsByTenant.getOrDefault(tenantKey,
-        NotificationSettingsView.unconfigured(tenantKey, traceId));
+    NotificationSettingsView existing = NotificationSettingsView.unconfigured(tenantKey, traceId);
     List<String> validationMessages = notificationSettingsValidation(existing.activeFieldLibrary(),
         existing.notificationFields(), existing.activeVersion());
     if (!validationMessages.isEmpty()) {
-      return ResponseEntity.badRequest().body(existing.withStatus("BLOCKED", "PRICING_NOTIFICATION_PUBLISH_BLOCKED",
+      return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(existing.withStatus("BLOCKED", "PRICING_NOTIFICATION_PUBLISH_BLOCKED",
           traceId, validationMessages, List.of("PricingNotificationPublishBlocked")));
     }
-    NotificationSettingsView published = existing.withStatus("PUBLISHED",
-        "PRICING_NOTIFICATION_SETTINGS_PUBLISHED", traceId, List.of(), List.of("PricingNotificationSettingsPublished"));
-    notificationSettingsByTenant.put(tenantKey, published);
-    return ResponseEntity.ok(published);
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(existing.withStatus("BLOCKED",
+        "PRICING_NOTIFICATION_PERSISTENCE_REQUIRED", traceId, List.of(DURABLE_UI_STORE_REQUIRED),
+        List.of("PricingNotificationPersistenceBlocked")));
   }
 
   PricingAccessSettingsView pricingAccessSettings(String tenantId, String userRoleId, String uiTraceId) {
     String tenantKey = normalizedTenantKey(tenantId);
     String roleId = normalizedRaw(userRoleId);
-    PricingAccessSettingsView existing = pricingAccessSettingsByTenant.getOrDefault(tenantKey,
-        PricingAccessSettingsView.unconfigured(tenantKey, normalizeTrace(uiTraceId)));
+    PricingAccessSettingsView existing = PricingAccessSettingsView.unconfigured(tenantKey, normalizeTrace(uiTraceId));
     return existing.withResolvedRole(roleId.isBlank() ? existing.activeRoleId() : roleId, normalizeTrace(uiTraceId));
   }
 
@@ -316,15 +301,14 @@ class PricingBffUiFallbackAdapter {
     List<PricingAccessAuditRecord> auditRecords = pricingAccessAuditRecords(tenantKey, normalizedRaw(actorUserId), roles,
         pricingProfiles, featureFlags, activeRoleId, activePricingProfileId, activeVersion);
     PricingAccessSettingsView view = new PricingAccessSettingsView(tenantKey,
-        validationMessages.isEmpty() ? "CONFIGURED" : "PARTIAL", true, activeVersion, activeRoleId,
+        "BLOCKED", false, activeVersion, activeRoleId,
         activePricingProfileId, roles, pricingProfiles, featureFlags, List.of(), List.of(), null,
-        disabledFeatureIds(featureFlags), auditRecords, validationMessages,
-        validationMessages.isEmpty() ? "PRICING_ACCESS_SETTINGS_STORED" : "PRICING_ACCESS_VALIDATION_PENDING",
-        traceId, List.of("PricingAccessSettingsSaved", "PricingAccessAuditRecorded"),
-        "Pricing-bff stores tenant-supplied role field visibility, pricing profile, and feature flag references only; it does not infer pricing rules or identity policy.")
+        disabledFeatureIds(featureFlags), auditRecords, appendPersistenceBlocked(validationMessages),
+        "PRICING_ACCESS_PERSISTENCE_REQUIRED",
+        traceId, List.of("PricingAccessPersistenceBlocked"),
+        DURABLE_UI_STORE_REQUIRED)
         .withResolvedRole(activeRoleId, traceId);
-    pricingAccessSettingsByTenant.put(tenantKey, view);
-    return ResponseEntity.status(HttpStatus.CREATED).body(view);
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(view);
   }
 
   ResponseEntity<?> createDraftScenario(String tenantId, String tenantContext, String uiTraceId,
@@ -333,67 +317,45 @@ class PricingBffUiFallbackAdapter {
     if (denied != null) return denied;
     String tenantKey = normalizedTenantKey(tenantId);
     String traceId = normalizeTrace(uiTraceId);
-    Map<String, Object> data = safeObjectMap(request == null ? null : request.data());
-    Map<String, Object> initialFacts = safeObjectMap(request == null ? null : request.initialFacts());
-    String externalLoanId = normalizedRaw(request == null ? null : request.externalLoanId());
-    if (externalLoanId.isBlank()) externalLoanId = normalizedRaw(data.get("loanNumber"));
-    String scenarioId = "draft-" + tenantKey + "-" + Integer.toUnsignedString((tenantKey + "|" + externalLoanId + "|" + draftScenarios(tenantKey).size()).hashCode(), 36);
-    DraftScenarioView draft = new DraftScenarioView(scenarioId, 1,
-        normalizedRaw(request == null ? null : request.status()).isBlank() ? "DRAFT_INCOMPLETE" : normalizedRaw(request.status()),
-        data, initialFacts.isEmpty() ? data : initialFacts, data, externalLoanId, traceId,
-        List.of("QuickQuotePipelineDraftCreated", "TenantScopedDraftStored"));
-    draftScenarios(tenantKey).put(scenarioId, draft);
-    return ResponseEntity.status(HttpStatus.CREATED).body(draft);
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("status", "BLOCKED",
+        "message", DURABLE_UI_STORE_REQUIRED,
+        "code", "DRAFT_SCENARIO_PERSISTENCE_REQUIRED",
+        "tenantContext", tenantKey,
+        "uiTraceId", traceId));
   }
 
   ResponseEntity<?> updateDraftScenario(String tenantId, String scenarioId, String section, String tenantContext,
       String uiTraceId, DraftScenarioRequest request) {
     ResponseEntity<Map<String, String>> denied = denyCrossTenantDraftAccess(tenantId, tenantContext, uiTraceId);
     if (denied != null) return denied;
-    String tenantKey = normalizedTenantKey(tenantId);
     String traceId = normalizeTrace(uiTraceId);
-    DraftScenarioView existing = draftScenarios(tenantKey).get(scenarioId);
-    if (existing == null) return ResponseEntity.notFound().build();
-    int expectedVersion = request == null || request.scenarioVersion() == null ? existing.scenarioVersion() : request.scenarioVersion();
-    if (expectedVersion != existing.scenarioVersion()) {
-      return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("status", "VERSION_CONFLICT", "message", "Draft scenario version conflict.", "uiTraceId", traceId));
-    }
-    Map<String, Object> data = new LinkedHashMap<>(existing.data());
-    data.putAll(safeObjectMap(request == null ? null : request.data()));
-    DraftScenarioView updated = new DraftScenarioView(existing.scenarioId(), existing.scenarioVersion() + 1,
-        existing.status(), data, existing.initialFacts(), data, existing.externalLoanId(), traceId,
-        List.of("QuickQuotePipelineDraftUpdated", "DraftSectionStored:" + normalizedRaw(section)));
-    draftScenarios(tenantKey).put(scenarioId, updated);
-    return ResponseEntity.ok(updated);
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("status", "BLOCKED",
+        "message", DURABLE_UI_STORE_REQUIRED,
+        "code", "DRAFT_SCENARIO_PERSISTENCE_REQUIRED",
+        "scenarioId", normalizedRaw(scenarioId),
+        "section", normalizedRaw(section),
+        "uiTraceId", traceId));
   }
 
   ResponseEntity<?> getDraftScenario(String tenantId, String scenarioId, String tenantContext, String uiTraceId) {
     ResponseEntity<Map<String, String>> denied = denyCrossTenantDraftAccess(tenantId, tenantContext, uiTraceId);
     if (denied != null) return denied;
-    DraftScenarioView draft = draftScenarios(normalizedTenantKey(tenantId)).get(scenarioId);
-    if (draft == null) return ResponseEntity.notFound().build();
-    return ResponseEntity.ok(draft.withTrace(normalizeTrace(uiTraceId)));
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("status", "BLOCKED",
+        "message", DURABLE_UI_STORE_REQUIRED,
+        "code", "DRAFT_SCENARIO_PERSISTENCE_REQUIRED",
+        "scenarioId", normalizedRaw(scenarioId),
+        "uiTraceId", normalizeTrace(uiTraceId)));
   }
 
   ResponseEntity<?> findDraftScenarios(String tenantId, String tenantContext, String uiTraceId,
       String borrowerLastName, String loanNumber, String status) {
     ResponseEntity<Map<String, String>> denied = denyCrossTenantDraftAccess(tenantId, tenantContext, uiTraceId);
     if (denied != null) return denied;
-    String normalizedBorrower = normalizedRaw(borrowerLastName);
-    String normalizedLoan = normalizedRaw(loanNumber);
-    String normalizedStatus = normalizedRaw(status);
-    List<DraftScenarioView> matches = draftScenarios(normalizedTenantKey(tenantId)).values().stream()
-        .filter(draft -> normalizedStatus.isBlank() || normalizedStatus.equals(normalizedRaw(draft.status())))
-        .filter(draft -> normalizedBorrower.isBlank() || normalizedBorrower.equals(normalizedRaw(draft.intake().get("borrowerLastName"))))
-        .filter(draft -> normalizedLoan.isBlank() || normalizedLoan.equals(normalizedRaw(draft.intake().get("loanNumber"))))
-        .map(draft -> draft.withTrace(normalizeTrace(uiTraceId)))
-        .toList();
-    if (matches.isEmpty()) return ResponseEntity.notFound().build();
-    return ResponseEntity.ok(Map.of("records", matches));
-  }
-
-  private Map<String, DraftScenarioView> draftScenarios(String tenantKey) {
-    return draftScenariosByTenant.computeIfAbsent(tenantKey, ignored -> new ConcurrentHashMap<>());
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("status", "BLOCKED",
+        "message", DURABLE_UI_STORE_REQUIRED,
+        "code", "DRAFT_SCENARIO_PERSISTENCE_REQUIRED",
+        "tenantContext", normalizedTenantKey(tenantId),
+        "uiTraceId", normalizeTrace(uiTraceId)));
   }
 
   private ResponseEntity<Map<String, String>> denyCrossTenantDraftAccess(String tenantId, String tenantContext, String uiTraceId) {
@@ -401,6 +363,12 @@ class PricingBffUiFallbackAdapter {
     String presented = normalizedTenantKey(tenantContext);
     if (presented.isBlank() || requested.equals(presented)) return null;
     return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("status", "DENIED", "message", "Draft scenario access denied.", "uiTraceId", normalizeTrace(uiTraceId)));
+  }
+
+  private List<String> appendPersistenceBlocked(List<String> validationMessages) {
+    List<String> messages = new ArrayList<>(validationMessages == null ? List.of() : validationMessages);
+    messages.add(DURABLE_UI_STORE_REQUIRED);
+    return List.copyOf(messages);
   }
 
   ProductCatalogManagerView productCatalogManager(String tenantContext, String uiTraceId) {
@@ -2075,8 +2043,7 @@ class PricingBffUiFallbackAdapter {
     if (!requestLibrary.isEmpty()) {
       return requestLibrary;
     }
-    return clientSettingsByTenant.getOrDefault(tenantKey, ClientSettingsView.unconfigured(tenantKey, "local-trace"))
-        .systemFields();
+    return List.of();
   }
 
   private List<PricingNotificationFieldView> safeNotificationFields(List<PricingNotificationFieldConfig> fields,

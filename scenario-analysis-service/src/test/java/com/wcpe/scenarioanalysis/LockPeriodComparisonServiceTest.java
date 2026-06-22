@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.wcpe.scenarioanalysis.LockPeriodComparisonService.IdempotencyConflictException;
-import com.wcpe.scenarioanalysis.LockPeriodComparisonService.InMemoryLockPeriodComparisonRepository;
 import com.wcpe.scenarioanalysis.LockPeriodComparisonService.LockPeriodComparisonCommand;
 import com.wcpe.scenarioanalysis.LockPeriodComparisonService.PolicyNotSatisfiedException;
 import com.wcpe.scenarioanalysis.LockPeriodComparisonService.PricingVersionStaleException;
@@ -19,12 +18,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class LockPeriodComparisonServiceTest {
-  private InMemoryLockPeriodComparisonRepository repository;
+  private TestOnlyInMemoryLockPeriodComparisonRepository repository;
   private LockPeriodComparisonService service;
 
   @BeforeEach
   void setUp() {
-    repository = new InMemoryLockPeriodComparisonRepository();
+    repository = new TestOnlyInMemoryLockPeriodComparisonRepository();
     service = new LockPeriodComparisonService(
         repository,
         Clock.fixed(Instant.parse("2026-06-01T12:00:00Z"), ZoneOffset.UTC));

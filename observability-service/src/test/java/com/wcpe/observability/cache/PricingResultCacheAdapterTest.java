@@ -26,7 +26,7 @@ class PricingResultCacheAdapterTest {
 
   @Test
   void missWritesDeterministicTenantScenarioResultHashAndTtl() {
-    InMemoryPricingResultCacheStore store = new InMemoryPricingResultCacheStore();
+    LocalPricingResultCacheStore store = new LocalPricingResultCacheStore();
     PricingResultCacheAdapter adapter = adapter(store, NOW, Duration.ofMinutes(15));
 
     PricingResultCacheOutcome outcome = adapter.resolve(cacheableRequest(), PricingResultCacheAdapterTest::safePayload);
@@ -44,7 +44,7 @@ class PricingResultCacheAdapterTest {
 
   @Test
   void secondLookupHitsWithoutRecomputing() {
-    InMemoryPricingResultCacheStore store = new InMemoryPricingResultCacheStore();
+    LocalPricingResultCacheStore store = new LocalPricingResultCacheStore();
     PricingResultCacheAdapter adapter = adapter(store, NOW, Duration.ofMinutes(15));
     AtomicInteger computations = new AtomicInteger();
 
@@ -63,7 +63,7 @@ class PricingResultCacheAdapterTest {
 
   @Test
   void disabledFeatureBypassesStoreAndKeepsPricingAvailable() {
-    InMemoryPricingResultCacheStore store = new InMemoryPricingResultCacheStore();
+    LocalPricingResultCacheStore store = new LocalPricingResultCacheStore();
     PricingResultCacheAdapter adapter = adapter(store, NOW, Duration.ofMinutes(15));
 
     PricingResultCacheOutcome outcome = adapter.resolve(request(new CacheEligibilityPolicy(
@@ -76,7 +76,7 @@ class PricingResultCacheAdapterTest {
 
   @Test
   void staleEntryRecomputesAndReplacesExpiredResult() {
-    InMemoryPricingResultCacheStore store = new InMemoryPricingResultCacheStore();
+    LocalPricingResultCacheStore store = new LocalPricingResultCacheStore();
     adapter(store, NOW.minus(Duration.ofMinutes(30)), Duration.ofMinutes(10))
         .resolve(cacheableRequest(), PricingResultCacheAdapterTest::safePayload);
 
@@ -114,7 +114,7 @@ class PricingResultCacheAdapterTest {
 
   @Test
   void unsafePricingResultPayloadIsRejectedBeforeCacheWrite() {
-    PricingResultCacheAdapter adapter = adapter(new InMemoryPricingResultCacheStore(), NOW, Duration.ofMinutes(15));
+    PricingResultCacheAdapter adapter = adapter(new LocalPricingResultCacheStore(), NOW, Duration.ofMinutes(15));
 
     assertThrows(IllegalArgumentException.class,
         () -> adapter.resolve(cacheableRequest(), () -> Map.of("borrowerName", "Jane Borrower")));

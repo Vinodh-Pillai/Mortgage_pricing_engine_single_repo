@@ -96,6 +96,7 @@ class QuoteSnapshotPersistenceTest {
     private static QuoteApplicationService serviceWithSnapshots(InMemoryQuoteSnapshotRepository snapshots) {
         return new QuoteApplicationService(
             new InMemoryQuoteRepository(),
+            new InMemoryQuoteJobRepository(),
             snapshots,
             QuoteTestSupport.dependenciesWithPolicy(),
             new InMemoryQuoteCache(),

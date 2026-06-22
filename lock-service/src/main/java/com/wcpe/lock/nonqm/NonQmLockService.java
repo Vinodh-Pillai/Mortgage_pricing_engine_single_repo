@@ -9,9 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -21,30 +19,32 @@ import java.util.UUID;
 
 public final class NonQmLockService {
   private final BusinessDayCalculator businessDayCalculator;
-  private final Map<String, NonQmLockPolicy> policiesByCode = new HashMap<>();
-  private final Map<String, SecondaryDeliveryProfile> deliveryProfilesByCode = new HashMap<>();
-  private final Map<String, NonQmLockRecord> locksByTenantAndId = new HashMap<>();
-  private final Map<String, NonQmExtensionDecision> extensionsByTenantAndId = new HashMap<>();
-  private final Map<String, FloatDownDecision> floatDownsByTenantAndId = new HashMap<>();
-  private final Map<String, Object> idempotency = new HashMap<>();
-  private final List<Map<String, String>> auditTrail = new ArrayList<>();
+  private final NonQmLockRepository repository;
 
   public NonQmLockService(BusinessDayCalculator businessDayCalculator) {
+    this(businessDayCalculator, new FailClosedNonQmLockRepository());
+  }
+
+  NonQmLockService(BusinessDayCalculator businessDayCalculator, NonQmLockRepository repository) {
     if (businessDayCalculator == null) {
       throw new LockServiceException("VALIDATION_FAILED", "businessDayCalculator is required");
     }
+    if (repository == null) {
+      throw new LockServiceException("VALIDATION_FAILED", "Non-QM lock repository is required");
+    }
     this.businessDayCalculator = businessDayCalculator;
+    this.repository = repository;
   }
 
   public void importDeliveryProfile(SecondaryDeliveryProfile profile) {
     if (profile == null) throw new LockServiceException("VALIDATION_FAILED", "delivery profile is required");
-    deliveryProfilesByCode.put(profile.profileCode(), profile);
+    repository.saveDeliveryProfile(profile);
     audit("NON_QM_SECONDARY_PROFILE_IMPORTED", profile.profileCode(), profile.investorCode(), "non_qm.secondary_profile.imported.v1");
   }
 
   public void importPolicy(NonQmLockPolicy policy) {
     if (policy == null) throw new LockServiceException("VALIDATION_FAILED", "lock policy is required");
-    SecondaryDeliveryProfile profile = deliveryProfilesByCode.getOrDefault(policy.deliveryProfile().profileCode(), policy.deliveryProfile());
+    SecondaryDeliveryProfile profile = repository.findDeliveryProfile(policy.deliveryProfile().profileCode()).orElse(policy.deliveryProfile());
     if (!"ACTIVE".equals(profile.status())) {
       throw new LockServiceException("SECONDARY_PROFILE_INACTIVE", "Investor delivery profile must be active before policy import");
     }
@@ -54,8 +54,8 @@ public final class NonQmLockService {
     if (policy.termOptions().isEmpty()) {
       throw new LockServiceException("VALIDATION_FAILED", "Non-QM lock policy requires at least one term option");
     }
-    policiesByCode.put(policy.policyCode(), policy);
-    deliveryProfilesByCode.put(profile.profileCode(), profile);
+    repository.savePolicy(policy);
+    repository.saveDeliveryProfile(profile);
     audit("NON_QM_LOCK_POLICY_IMPORTED", policy.policyCode(), policy.investorCode(), "non_qm.lock_policy.imported.v1");
   }
 
@@ -84,19 +84,19 @@ public final class NonQmLockService {
       deliveryProfile, request.pricingWaterfall().waterfallRef(), request.pricingWaterfall().auditHash(), term.lockPriceAdjustmentBps(),
       request.projectContext(), auditRef, "non_qm.lock_requested.v1"
     );
-    locksByTenantAndId.put(key(request.tenantId(), lockId), record);
+    repository.saveLock(record);
     NonQmLockDecision decision = new NonQmLockDecision(
       lockId, policy.policyCode(), term.termDays(), expiration.expiresAt(), deliveryProfile.deliveryType(), record.status(),
       List.of("Non-QM policy selected", "Secondary profile assigned", "Expiration calculated with tenant business-day calendar"),
       auditRef, "non_qm.lock_requested.v1"
     );
-    idempotency.put(idempotencyKey(request.tenantId(), request.idempotencyKey()), new Idempotency(payloadHash, decision));
+    repository.saveIdempotency(request.tenantId(), request.idempotencyKey(), payloadHash, decision);
     audit("NON_QM_LOCK_REQUESTED", lockId, policy.policyCode(), decision.outboxEventType());
     return decision;
   }
 
   public NonQmLockRecord getLock(UUID tenantId, String lockId) {
-    return Optional.ofNullable(locksByTenantAndId.get(key(tenantId, lockId)))
+    return repository.findLock(tenantId, lockId)
       .orElseThrow(() -> new LockServiceException("NOT_FOUND", "Non-QM lock was not found for tenant"));
   }
 
@@ -106,7 +106,7 @@ public final class NonQmLockService {
     if (replay instanceof NonQmExtensionDecision decision) return decision;
 
     NonQmLockRecord lock = getLock(request.tenantId(), request.lockId());
-    NonQmLockPolicy policy = policiesByCode.get(lock.policyCode());
+    NonQmLockPolicy policy = repository.findPolicy(lock.policyCode()).orElse(null);
     if (policy == null) throw new LockServiceException("LOCK_POLICY_MISSING", "Policy used by lock is not available");
     ExtensionPolicy extensionPolicy = policy.extensionPolicies().stream()
       .filter(candidate -> candidate.extensionType() == request.extensionType())
@@ -134,10 +134,10 @@ public final class NonQmLockService {
       expiration.expiresAt(), fee, missingEvidence, missingEvidence.isEmpty() ? List.of("EXTENSION_POLICY_SATISFIED") : List.of("EVIDENCE_REQUIRED"),
       "AUDIT-NONQM-EXT-" + extensionId, eventType
     );
-    extensionsByTenantAndId.put(key(request.tenantId(), extensionId), decision);
-    idempotency.put(idempotencyKey(request.tenantId(), request.idempotencyKey()), new Idempotency(payloadHash, decision));
+    repository.saveExtension(decision);
+    repository.saveIdempotency(request.tenantId(), request.idempotencyKey(), payloadHash, decision);
     if (status == ExtensionStatus.APPROVED) {
-      locksByTenantAndId.put(key(lock.tenantId(), lock.lockId()), copyWithExtension(lock, expiration.expiresAt(), expiration.breakdown()));
+      repository.saveLock(copyWithExtension(lock, expiration.expiresAt(), expiration.breakdown()));
     }
     audit("NON_QM_LOCK_EXTENSION_" + status.name(), extensionId, extensionPolicy.extensionCode(), decision.outboxEventType());
     return decision;
@@ -149,7 +149,8 @@ public final class NonQmLockService {
     if (replay instanceof FloatDownDecision decision) return decision;
 
     NonQmLockRecord lock = getLock(request.tenantId(), request.lockId());
-    NonQmLockPolicy policy = policiesByCode.get(lock.policyCode());
+    NonQmLockPolicy policy = repository.findPolicy(lock.policyCode()).orElse(null);
+    if (policy == null) throw new LockServiceException("LOCK_POLICY_MISSING", "Policy used by lock is not available");
     LockTermOption term = policy.termOptions().stream()
       .filter(candidate -> candidate.termCode().equals(lock.termCode()))
       .findFirst()
@@ -162,8 +163,8 @@ public final class NonQmLockService {
     } else {
       decision = new FloatDownDecision(lock.lockId(), FloatDownStatus.APPROVED, term.floatDownRuleRef(), term.minimumImprovementBps(), request.currentPriceImprovementBps(), request.pricingEvidenceRef(), List.of("FLOAT_DOWN_POLICY_SATISFIED"), "AUDIT-NONQM-FLOATDOWN-" + lock.lockId(), "non_qm.float_down_approved.v1");
     }
-    floatDownsByTenantAndId.put(key(request.tenantId(), lock.lockId()), decision);
-    idempotency.put(idempotencyKey(request.tenantId(), request.idempotencyKey()), new Idempotency(payloadHash, decision));
+    repository.saveFloatDown(request.tenantId(), lock.lockId(), decision);
+    repository.saveIdempotency(request.tenantId(), request.idempotencyKey(), payloadHash, decision);
     audit("NON_QM_FLOAT_DOWN_" + decision.status().name(), lock.lockId(), decision.ruleRef(), decision.outboxEventType());
     return decision;
   }
@@ -174,7 +175,7 @@ public final class NonQmLockService {
     if (!"ACTIVE".equals(profile.status())) {
       throw new LockServiceException("SECONDARY_PROFILE_INACTIVE", "Inactive investor profile blocks delivery package creation");
     }
-    Map<String, String> exportFields = new HashMap<>(profile.investorCustomFields());
+    Map<String, String> exportFields = new java.util.LinkedHashMap<>(profile.investorCustomFields());
     exportFields.put("lockPolicyCode", lock.policyCode());
     exportFields.put("lockTermDays", String.valueOf(lock.lockPeriodBusinessDays()));
     exportFields.put("pricingWaterfallRef", lock.pricingWaterfallRef());
@@ -203,11 +204,11 @@ public final class NonQmLockService {
   }
 
   public List<Map<String, String>> auditTrail() {
-    return List.copyOf(auditTrail);
+    return repository.auditTrail();
   }
 
   private Optional<NonQmLockPolicy> resolvePolicy(PricingWaterfallSnapshot waterfall, Instant effectiveAt) {
-    return policiesByCode.values().stream()
+    return repository.policies().stream()
       .filter(policy -> "ACTIVE".equals(policy.status()))
       .filter(policy -> policy.investorCode().equals(waterfall.investorCode()))
       .filter(policy -> policy.channelCode().equals(waterfall.channelCode()))
@@ -239,18 +240,15 @@ public final class NonQmLockService {
       lock.expiresAt(), lock.expiresAt(), fee, List.of(), List.of(reasonCode), "AUDIT-NONQM-EXT-" + extensionId,
       "non_qm.lock_extension_decisioned.v1"
     );
-    extensionsByTenantAndId.put(key(request.tenantId(), extensionId), decision);
+    repository.saveExtension(decision);
     audit("NON_QM_LOCK_EXTENSION_REJECTED", extensionId, reasonCode, decision.outboxEventType());
     return decision;
   }
 
   private List<String> missingEvidence(ExtensionPolicy policy, List<String> evidenceRefs) {
-    List<String> missing = new ArrayList<>();
-    for (String required : policy.requiredEvidenceTypes()) {
-      boolean present = evidenceRefs.stream().anyMatch(ref -> ref != null && ref.contains(required));
-      if (!present) missing.add(required);
-    }
-    return List.copyOf(missing);
+    return policy.requiredEvidenceTypes().stream()
+      .filter(required -> evidenceRefs.stream().noneMatch(ref -> ref != null && ref.contains(required)))
+      .toList();
   }
 
   private NonQmLockRecord copyWithExtension(
@@ -267,31 +265,17 @@ public final class NonQmLockService {
   }
 
   private Object replay(UUID tenantId, String idempotencyKey, String payloadHash) {
-    Object value = idempotency.get(idempotencyKey(tenantId, idempotencyKey));
-    if (value == null) return null;
-    Idempotency record = (Idempotency) value;
-    if (!record.payloadHash().equals(payloadHash)) {
-      throw new LockServiceException("IDEMPOTENCY_CONFLICT", "Idempotency key was reused with a different Non-QM payload");
-    }
-    return record.response();
+    return repository.findIdempotency(tenantId, idempotencyKey, payloadHash).orElse(null);
   }
 
   private void audit(String action, String aggregateId, String policyOrProfileRef, String eventType) {
-    auditTrail.add(Map.of(
+    repository.addAudit(Map.of(
       "action", action,
       "aggregateId", aggregateId,
       "policyOrProfileRef", policyOrProfileRef == null ? "" : policyOrProfileRef,
       "eventType", eventType,
       "recordedAt", Instant.now().toString()
     ));
-  }
-
-  private static String key(UUID tenantId, String id) {
-    return tenantId + ":" + id;
-  }
-
-  private static String idempotencyKey(UUID tenantId, String idempotencyKey) {
-    return tenantId + ":" + idempotencyKey;
   }
 
   private static String stableId(UUID tenantId, String requestId, String idempotencyKey) {
@@ -305,6 +289,4 @@ public final class NonQmLockService {
       throw new IllegalStateException("SHA-256 unavailable", e);
     }
   }
-
-  private record Idempotency(String payloadHash, Object response) {}
 }

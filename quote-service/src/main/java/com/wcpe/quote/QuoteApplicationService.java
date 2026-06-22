@@ -36,16 +36,6 @@ public class QuoteApplicationService {
 
     public QuoteApplicationService(
         QuoteRepository repository,
-        QuoteDependencies dependencies,
-        QuoteCache cache,
-        BestExecutionRanker ranker,
-        Clock clock
-    ) {
-        this(repository, new InMemoryQuoteJobRepository(), new InMemoryQuoteSnapshotRepository(), dependencies, cache, ranker, clock);
-    }
-
-    public QuoteApplicationService(
-        QuoteRepository repository,
         QuoteJobRepository jobRepository,
         QuoteSnapshotRepository snapshotRepository,
         QuoteDependencies dependencies,
@@ -74,17 +64,6 @@ public class QuoteApplicationService {
         this.ranker = ranker;
         this.clock = clock;
         this.parallelPricingOrchestrator = parallelPricingOrchestrator == null ? new ParallelPricingOrchestrator() : parallelPricingOrchestrator;
-    }
-
-    public QuoteApplicationService(
-        QuoteRepository repository,
-        QuoteSnapshotRepository snapshotRepository,
-        QuoteDependencies dependencies,
-        QuoteCache cache,
-        BestExecutionRanker ranker,
-        Clock clock
-    ) {
-        this(repository, new InMemoryQuoteJobRepository(), snapshotRepository, dependencies, cache, ranker, clock);
     }
 
     public Quote createQuote(QuoteCreateRequest request) {

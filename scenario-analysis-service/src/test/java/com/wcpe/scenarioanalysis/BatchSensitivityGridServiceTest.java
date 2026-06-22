@@ -8,7 +8,6 @@ import com.wcpe.scenarioanalysis.BatchSensitivityGridService.BatchGridAxis;
 import com.wcpe.scenarioanalysis.BatchSensitivityGridService.BatchGridCommand;
 import com.wcpe.scenarioanalysis.BatchSensitivityGridService.CellLimitExceededException;
 import com.wcpe.scenarioanalysis.BatchSensitivityGridService.IdempotencyConflictException;
-import com.wcpe.scenarioanalysis.BatchSensitivityGridService.InMemoryBatchGridRepository;
 import com.wcpe.scenarioanalysis.BatchSensitivityGridService.ValidationException;
 import java.time.Clock;
 import java.time.Instant;
@@ -18,12 +17,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class BatchSensitivityGridServiceTest {
-  private InMemoryBatchGridRepository repository;
+  private TestOnlyInMemoryBatchGridRepository repository;
   private BatchSensitivityGridService service;
 
   @BeforeEach
   void setUp() {
-    repository = new InMemoryBatchGridRepository();
+    repository = new TestOnlyInMemoryBatchGridRepository();
     service = new BatchSensitivityGridService(
         repository,
         Clock.fixed(Instant.parse("2026-06-01T12:00:00Z"), ZoneOffset.UTC));

@@ -24,7 +24,7 @@ import org.junit.jupiter.api.Test;
 
 class SrpTest {
   private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
-  private final CompanyMarginPolicyService service = new CompanyMarginPolicyService(CLOCK);
+  private final CompanyMarginPolicyService service = MarginServiceTestStores.companyMarginPolicyService(CLOCK);
 
   @Test
   void calculationSpreadTimesLoanAmount() {

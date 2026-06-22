@@ -29,7 +29,7 @@ public class WhatIfReplayService {
   private final Clock clock;
 
   public WhatIfReplayService() {
-    this(new InMemoryReplayRepository(), Clock.systemUTC());
+    throw FailClosedPersistence.notConfigured("what-if replay store");
   }
 
   WhatIfReplayService(ReplayRepository repository, Clock clock) {
@@ -433,35 +433,6 @@ public class WhatIfReplayService {
     Optional<StoredReplay> findByReplayId(String tenantId, UUID replayId);
 
     void save(StoredReplay replay);
-  }
-
-  public static class InMemoryReplayRepository implements ReplayRepository {
-    private final Map<String, StoredReplay> replaysByTenantAndId = new ConcurrentHashMap<>();
-    private final Map<String, StoredReplay> replaysByTenantAndIdempotency = new ConcurrentHashMap<>();
-
-    @Override
-    public Optional<StoredReplay> findByIdempotencyKeyHash(String tenantId, String idempotencyKeyHash) {
-      return Optional.ofNullable(replaysByTenantAndIdempotency.get(key(tenantId, idempotencyKeyHash)));
-    }
-
-    @Override
-    public Optional<StoredReplay> findByReplayId(String tenantId, UUID replayId) {
-      return Optional.ofNullable(replaysByTenantAndId.get(key(tenantId, replayId.toString())));
-    }
-
-    @Override
-    public void save(StoredReplay replay) {
-      replaysByTenantAndId.put(key(replay.tenantId(), replay.replayId().toString()), replay);
-      replaysByTenantAndIdempotency.put(key(replay.tenantId(), replay.idempotencyKeyHash()), replay);
-    }
-
-    public int size() {
-      return replaysByTenantAndId.size();
-    }
-
-    private static String key(String tenantId, String id) {
-      return tenantId + ':' + id;
-    }
   }
 
   public static class ValidationException extends RuntimeException {

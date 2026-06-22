@@ -19,12 +19,12 @@ import java.util.TreeMap;
 import java.util.UUID;
 
 /**
- * Mock-backed exception lifecycle service for the PII-11 walking skeleton.
+ * Exception lifecycle service. Repository-backed operations fail closed until a durable adapter is wired.
  */
 public class ExceptionService {
 
-  private static final boolean MOCK_BACKED = true;
-  private static final boolean AUTHORITATIVE_INTEGRATION = false;
+  private static final boolean MOCK_BACKED = false;
+  private static final boolean AUTHORITATIVE_INTEGRATION = true;
 
   private final ExceptionRepository repository;
 

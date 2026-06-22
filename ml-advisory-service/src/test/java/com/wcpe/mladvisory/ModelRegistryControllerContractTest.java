@@ -3,6 +3,7 @@ package com.wcpe.mladvisory;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.lang.reflect.Method;
 import org.junit.jupiter.api.Test;
@@ -13,7 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 class ModelRegistryControllerContractTest {
   @Test
   void shouldRequireChecksumAndAllowedUseAdvisoryOnly() {
-    ModelRegistryService service = new ModelRegistryService();
+    ModelRegistryService service = new ModelRegistryService(java.time.Clock.systemUTC(), new TestModelVersionRepository());
 
     MlAdvisoryResult<ModelVersionResponse> missingChecksum =
         service.register(ModelVersionGovernanceFixtures.registerCommand("", AllowedUse.ADVISORY_ONLY, true));
@@ -21,6 +22,13 @@ class ModelRegistryControllerContractTest {
     assertFalse(missingChecksum.valid());
     assertEquals("ML_MODEL_CHECKSUM_REQUIRED", missingChecksum.errorCode().orElseThrow());
     assertEquals(ModelRegistryService.REGISTER_ENDPOINT, "POST /api/v1/tenants/{tenantId}/ml-advisory/model-versions");
+  }
+
+  @Test
+  void productionDefaultRegistryConstructorFailsClosedWithoutJdbcRepository() {
+    IllegalStateException failure = assertThrows(IllegalStateException.class, ModelRegistryService::new);
+
+    assertTrueMessageContains(failure, "JDBC/PostgreSQL-backed ModelVersionRepository");
   }
 
   @Test
@@ -36,5 +44,9 @@ class ModelRegistryControllerContractTest {
     assertNotNull(requestMapping);
     assertEquals("/api/v1/tenants/{tenantId}/ml-advisory/model-versions", requestMapping.value()[0]);
     assertNotNull(postMapping);
+  }
+
+  private void assertTrueMessageContains(IllegalStateException failure, String expected) {
+    org.junit.jupiter.api.Assertions.assertTrue(failure.getMessage().contains(expected));
   }
 }

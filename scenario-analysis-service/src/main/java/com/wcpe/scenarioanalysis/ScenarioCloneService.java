@@ -67,21 +67,4 @@ public class ScenarioCloneService {
     Optional<ScenarioLineageRecord> findByVariantScenarioId(String variantScenarioId);
   }
 
-  public static class InMemoryScenarioLineageRepository implements ScenarioLineageRepository {
-    private final Map<String, ScenarioLineageRecord> recordsByVariantId = new ConcurrentHashMap<>();
-
-    @Override
-    public void save(ScenarioLineageRecord lineage) {
-      recordsByVariantId.put(lineage.variantScenarioId(), lineage);
-    }
-
-    @Override
-    public Optional<ScenarioLineageRecord> findByVariantScenarioId(String variantScenarioId) {
-      return Optional.ofNullable(recordsByVariantId.get(variantScenarioId));
-    }
-
-    public int size() {
-      return recordsByVariantId.size();
-    }
-  }
 }

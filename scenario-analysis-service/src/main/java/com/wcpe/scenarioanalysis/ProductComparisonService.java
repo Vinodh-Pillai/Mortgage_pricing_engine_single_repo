@@ -24,7 +24,7 @@ public class ProductComparisonService {
   private final Clock clock;
 
   public ProductComparisonService() {
-    this(new InMemoryProductComparisonRepository(), Clock.systemUTC());
+    throw FailClosedPersistence.notConfigured("product comparison store");
   }
 
   ProductComparisonService(ProductComparisonRepository repository, Clock clock) {
@@ -447,52 +447,6 @@ public class ProductComparisonService {
     void save(StoredProductComparisonRun run);
 
     void appendEvent(String tenantId, UUID analysisId, ProductComparisonEvent event);
-  }
-
-  static class InMemoryProductComparisonRepository implements ProductComparisonRepository {
-    private final Map<String, StoredProductComparisonRun> runsByTenantAndIdempotency = new ConcurrentHashMap<>();
-    private final Map<String, StoredProductComparisonRun> runsByTenantAndAnalysisId = new ConcurrentHashMap<>();
-
-    @Override
-    public Optional<StoredProductComparisonRun> findByIdempotencyKeyHash(String tenantId, String idempotencyKeyHash) {
-      return Optional.ofNullable(runsByTenantAndIdempotency.get(key(tenantId, idempotencyKeyHash)));
-    }
-
-    @Override
-    public Optional<StoredProductComparisonRun> findByAnalysisId(String tenantId, UUID analysisId) {
-      return Optional.ofNullable(runsByTenantAndAnalysisId.get(key(tenantId, analysisId.toString())));
-    }
-
-    @Override
-    public void save(StoredProductComparisonRun run) {
-      runsByTenantAndIdempotency.put(key(run.tenantId(), run.idempotencyKeyHash()), run);
-      runsByTenantAndAnalysisId.put(key(run.tenantId(), run.analysisId().toString()), run);
-    }
-
-    @Override
-    public void appendEvent(String tenantId, UUID analysisId, ProductComparisonEvent event) {
-      StoredProductComparisonRun run = runsByTenantAndAnalysisId.get(key(tenantId, analysisId.toString()));
-      if (run == null) {
-        throw new NotFoundException("product comparison run was not found");
-      }
-      List<ProductComparisonEvent> events = new ArrayList<>(run.events());
-      events.add(event);
-      StoredProductComparisonRun updated = new StoredProductComparisonRun(
-          run.tenantId(), run.analysisId(), run.requestHash(), run.idempotencyKeyHash(), run.response(), List.copyOf(events), run.createdAt());
-      save(updated);
-    }
-
-    int size() {
-      return runsByTenantAndAnalysisId.size();
-    }
-
-    Optional<StoredProductComparisonRun> firstRun() {
-      return runsByTenantAndAnalysisId.values().stream().findFirst();
-    }
-
-    private static String key(String tenantId, String id) {
-      return tenantId + ':' + id;
-    }
   }
 
   public static class ValidationException extends RuntimeException {

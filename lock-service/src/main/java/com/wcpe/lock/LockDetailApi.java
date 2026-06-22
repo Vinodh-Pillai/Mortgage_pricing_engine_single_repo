@@ -5,7 +5,7 @@ import java.util.UUID;
 
 public final class LockDetailApi {
   public static final String GET_LOCK_METHOD = "GET";
-  public static final String GET_LOCK_PATH = "/api/v1/locks/{id}";
+  public static final String GET_LOCK_PATH = "/api/v1/tenants/{tenantId}/locks/{lockId}";
 
   private final LockService service;
 

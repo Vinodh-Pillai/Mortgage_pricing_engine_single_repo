@@ -1,9 +1,11 @@
-import { test, expect, describe, beforeAll, afterAll, beforeEach, afterEach } from "@playwright/test";
+import { test, expect } from "@playwright/test";
 import { apiHelper, type ApiResponse, type TestContext } from "../core/helpers/api-helper";
 import { uiHelper, type NavigationResult, type FormField } from "../core/helpers/ui-helper";
 import { driftDetector, type PricingExpectation, type BaselineExpectation } from "../core/drift/drift-detector";
 import { personas, type PersonaRole, getPersona, getTestScenarios, getExpectedPricingBehavior } from "../core/personas/personas";
 import { testScenarios, expectedPricingOutcomes, type TestScenario } from "../core/fixtures/test-data";
+
+const { describe, beforeAll, afterAll, beforeEach, afterEach } = test;
 
 const SCENARIO_KEYS = ["primePurchase", "nearPrimeRefi", "subPrimeCashOut", "wholesaleWithCoBorrower"] as const;
 const PERSONA_ROLES = ["RETAIL_LO", "WHOLESALE_LO", "CORRESPONDENT_LO", "PRICING_ANALYST", "LOCK_DESK"] as const;

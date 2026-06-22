@@ -16,7 +16,7 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class MarginVersionResolverTest {
-  private final MarginVersioningService service = new MarginVersioningService(
+  private final MarginVersioningService service = MarginServiceTestStores.marginVersioningService(
       Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC));
 
   @Test

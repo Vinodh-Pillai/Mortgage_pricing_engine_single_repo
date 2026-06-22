@@ -31,7 +31,7 @@ import org.junit.jupiter.api.Test;
 class ProfitabilityFloorServiceTest {
   private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");
 
-  private final ProfitabilityFloorService service = new ProfitabilityFloorService(Clock.fixed(NOW, ZoneOffset.UTC));
+  private final ProfitabilityFloorService service = MarginServiceTestStores.profitabilityFloorService(Clock.fixed(NOW, ZoneOffset.UTC));
 
   @Test
   void publishBlockPolicyAndExcludesBlockedOption() {

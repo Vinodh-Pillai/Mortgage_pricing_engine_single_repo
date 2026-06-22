@@ -3,8 +3,6 @@ package com.wcpe.pricingbff.los;
 import com.wcpe.pricingbff.los.LosApiModels.QuoteServiceRequest;
 import com.wcpe.pricingbff.los.LosApiModels.QuoteServiceResponse;
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
-import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -22,20 +20,17 @@ class LosQuoteServiceClient {
   }
 
   QuoteServiceResponse submitQuoteJob(QuoteServiceRequest request) {
-    if (!baseUrl.isBlank()) {
-      return restClient.post()
-          .uri(URI.create(baseUrl + "/api/v1/los/quote-requests"))
-          .contentType(MediaType.APPLICATION_JSON)
-          .header("X-Request-ID", request.idempotencyKey())
-          .header("X-Correlation-ID", request.correlationId())
-          .body(request)
-          .retrieve()
-          .body(QuoteServiceResponse.class);
+    if (baseUrl.isBlank()) {
+      throw new LosValidationException("QUOTE_SERVICE_INTEGRATION_REQUIRED",
+          "quote-service base URL is not configured; LOS pricing request was not started");
     }
-    String quoteIdentity = request.requestId() == null || request.requestId().isBlank()
-        ? request.idempotencyKey()
-        : request.requestId();
-    String jobId = UUID.nameUUIDFromBytes((request.tenantId() + ":" + quoteIdentity + ":" + request.idempotencyKey()).getBytes(StandardCharsets.UTF_8)).toString();
-    return new QuoteServiceResponse(jobId, "QUEUED", "/api/v1/los/quote-requests/" + jobId, request.correlationId());
+    return restClient.post()
+        .uri(URI.create(baseUrl + "/api/v1/los/quote-requests"))
+        .contentType(MediaType.APPLICATION_JSON)
+        .header("X-Request-ID", request.idempotencyKey())
+        .header("X-Correlation-ID", request.correlationId())
+        .body(request)
+        .retrieve()
+        .body(QuoteServiceResponse.class);
   }
 }

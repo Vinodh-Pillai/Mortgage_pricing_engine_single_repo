@@ -1,9 +1,10 @@
 ﻿// Governance, Compliance, and Partner E2E Tests
-import { test, expect, describe, beforeAll, afterAll, beforeEach, afterEach } from "@playwright/test";
+import { test, expect } from "@playwright/test";
 import { apiHelper, type ApiResponse, type TestContext } from "../core/helpers/api-helper";
 import { uiHelper, type NavigationResult } from "../core/helpers/ui-helper";
 import { driftDetector, type DriftFinding, type DriftReport, type BaselineExpectation } from "../core/drift/drift-detector";
 import { personas, type PersonaRole, getPersona, getTestScenarios, getAccessibleRoutes, getRestrictedRoutes } from "../core/personas/personas";
+const { describe, beforeAll, afterAll, beforeEach, afterEach } = test;
 const GOVERNANCE_PERSONAS = ["GOVERNANCE_REVIEWER", "ADMIN"] as PersonaRole[];
 const COMPLIANCE_PERSONAS = ["COMPLIANCE_OFFICER", "ADMIN"] as PersonaRole[];
 const PARTNER_PERSONAS = ["CAPITAL_MARKETS", "ADMIN", "WHOLESALE_LO", "CORRESPONDENT_LO"] as PersonaRole[];

@@ -10,7 +10,9 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.stereotype.Service;
 
+@Service
 public class AuditLogService {
     public static final String AUDIT_WRITE_SCOPE = "audit:write";
     public static final String AUDIT_READ_SCOPE = "audit:read";
@@ -18,16 +20,16 @@ public class AuditLogService {
     private static final String EVENT_NAME = "AuditRecordWritten.v1";
     private static final String SCHEMA_REF = "mpe.security.AuditRecordWritten.v1";
 
-    private final InMemoryAuditLogStore store;
+    private final AuditLogStore store;
     private final Clock clock;
     private final AuditRedactionPolicy redactionPolicy;
     private final EventEnvelopeFactory envelopeFactory;
 
-    public AuditLogService(InMemoryAuditLogStore store, Clock clock) {
+    public AuditLogService(AuditLogStore store, Clock clock) {
         this(store, clock, new AuditRedactionPolicy(), new EventEnvelopeFactory(clock, null));
     }
 
-    public AuditLogService(InMemoryAuditLogStore store, Clock clock, AuditRedactionPolicy redactionPolicy, EventEnvelopeFactory envelopeFactory) {
+    public AuditLogService(AuditLogStore store, Clock clock, AuditRedactionPolicy redactionPolicy, EventEnvelopeFactory envelopeFactory) {
         if (store == null) {
             throw new AuditException("AUDIT_CONTEXT_REQUIRED", "store is required");
         }

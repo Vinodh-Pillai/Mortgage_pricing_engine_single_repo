@@ -4,7 +4,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 
-public final class InMemoryCacheInvalidationRepository implements CacheInvalidationRepository {
+final class TestCacheInvalidationRepository implements CacheInvalidationRepository {
   private final Map<String, CacheInvalidationRequest> byIdempotencyKey = new LinkedHashMap<>();
   private final Map<String, CacheInvalidationRequest> bySourceEventNamespace = new LinkedHashMap<>();
 

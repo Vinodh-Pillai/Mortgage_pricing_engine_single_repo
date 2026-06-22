@@ -11,9 +11,13 @@ class QuoteExpirationRequestTimeGuardTest {
     @Test
     void getQuoteMarksExpiredWhenCapturedExpiresAtHasPassed() {
         InMemoryQuoteRepository repository = new InMemoryQuoteRepository();
+        InMemoryQuoteJobRepository jobRepository = new InMemoryQuoteJobRepository();
+        InMemoryQuoteSnapshotRepository snapshotRepository = new InMemoryQuoteSnapshotRepository();
         InMemoryQuoteCache cache = new InMemoryQuoteCache();
         QuoteApplicationService createService = new QuoteApplicationService(
             repository,
+            jobRepository,
+            snapshotRepository,
             QuoteTestSupport.dependenciesWithPolicy(),
             cache,
             new BestExecutionRanker(),
@@ -22,6 +26,8 @@ class QuoteExpirationRequestTimeGuardTest {
         Quote quote = createService.createQuote(QuoteTestSupport.request("idem-expire"));
         QuoteApplicationService readService = new QuoteApplicationService(
             repository,
+            jobRepository,
+            snapshotRepository,
             QuoteTestSupport.dependenciesWithPolicy(),
             cache,
             new BestExecutionRanker(),

@@ -4,7 +4,7 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 
-public final class InMemoryRateLimitCounterStore implements RateLimitCounterStore {
+public final class LocalRateLimitCounterStore implements RateLimitCounterStore {
   private final Map<RateLimitCounterKey, Integer> counters = new HashMap<>();
 
   @Override

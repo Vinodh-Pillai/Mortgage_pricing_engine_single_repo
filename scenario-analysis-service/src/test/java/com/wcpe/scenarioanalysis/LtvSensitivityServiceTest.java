@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.wcpe.scenarioanalysis.LtvSensitivityService.IdempotencyConflictException;
-import com.wcpe.scenarioanalysis.LtvSensitivityService.InMemoryLtvSensitivityRepository;
 import com.wcpe.scenarioanalysis.LtvSensitivityService.LtvSensitivityCommand;
 import com.wcpe.scenarioanalysis.LtvSensitivityService.LtvSensitivityMode;
 import com.wcpe.scenarioanalysis.LtvSensitivityService.PolicyNotSatisfiedException;
@@ -18,12 +17,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class LtvSensitivityServiceTest {
-  private InMemoryLtvSensitivityRepository repository;
+  private TestOnlyInMemoryLtvSensitivityRepository repository;
   private LtvSensitivityService service;
 
   @BeforeEach
   void setUp() {
-    repository = new InMemoryLtvSensitivityRepository();
+    repository = new TestOnlyInMemoryLtvSensitivityRepository();
     service = new LtvSensitivityService(
         repository,
         Clock.fixed(Instant.parse("2026-06-01T12:00:00Z"), ZoneOffset.UTC));

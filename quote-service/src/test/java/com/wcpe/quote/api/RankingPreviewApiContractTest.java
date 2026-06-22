@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.wcpe.quote.BestExecutionRanker;
 import com.wcpe.quote.InMemoryQuoteCache;
+import com.wcpe.quote.InMemoryQuoteJobRepository;
 import com.wcpe.quote.InMemoryQuoteRepository;
+import com.wcpe.quote.InMemoryQuoteSnapshotRepository;
 import com.wcpe.quote.QuoteApplicationService;
 import com.wcpe.quote.QuoteTestSupport;
 import com.wcpe.quote.RankingCriterion;
@@ -22,6 +24,8 @@ class RankingPreviewApiContractTest {
     void previewsRankingWithoutPersistingQuote() {
         QuoteApplicationService service = new QuoteApplicationService(
             new InMemoryQuoteRepository(),
+            new InMemoryQuoteJobRepository(),
+            new InMemoryQuoteSnapshotRepository(),
             QuoteTestSupport.dependenciesWithPolicy(),
             new InMemoryQuoteCache(),
             new BestExecutionRanker(),

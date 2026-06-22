@@ -39,7 +39,7 @@ public class WhatIfVariantService {
   private final Clock clock;
 
   public WhatIfVariantService() {
-    this(new InMemoryWhatIfVariantRepository(), Clock.systemUTC());
+    throw FailClosedPersistence.notConfigured("what-if variant store");
   }
 
   public WhatIfVariantService(WhatIfVariantRepository repository, Clock clock) {
@@ -285,28 +285,6 @@ public class WhatIfVariantService {
     Optional<StoredVariant> findByIdempotencyKeyHash(String tenantId, String idempotencyKeyHash);
 
     void save(StoredVariant variant);
-  }
-
-  public static class InMemoryWhatIfVariantRepository implements WhatIfVariantRepository {
-    private final Map<String, StoredVariant> variantsByTenantAndIdempotency = new ConcurrentHashMap<>();
-
-    @Override
-    public Optional<StoredVariant> findByIdempotencyKeyHash(String tenantId, String idempotencyKeyHash) {
-      return Optional.ofNullable(variantsByTenantAndIdempotency.get(key(tenantId, idempotencyKeyHash)));
-    }
-
-    @Override
-    public void save(StoredVariant variant) {
-      variantsByTenantAndIdempotency.put(key(variant.tenantId(), variant.idempotencyKeyHash()), variant);
-    }
-
-    public int size() {
-      return variantsByTenantAndIdempotency.size();
-    }
-
-    private static String key(String tenantId, String idempotencyKeyHash) {
-      return tenantId + ':' + idempotencyKeyHash;
-    }
   }
 
   public static class ValidationException extends RuntimeException {

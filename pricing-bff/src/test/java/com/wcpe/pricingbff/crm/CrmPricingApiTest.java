@@ -51,7 +51,7 @@ class CrmPricingApiTest {
   }
 
   @Test
-  void fullCrmPayloadQueuesQuoteJobAndCanPromoteSaveShareAndDashboard() throws Exception {
+  void fullCrmPayloadQueuesQuoteJobAndFailsClosedForReadModelDependentActions() throws Exception {
     MvcResult created = mockMvc.perform(post("/api/v1/tenants/tenant-crm/integrations/crm/salesforce/pricing-requests")
             .headers(Headers.crm("pricing:write"))
             .header("X-Request-ID", "crm-full-001")
@@ -84,37 +84,36 @@ class CrmPricingApiTest {
 
     mockMvc.perform(post("/api/v1/tenants/tenant-crm/integrations/crm/pricing-requests/{requestId}/continue", requestId)
             .headers(Headers.crm("pricing:write")))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.status").value("PROMOTED"));
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("CRM_PRICING_READ_MODEL_REQUIRED"));
 
-    MvcResult saved = mockMvc.perform(post("/api/v1/tenants/tenant-crm/integrations/crm/pricing-requests/{requestId}/scenarios", requestId)
+    mockMvc.perform(post("/api/v1/tenants/tenant-crm/integrations/crm/pricing-requests/{requestId}/scenarios", requestId)
             .headers(Headers.crm("pricing:write")))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.status").value("SAVED"))
-        .andReturn();
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("CRM_SCENARIO_PERSISTENCE_REQUIRED"));
 
-    String scenarioId = objectMapper.readTree(saved.getResponse().getContentAsString()).path("scenarioId").asText();
-    mockMvc.perform(post("/api/v1/tenants/tenant-crm/integrations/crm/scenarios/{scenarioId}/share", scenarioId)
+    mockMvc.perform(post("/api/v1/tenants/tenant-crm/integrations/crm/scenarios/{scenarioId}/share", "scenario-read-model-required")
             .headers(Headers.crm("pricing:write")))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.status").value("SHARE_READY"));
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("CRM_SCENARIO_PERSISTENCE_REQUIRED"));
 
     mockMvc.perform(get("/api/v1/tenants/tenant-crm/integrations/crm/dashboard")
             .headers(Headers.crm("pricing:read")))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.nonQmPricingSummary.productFamily").value("NON_QM"))
-        .andExpect(jsonPath("$.pricingRequests").isArray());
+        .andExpect(jsonPath("$.nonQmPricingSummary.dependencyStatus").value("CRM_PRICING_READ_MODEL_REQUIRED"))
+        .andExpect(jsonPath("$.pricingRequests").isArray())
+        .andExpect(jsonPath("$.pricingRequests").isEmpty());
   }
 
   @Test
-  void webhookRegistrationAndPricingPushAreQueuedForCrm() throws Exception {
+  void webhookRegistrationAndPricingPushFailClosedWithoutDurablePersistence() throws Exception {
     mockMvc.perform(post("/api/v1/tenants/tenant-crm/integrations/crm/webhooks")
             .headers(Headers.crm("pricing:write"))
             .header("X-Request-ID", "crm-webhook-reg")
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"url\":\"https://crm.example.test/hooks/pricing\",\"events\":[\"crm.pricing.updated\"],\"sourceSystem\":\"SALESFORCE\",\"secret\":\"not-recorded\"}"))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.status").value("ACTIVE"));
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("CRM_WEBHOOK_PERSISTENCE_REQUIRED"));
 
     MvcResult created = mockMvc.perform(post("/api/v1/tenants/tenant-crm/integrations/crm/pricing-requests")
             .headers(Headers.crm("pricing:write"))
@@ -128,8 +127,8 @@ class CrmPricingApiTest {
     String requestId = statusUrl.substring(statusUrl.lastIndexOf('/') + 1);
     mockMvc.perform(post("/api/v1/tenants/tenant-crm/integrations/crm/pricing-requests/{requestId}/push", requestId)
             .headers(Headers.crm("pricing:write")))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.deliveries[0].status").value("QUEUED"));
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("CRM_PRICING_READ_MODEL_REQUIRED"));
   }
 
   @Test

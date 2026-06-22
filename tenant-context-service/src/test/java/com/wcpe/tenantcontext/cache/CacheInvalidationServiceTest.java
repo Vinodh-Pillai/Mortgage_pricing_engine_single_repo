@@ -6,8 +6,8 @@ import com.wcpe.tenantcontext.ActorRef;
 import com.wcpe.tenantcontext.RequestContext;
 import com.wcpe.tenantcontext.TenantContext;
 import com.wcpe.tenantcontext.audit.AuditLogService;
-import com.wcpe.tenantcontext.audit.InMemoryAuditLogStore;
-import com.wcpe.tenantcontext.outbox.InMemoryOutboxStore;
+import com.wcpe.tenantcontext.audit.TestOnlyInMemoryAuditLogStore;
+import com.wcpe.tenantcontext.outbox.TestOnlyInMemoryOutboxStore;
 import com.wcpe.tenantcontext.outbox.OutboxWriter;
 import org.junit.jupiter.api.Test;
 
@@ -19,8 +19,8 @@ import java.util.UUID;
 
 class CacheInvalidationServiceTest {
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-06-07T18:45:00Z"), ZoneOffset.UTC);
-    private final InMemoryOutboxStore outboxStore = new InMemoryOutboxStore();
-    private final InMemoryAuditLogStore auditStore = new InMemoryAuditLogStore();
+    private final TestOnlyInMemoryOutboxStore outboxStore = new TestOnlyInMemoryOutboxStore();
+    private final TestOnlyInMemoryAuditLogStore auditStore = new TestOnlyInMemoryAuditLogStore();
     private final CacheInvalidationService service = new CacheInvalidationService(new OutboxWriter(outboxStore, CLOCK),
         new AuditLogService(auditStore, CLOCK), CLOCK);
 

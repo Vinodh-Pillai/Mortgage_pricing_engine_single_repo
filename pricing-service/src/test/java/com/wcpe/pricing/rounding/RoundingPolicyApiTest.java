@@ -2,7 +2,7 @@ package com.wcpe.pricing.rounding;
 
 import com.wcpe.pricing.rounding.api.RoundingPolicyApi;
 import com.wcpe.pricing.rounding.api.RoundingPolicyApi.CreateRoundingPolicyRequest;
-import com.wcpe.pricing.rounding.api.RoundingPolicyApi.InMemoryRoundingPolicyRepository;
+import com.wcpe.pricing.rounding.api.InMemoryRoundingPolicyRepository;
 import com.wcpe.pricing.rounding.api.RoundingPolicyApi.ResolveRoundingPolicyRequest;
 import com.wcpe.pricing.rounding.api.RoundingPolicyApi.RoundedValue;
 import com.wcpe.pricing.rounding.api.RoundingPolicyApi.RoundingHeaders;

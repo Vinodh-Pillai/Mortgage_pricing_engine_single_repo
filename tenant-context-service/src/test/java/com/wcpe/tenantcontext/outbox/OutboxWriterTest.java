@@ -13,7 +13,7 @@ import java.util.UUID;
 
 class OutboxWriterTest {
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-06-07T18:15:00Z"), ZoneOffset.UTC);
-    private final InMemoryOutboxStore store = new InMemoryOutboxStore();
+    private final TestOnlyInMemoryOutboxStore store = new TestOnlyInMemoryOutboxStore();
     private final OutboxWriter writer = new OutboxWriter(store, CLOCK);
 
     @Test

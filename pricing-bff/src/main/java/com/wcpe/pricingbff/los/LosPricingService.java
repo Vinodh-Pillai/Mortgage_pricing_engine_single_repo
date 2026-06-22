@@ -35,7 +35,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -51,10 +50,6 @@ class LosPricingService {
   private final LosWebhookRegistry webhookRegistry;
   private final LosIdempotencyStore idempotencyStore;
   private final LosFeatureFlagService featureFlagService;
-  private final Map<String, LosPricingResponse> pricingRequests = new ConcurrentHashMap<>();
-  private final Map<String, List<LosOffer>> offersByPricingRequest = new ConcurrentHashMap<>();
-  private final Map<String, LosLockResponse> locks = new ConcurrentHashMap<>();
-  private final Map<String, String> tenantByPricingRequest = new ConcurrentHashMap<>();
 
   LosPricingService(ObjectMapper objectMapper, LosScenarioAdapter scenarioAdapter, LosQuoteServiceClient quoteClient,
       LosLockServiceClient lockClient, LosWebhookRegistry webhookRegistry, LosIdempotencyStore idempotencyStore) {
@@ -101,9 +96,6 @@ class LosPricingService {
     String pricingRequestId = UUID.nameUUIDFromBytes((request.tenantId() + ":" + request.requestId()).getBytes(StandardCharsets.UTF_8)).toString();
     LosPricingResponse response = new LosPricingResponse(request.requestId(), pricingRequestId, "ACCEPTED", List.of(), List.of(),
         null, "/api/v1/los/pricing-requests/" + pricingRequestId, quoteJob.jobId(), correlationId);
-    pricingRequests.put(pricingRequestId, response);
-    tenantByPricingRequest.put(pricingRequestId, request.tenantId());
-    offersByPricingRequest.put(pricingRequestId, new ArrayList<>());
     idempotencyStore.store("POST", "/api/v1/los/pricing-requests", idempotencyKey, requestHash, response);
     return response;
   }
@@ -131,44 +123,18 @@ class LosPricingService {
       List<String> productResultRefs,
       List<String> validationMessages,
       String correlationId) {
-    LosPricingResponse existing = pricingRequests.get(pricingRequestId);
-    if (existing == null) {
-      throw new LosValidationException("PRICING_REQUEST_NOT_FOUND", "Pricing request was not found for callback completion");
-    }
-    LoanPassTenantFlags flags = flagsForTenant(resolveTenant(pricingRequestId));
-    Instant completedAt = Instant.now();
-    LosPricingResponse completed = new LosPricingResponse(existing.requestId(), pricingRequestId, "COMPLETED",
-        existing.offers(), existing.waterfall(), completedAt, existing.statusUrl(),
-        quoteJobId == null ? existing.quoteJobId() : quoteJobId, correlationId);
-    pricingRequests.put(pricingRequestId, completed);
-    return webhookRegistry.dispatch(resolveTenant(pricingRequestId),
-        new WebhookEvent("pricing.completed", Map.of(
-            "pricingRequestId", pricingRequestId,
-            "quoteJobId", completed.quoteJobId(),
-            "status", completed.status(),
-            "productResultRefs", List.copyOf(productResultRefs == null ? List.of() : productResultRefs),
-            "validationMessages", List.copyOf(validationMessages == null ? List.of() : validationMessages),
-            "tenantFeatureFlagConfigRef", flags.configRef(),
-            "tenantFeatureFlagAuditRef", flags.auditRef(),
-            "tenantFeatureFlagVersion", flags.version(),
-            "correlationId", correlationId == null ? "" : correlationId,
-            "timestamp", completedAt.toString()), correlationId, completedAt), flags.callbackDeliveryEnabled(), flags.auditRef());
+    throw new LosValidationException("PRICING_REQUEST_PERSISTENCE_REQUIRED",
+        "Pricing request completion requires a durable pricing request read model; process-local callback state is disabled");
   }
 
   LosPricingResponse getPricingRequest(String id) {
-    String tenantId = tenantByPricingRequest.get(id);
-    if (!blank(tenantId)) {
-      requireLoanPassCompatibility(flagsForTenant(tenantId));
-    }
-    return pricingRequests.getOrDefault(id, notFoundPricingResponse(id));
+    throw new LosValidationException("PRICING_REQUEST_READ_MODEL_REQUIRED",
+        "Pricing request status requires a durable downstream read model; process-local pricing request state is disabled");
   }
 
   List<LosOffer> getOffers(String pricingRequestId) {
-    String tenantId = tenantByPricingRequest.get(pricingRequestId);
-    if (!blank(tenantId)) {
-      requireLoanPassCompatibility(flagsForTenant(tenantId));
-    }
-    return List.copyOf(offersByPricingRequest.getOrDefault(pricingRequestId, List.of()));
+    throw new LosValidationException("PRICING_OFFERS_READ_MODEL_REQUIRED",
+        "Pricing offers require a durable downstream offer read model; process-local offer state is disabled");
   }
 
   LosProductCatalogResponse getProductCatalog(String tenantId, String channel, String investor,
@@ -342,68 +308,26 @@ class LosPricingService {
 
   LosLockResponse requestLock(LosLockRequest request, String idempotencyKey, String correlationId) {
     validateLockRequest(request);
-    String tenantId = resolveTenant(request.pricingRequestId());
-    LoanPassTenantFlags flags = flagsForTenant(tenantId);
-    requireLoanPassCompatibility(flags);
     String requestHash = hash(request);
     Optional<Object> cached = idempotencyStore.cached("POST", "/api/v1/los/locks", idempotencyKey, requestHash);
     if (cached.isPresent() && cached.get() instanceof LosLockResponse response) {
       return response;
     }
-    LosOffer offer = offersByPricingRequest.getOrDefault(request.pricingRequestId(), List.of()).stream()
-        .filter(candidate -> request.offerId().equals(candidate.offerId()))
-        .findFirst()
-        .orElse(null);
-    LosLockResponse response = lockClient.requestLock(request, offer, correlationId);
-    locks.put(response.lockId(), response);
-    idempotencyStore.store("POST", "/api/v1/los/locks", idempotencyKey, requestHash, response);
-    webhookRegistry.dispatch(tenantId, new WebhookEvent("lock.confirmed", Map.of(
-        "lockId", response.lockId(),
-        "pricingRequestId", response.pricingRequestId(),
-        "status", response.status(),
-        "expiration", response.lockExpiration().toString(),
-        "tenantFeatureFlagConfigRef", flags.configRef(),
-        "tenantFeatureFlagAuditRef", flags.auditRef(),
-        "tenantFeatureFlagVersion", flags.version()), correlationId, Instant.now()),
-        flags.callbackDeliveryEnabled(), flags.auditRef());
-    return response;
+    throw new LosValidationException("LOCK_REQUEST_READ_MODEL_REQUIRED",
+        "LOS lock requests require durable tenant, pricing request, and offer read models; process-local lock source-of-truth state is disabled");
   }
 
   LosLockResponse getLock(String id) {
-    LosLockResponse lock = locks.get(id);
-    if (lock == null) {
-      throw new LosValidationException("LOCK_NOT_FOUND", "LOS lock not found");
-    }
-    requireLoanPassCompatibility(flagsForTenant(resolveTenant(lock.pricingRequestId())));
-    return lock;
+    throw new LosValidationException("LOCK_READ_MODEL_REQUIRED",
+        "LOS lock status requires a durable downstream lock read model; process-local lock state is disabled");
   }
 
   LosLockResponse extendLock(String id, LosLockExtendRequest request, String idempotencyKey, String correlationId) {
     if (request == null || request.extendByDays() == null || request.extendByDays() <= 0) {
       throw new LosValidationException("LOCK_EXTENSION_INVALID", "extendByDays must be greater than zero");
     }
-    LosLockResponse existing = getLock(id);
-    String path = "/api/v1/los/locks/" + id + "/extend";
-    String requestHash = hash(request);
-    Optional<Object> cached = idempotencyStore.cached("POST", path, idempotencyKey, requestHash);
-    if (cached.isPresent() && cached.get() instanceof LosLockResponse response) {
-      return response;
-    }
-    LosLockResponse response = lockClient.extendLock(existing, request.extendByDays(), correlationId);
-    locks.put(id, response);
-    idempotencyStore.store("POST", path, idempotencyKey, requestHash, response);
-    String tenantId = resolveTenant(existing.pricingRequestId());
-    LoanPassTenantFlags flags = flagsForTenant(tenantId);
-    webhookRegistry.dispatch(tenantId, new WebhookEvent("lock.extended", Map.of(
-        "lockId", response.lockId(),
-        "pricingRequestId", response.pricingRequestId(),
-        "status", response.status(),
-        "newExpiration", response.lockExpiration().toString(),
-        "tenantFeatureFlagConfigRef", flags.configRef(),
-        "tenantFeatureFlagAuditRef", flags.auditRef(),
-        "tenantFeatureFlagVersion", flags.version()), correlationId, Instant.now()),
-        flags.callbackDeliveryEnabled(), flags.auditRef());
-    return response;
+    throw new LosValidationException("LOCK_READ_MODEL_REQUIRED",
+        "LOS lock extension requires a durable downstream lock read model; process-local lock state is disabled");
   }
 
   LosWebhookRegistrationResponse registerWebhook(LosWebhookRegistrationRequest request, String fallbackTenantId) {
@@ -679,11 +603,4 @@ class LosPricingService {
     return value == null || value.isBlank();
   }
 
-  private LosPricingResponse notFoundPricingResponse(String id) {
-    return new LosPricingResponse(null, id, "NOT_FOUND", List.of(), List.of(), null, "/api/v1/los/pricing-requests/" + id, null, null);
-  }
-
-  private String resolveTenant(String pricingRequestId) {
-    return tenantByPricingRequest.getOrDefault(pricingRequestId, "unknown");
-  }
 }

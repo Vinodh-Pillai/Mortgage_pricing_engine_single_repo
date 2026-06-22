@@ -42,6 +42,6 @@ class MarginVersionManifestTest {
   }
 
   private static MarginVersioningService service() {
-    return new MarginVersioningService(Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC));
+    return MarginServiceTestStores.marginVersioningService(Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC));
   }
 }

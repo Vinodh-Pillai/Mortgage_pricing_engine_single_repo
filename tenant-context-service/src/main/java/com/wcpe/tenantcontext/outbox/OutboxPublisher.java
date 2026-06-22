@@ -6,12 +6,12 @@ import java.util.List;
 import java.util.UUID;
 
 public class OutboxPublisher {
-    private final InMemoryOutboxStore store;
+    private final OutboxStore store;
     private final Clock clock;
     private final int maxAttempts;
     private final Duration retryDelay;
 
-    public OutboxPublisher(InMemoryOutboxStore store, Clock clock, int maxAttempts, Duration retryDelay) {
+    public OutboxPublisher(OutboxStore store, Clock clock, int maxAttempts, Duration retryDelay) {
         if (store == null) {
             throw new OutboxException("OUTBOX_VALIDATION_FAILED", "store is required");
         }

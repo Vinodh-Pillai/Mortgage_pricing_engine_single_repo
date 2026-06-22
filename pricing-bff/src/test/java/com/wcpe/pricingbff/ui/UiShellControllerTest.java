@@ -199,7 +199,7 @@ class UiShellControllerTest {
   }
 
   @Test
-  void pipelineSettingsFieldsStoreAndRetrieveTenantFieldBindings() throws Exception {
+  void pipelineSettingsFieldsFailClosedWithoutDurablePersistence() throws Exception {
     mvc.perform(get("/api/v1/tenants/demo-tenant/pipeline/settings")
             .header("X-Ui-Trace-Id", "trace-pipeline-settings-before"))
         .andExpect(status().isOk())
@@ -233,30 +233,28 @@ class UiShellControllerTest {
             .header("X-Ui-Trace-Id", "trace-pipeline-settings-save")
             .contentType(MediaType.APPLICATION_JSON)
             .content(settings))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.status").value("CONFIGURED"))
-        .andExpect(jsonPath("$.configured").value(true))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.status").value("BLOCKED"))
+        .andExpect(jsonPath("$.configured").value(false))
+        .andExpect(jsonPath("$.dependencyStatus").value("PIPELINE_SETTINGS_PERSISTENCE_REQUIRED"))
         .andExpect(jsonPath("$.pipelineFields", hasSize(2)))
         .andExpect(jsonPath("$.bindingSummary.pipelineColumnFieldIds[0]").value("loanNumber"))
         .andExpect(jsonPath("$.bindingSummary.priceScenarioCalculationFieldIds[0]").value("calc.adjustedRate"))
         .andExpect(jsonPath("$.bindingSummary.priceScenarioCalculationFieldIds[3]").value("calc.margin"))
         .andExpect(jsonPath("$.bindingSummary.defaultFilterFieldIds[1]").value("filter.lockPeriod"))
         .andExpect(jsonPath("$.bindingSummary.lockingFieldIds[2]").value("lock.extensionDays"))
-        .andExpect(jsonPath("$.validationMessages", empty()))
-        .andExpect(jsonPath("$.events[1]").value("PipelineSettingsFieldsBound"));
+        .andExpect(jsonPath("$.validationMessages[0]").value("Durable UI persistence is not configured; process-local tenant and draft state is disabled."))
+        .andExpect(jsonPath("$.events[0]").value("PipelineSettingsPersistenceBlocked"));
 
     mvc.perform(get("/api/v1/tenants/demo-tenant/pipeline/settings")
             .header("X-Ui-Trace-Id", "trace-pipeline-settings-read"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.status").value("CONFIGURED"))
-        .andExpect(jsonPath("$.pipelineFields[1].fieldId").value("borrowerLastName"))
-        .andExpect(jsonPath("$.priceScenarioTable.adjustedPriceFieldId").value("calc.adjustedPrice"))
-        .andExpect(jsonPath("$.defaultPricingFilters.fieldIds[0]").value("filter.productType"))
-        .andExpect(jsonPath("$.lockingFields.requestDateFieldId").value("lock.requestDate"));
+        .andExpect(jsonPath("$.status").value("UNCONFIGURED"))
+        .andExpect(jsonPath("$.pipelineFields", empty()));
   }
 
   @Test
-  void clientSettingsStoreTenantValuesByActiveVersionWithoutPricingDefaults() throws Exception {
+  void clientSettingsFailClosedWithoutDurablePersistence() throws Exception {
     mvc.perform(get("/api/v1/tenants/tenant-b/pipeline/client-settings")
             .header("X-Ui-Trace-Id", "trace-client-settings-other-tenant"))
         .andExpect(status().isOk())
@@ -283,19 +281,21 @@ class UiShellControllerTest {
             .header("X-Ui-Trace-Id", "trace-client-settings-save")
             .contentType(MediaType.APPLICATION_JSON)
             .content(settings))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.status").value("CONFIGURED"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.status").value("BLOCKED"))
+        .andExpect(jsonPath("$.configured").value(false))
+        .andExpect(jsonPath("$.dependencyStatus").value("CLIENT_SETTINGS_PERSISTENCE_REQUIRED"))
         .andExpect(jsonPath("$.activeVersion").value("tenant-a-client-settings-v1"))
         .andExpect(jsonPath("$.systemFields[0].systemFieldId").value("client.notificationEmail"))
         .andExpect(jsonPath("$.clientFieldValues['client.notificationEmail']").value("ops@example.test"))
         .andExpect(jsonPath("$.fallbackReason")
-            .value("Pricing-bff stores tenant-supplied client setting values and references system field IDs only; it does not infer client-level pricing defaults."));
+            .value("Durable UI persistence is not configured; process-local tenant and draft state is disabled."));
 
     mvc.perform(post("/api/v1/tenants/tenant-a/pipeline/client-settings/publish")
             .header("X-Ui-Trace-Id", "trace-client-settings-publish"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.status").value("PUBLISHED"))
-        .andExpect(jsonPath("$.dependencyStatus").value("CLIENT_SETTINGS_ACTIVE_VERSION_PUBLISHED"));
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.status").value("BLOCKED"))
+        .andExpect(jsonPath("$.dependencyStatus").value("CLIENT_SETTINGS_PUBLISH_BLOCKED"));
 
     mvc.perform(get("/api/v1/tenants/tenant-b/pipeline/client-settings")
             .header("X-Ui-Trace-Id", "trace-client-settings-isolated"))
@@ -305,7 +305,7 @@ class UiShellControllerTest {
   }
 
   @Test
-  void clientSettingsPublishBlocksValuesThatReferenceMissingSystemFields() throws Exception {
+  void clientSettingsValidationAndPersistenceBlockAreReturnedTogether() throws Exception {
     String settings = """
         {
           "activeVersion":"tenant-c-client-settings-v1",
@@ -322,18 +322,16 @@ class UiShellControllerTest {
     mvc.perform(post("/api/v1/tenants/tenant-c/pipeline/client-settings")
             .contentType(MediaType.APPLICATION_JSON)
             .content(settings))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.status").value("PARTIAL"));
-
-    mvc.perform(post("/api/v1/tenants/tenant-c/pipeline/client-settings/publish"))
-        .andExpect(status().isBadRequest())
+        .andExpect(status().isServiceUnavailable())
         .andExpect(jsonPath("$.status").value("BLOCKED"))
         .andExpect(jsonPath("$.validationMessages[0]")
-            .value("Client setting values reference missing system field IDs: client.missingField"));
+            .value("Client setting values reference missing system field IDs: client.missingField"))
+        .andExpect(jsonPath("$.validationMessages[1]")
+            .value("Durable UI persistence is not configured; process-local tenant and draft state is disabled."));
   }
 
   @Test
-  void pricingNotificationSettingsStoreAliasesConditionsAndVisibleReferences() throws Exception {
+  void pricingNotificationSettingsFailClosedWithoutDurablePersistence() throws Exception {
     mvc.perform(get("/api/v1/tenants/tenant-notify-a/pipeline/pricing-notifications")
             .header("X-Ui-Trace-Id", "trace-notification-unconfigured"))
         .andExpect(status().isOk())
@@ -367,8 +365,9 @@ class UiShellControllerTest {
             .header("X-Ui-Trace-Id", "trace-notification-save")
             .contentType(MediaType.APPLICATION_JSON)
             .content(settings))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.status").value("CONFIGURED"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.status").value("BLOCKED"))
+        .andExpect(jsonPath("$.dependencyStatus").value("PRICING_NOTIFICATION_PERSISTENCE_REQUIRED"))
         .andExpect(jsonPath("$.notificationFields[0].nameAlias").value("Quote ready email"))
         .andExpect(jsonPath("$.notificationFields[0].descriptionAlias")
             .value("Notify operations when quote pricing is ready for review."))
@@ -380,13 +379,13 @@ class UiShellControllerTest {
         .andExpect(jsonPath("$.notificationFields[0].visibleReferences[0]")
             .value("condition:quote-ready-reference"))
         .andExpect(jsonPath("$.notificationFields[0].visibleReferences[1]").value("field:pricing.sendNotification"))
-        .andExpect(jsonPath("$.events[1]").value("PricingNotificationFieldsReferenced"));
+        .andExpect(jsonPath("$.events[0]").value("PricingNotificationPersistenceBlocked"));
 
     mvc.perform(post("/api/v1/tenants/tenant-notify-a/pipeline/pricing-notifications/publish")
             .header("X-Ui-Trace-Id", "trace-notification-publish"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.status").value("PUBLISHED"))
-        .andExpect(jsonPath("$.dependencyStatus").value("PRICING_NOTIFICATION_SETTINGS_PUBLISHED"));
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.status").value("BLOCKED"))
+        .andExpect(jsonPath("$.dependencyStatus").value("PRICING_NOTIFICATION_PUBLISH_BLOCKED"));
   }
 
   @Test
@@ -415,11 +414,7 @@ class UiShellControllerTest {
     mvc.perform(post("/api/v1/tenants/tenant-notify-b/pipeline/pricing-notifications")
             .contentType(MediaType.APPLICATION_JSON)
             .content(settings))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.status").value("PARTIAL"));
-
-    mvc.perform(post("/api/v1/tenants/tenant-notify-b/pipeline/pricing-notifications/publish"))
-        .andExpect(status().isBadRequest())
+        .andExpect(status().isServiceUnavailable())
         .andExpect(jsonPath("$.status").value("BLOCKED"))
         .andExpect(jsonPath("$.validationMessages[0]")
             .value("Pricing notification pricing.quoteReadyNotification references missing send-notification field ID: pricing.sendNotification"))
@@ -428,7 +423,7 @@ class UiShellControllerTest {
   }
 
   @Test
-  void pricingAccessSettingsResolveRoleProfileFeatureFlagsAndAuditByTenant() throws Exception {
+  void pricingAccessSettingsFailClosedWithoutDurablePersistence() throws Exception {
     mvc.perform(get("/api/v1/tenants/tenant-access-b/pipeline/pricing-access")
             .header("X-User-Role", "loan-officer"))
         .andExpect(status().isOk())
@@ -460,8 +455,9 @@ class UiShellControllerTest {
             .header("X-User-Id", "admin-user-1")
             .contentType(MediaType.APPLICATION_JSON)
             .content(settings))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.status").value("CONFIGURED"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.status").value("BLOCKED"))
+        .andExpect(jsonPath("$.dependencyStatus").value("PRICING_ACCESS_PERSISTENCE_REQUIRED"))
         .andExpect(jsonPath("$.authorizedPricingFieldIds", hasSize(2)))
         .andExpect(jsonPath("$.authorizedPricingFieldIds[0]").value("loanNumber"))
         .andExpect(jsonPath("$.activePricingProfile.profileId").value("retail-profile"))
@@ -471,7 +467,7 @@ class UiShellControllerTest {
         .andExpect(jsonPath("$.auditRecords[0].tenantContext").value("tenant-access-a"))
         .andExpect(jsonPath("$.auditRecords[0].actorUserId").value("admin-user-1"))
         .andExpect(jsonPath("$.auditRecords[0].changedValues[0]").value("loan-officer:loanNumber|borrowerLastName"))
-        .andExpect(jsonPath("$.events[1]").value("PricingAccessAuditRecorded"));
+        .andExpect(jsonPath("$.events[0]").value("PricingAccessPersistenceBlocked"));
 
     mvc.perform(get("/api/v1/tenants/tenant-access-a/pipeline/pricing-access")
             .header("X-User-Role", "ops-reviewer")
@@ -479,8 +475,7 @@ class UiShellControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.tenantContext").value("tenant-access-a"))
         .andExpect(jsonPath("$.activeRoleId").value("ops-reviewer"))
-        .andExpect(jsonPath("$.authorizedPricingFieldIds", hasSize(3)))
-        .andExpect(jsonPath("$.authorizedPricingFieldIds[2]").value("pricing.quoteReadyNotification"))
+        .andExpect(jsonPath("$.authorizedPricingFieldIds", empty()))
         .andExpect(jsonPath("$.uiTraceId").value("trace-pricing-access-read"));
 
     mvc.perform(get("/api/v1/tenants/tenant-access-b/pipeline/pricing-access")
@@ -508,8 +503,8 @@ class UiShellControllerTest {
     mvc.perform(post("/api/v1/tenants/tenant-access-validation/pipeline/pricing-access")
             .contentType(MediaType.APPLICATION_JSON)
             .content(settings))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.status").value("PARTIAL"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.status").value("BLOCKED"))
         .andExpect(jsonPath("$.validationMessages[0]")
             .value("Active role ID references missing role pricing access config: missing-role"))
         .andExpect(jsonPath("$.validationMessages[1]")
@@ -688,7 +683,7 @@ class UiShellControllerTest {
   }
 
   @Test
-  void quickQuoteDraftScenarioPersistsPipelineContextForTenantScopedRetrieve() throws Exception {
+  void quickQuoteDraftScenarioFailsClosedWithoutDurablePersistence() throws Exception {
     String draft = """
         {
           "status": "DRAFT_INCOMPLETE",
@@ -711,21 +706,19 @@ class UiShellControllerTest {
             .header("X-Ui-Trace-Id", "trace-s07-save")
             .contentType(MediaType.APPLICATION_JSON)
             .content(draft))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.status").value("DRAFT_INCOMPLETE"))
-        .andExpect(jsonPath("$.intake.borrowerLastName").value("Rivera"))
-        .andExpect(jsonPath("$.intake.clientContext").value(org.hamcrest.Matchers.containsString("PII-77-S07")))
-        .andExpect(jsonPath("$.events[0]").value("QuickQuotePipelineDraftCreated"));
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.status").value("BLOCKED"))
+        .andExpect(jsonPath("$.code").value("DRAFT_SCENARIO_PERSISTENCE_REQUIRED"))
+        .andExpect(jsonPath("$.message").value("Durable UI persistence is not configured; process-local tenant and draft state is disabled."));
 
     mvc.perform(get("/api/v1/tenants/demo-tenant/scenarios")
             .header("X-Tenant-Context", "demo-tenant")
             .param("borrowerLastName", "Rivera")
             .param("loanNumber", "LN-2001")
             .param("status", "DRAFT_INCOMPLETE"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.records", hasSize(1)))
-        .andExpect(jsonPath("$.records[0].intake.loanNumber").value("LN-2001"))
-        .andExpect(jsonPath("$.records[0].intake.clientContext").value(org.hamcrest.Matchers.containsString("CONF_30YR_PREVIEW")));
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.status").value("BLOCKED"))
+        .andExpect(jsonPath("$.code").value("DRAFT_SCENARIO_PERSISTENCE_REQUIRED"));
   }
 
   @Test
@@ -734,7 +727,8 @@ class UiShellControllerTest {
             .header("X-Tenant-Context", "tenant-a")
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"data\":{\"borrowerLastName\":\"Rivera\",\"loanNumber\":\"LN-SEC\"}}"))
-        .andExpect(status().isCreated());
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.code").value("DRAFT_SCENARIO_PERSISTENCE_REQUIRED"));
 
     mvc.perform(get("/api/v1/tenants/tenant-a/scenarios")
             .header("X-Tenant-Context", "tenant-b")

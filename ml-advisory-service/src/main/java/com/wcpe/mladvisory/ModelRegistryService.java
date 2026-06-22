@@ -31,11 +31,11 @@ public final class ModelRegistryService {
   private final ModelApprovalPolicy approvalPolicy = new ModelApprovalPolicy();
 
   public ModelRegistryService() {
-    this(Clock.systemUTC(), new InMemoryModelVersionRepository());
+    throw failClosedMissingPersistence();
   }
 
   public ModelRegistryService(Clock clock) {
-    this(clock, new InMemoryModelVersionRepository());
+    throw failClosedMissingPersistence();
   }
 
   ModelRegistryService(Clock clock, ModelVersionRepository repository) {
@@ -283,5 +283,10 @@ public final class ModelRegistryService {
     } catch (NoSuchAlgorithmException ex) {
       throw new IllegalStateException("SHA-256 unavailable", ex);
     }
+  }
+
+  private static IllegalStateException failClosedMissingPersistence() {
+    return new IllegalStateException(
+        "Model version governance persistence requires an explicit JDBC/PostgreSQL-backed ModelVersionRepository; in-memory production fallback is disabled.");
   }
 }

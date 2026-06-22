@@ -157,5 +157,13 @@ public class ParallelPricingOrchestrator implements AutoCloseable {
     @Override
     public void close() {
         pricingExecutor.shutdownNow();
+        try {
+            if (!pricingExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                pricingExecutor.shutdownNow();
+            }
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            pricingExecutor.shutdownNow();
+        }
     }
 }

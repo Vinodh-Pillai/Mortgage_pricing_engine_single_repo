@@ -28,7 +28,7 @@ import com.wcpe.pricing.calculationtables.CalculationDataTableLookupApi;
 import com.wcpe.pricing.calculationtables.CalculationDataTableLookupApi.CalculationLookupReference;
 import com.wcpe.pricing.calculationtables.CalculationDataTableLookupApi.CreateLookupRequest;
 import com.wcpe.pricing.calculationtables.CalculationDataTableLookupApi.EditLookupOptionsRequest;
-import com.wcpe.pricing.calculationtables.CalculationDataTableLookupApi.InMemoryCalculationDataTableLookupRepository;
+import com.wcpe.pricing.calculationtables.InMemoryCalculationDataTableLookupRepository;
 import com.wcpe.pricing.calculationtables.CalculationDataTableLookupApi.LookupHeaders;
 import com.wcpe.pricing.calculationtables.CalculationDataTableLookupApi.LookupOptionDraft;
 import java.util.List;

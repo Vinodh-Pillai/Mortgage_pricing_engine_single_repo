@@ -14,6 +14,8 @@ public interface NormalizationProfileRepository extends JpaRepository<Normalizat
 
     List<NormalizationProfile> findByTenantIdAndStatus(UUID tenantId, String status);
 
+    List<NormalizationProfile> findByTenantId(UUID tenantId);
+
     List<NormalizationProfile> findByTenantIdAndInvestorCodeAndProductCode(
             UUID tenantId, String investorCode, String productCode);
 

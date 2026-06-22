@@ -9,7 +9,7 @@ final class ModelVersionGovernanceFixtures {
   private ModelVersionGovernanceFixtures() {}
 
   static ModelRegistryService registryWithSubmittedReview(boolean completeEvidence) {
-    ModelRegistryService service = new ModelRegistryService(Clock.fixed(AdvisoryTestFixtures.NOW, ZoneOffset.UTC));
+    ModelRegistryService service = new ModelRegistryService(Clock.fixed(AdvisoryTestFixtures.NOW, ZoneOffset.UTC), new TestModelVersionRepository());
     ModelVersionResponse registered =
         service.register(registerCommand("sha256:approved", AllowedUse.ADVISORY_ONLY, completeEvidence)).value().orElseThrow();
     service.submitReview(AdvisoryTestFixtures.TENANT, registered.modelVersionId(), "ml-operator-2", "corr-submit-review");

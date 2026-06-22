@@ -6,7 +6,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.wcpe.scenarioanalysis.WhatIfGuardrailService.CreatePolicyCommand;
 import com.wcpe.scenarioanalysis.WhatIfGuardrailService.EvaluateCommand;
 import com.wcpe.scenarioanalysis.WhatIfGuardrailService.GuardrailRule;
-import com.wcpe.scenarioanalysis.WhatIfGuardrailService.InMemoryWhatIfGuardrailRepository;
 import com.wcpe.scenarioanalysis.WhatIfGuardrailService.PolicyNotSatisfiedException;
 import com.wcpe.scenarioanalysis.WhatIfGuardrailService.PublishPolicyCommand;
 import java.time.Clock;
@@ -18,12 +17,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class WhatIfGuardrailServiceTest {
-  private InMemoryWhatIfGuardrailRepository repository;
+  private TestOnlyInMemoryWhatIfGuardrailRepository repository;
   private WhatIfGuardrailService service;
 
   @BeforeEach
   void setUp() {
-    repository = new InMemoryWhatIfGuardrailRepository();
+    repository = new TestOnlyInMemoryWhatIfGuardrailRepository();
     service = new WhatIfGuardrailService(
         repository,
         Clock.fixed(Instant.parse("2026-06-01T12:00:00Z"), ZoneOffset.UTC));

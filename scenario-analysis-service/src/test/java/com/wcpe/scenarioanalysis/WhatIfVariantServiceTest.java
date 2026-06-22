@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.wcpe.scenarioanalysis.WhatIfVariantService.CreateVariantCommand;
 import com.wcpe.scenarioanalysis.WhatIfVariantService.IdempotencyConflictException;
-import com.wcpe.scenarioanalysis.WhatIfVariantService.InMemoryWhatIfVariantRepository;
 import com.wcpe.scenarioanalysis.WhatIfVariantService.UnsupportedFieldException;
 import com.wcpe.scenarioanalysis.WhatIfVariantService.VariantChange;
 import java.time.Clock;
@@ -16,12 +15,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class WhatIfVariantServiceTest {
-  private InMemoryWhatIfVariantRepository repository;
+  private TestOnlyInMemoryWhatIfVariantRepository repository;
   private WhatIfVariantService service;
 
   @BeforeEach
   void setUp() {
-    repository = new InMemoryWhatIfVariantRepository();
+    repository = new TestOnlyInMemoryWhatIfVariantRepository();
     service = new WhatIfVariantService(
         repository,
         Clock.fixed(Instant.parse("2026-06-01T12:00:00Z"), ZoneOffset.UTC));
