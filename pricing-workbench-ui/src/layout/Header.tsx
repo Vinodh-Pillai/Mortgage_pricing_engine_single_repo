@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as 
 import { Link, useLocation } from 'react-router-dom';
 import { Avatar, roleColorKeyForLabel, roleColors, themeStorageKey } from '../design-system';
 import { useTranslation } from '../lib/i18n';
+import { usePageActions } from './PageActionsContext';
 
 type HeaderProps = {
   breadcrumb: string;
@@ -25,6 +26,7 @@ export function Header({ breadcrumb, notificationCount, showAuthenticatedChrome 
   const menuRef = useRef<HTMLDivElement>(null);
   const userMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const userMenuDropdownRef = useRef<HTMLDivElement>(null);
+  const { promotedActions } = usePageActions();
   const roleColorKey = roleColorKeyForLabel(user.role);
   const roleColor = roleColors[roleColorKey];
   const displayName = user.name?.trim() || t('pricingWorkbench');
@@ -130,11 +132,21 @@ export function Header({ breadcrumb, notificationCount, showAuthenticatedChrome 
         </div>
       </div>
       <div className="layout-header__actions">
+        {compactHeader && promotedActions ? (
+          <div className="layout-header__promoted-actions" aria-label={promotedActions.label}>
+            <span className="layout-header__promoted-label">Page actions</span>
+            {promotedActions.actions}
+          </div>
+        ) : null}
         {showAuthenticatedChrome ? (
           <button className="layout-icon-button" type="button" data-layout-notifications-trigger="true" onClick={handleNotificationsToggle} aria-label={t('notifications', { count: notificationCount })}>
             <span aria-hidden="true">🔔</span><span className="layout-header__action-label">{t('alerts')}</span>{notificationCount > 0 ? <span className="layout-badge">{notificationCount}</span> : null}
           </button>
         ) : null}
+        <details className="layout-header__help">
+          <summary aria-label="Page help">?</summary>
+          <span>Use page actions for the primary workflow. Additional details stay in expandable page sections.</span>
+        </details>
         <button
           className="layout-theme-toggle"
           type="button"

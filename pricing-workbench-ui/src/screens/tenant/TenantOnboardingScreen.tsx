@@ -11,7 +11,7 @@ const tenantConfig: FunctionalityPageConfig<TenantRow> = {
   breadcrumb: 'Onboarding / Tenant',
   eyebrow: 'Tenant service setup',
   title: 'Tenant Onboarding',
-  summary: 'Progressively captures tenant workspace setup, identity configuration, channels, integrations, compliance settings, and launch readiness without embedding tenant policy values in the UI.',
+  summary: 'Guides tenant setup, identity, channels, integrations, compliance readiness, and launch review.',
   dataBoundary: 'tenant-service: GET/POST /api/v1/tenants',
   sections: [
     { id: 'workspace-setup', eyebrow: 'Step 1', title: 'Workspace Setup', summary: 'Name, operating contact, and launch intent metadata.', status: 'ready', items: ['Workspace name', 'Operations contact', 'Launch goal'] },
@@ -23,8 +23,8 @@ const tenantConfig: FunctionalityPageConfig<TenantRow> = {
   ],
   metrics: [
     { label: 'Sections', value: '6', help: 'Progressive onboarding areas' },
-    { label: 'State coverage', value: '5/5', help: 'VisualStateContract states' },
-    { label: 'Evidence', value: 'Enabled', help: 'Load, section, and action capture' },
+    { label: 'Readiness', value: '5 areas', help: 'Loading, empty, blocked, attention, and ready views are covered.' },
+    { label: 'Evidence', value: 'Ready', help: 'Actions record review evidence for audit follow-up.' },
   ],
   rows: [
     { id: 'tenant-workspace', area: 'Workspace Setup', owner: 'Operations', status: 'ready' },

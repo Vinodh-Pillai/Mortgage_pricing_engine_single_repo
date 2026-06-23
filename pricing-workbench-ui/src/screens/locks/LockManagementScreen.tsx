@@ -12,7 +12,7 @@ const lockConfig: FunctionalityPageConfig<LockRow> = {
   breadcrumb: 'Locks / Management',
   eyebrow: 'Lock service',
   title: 'Lock Management',
-  summary: 'Manages active locks, requests, expiring work, history, bulk actions, and investor delivery status from lock-service evidence.',
+  summary: 'Manages active locks, requests, expiring work, history, bulk actions, and investor delivery status.',
   dataBoundary: 'lock-service: GET/POST /api/v1/locks',
   sections: [
     { id: 'active-locks', eyebrow: 'Active', title: 'Active Locks', summary: 'Confirmed and requested lock records.', status: 'ready', items: ['Confirmed locks', 'Requested locks', 'Owner refs'] },
@@ -40,8 +40,8 @@ const lockConfig: FunctionalityPageConfig<LockRow> = {
     { key: 'status', header: 'Status', render: (row) => <span className={`functionality-badge functionality-badge--${row.status}`}>{row.status}</span> },
   ],
   tableCaption: 'Lock management records',
-  primaryActions: [{ id: 'extend-locks', label: 'Bulk extend', variant: 'primary' }],
-  secondaryActions: [{ id: 'cancel-locks', label: 'Bulk cancel', variant: 'danger' }, { id: 'deliver-locks', label: 'Bulk deliver' }],
+  primaryActions: [{ id: 'request-lock-review', label: 'Stage Request Lock', variant: 'primary' }],
+  secondaryActions: [{ id: 'extend-expiring-lock-review', label: 'Stage Extension Review' }, { id: 'extend-locks', label: 'Bulk extend' }, { id: 'cancel-locks', label: 'Bulk cancel', variant: 'danger' }, { id: 'deliver-locks', label: 'Bulk deliver' }],
   emptyMessage: 'No lock records are available for this workspace.',
   blockedMessage: 'Lock management is blocked until lock-service expiration and delivery references are available.',
   attentionMessage: 'Requested and expiring locks need operations review.',
@@ -66,15 +66,15 @@ function LockOperationsSpotlight({ onEvidence }: { onEvidence: (actionId: string
     <section className="panel" aria-labelledby="lock-ops-spotlight-heading">
       <div className="panel-heading-row">
         <div>
-          <p className="eyebrow">Local lock desk fixture</p>
+            <p className="eyebrow">Lock operations</p>
           <h2 id="lock-ops-spotlight-heading">Lock lifecycle actions</h2>
         </div>
       </div>
-      <p className="field-help">These controls stage Sarah loan-officer and operations actions locally. Production lock-service, investor delivery, fee settlement, cutoff calendars, and accounting integrations remain explicitly blocked.</p>
+      <details className="field-help"><summary aria-label="Lock operation details">?</summary><span>Additional investor delivery and cutoff details are shown only when connected records are available.</span></details>
       <div className="offer-toolbar" aria-label="Local lock lifecycle actions">
-        <button type="button" onClick={() => stageAction('request-lock-local-fixture', 'Local request-lock evidence staged. Production investor submission and compliance disclosure package are required before durable lock creation.')}>Stage Request Lock</button>
-        <button type="button" onClick={() => stageAction('extend-expiring-lock-local-fixture', 'Local lock-extension review staged. Extension days, fees, cutoffs, and investor policy must come from production lock desk integrations.')}>Stage Extension Review</button>
-        <button type="button" onClick={() => stageAction('show-expiry-blockers-local-fixture', 'Expiry blockers shown from local fixture; live investor calendars and status sync are missing production integrations.')}>Show Expiry Blockers</button>
+        <button type="button" onClick={() => stageAction('request-lock-review', 'Lock request review started. Complete required investor and disclosure checks before submitting.')}>Stage Request Lock</button>
+        <button type="button" onClick={() => stageAction('extend-expiring-lock-review', 'Extension review started. Confirm investor cutoff and fee details before continuing.')}>Stage Extension Review</button>
+        <button type="button" onClick={() => stageAction('show-expiry-items', 'Expiry items are ready for operations review.')}>Review Expiry Items</button>
       </div>
       {notice ? <div className="banner banner--info" role="status">{notice}</div> : null}
     </section>

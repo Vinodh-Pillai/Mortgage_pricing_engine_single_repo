@@ -61,12 +61,12 @@ export function MajorFunctionalityPage<T extends object>({ config, visualState =
         title={config.title}
         breadcrumb={config.breadcrumb}
         summary={config.summary}
-        meta={<span>Screen data is scoped to this workspace.</span>}
+        meta={config.metrics.length ? <details className="page-header__help"><summary aria-label={`${config.title} details`}>?</summary><span>Readiness details are available in the cards below.</span></details> : undefined}
         actions={<ActionToolbar label={`${config.title} actions`} primaryActions={config.primaryActions} secondaryActions={config.secondaryActions} onAction={recordAction} />}
       />
       <PageStateWrapper state={state} title={config.title} emptyMessage={config.emptyMessage} blockedMessage={config.blockedMessage} attentionMessage={config.attentionMessage}>
         <section className="page-metrics" aria-label={`${config.title} readiness metrics`}>
-          {config.metrics.map((metric) => <div className="page-metric" key={metric.label}><span>{metric.label}</span><strong>{metric.value}</strong><small>{metric.help}</small></div>)}
+          {config.metrics.map((metric) => <div className="page-metric" key={metric.label}><span>{metric.label}</span><strong>{metric.value}</strong><details><summary aria-label={`${metric.label} help`}>?</summary><small>{metric.help}</small></details></div>)}
         </section>
         {config.renderSpotlight?.(recordAction)}
         <section className="section-grid" aria-label={`${config.title} progressive sections`}>
@@ -76,7 +76,7 @@ export function MajorFunctionalityPage<T extends object>({ config, visualState =
             </SectionCard>
           ))}
         </section>
-        <SectionCard id={`${config.screenId}-records`} eyebrow="Workspace records" title={`${config.title} records`} summary="Sortable and filterable local view backed by service-owned data contracts." status="ready">
+        <SectionCard id={`${config.screenId}-records`} eyebrow="Records" title={`${config.title} records`} summary="Sortable and filterable view." status="ready">
           <DataTable caption={config.tableCaption} rows={config.rows} columns={config.columns} />
         </SectionCard>
       </PageStateWrapper>

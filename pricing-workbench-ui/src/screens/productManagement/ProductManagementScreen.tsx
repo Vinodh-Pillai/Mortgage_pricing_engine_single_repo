@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
 import { fetchProductAdmin, type ProductAdminMapping, type ProductAdminProduct, type ProductAdminStipulation, type ProductAdminView } from '../../lib/api/products';
+import { usePageActions } from '../../layout/PageActionsContext';
 
 type ProductManagementScreenProps = {
   fetchImpl?: typeof fetch;
@@ -53,7 +54,7 @@ const blankFilters: ProductFilters = {
 const detailTabs: ProductDetailTab[] = ['General', 'Pricing', 'Eligibility', 'Stipulations', 'Adjustments'];
 
 const previewView: ProductAdminView = {
-  tenantContext: 'ui-preview-tenant',
+  tenantContext: 'Product workspace',
   dependencyStatus: 'PRODUCT_CATALOG_PREVIEW',
   fallbackReason: 'catalog preview',
   uiTraceId: 'product-management-preview-trace',
@@ -98,6 +99,7 @@ const previewView: ProductAdminView = {
 };
 
 export function ProductManagementScreen({ fetchImpl = fetch, tenantContext = 'ui-preview-tenant' }: ProductManagementScreenProps) {
+  const { setPromotedActions } = usePageActions();
   const [state, setState] = useState<ProductManagementState>({ kind: 'loading' });
   const [products, setProducts] = useState<ManagedProduct[]>([]);
   const [filters, setFilters] = useState<ProductFilters>(blankFilters);
@@ -179,6 +181,21 @@ export function ProductManagementScreen({ fetchImpl = fetch, tenantContext = 'ui
     setExportText(JSON.stringify(payload.map(toExportProduct), null, 2));
   }
 
+  const promotedProductActions = useMemo(() => (
+    <div className="pm-actions" aria-label="Product management actions">
+      <button type="button" className="pm-primary" onClick={() => setSlideOver({ kind: 'add' })}>Add Product</button>
+      <button type="button" onClick={() => bulkStatus('ACTIVE')} disabled={!selectedIds.size}>Enable</button>
+      <button type="button" onClick={() => bulkStatus('DISABLED')} disabled={!selectedIds.size}>Disable</button>
+      <button type="button" onClick={assignBulkInvestor} disabled={!selectedIds.size || !bulkInvestor.trim()}>Assign</button>
+      <button type="button" onClick={exportSelected}>Export</button>
+    </div>
+  ), [bulkInvestor, filteredProducts, selectedIds.size, selectedProducts]);
+
+  useEffect(() => {
+    setPromotedActions({ label: 'Product management page actions', actions: promotedProductActions });
+    return () => setPromotedActions(null);
+  }, [promotedProductActions, setPromotedActions]);
+
   function createProduct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
@@ -253,9 +270,9 @@ export function ProductManagementScreen({ fetchImpl = fetch, tenantContext = 'ui
       <main className="pm-main">
         <header className="pm-toolbar pm-glass">
           <div>
-            <p className="pm-kicker">{view?.tenantContext ?? tenantContext}</p>
+            <p className="pm-kicker">Product workspace</p>
             <h1 id="product-management-title">Product Management</h1>
-            {state.kind === 'blocked' ? <span className="pm-pill pm-pill--warn">{state.message}</span> : null}
+            {state.kind === 'blocked' ? <span className="pm-pill pm-pill--warn">Connected product catalog unavailable</span> : null}
           </div>
           <div className="pm-actions">
             <button type="button" className="pm-primary" onClick={() => setSlideOver({ kind: 'add' })}>Add Product</button>
@@ -264,19 +281,24 @@ export function ProductManagementScreen({ fetchImpl = fetch, tenantContext = 'ui
 
         <section className="pm-bulk pm-glass" aria-label="Bulk actions">
           <label className="pm-checkline"><input type="checkbox" checked={filteredProducts.length > 0 && filteredProducts.every((product) => selectedIds.has(product.productId))} onChange={(event) => setSelectedIds(event.target.checked ? new Set(filteredProducts.map((product) => product.productId)) : new Set())} /> {selectedIds.size}</label>
-          <button type="button" onClick={() => bulkStatus('ACTIVE')} disabled={!selectedIds.size}>Enable</button>
-          <button type="button" onClick={() => bulkStatus('DISABLED')} disabled={!selectedIds.size}>Disable</button>
-          <input value={bulkInvestor} onChange={(event) => setBulkInvestor(event.target.value)} placeholder="Investor" aria-label="Bulk investor" />
-          <button type="button" onClick={assignBulkInvestor} disabled={!selectedIds.size || !bulkInvestor.trim()}>Assign</button>
-          <button type="button" onClick={exportSelected}>Export</button>
+          <details className="pm-bulk-details">
+            <summary>Bulk actions</summary>
+            <div className="pm-bulk-details__controls">
+              <button type="button" onClick={() => bulkStatus('ACTIVE')} disabled={!selectedIds.size}>Enable</button>
+              <button type="button" onClick={() => bulkStatus('DISABLED')} disabled={!selectedIds.size}>Disable</button>
+              <input value={bulkInvestor} onChange={(event) => setBulkInvestor(event.target.value)} placeholder="Investor" aria-label="Bulk investor" />
+              <button type="button" onClick={assignBulkInvestor} disabled={!selectedIds.size || !bulkInvestor.trim()}>Assign</button>
+              <button type="button" onClick={exportSelected}>Export</button>
+            </div>
+          </details>
           <span className="pm-count">{filteredProducts.length}/{products.length}</span>
         </section>
 
         {exportText ? <textarea className="pm-export pm-glass" readOnly value={exportText} aria-label="Exported products" /> : null}
 
         <section className="pm-grid" aria-label="Products">
-          {filteredProducts.map((product) => (
-            <article className="pm-card pm-glass" key={product.productId} onClick={() => { setSlideOver({ kind: 'detail', productId: product.productId }); setActiveTab('General'); }}>
+          {filteredProducts.map((product, index) => (
+            <article className="pm-card pm-glass" key={`${product.productId}-${index}`} onClick={() => { setSlideOver({ kind: 'detail', productId: product.productId }); setActiveTab('General'); }}>
               <div className="pm-card-top">
                 <input type="checkbox" aria-label={`Select ${product.productCode}`} checked={selectedIds.has(product.productId)} onClick={(event) => event.stopPropagation()} onChange={() => toggleSelected(product.productId)} />
                 <span className={`pm-status pm-status--${String(product.status).toLowerCase()}`}>{product.status}</span>
@@ -287,7 +309,7 @@ export function ProductManagementScreen({ fetchImpl = fetch, tenantContext = 'ui
               <div className="pm-rate">{rateRange(product)}</div>
               <div className="pm-quick-row" onClick={(event) => event.stopPropagation()}>
                 <select value={product.status} aria-label={`${product.productCode} status`} onChange={(event) => patchProduct(product.productId, { status: event.target.value })}>
-                  {lifecycleOptions.map((status) => <option key={status} value={status}>{status}</option>)}
+                  {lifecycleOptions.map((status, statusIndex) => <option key={`${status}-${statusIndex}`} value={status}>{status}</option>)}
                 </select>
                 <input value={product.investorCode} aria-label={`${product.productCode} investor`} onChange={(event) => patchProduct(product.productId, { investorCode: event.target.value })} />
               </div>
@@ -417,7 +439,7 @@ function FieldValue({ label, value, onChange }: { label: string; value: string; 
 }
 
 function ChipRow({ label, values }: { label: string; values: string[] }) {
-  return <div className="pm-chip-row"><span>{label}</span><div>{(values.length ? values : ['—']).map((value) => <b key={value}>{value}</b>)}</div></div>;
+  return <div className="pm-chip-row"><span>{label}</span><div>{(values.length ? values : ['—']).map((value, index) => <b key={`${value}-${index}`}>{value}</b>)}</div></div>;
 }
 
 function toManagedProduct(product: ProductAdminProduct): ManagedProduct {
@@ -505,6 +527,9 @@ const productManagementStyles = `
 .pm-kicker { margin: 0 0 4px; color: #8fd7ff; text-transform: uppercase; letter-spacing: .16em; font-size: 11px; }
 .pm-actions, .pm-bulk { flex-wrap: wrap; }
 .pm-bulk { justify-content: flex-start; }
+.pm-bulk-details { min-width: min(100%, 560px); }
+.pm-bulk-details summary { cursor: pointer; font-weight: 900; color: #b8f3ff; }
+.pm-bulk-details__controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
 .pm-bulk input { max-width: 180px; }
 .pm-count { margin-left: auto; color: #b7d7ef; font-weight: 700; }
 .pm-checkline { display: inline-flex; gap: 8px; align-items: center; min-width: 72px; }

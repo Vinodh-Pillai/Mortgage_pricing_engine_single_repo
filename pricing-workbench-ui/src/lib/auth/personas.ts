@@ -104,6 +104,7 @@ export const syntheticPersonas: Persona[] = [
       'margin:analyze',
       'scenario:read',
       'scenario:what-if',
+      'eligibility:read',
       'adjustment:read',
       'rate-feed:read',
       'product:read',

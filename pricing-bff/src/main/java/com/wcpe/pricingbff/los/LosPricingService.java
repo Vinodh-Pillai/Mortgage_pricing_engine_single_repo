@@ -5,6 +5,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wcpe.pricingbff.los.LosApiModels.LosLockExtendRequest;
 import com.wcpe.pricingbff.los.LosApiModels.LosLockRequest;
 import com.wcpe.pricingbff.los.LosApiModels.LosLockResponse;
+import com.wcpe.pricingbff.los.LosApiModels.LoanPassExecuteProductRequest;
+import com.wcpe.pricingbff.los.LosApiModels.LoanPassExecuteSummaryRequest;
+import com.wcpe.pricingbff.los.LosApiModels.LoanPassExecutionProductSummary;
+import com.wcpe.pricingbff.los.LosApiModels.LoanPassExecutionSummaryResponse;
+import com.wcpe.pricingbff.los.LosApiModels.LoanPassExecutionSummaryTotals;
+import com.wcpe.pricingbff.los.LosApiModels.LoanPassProductExecutionResult;
 import com.wcpe.pricingbff.los.LosApiModels.LosOffer;
 import com.wcpe.pricingbff.los.LosApiModels.LosProductCatalogResponse;
 import com.wcpe.pricingbff.los.LosApiModels.LosProductDetailResponse;
@@ -29,6 +35,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +47,13 @@ import org.springframework.stereotype.Service;
 
 @Service
 class LosPricingService {
+  static final String LOANPASS_PUBLIC_API_DOCS_URL = "https://docs.loanpass.io/public-api/index.html";
+  static final String LOANPASS_PUBLIC_API_SCHEMA_URL = "https://api.loanpass.io/v1/swagger/schema.json";
+  static final List<String> LOANPASS_PUBLIC_API_OPERATION_CONCEPTS = List.of("execute-summary", "execute-product");
+  static final String LOANPASS_CONTRACT_FIELD_POLICY = "concept-aligned-only-no-request-response-fields-adopted";
+  private static final List<String> REQUIRED_EXECUTE_METADATA_REFS = List.of(
+      "productCatalogRef", "productAuthorizationMetadataRef", "ruleCatalogRef", "stipulationCatalogRef",
+      "rateCatalogRef", "lockTermCatalogRef");
   private static final Set<String> SUPPORTED_PRODUCT_SEARCH_FILTERS = Set.of(
       "productFamily", "channel", "investor", "loanPurpose", "occupancy", "propertyType",
       "term", "amortization", "effectiveDate", "q", "query", "active", "page", "pageSize", "sort");
@@ -100,6 +114,58 @@ class LosPricingService {
     return response;
   }
 
+  LoanPassExecutionSummaryResponse executeSummary(LoanPassExecuteSummaryRequest request, String headerTenantId,
+      String correlationId) {
+    validateExecuteSummaryRequest(request, headerTenantId);
+    String tenantId = tenantId(request.tenantId(), headerTenantId);
+    LoanPassTenantFlags flags = flagsForTenant(tenantId);
+    requireLoanPassCompatibility(flags);
+    validateCreditApplicationEnumMappings(request.creditApplicationFields(), flags);
+    Map<String, Object> metadata = executeMetadata("/api/v1/los/execute-summary", "execute-summary", tenantId,
+        request.pricingProfileId(), request.pipelineRecordId(), request.currentTime(), request.outputFieldsFilter(),
+        request.publishedVersionRequest(), request.creditApplicationFields().size(), request.ausFields().size(), correlationId, flags);
+    List<String> missingMetadata = missingExecuteMetadata(request.publishedVersionRequest());
+    if (!missingMetadata.isEmpty()) {
+      return new LoanPassExecutionSummaryResponse(new LoanPassExecutionSummaryTotals(0, 0, 0, 0, 0), List.of(), null,
+          blockedExecuteMetadata(metadata, missingMetadata));
+    }
+    List<LoanPassExecutionProductSummary> products = executeProducts(request.publishedVersionRequest()).stream()
+        .map(product -> toExecutionSummary(product, versionNumber(request.publishedVersionRequest())))
+        .toList();
+    return new LoanPassExecutionSummaryResponse(new LoanPassExecutionSummaryTotals(0, 0, products.size(), 0, 0), products,
+        versionNumber(request.publishedVersionRequest()), readyExecuteMetadata(metadata, request.publishedVersionRequest()));
+  }
+
+  LoanPassProductExecutionResult executeProduct(LoanPassExecuteProductRequest request, String headerTenantId,
+      String correlationId) {
+    validateExecuteProductRequest(request, headerTenantId);
+    String tenantId = tenantId(request.tenantId(), headerTenantId);
+    LoanPassTenantFlags flags = flagsForTenant(tenantId);
+    requireLoanPassCompatibility(flags);
+    validateCreditApplicationEnumMappings(request.creditApplicationFields(), flags);
+    Map<String, Object> metadata = executeMetadata("/api/v1/los/execute-product", "execute-product", tenantId,
+        request.pricingProfileId(), request.pipelineRecordId(), request.currentTime(), request.outputFieldsFilter(),
+        request.publishedVersionRequest(), request.creditApplicationFields().size(), request.ausFields().size(), correlationId, flags);
+    List<String> missingMetadata = missingExecuteMetadata(request.publishedVersionRequest());
+    if (!missingMetadata.isEmpty()) {
+      return new LoanPassProductExecutionResult(request.productId().trim(), "", "", "", "", false,
+          List.of(), List.of(), productExecutionBlockedStatus("TENANT_PRODUCT_AUTHORIZATION_UNAVAILABLE",
+              "Catalog-backed product, rule, stipulation, rate, and lock-period metadata is required before product execution can run"),
+          null, blockedExecuteMetadata(metadata, missingMetadata));
+    }
+    Optional<Map<String, Object>> product = executeProducts(request.publishedVersionRequest()).stream()
+        .filter(candidate -> request.productId().trim().equals(text(candidate, "productId")))
+        .findFirst();
+    if (product.isEmpty()) {
+      return new LoanPassProductExecutionResult(request.productId().trim(), "", "", "", "", false,
+          List.of(), List.of(), productExecutionBlockedStatus("PRODUCT_METADATA_NOT_FOUND",
+              "Product metadata was not found in the supplied catalog-backed execution metadata"),
+          null, blockedExecuteMetadata(metadata, List.of("products[productId=" + request.productId().trim() + "]")));
+    }
+    return toProductExecution(product.get(), readyExecuteMetadata(metadata, request.publishedVersionRequest()),
+        versionNumber(request.publishedVersionRequest()));
+  }
+
   private Map<String, String> quoteClientContext(LosPricingRequest request, LosScenario scenario, LoanPassTenantFlags flags) {
     Map<String, String> context = new LinkedHashMap<>();
     context.put("source", "LOS");
@@ -110,11 +176,266 @@ class LosPricingService {
     context.put("tenantFeatureFlagConfigRef", flags.configRef());
     context.put("tenantFeatureFlagAuditRef", flags.auditRef());
     context.put("tenantFeatureFlagVersion", Integer.toString(flags.version()));
+    context.put("loanPassPublicApiDocsUrl", LOANPASS_PUBLIC_API_DOCS_URL);
+    context.put("loanPassPublicApiSchemaUrl", LOANPASS_PUBLIC_API_SCHEMA_URL);
+    context.put("loanPassPublicApiOperationConcepts", String.join(",", LOANPASS_PUBLIC_API_OPERATION_CONCEPTS));
+    context.put("loanPassContractFieldPolicy", LOANPASS_CONTRACT_FIELD_POLICY);
+    context.put("productAuthorizationPolicy", "fail-closed-until-tenant-product-authorization-metadata-exists");
     if (!blank(scenario.scenarioId())) {
       context.put("scenarioRef", scenario.scenarioId());
       context.put("scenarioVersion", Integer.toString(scenario.scenarioVersion()));
     }
     return Map.copyOf(context);
+  }
+
+  private Map<String, Object> executeMetadata(String endpoint, String operationConcept, String tenantId,
+      String pricingProfileId, String pipelineRecordId, Instant currentTime, Map<String, Object> outputFieldsFilter,
+      Map<String, Object> publishedVersionRequest, int creditApplicationFieldCount, int ausFieldCount,
+      String correlationId, LoanPassTenantFlags flags) {
+    Map<String, Object> requestedContext = new LinkedHashMap<>();
+    requestedContext.put("tenantId", tenantId.trim());
+    putIfPresent(requestedContext, "pricingProfileId", pricingProfileId);
+    putIfPresent(requestedContext, "pipelineRecordId", pipelineRecordId);
+    requestedContext.put("currentTime", currentTime.toString());
+    requestedContext.put("creditApplicationFieldCount", creditApplicationFieldCount);
+    requestedContext.put("ausFieldCount", ausFieldCount);
+    if (outputFieldsFilter != null && !outputFieldsFilter.isEmpty()) requestedContext.put("outputFieldsFilter", Map.copyOf(outputFieldsFilter));
+    if (publishedVersionRequest != null && !publishedVersionRequest.isEmpty()) requestedContext.put("publishedVersionRequest", Map.copyOf(publishedVersionRequest));
+
+    Map<String, Object> metadata = new LinkedHashMap<>();
+    metadata.put("source", "fail-closed");
+    addFeatureFlagMetadata(metadata, flags);
+    metadata.put("endpoint", endpoint);
+    metadata.put("operationConcept", operationConcept);
+    metadata.put("requestedContext", Map.copyOf(requestedContext));
+    metadata.put("authorizationStatus", "BLOCKED");
+    metadata.put("authorizationMetadataStatus", "UNAVAILABLE");
+    metadata.put("mappingMetadataStatus", "INCOMPLETE");
+    metadata.put("catalogDependency", "catalog-service:tenant-product-authorization-required");
+    metadata.put("warnings", List.of("TENANT_PRODUCT_AUTHORIZATION_UNAVAILABLE", "CATALOG_METADATA_NOT_CONFIGURED"));
+    putIfPresent(metadata, "correlationId", correlationId);
+    addLoanPassPublicApiMetadata(metadata);
+    return Map.copyOf(metadata);
+  }
+
+  private Map<String, Object> productExecutionBlockedStatus(String code, String message) {
+    Map<String, Object> source = new LinkedHashMap<>();
+    source.put("type", "catalog-service");
+    source.put("ref", "tenant-product-authorization");
+    Map<String, Object> kind = new LinkedHashMap<>();
+    kind.put("type", "configuration-unavailable");
+    kind.put("code", code);
+    Map<String, Object> error = new LinkedHashMap<>();
+    error.put("source", Map.copyOf(source));
+    error.put("kind", Map.copyOf(kind));
+    error.put("message", message);
+    Map<String, Object> status = new LinkedHashMap<>();
+    status.put("type", "error");
+    status.put("errors", List.of(Map.copyOf(error)));
+    return Map.copyOf(status);
+  }
+
+  private Map<String, Object> blockedExecuteMetadata(Map<String, Object> baseMetadata, List<String> missingRequirements) {
+    Map<String, Object> metadata = new LinkedHashMap<>(baseMetadata);
+    metadata.put("missingMetadata", List.copyOf(missingRequirements));
+    metadata.put("mappingMetadataStatus", "INCOMPLETE");
+    metadata.put("rateMetadataStatus", missingRequirements.contains("rateCatalogRef") ? "UNAVAILABLE" : "AVAILABLE");
+    metadata.put("lockPeriodMetadataStatus", missingRequirements.contains("lockTermCatalogRef") ? "UNAVAILABLE" : "AVAILABLE");
+    metadata.put("warnings", missingRequirements.stream().map(item -> "MISSING_" + item).toList());
+    return Map.copyOf(metadata);
+  }
+
+  private Map<String, Object> readyExecuteMetadata(Map<String, Object> baseMetadata, Map<String, Object> publishedVersionRequest) {
+    Map<String, Object> metadata = new LinkedHashMap<>(baseMetadata);
+    metadata.put("source", "catalog-backed");
+    metadata.put("authorizationStatus", "READY");
+    metadata.put("authorizationMetadataStatus", "AVAILABLE");
+    metadata.put("mappingMetadataStatus", "COMPLETE");
+    metadata.put("rateMetadataStatus", "AVAILABLE");
+    metadata.put("lockPeriodMetadataStatus", "AVAILABLE");
+    metadata.put("catalogDependency", "supplied-publishedVersionRequest");
+    metadata.put("metadataRefs", metadataRefs(publishedVersionRequest));
+    metadata.put("warnings", List.of());
+    return Map.copyOf(metadata);
+  }
+
+  private Map<String, Object> metadataRefs(Map<String, Object> publishedVersionRequest) {
+    Map<String, Object> refs = new LinkedHashMap<>();
+    for (String key : REQUIRED_EXECUTE_METADATA_REFS) {
+      refs.put(key, publishedVersionRequest.get(key));
+    }
+    putIfPresent(refs, "catalogMetadataRef", text(publishedVersionRequest, "catalogMetadataRef"));
+    return Map.copyOf(refs);
+  }
+
+  private List<String> missingExecuteMetadata(Map<String, Object> publishedVersionRequest) {
+    List<String> missing = new ArrayList<>();
+    if (publishedVersionRequest == null || publishedVersionRequest.isEmpty()) {
+      missing.add("publishedVersionRequest");
+      missing.addAll(REQUIRED_EXECUTE_METADATA_REFS);
+      missing.add("products");
+      return List.copyOf(missing);
+    }
+    for (String key : REQUIRED_EXECUTE_METADATA_REFS) {
+      if (blankObject(publishedVersionRequest.get(key))) {
+        missing.add(key);
+      }
+    }
+    if (executeProducts(publishedVersionRequest).isEmpty()) {
+      missing.add("products");
+    }
+    return List.copyOf(missing);
+  }
+
+  private List<Map<String, Object>> executeProducts(Map<String, Object> publishedVersionRequest) {
+    if (publishedVersionRequest == null || !(publishedVersionRequest.get("products") instanceof List<?> products)) {
+      return List.of();
+    }
+    List<Map<String, Object>> mapped = new ArrayList<>();
+    for (Object product : products) {
+      if (product instanceof Map<?, ?> rawProduct) {
+        Map<String, Object> normalized = new LinkedHashMap<>();
+        rawProduct.forEach((key, value) -> {
+          if (key != null) normalized.put(key.toString(), value);
+        });
+        if (!blank(text(normalized, "productId")) && !blank(text(normalized, "productName"))) {
+          mapped.add(Map.copyOf(normalized));
+        }
+      }
+    }
+    return List.copyOf(mapped);
+  }
+
+  private LoanPassExecutionProductSummary toExecutionSummary(Map<String, Object> product, String defaultVersionNumber) {
+    return new LoanPassExecutionProductSummary(text(product, "productId"), text(product, "productName"),
+        text(product, "productCode"), text(product, "investorName"), text(product, "investorCode"),
+        productFields(product), calculatedFields(product), booleanValue(product.get("isPricingEnabled")),
+        productExecutionStatus(product), productVersion(product, defaultVersionNumber));
+  }
+
+  private LoanPassProductExecutionResult toProductExecution(Map<String, Object> product, Map<String, Object> metadata,
+      String defaultVersionNumber) {
+    return new LoanPassProductExecutionResult(text(product, "productId"), text(product, "productName"),
+        text(product, "productCode"), text(product, "investorName"), text(product, "investorCode"),
+        booleanValue(product.get("isPricingEnabled")), productFields(product), calculatedFields(product),
+        productExecutionStatus(product), productVersion(product, defaultVersionNumber), metadata);
+  }
+
+  private List<CreditApplicationField> productFields(Map<String, Object> product) {
+    List<CreditApplicationField> fields = new ArrayList<>(fieldsFrom(product.get("productFields")));
+    addMetadataField(fields, "field@product-rules", "rule-catalog", product.get("rules"));
+    addMetadataField(fields, "field@product-stipulations", "stipulation-catalog", product.get("stipulations"));
+    return List.copyOf(fields);
+  }
+
+  private List<CreditApplicationField> calculatedFields(Map<String, Object> product) {
+    List<CreditApplicationField> fields = new ArrayList<>(fieldsFrom(product.get("calculatedFields")));
+    addMetadataField(fields, "field@rate-options", "rate-catalog", product.get("rateOptions"));
+    addMetadataField(fields, "field@lock-periods", "lock-term-catalog", product.get("lockPeriods"));
+    return List.copyOf(fields);
+  }
+
+  private List<CreditApplicationField> fieldsFrom(Object value) {
+    if (!(value instanceof List<?> values)) return List.of();
+    List<CreditApplicationField> fields = new ArrayList<>();
+    for (Object item : values) {
+      if (item instanceof Map<?, ?> raw && !blankObject(raw.get("fieldId"))) {
+        Object rawValue = raw.get("value");
+        CreditApplicationValue fieldValue = rawValue instanceof Map<?, ?> rawValueMap
+            ? new CreditApplicationValue(text(rawValueMap, "type"), rawValueMap.get("value"), text(rawValueMap, "enumTypeId"), text(rawValueMap, "variantId"))
+            : new CreditApplicationValue("metadata", rawValue, null, null);
+        fields.add(new CreditApplicationField(raw.get("fieldId").toString(), fieldValue));
+      }
+    }
+    return List.copyOf(fields);
+  }
+
+  private void addMetadataField(List<CreditApplicationField> fields, String fieldId, String metadataType, Object value) {
+    if (!emptyValue(value)) {
+      fields.add(new CreditApplicationField(fieldId, new CreditApplicationValue("metadata-list", value, metadataType, null)));
+    }
+  }
+
+  private Map<String, Object> productExecutionStatus(Map<String, Object> product) {
+    if (product.get("status") instanceof Map<?, ?> rawStatus) {
+      Map<String, Object> status = new LinkedHashMap<>();
+      rawStatus.forEach((key, value) -> {
+        if (key != null) status.put(key.toString(), value);
+      });
+      return Map.copyOf(status);
+    }
+    Map<String, Object> status = new LinkedHashMap<>();
+    status.put("type", Boolean.TRUE.equals(booleanValue(product.get("isPricingEnabled"))) ? "available" : "review_required");
+    putIfPresent(status, "metadataRef", text(product, "metadataRef"));
+    return Map.copyOf(status);
+  }
+
+  private String productVersion(Map<String, Object> product, String defaultVersionNumber) {
+    String productVersion = text(product, "versionNumber");
+    return blank(productVersion) ? defaultVersionNumber : productVersion;
+  }
+
+  private String versionNumber(Map<String, Object> publishedVersionRequest) {
+    String version = text(publishedVersionRequest, "versionNumber");
+    return blank(version) ? text(publishedVersionRequest, "catalogMetadataRef") : version;
+  }
+
+  private Boolean booleanValue(Object value) {
+    if (value instanceof Boolean bool) return bool;
+    if (value instanceof String text) return Boolean.parseBoolean(text);
+    return Boolean.FALSE;
+  }
+
+  private boolean emptyValue(Object value) {
+    if (value == null) return true;
+    if (value instanceof String text) return text.isBlank();
+    if (value instanceof Collection<?> collection) return collection.isEmpty();
+    if (value instanceof Map<?, ?> map) return map.isEmpty();
+    return false;
+  }
+
+  private boolean blankObject(Object value) {
+    return value == null || value.toString().isBlank();
+  }
+
+  private String text(Map<?, ?> map, String key) {
+    if (map == null || map.get(key) == null) return "";
+    return map.get(key).toString().trim();
+  }
+
+  private void validateExecuteSummaryRequest(LoanPassExecuteSummaryRequest request, String headerTenantId) {
+    if (request == null) {
+      throw new LosValidationException("LOANPASS_EXECUTE_SUMMARY_REQUEST_REQUIRED", "execute-summary request body is required");
+    }
+    validateExecuteCommon(tenantId(request.tenantId(), headerTenantId), request.currentTime(), request.creditApplicationFields(), "execute-summary");
+  }
+
+  private void validateExecuteProductRequest(LoanPassExecuteProductRequest request, String headerTenantId) {
+    if (request == null) {
+      throw new LosValidationException("LOANPASS_EXECUTE_PRODUCT_REQUEST_REQUIRED", "execute-product request body is required");
+    }
+    if (blank(request.productId())) {
+      throw new LosValidationException("LOANPASS_PRODUCT_ID_REQUIRED", "productId is required before execute-product can run");
+    }
+    validateExecuteCommon(tenantId(request.tenantId(), headerTenantId), request.currentTime(), request.creditApplicationFields(), "execute-product");
+  }
+
+  private void validateExecuteCommon(String tenantId, Instant currentTime, List<CreditApplicationField> creditApplicationFields,
+      String operation) {
+    if (blank(tenantId)) {
+      throw new LosValidationException("MISSING_REQUIRED_TENANT_MAPPING",
+          "tenantId is required at $.tenantId or X-Tenant-ID before " + operation + " can run");
+    }
+    if (currentTime == null) {
+      throw new LosValidationException("LOANPASS_CURRENT_TIME_REQUIRED", "currentTime is required before " + operation + " can run");
+    }
+    if (creditApplicationFields == null || creditApplicationFields.isEmpty()) {
+      throw new LosValidationException("LOANPASS_ENGINE_FIELDS_REQUIRED", "creditApplicationFields are required before " + operation + " can run");
+    }
+  }
+
+  private String tenantId(String requestTenantId, String headerTenantId) {
+    return blank(requestTenantId) ? headerTenantId : requestTenantId;
   }
 
   List<com.wcpe.pricingbff.los.LosApiModels.WebhookDeliveryReceipt> completePricingRequest(
@@ -162,6 +483,7 @@ class LosPricingService {
     metadata.put("requestedFilters", Map.copyOf(requestFilters));
     metadata.put("mappingMetadataStatus", "UNAVAILABLE");
     metadata.put("authorizationMetadataStatus", blank(tenantId) ? "MISSING_TENANT_CONTEXT" : "UNAVAILABLE");
+    addLoanPassPublicApiMetadata(metadata);
     return new LosProductCatalogResponse(List.of(), 0, normalizedPage, normalizedPageSize, 0,
         "BLOCKED", blockedReason, metadata);
   }
@@ -213,6 +535,7 @@ class LosPricingService {
     metadata.put("authorizationMetadataStatus", blank(tenantId) ? "MISSING_TENANT_CONTEXT" : "UNAVAILABLE");
     metadata.put("searchScope", "catalog-metadata-only");
     metadata.put("supportedFilters", SUPPORTED_PRODUCT_SEARCH_FILTERS.stream().sorted().toList());
+    addLoanPassPublicApiMetadata(metadata);
     return new LosProductCatalogResponse(List.of(), 0, normalizedPage, normalizedPageSize, 0,
         "BLOCKED", blockedReason, metadata);
   }
@@ -249,6 +572,7 @@ class LosPricingService {
     metadata.put("authorizationMetadataStatus", "UNAVAILABLE");
     metadata.put("mappingMetadataStatus", "INCOMPLETE");
     metadata.put("warnings", List.of("CATALOG_METADATA_NOT_CONFIGURED", "MAPPING_METADATA_INCOMPLETE"));
+    addLoanPassPublicApiMetadata(metadata);
 
     return new LosProductDetailResponse(productId.trim(), null, "BLOCKED", "CATALOG_METADATA_NOT_CONFIGURED",
         List.of(), List.of(), supportedValues, "INCOMPLETE", quoteCompatibility, metadata);
@@ -301,9 +625,18 @@ class LosPricingService {
     metadata.put("eligibilityDependency", "eligibility-service:rule-config-required");
     metadata.put("warnings", responseReasons);
     metadata.put("fieldMessageCount", requestFieldMessages.size());
+    addLoanPassPublicApiMetadata(metadata);
     String status = results.isEmpty() ? "BLOCKED" : results.stream().anyMatch(result -> "requires_more_information".equals(result.eligibility()))
         ? "INCOMPLETE" : "BLOCKED";
     return new LosProductEligibilityResponse(status, correlationId, results, responseReasons, metadata);
+  }
+
+  private void addLoanPassPublicApiMetadata(Map<String, Object> metadata) {
+    metadata.put("loanPassPublicApiDocsUrl", LOANPASS_PUBLIC_API_DOCS_URL);
+    metadata.put("loanPassPublicApiSchemaUrl", LOANPASS_PUBLIC_API_SCHEMA_URL);
+    metadata.put("loanPassPublicApiOperationConcepts", LOANPASS_PUBLIC_API_OPERATION_CONCEPTS);
+    metadata.put("loanPassContractFieldPolicy", LOANPASS_CONTRACT_FIELD_POLICY);
+    metadata.put("loanPassContractEvidenceStatus", "public-docs-accessible-schema-url-discovered-field-shapes-not-adopted");
   }
 
   LosLockResponse requestLock(LosLockRequest request, String idempotencyKey, String correlationId) {

@@ -1,6 +1,8 @@
 package com.wcpe.pricingbff.los;
 
 import com.wcpe.pricingbff.los.LosApiModels.ErrorResponse;
+import com.wcpe.pricingbff.los.LosApiModels.LoanPassExecuteProductRequest;
+import com.wcpe.pricingbff.los.LosApiModels.LoanPassExecuteSummaryRequest;
 import com.wcpe.pricingbff.los.LosApiModels.LosLockExtendRequest;
 import com.wcpe.pricingbff.los.LosApiModels.LosLockRequest;
 import com.wcpe.pricingbff.los.LosApiModels.LosProductCatalogResponse;
@@ -39,6 +41,20 @@ class LosPricingController {
     String idempotencyKey = loanPassIdempotencyKey == null || loanPassIdempotencyKey.isBlank()
         ? requestId : loanPassIdempotencyKey;
     return ResponseEntity.status(HttpStatus.ACCEPTED).body(service.createPricingRequest(request, idempotencyKey, correlationId));
+  }
+
+  @PostMapping("/execute-summary")
+  Object executeSummary(@RequestBody LoanPassExecuteSummaryRequest request,
+      @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+      @RequestHeader(value = "X-Correlation-ID", required = false) String correlationId) {
+    return service.executeSummary(request, tenantId, correlationId);
+  }
+
+  @PostMapping("/execute-product")
+  Object executeProduct(@RequestBody LoanPassExecuteProductRequest request,
+      @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+      @RequestHeader(value = "X-Correlation-ID", required = false) String correlationId) {
+    return service.executeProduct(request, tenantId, correlationId);
   }
 
   @GetMapping("/pricing-requests/{id}")

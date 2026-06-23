@@ -116,6 +116,7 @@ import { WorkbenchModuleRail } from './screens/workbenchShell/WorkbenchShell';
 import { DiagnosticsDetails } from './components/DiagnosticsDetails';
 import { ThemeProvider, useTheme } from './design-system';
 import { Shell } from './layout';
+import { usePageActions } from './layout/PageActionsContext';
 import { AuthProvider, useAuth } from './lib/auth/AuthContext';
 import { RouteGuard } from './routing/RouteGuard';
 import { useCurrentRoute } from './routing/hooks';
@@ -1018,7 +1019,12 @@ function businessFacingText(value: string | number | null | undefined) {
   if (value === null || value === undefined || value === '') return 'Not provided';
   return String(value)
     .replace(/NO_UPSTREAMS_CONFIGURED/gi, 'Connected services need setup')
-    .replace(/FALLBACK_STATIC_DEPENDENCIES_UNAVAILABLE/gi, 'Configuration details need setup')
+    .replace(/ui-preview-tenant/gi, 'Product workspace')
+    .replace(/payment[- ]ref[- ]required/gi, 'Payment not supplied')
+    .replace(/apr[- ]ref[- ]required/gi, 'APR not supplied')
+    .replace(/score[: -]*backend[- ]owned/gi, 'Score pending')
+    .replace(/quote[- ]service\s+evidence/gi, 'quote review record')
+    .replace(/FALLBACK_STATIC_DEPENDENCIES_UNAVAILABLE/gi, 'Setup details need review')
     .replace(/Support reference/gi, 'Support detail')
     .replace(/validation_result\.json|validation_trace\.jsonl|module_evidence_index\.json|blocker_register\.json/gi, 'review package item')
     .replace(/ui_trace_id|uiTraceId|trace id|trace refs?|correlation id/gi, 'support reference')
@@ -1046,6 +1052,9 @@ function businessFacingText(value: string | number | null | undefined) {
     .replace(/SLA contract required/gi, 'Response target needs setup')
     .replace(/Awaiting configured SLA contract/gi, 'Response target needs setup')
     .replace(/SLA deadline supplied by configured privacy service/gi, 'Response target supplied by configured privacy service')
+    .replace(/configuration/gi, 'setup')
+    .replace(/configured/gi, 'available')
+    .replace(/\bconfig\b/gi, 'setup')
     .replace(/DLQ/gi, 'exception queue')
     .replace(/DSAR/gi, 'privacy request')
     .replace(/RBAC/gi, 'role access')
@@ -1066,7 +1075,7 @@ function businessFacingText(value: string | number | null | undefined) {
 
 function serviceReadinessText(value: string | null | undefined) {
   if (!value) return 'Not provided';
-  return 'Configuration needed before live service use.';
+  return 'Setup needed before live service use.';
 }
 
 function AdminGovernanceSection() {
@@ -2720,6 +2729,7 @@ function TransportResultBanner({ result, acceptedLabel, blockedLabel }: { result
 
 function LockLifecycleSection({ runId }: { runId: string }) {
   const navigate = useNavigate();
+  const { setPromotedActions } = usePageActions();
   const selectedOfferId = sessionStorage.getItem(`${selectedOfferStoragePrefix}${runId}`);
   const [lockState, setLockState] = useState<LockState>({ kind: 'loading' });
   const [disclosuresAccepted, setDisclosuresAccepted] = useState(false);
@@ -2769,6 +2779,26 @@ function LockLifecycleSection({ runId }: { runId: string }) {
       setConfirming(false);
     }
   }
+
+  useEffect(() => {
+    if (lockState.kind !== 'loaded') {
+      setPromotedActions(null);
+      return () => setPromotedActions(null);
+    }
+    const workflow = lockState.workflow;
+    const requestDisabled = workflow.lockDisabled || disclosuresAccepted;
+    const headerConfirmDisabled = workflow.lockDisabled || !disclosuresAccepted || confirming;
+    setPromotedActions({
+      label: 'Lock workflow page actions',
+      actions: (
+        <div className="pm-actions" aria-label="Lock workflow actions">
+          <button type="button" onClick={() => setDisclosuresAccepted(true)} disabled={requestDisabled}>Request lock</button>
+          <button type="button" className="pm-primary" onClick={() => void submitLock()} disabled={headerConfirmDisabled}>{confirming ? 'Confirming lock...' : 'Confirm lock'}</button>
+        </div>
+      ),
+    });
+    return () => setPromotedActions(null);
+  }, [lockState, disclosuresAccepted, confirming, setPromotedActions]);
 
   if (lockState.kind === 'loading') {
     return <section className="panel" aria-labelledby="lock-heading"><h2 id="lock-heading">Lock workflow</h2><p role="status">Loading lock preconditions...</p></section>;
@@ -2872,7 +2902,7 @@ function LockLifecycleSection({ runId }: { runId: string }) {
           </div>
 
           {(workflow.blockerDetails ?? []).length ? (
-            <div className="quote-table lock-table" role="table" aria-label="Backend lock blockers">
+            <div className="quote-table lock-table" role="table" aria-label="Lock items needing attention">
               <div role="row" className="quote-table__row quote-table__row--head">
                 <span role="columnheader">Code</span>
                 <span role="columnheader">Message</span>
@@ -3103,9 +3133,8 @@ function PricingWaterfallSection({ runId }: { runId: string }) {
       .then((view) => {
         if (active) setWaterfallState({ kind: 'loaded', view });
       })
-      .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'Pricing waterfall evidence is unavailable.';
-        if (active) setWaterfallState({ kind: 'unreachable', message });
+      .catch(() => {
+        if (active) setWaterfallState({ kind: 'unreachable', message: 'Pricing waterfall is temporarily unavailable.' });
       });
     return () => {
       active = false;
@@ -3125,7 +3154,9 @@ function PricingWaterfallSection({ runId }: { runId: string }) {
     );
   }
 
-  const view = waterfallState.view;
+  const view: Partial<PricingWaterfallView> = waterfallState.view;
+  const baseSelection = view.baseSelection ?? {} as PricingWaterfallView['baseSelection'];
+  const finalPrice = view.finalPrice ?? { finalPriceId: undefined, roundedFinalPrice: { value: null, redacted: false, reason: null }, ledger: [], roundingTraceRefs: [] } as unknown as PricingWaterfallView['finalPrice'];
   return (
     <>
       <section className="hero hero--admin" aria-labelledby="waterfall-title">
@@ -3143,7 +3174,7 @@ function PricingWaterfallSection({ runId }: { runId: string }) {
             <p className="eyebrow">Connected pricing records</p>
             <h2 id="waterfall-heading">Waterfall evidence</h2>
           </div>
-          <DiagnosticsDetails items={[`Support reference: ${view.uiTraceId}`, `Evidence record: ${view.evidenceHash}`]} />
+          <DiagnosticsDetails items={[`Support detail: ${businessFacingText(view.uiTraceId)}`, `Review record: ${businessFacingText(view.evidenceHash)}`]} />
         </div>
 
         <div className="banner banner--blocked" role="alert">
@@ -3153,19 +3184,19 @@ function PricingWaterfallSection({ runId }: { runId: string }) {
         </div>
 
         <dl className="status-grid">
-          <dt>Base selection</dt><dd>{businessFacingText(view.baseSelection.selectionId)}</dd>
-          <dt>Grid version</dt><dd>{businessFacingText(view.baseSelection.gridVersionRef)}</dd>
-          <dt>Selected note rate</dt><dd>{waterfallValueText(view.baseSelection.selectedNoteRate)}</dd>
-          <dt>Base price</dt><dd>{waterfallValueText(view.baseSelection.basePrice)}</dd>
-          <dt>Final price</dt><dd>{businessFacingText(view.finalPrice.finalPriceId)}</dd>
-          <dt>Rounded final price</dt><dd>{waterfallValueText(view.finalPrice.roundedFinalPrice)}</dd>
+          <dt>Base selection</dt><dd>{businessFacingText(baseSelection.selectionId)}</dd>
+          <dt>Grid version</dt><dd>{businessFacingText(baseSelection.gridVersionRef)}</dd>
+          <dt>Selected note rate</dt><dd>{waterfallValueText(baseSelection.selectedNoteRate)}</dd>
+          <dt>Base price</dt><dd>{waterfallValueText(baseSelection.basePrice)}</dd>
+          <dt>Final price</dt><dd>{businessFacingText(finalPrice.finalPriceId)}</dd>
+          <dt>Rounded final price</dt><dd>{waterfallValueText(finalPrice.roundedFinalPrice)}</dd>
           <dt>Result record</dt><dd>{businessFacingText(view.resultHash)}</dd>
           <dt>Processing record</dt><dd>{businessFacingText(view.replayHash)}</dd>
         </dl>
 
-        <ChipList label="Version refs" values={view.versionRefs.map(businessFacingText)} />
-        <ChipList label="Review references" values={view.auditRefs.map(businessFacingText)} />
-        <ChipList label="Rounding review references" values={view.finalPrice.roundingTraceRefs.map(businessFacingText)} />
+        <ChipList label="Version records" values={(view.versionRefs ?? []).map(businessFacingText)} />
+        <ChipList label="Review records" values={(view.auditRefs ?? []).map(businessFacingText)} />
+        <ChipList label="Rounding review records" values={(finalPrice.roundingTraceRefs ?? []).map(businessFacingText)} />
       </section>
 
       <section className="panel" aria-labelledby="waterfall-ledger-heading">
@@ -3176,17 +3207,17 @@ function PricingWaterfallSection({ runId }: { runId: string }) {
             <span role="columnheader">Input</span>
             <span role="columnheader">Operation</span>
             <span role="columnheader">Output</span>
-            <span role="columnheader">Config</span>
+            <span role="columnheader">Setup</span>
             <span role="columnheader">Reason</span>
           </div>
-          {view.finalPrice.ledger.map((row) => <WaterfallLedgerTableRow key={`${row.ordinal}-${row.step}`} row={row} />)}
+          {(finalPrice.ledger ?? []).map((row) => <WaterfallLedgerTableRow key={`${row.ordinal}-${row.step}`} row={row} />)}
         </div>
       </section>
 
       <section className="panel" aria-labelledby="waterfall-blockers-heading">
         <h2 id="waterfall-blockers-heading">Missing-price blockers and processing evidence</h2>
         <div className="offer-list" role="list" aria-label="Pricing waterfall blockers">
-          {view.blockers.map((blocker) => (
+          {(view.blockers ?? []).map((blocker) => (
             <article key={blocker.code} className="banner banner--blocked" role="listitem">
               <strong>{businessFacingText(blocker.code)}</strong>
               <span>{businessFacingText(blocker.message)}</span>
@@ -3194,7 +3225,7 @@ function PricingWaterfallSection({ runId }: { runId: string }) {
             </article>
           ))}
         </div>
-        <ChipList label="Waterfall events" values={view.events.map(businessFacingText)} />
+        <ChipList label="Waterfall events" values={(view.events ?? []).map(businessFacingText)} />
       </section>
     </>
   );
@@ -3213,7 +3244,8 @@ function WaterfallLedgerTableRow({ row }: { row: WaterfallLedgerRow }) {
   );
 }
 
-function waterfallValueText(value: { value: string | null; redacted: boolean; reason: string | null }) {
+function waterfallValueText(value: { value: string | null; redacted: boolean; reason: string | null } | undefined) {
+  if (!value) return 'Not provided';
   if (value.redacted) return `Redacted: ${businessFacingText(value.reason)}`;
   return businessFacingText(value.value);
 }
@@ -3468,7 +3500,7 @@ function OfferComparisonSection({ runId }: { runId: string }) {
                 </dl>
                 <ChipList label="Rationale" values={offer.rationaleChips} />
                 <ChipList label="Scenario flags" values={offer.scenarioFlags} />
-                <ChipList label="Configured service refs" values={(offer.upstreamRefs ?? []).map(businessFacingText)} />
+                <ChipList label="Service setup details" values={(offer.upstreamRefs ?? []).map(businessFacingText)} />
                 <ChipList label="Lock eligibility refs" values={offer.lockEligibilityRefs ?? []} />
                 <ChipList label="Snapshot refs" values={offer.snapshotRefs ?? []} />
                 <ChipList label="Review references" values={(offer.auditIds ?? []).map(businessFacingText)} />
@@ -3520,9 +3552,8 @@ function QuoteDetailSection({ runId, offerId }: { runId: string; offerId: string
       .then((detail) => {
         if (active) setDetailState({ kind: 'loaded', detail });
       })
-      .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'Quote detail evidence is unavailable.';
-        if (active) setDetailState({ kind: 'unreachable', message });
+      .catch(() => {
+        if (active) setDetailState({ kind: 'unreachable', message: 'Quote detail is temporarily unavailable.' });
       });
     return () => {
       active = false;
@@ -3542,12 +3573,16 @@ function QuoteDetailSection({ runId, offerId }: { runId: string; offerId: string
     );
   }
 
-  const detail = detailState.detail;
+  const detail: Partial<QuoteDetailView> = detailState.detail;
+  const summary = detail.summary ?? {} as QuoteDetailView['summary'];
+  const detailWaterfall = detail.waterfall ?? {} as QuoteDetailView['waterfall'];
+  const detailBaseSelection = detailWaterfall.baseSelection ?? {} as QuoteDetailView['waterfall']['baseSelection'];
+  const detailFinalPrice = detailWaterfall.finalPrice ?? { ledger: [], roundingTraceRefs: [], roundedFinalPrice: { value: null, redacted: false, reason: null } } as unknown as QuoteDetailView['waterfall']['finalPrice'];
   return (
     <>
       <section className="hero hero--admin" aria-labelledby="quote-detail-title">
         <p className="eyebrow">Quote detail Â· PII-22-S23</p>
-        <h2 id="quote-detail-title">Quote detail waterfall for {detail.offerId}</h2>
+        <h2 id="quote-detail-title">Quote detail for {businessFacingText(detail.offerId)}</h2>
         <p>
           Review card summary, ranking, pricing waterfall references, redactions, compliance flags, and review/processing evidence from
           configured service facts. The workbench does not calculate note rate, final price, margin, or adjustments.
@@ -3560,28 +3595,28 @@ function QuoteDetailSection({ runId, offerId }: { runId: string; offerId: string
             <p className="eyebrow">Connected quote details</p>
             <h2 id="quote-detail-heading">Quote detail review panels</h2>
           </div>
-          <DiagnosticsDetails items={[`Support reference: ${detail.uiTraceId}`, `Evidence record: ${detail.evidenceHash}`]} />
+          <DiagnosticsDetails items={[`Support detail: ${businessFacingText(detail.uiTraceId)}`, `Review record: ${businessFacingText(detail.evidenceHash)}`]} />
         </div>
         <div className="banner banner--blocked" role="alert">
           <strong>{businessFacingText(detail.status)}</strong>
           <span>{businessFacingText(detail.fallbackReason)}</span>
         </div>
         <dl className="status-grid">
-          <dt>Product</dt><dd>{valueText(detail.summary.productLabel)}</dd>
-          <dt>Rank</dt><dd>{valueText(detail.summary.rank)}</dd>
-          <dt>Rank score</dt><dd>{valueText(detail.summary.rankScore)}</dd>
-          <dt>Scenario version</dt><dd>{valueText(detail.summary.scenarioVersion)}</dd>
+          <dt>Product</dt><dd>{valueText(summary.productLabel)}</dd>
+          <dt>Rank</dt><dd>{valueText(summary.rank)}</dd>
+          <dt>Rank score</dt><dd>{valueText(summary.rankScore)}</dd>
+          <dt>Scenario version</dt><dd>{valueText(summary.scenarioVersion)}</dd>
           <dt>Processing record</dt><dd>{businessFacingText(detail.replayHash)}</dd>
-          <dt>Waterfall record</dt><dd>{businessFacingText(detail.waterfall.evidenceHash)}</dd>
+          <dt>Waterfall record</dt><dd>{businessFacingText(detailWaterfall.evidenceHash)}</dd>
         </dl>
-        <ChipList label="Quote detail review references" values={detail.auditRefs.map(businessFacingText)} />
-        <ChipList label="Quote detail compliance flags" values={detail.complianceFlags.map(businessFacingText)} />
+        <ChipList label="Quote detail review records" values={(detail.auditRefs ?? []).map(businessFacingText)} />
+        <ChipList label="Quote detail compliance flags" values={(detail.complianceFlags ?? []).map(businessFacingText)} />
       </section>
 
       <section className="panel" aria-labelledby="quote-detail-panels-heading">
         <h2 id="quote-detail-panels-heading">Accessible detail panels</h2>
         <div className="module-rail__grid" role="list" aria-label="Quote detail review panels">
-          {detail.panels.map((panel) => {
+          {(detail.panels ?? []).map((panel) => {
             const panelLabel = businessFacingText(panel.label);
             return (
               <article key={panel.panelId} className="module-card" role="listitem" aria-label={`${panelLabel} panel`}>
@@ -3605,7 +3640,7 @@ function QuoteDetailSection({ runId, offerId }: { runId: string; offerId: string
             <span role="columnheader">Why unavailable</span>
             <span role="columnheader">Review reference</span>
           </div>
-          {detail.redactions.map((redaction) => (
+          {(detail.redactions ?? []).map((redaction) => (
             <div key={`${redaction.fieldPath}-${redaction.auditRef}`} role="row" className="quote-table__row">
               <span role="cell">{businessFacingText(redaction.fieldPath)}</span>
               <span role="cell">{businessFacingText(redaction.state)}</span>
@@ -3619,10 +3654,10 @@ function QuoteDetailSection({ runId, offerId }: { runId: string; offerId: string
       <section className="panel" aria-labelledby="quote-detail-waterfall-heading">
         <h2 id="quote-detail-waterfall-heading">Waterfall sections and rounding review</h2>
         <dl className="status-grid">
-          <dt>Base selection</dt><dd>{businessFacingText(detail.waterfall.baseSelection.selectionId)}</dd>
-          <dt>Selected note rate</dt><dd>{waterfallValueText(detail.waterfall.baseSelection.selectedNoteRate)}</dd>
-          <dt>Rounded final price</dt><dd>{waterfallValueText(detail.waterfall.finalPrice.roundedFinalPrice)}</dd>
-          <dt>Result record</dt><dd>{businessFacingText(detail.waterfall.resultHash)}</dd>
+          <dt>Base selection</dt><dd>{businessFacingText(detailBaseSelection.selectionId)}</dd>
+          <dt>Selected note rate</dt><dd>{waterfallValueText(detailBaseSelection.selectedNoteRate)}</dd>
+          <dt>Rounded final price</dt><dd>{waterfallValueText(detailFinalPrice.roundedFinalPrice)}</dd>
+          <dt>Result record</dt><dd>{businessFacingText(detailWaterfall.resultHash)}</dd>
         </dl>
         <div className="quote-table" role="table" aria-label="Quote detail waterfall ledger">
           <div role="row" className="quote-table__row quote-table__row--head">
@@ -3630,13 +3665,13 @@ function QuoteDetailSection({ runId, offerId }: { runId: string; offerId: string
             <span role="columnheader">Input</span>
             <span role="columnheader">Operation</span>
             <span role="columnheader">Output</span>
-            <span role="columnheader">Config</span>
+            <span role="columnheader">Setup</span>
             <span role="columnheader">Reason</span>
           </div>
-          {detail.waterfall.finalPrice.ledger.map((row) => <WaterfallLedgerTableRow key={`${row.ordinal}-${row.step}`} row={row} />)}
+          {(detailFinalPrice.ledger ?? []).map((row) => <WaterfallLedgerTableRow key={`${row.ordinal}-${row.step}`} row={row} />)}
         </div>
-        <ChipList label="Quote detail rounding review references" values={detail.waterfall.finalPrice.roundingTraceRefs.map(businessFacingText)} />
-        <ChipList label="Quote detail events" values={detail.events.map(businessFacingText)} />
+        <ChipList label="Quote detail rounding review records" values={(detailFinalPrice.roundingTraceRefs ?? []).map(businessFacingText)} />
+        <ChipList label="Quote detail events" values={(detail.events ?? []).map(businessFacingText)} />
       </section>
     </>
   );
@@ -3644,7 +3679,7 @@ function QuoteDetailSection({ runId, offerId }: { runId: string; offerId: string
 
 function ChipList({ label, values }: { label: string; values: string[] }) {
   if (!values.length) return <p className="field-help">No {label.toLowerCase()} provided.</p>;
-  return <ul className="chip-list" aria-label={label}>{values.map((value) => <li key={value}>{value}</li>)}</ul>;
+  return <ul className="chip-list" aria-label={label}>{values.map((value, index) => <li key={`${value}-${index}`}>{value}</li>)}</ul>;
 }
 
 function stableSortedOffers(offers: OfferSummary[], sortKey: string) {
@@ -3670,5 +3705,5 @@ function offerSortValue(offer: OfferSummary, sortKey: string) {
 
 function valueText(value: string | number | null | undefined) {
   if (value === null || value === undefined || value === '') return 'Not provided';
-  return String(value);
+  return businessFacingText(value);
 }

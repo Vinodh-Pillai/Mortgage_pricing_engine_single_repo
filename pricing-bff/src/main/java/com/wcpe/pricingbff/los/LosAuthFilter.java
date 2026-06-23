@@ -30,6 +30,8 @@ class LosAuthFilter extends OncePerRequestFilter {
   private static final Set<String> SUPPORTED_SYSTEMS = Set.of("ENCOMPASS", "BYTE", "MERIDIANLINK", "CALYX");
   private static final List<ScopeRule> SCOPE_RULES = List.of(
       new ScopeRule("POST", Pattern.compile("^/api/v1/los/pricing-requests$"), "los:pricing-request:write", false),
+      new ScopeRule("POST", Pattern.compile("^/api/v1/los/execute-summary$"), "los:pricing-request:write", false),
+      new ScopeRule("POST", Pattern.compile("^/api/v1/los/execute-product$"), "los:pricing-request:write", false),
       new ScopeRule("GET", Pattern.compile("^/api/v1/los/pricing-requests/[^/]+$"), "los:pricing-request:read", true),
       new ScopeRule("GET", Pattern.compile("^/api/v1/los/pricing-requests/[^/]+/offers$"), "los:pricing-request:read", true),
       new ScopeRule("GET", Pattern.compile("^/api/v1/los/products$"), "los:product-catalog:read", false),

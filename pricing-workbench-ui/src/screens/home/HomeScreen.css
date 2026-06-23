@@ -87,6 +87,26 @@
   transition: transform 140ms ease, box-shadow 140ms ease;
 }
 
+.quick-action-card small:not(.ds-visually-hidden) {
+  flex-basis: 100%;
+}
+
+.quick-action-help-chip {
+  align-items: center;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  color: #1d4ed8;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 0.78rem;
+  font-weight: 900;
+  height: 1.35rem;
+  justify-content: center;
+  margin-left: auto;
+  width: 1.35rem;
+}
+
 .quick-action-card:hover,
 .quick-action-card:focus-visible {
   box-shadow: 0 16px 34px rgb(15 23 42 / 14%);

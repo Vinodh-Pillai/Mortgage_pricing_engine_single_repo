@@ -33,6 +33,11 @@ public class JdbcQuoteJobRepository implements QuoteJobRepository {
     }
 
     @Override
+    public Optional<QuoteJob> findByJobId(UUID jobId) {
+        return findJob("job_id = ?", statement -> statement.setObject(1, jobId));
+    }
+
+    @Override
     public Optional<QuoteJob> findByIdempotencyKey(UUID tenantId, String idempotencyKey) {
         return findJob("tenant_id = ? and idempotency_key = ?", statement -> {
             statement.setObject(1, tenantId);

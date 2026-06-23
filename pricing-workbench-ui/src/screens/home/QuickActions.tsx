@@ -85,8 +85,9 @@ export function QuickActions({ role, onNavigate }: QuickActionsProps) {
             <button className="quick-action-card" key={action.id} type="button" onClick={() => onNavigate(action.route)} aria-describedby={describedBy}>
               <span className="quick-action-icon" aria-hidden="true">{action.icon}</span>
               <span>{action.label}</span>
+              {showAuditHelp && action.auditHelpText ? <span className="quick-action-help-chip" aria-hidden="true" title={action.auditHelpText}>?</span> : null}
               {action.unavailableReason ? <small id={`${action.id}-reason`}>{action.unavailableReason}</small> : null}
-              {showAuditHelp && action.auditHelpText ? <small id={`${action.id}-audit`}>{action.auditHelpText}</small> : null}
+              {showAuditHelp && action.auditHelpText ? <small id={`${action.id}-audit`} className="ds-visually-hidden">{action.auditHelpText}</small> : null}
             </button>
           );
         })}

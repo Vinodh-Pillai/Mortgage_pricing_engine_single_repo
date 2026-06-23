@@ -26,6 +26,13 @@ public final class RuleEvaluationEngine {
     private static final Comparator<CompiledRule> RULE_ORDER = Comparator
         .comparingInt(CompiledRule::priority)
         .thenComparing(CompiledRule::ruleId);
+    private static final ThreadLocal<MessageDigest> SHA_256 = ThreadLocal.withInitial(() -> {
+        try {
+            return MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 unavailable", ex);
+        }
+    });
 
     private final RuleIndexer indexer;
     private final PrecisionNormalizer normalizer;
@@ -144,19 +151,20 @@ public final class RuleEvaluationEngine {
     }
 
     private String firstMissingReason(CompiledRule rule, FactMap facts) {
-        return rule.conditions().stream()
-            .flatMap(condition -> condition.requiredDimensions().stream())
-            .filter(dimension -> !facts.exists(dimension))
-            .findFirst()
-            .map(dimension -> "missing_fact:" + dimension)
-            .orElse("missing_fact");
+        for (String dimension : rule.requiredDimensions()) {
+            if (!facts.exists(dimension)) {
+                return "missing_fact:" + dimension;
+            }
+        }
+        return "missing_fact";
     }
 
     private List<CompiledRule> candidateRules(RuleBookIndex index, FactMap facts, Set<UUID> alreadyBlocked) {
         List<CompiledRule> noRequiredRules = index.rulesWithNoRequiredDimensionsByPriority();
-        if (noRequiredRules.isEmpty() && facts.asMap().size() == 1) {
-            String dimension = facts.asMap().keySet().iterator().next();
-            List<CompiledRule> singleDimensionRules = index.dimensionRulesByPriority().get(dimension);
+        Map<String, Object> factValues = facts.asMap();
+        if (noRequiredRules.isEmpty() && factValues.size() == 1) {
+            String dimension = factValues.keySet().iterator().next();
+            List<CompiledRule> singleDimensionRules = indexedRulesForFact(index, dimension, factValues.get(dimension));
             if (singleDimensionRules == null || singleDimensionRules.isEmpty()) {
                 return List.of();
             }
@@ -168,12 +176,23 @@ public final class RuleEvaluationEngine {
                 .toList();
         }
 
+        int estimatedCandidateCount = noRequiredRules.size();
+        for (String dimension : factValues.keySet()) {
+            List<CompiledRule> rules = indexedRulesForFact(index, dimension, factValues.get(dimension));
+            if (rules != null) {
+                estimatedCandidateCount += rules.size();
+            }
+        }
+        if (estimatedCandidateCount <= index.orderedEnabledRules().size() / 2) {
+            return sparseCandidateRules(index, factValues, alreadyBlocked);
+        }
+
         Set<UUID> candidates = new HashSet<>();
         for (CompiledRule rule : noRequiredRules) {
             candidates.add(rule.ruleId());
         }
-        for (String dimension : facts.asMap().keySet()) {
-            List<CompiledRule> rules = index.dimensionRulesByPriority().get(dimension);
+        for (String dimension : factValues.keySet()) {
+            List<CompiledRule> rules = indexedRulesForFact(index, dimension, factValues.get(dimension));
             if (rules != null) {
                 for (CompiledRule rule : rules) {
                     candidates.add(rule.ruleId());
@@ -189,14 +208,67 @@ public final class RuleEvaluationEngine {
         return orderedCandidates;
     }
 
-    private RuleEvaluation evaluateRule(CompiledRule rule, FactMap facts, PricingPrecisionPolicy policy) {
-        for (CompiledCondition condition : rule.conditions()) {
-            CompiledCondition.ConditionEvaluation result = condition.evaluate(facts);
-            if (result.blocked()) {
-                return new RuleEvaluation(rule, false, true, result.reason(), BigDecimal.ZERO, List.of());
+    private List<CompiledRule> indexedRulesForFact(RuleBookIndex index, String dimension, Object factValue) {
+        List<CompiledRule> residualRules = index.residualDimensionRulesByPriority().get(dimension);
+        Map<String, List<CompiledRule>> exactRulesByValue = index.exactDimensionRulesByValueByPriority().get(dimension);
+        List<CompiledRule> exactRules = exactRulesByValue == null ? null : exactRulesByValue.get(RuleIndexer.normalizeToken(factValue));
+        if ((residualRules == null || residualRules.isEmpty()) && (exactRules == null || exactRules.isEmpty())) {
+            return List.of();
+        }
+        if (residualRules == null || residualRules.isEmpty()) {
+            return exactRules;
+        }
+        if (exactRules == null || exactRules.isEmpty()) {
+            return residualRules;
+        }
+        Map<UUID, CompiledRule> merged = new LinkedHashMap<>();
+        for (CompiledRule rule : exactRules) {
+            merged.put(rule.ruleId(), rule);
+        }
+        for (CompiledRule rule : residualRules) {
+            merged.put(rule.ruleId(), rule);
+        }
+        List<CompiledRule> ordered = new ArrayList<>(merged.values());
+        ordered.sort(RULE_ORDER);
+        return ordered;
+    }
+
+    private List<CompiledRule> sparseCandidateRules(RuleBookIndex index, Map<String, Object> factValues, Set<UUID> alreadyBlocked) {
+        Map<UUID, CompiledRule> candidates = new LinkedHashMap<>();
+        for (CompiledRule rule : index.rulesWithNoRequiredDimensionsByPriority()) {
+            if (!alreadyBlocked.contains(rule.ruleId())) {
+                candidates.put(rule.ruleId(), rule);
             }
-            if (!result.matched()) {
-                return new RuleEvaluation(rule, false, false, "", BigDecimal.ZERO, List.of());
+        }
+        for (String dimension : factValues.keySet()) {
+            List<CompiledRule> rules = indexedRulesForFact(index, dimension, factValues.get(dimension));
+            if (rules == null) {
+                continue;
+            }
+            for (CompiledRule rule : rules) {
+                if (!alreadyBlocked.contains(rule.ruleId())) {
+                    candidates.put(rule.ruleId(), rule);
+                }
+            }
+        }
+        if (candidates.isEmpty()) {
+            return List.of();
+        }
+        List<CompiledRule> orderedCandidates = new ArrayList<>(candidates.values());
+        orderedCandidates.sort(RULE_ORDER);
+        return orderedCandidates;
+    }
+
+    private RuleEvaluation evaluateRule(CompiledRule rule, FactMap facts, PricingPrecisionPolicy policy) {
+        if (!rule.singleExactMatchOnly()) {
+            for (CompiledCondition condition : rule.conditions()) {
+                CompiledCondition.ConditionEvaluation result = condition.evaluate(facts);
+                if (result.blocked()) {
+                    return new RuleEvaluation(rule, false, true, result.reason(), BigDecimal.ZERO, List.of());
+                }
+                if (!result.matched()) {
+                    return new RuleEvaluation(rule, false, false, "", BigDecimal.ZERO, List.of());
+                }
             }
         }
         CapResult amount = outputAmount(rule, policy);
@@ -210,7 +282,7 @@ public final class RuleEvaluationEngine {
         if (rule.output().type() == AdjustmentOutputType.LABEL_ONLY || rule.output().type() == AdjustmentOutputType.BLOCKING_CONFLICT) {
             return new CapResult(BigDecimal.ZERO, List.of());
         }
-        return new CapResult(normalizer.normalize(policy, rule.output().type(), rule.output().amount()), List.of());
+        return new CapResult(rule.output().amount(), List.of());
     }
 
     private CapResult applyCapFloor(BigDecimal raw, BigDecimal min, BigDecimal max, PricingPrecisionPolicy policy, AdjustmentOutputType type) {
@@ -242,15 +314,12 @@ public final class RuleEvaluationEngine {
     }
 
     private static String hash(Object... values) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            for (Object value : values) {
-                digest.update(String.valueOf(value).getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            }
-            return HexFormat.of().formatHex(digest.digest());
-        } catch (NoSuchAlgorithmException ex) {
-            throw new IllegalStateException("SHA-256 unavailable", ex);
+        MessageDigest digest = SHA_256.get();
+        digest.reset();
+        for (Object value : values) {
+            digest.update(String.valueOf(value).getBytes(java.nio.charset.StandardCharsets.UTF_8));
         }
+        return HexFormat.of().formatHex(digest.digest());
     }
 
     private static String hashLines(List<AdjustmentLine> lines) {

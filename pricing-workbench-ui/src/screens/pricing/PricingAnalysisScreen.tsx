@@ -11,7 +11,7 @@ const pricingConfig: FunctionalityPageConfig<PricingRow> = {
   breadcrumb: 'Pricing / Analysis',
   eyebrow: 'Pricing analysis service',
   title: 'Pricing Analysis',
-  summary: 'Provides read-only waterfall, margin analysis, adjustment evidence, scenario comparison, profitability floor references, and export readiness from backend evidence.',
+  summary: 'Reviews waterfall, margin, adjustment, scenario comparison, profitability floor, and export readiness evidence.',
   dataBoundary: 'pricing-service: GET /api/v1/pricing/waterfall/:runId',
   sections: [
     { id: 'waterfall-view', eyebrow: 'Waterfall', title: 'Waterfall View', summary: 'Read-only step references from backend evidence.', status: 'ready', items: ['Base selection ref', 'Adjustment refs', 'Final output ref'] },
@@ -22,9 +22,9 @@ const pricingConfig: FunctionalityPageConfig<PricingRow> = {
     { id: 'export', eyebrow: 'Export', title: 'Export', summary: 'Controlled export payloads with evidence metadata.', status: 'empty', items: ['CSV metadata', 'JSON metadata', 'PDF unavailable'] },
   ],
   metrics: [
-    { label: 'Mode', value: 'Read-only', help: 'No local pricing calculations' },
+    { label: 'Mode', value: 'Review', help: 'Pricing values come from connected pricing records.' },
     { label: 'Comparison', value: '2-up', help: 'Side-by-side scenarios' },
-    { label: 'Evidence', value: 'Traceable', help: 'Refs displayed with state' },
+    { label: 'Evidence', value: 'Traceable', help: 'Review records stay available for audit.' },
   ],
   rows: [
     { id: 'pricing-base', scenario: 'Baseline scenario', evidence: 'waterfall-ref-required', status: 'ready' },

@@ -215,6 +215,97 @@ public final class LosApiModels {
       String ref,
       String status) {}
 
+  public record LoanPassExecuteSummaryRequest(
+      String tenantId,
+      String pricingProfileId,
+      java.time.Instant currentTime,
+      List<CreditApplicationField> creditApplicationFields,
+      List<CreditApplicationField> ausFields,
+      Map<String, Object> outputFieldsFilter,
+      Map<String, Object> publishedVersionRequest,
+      String pipelineRecordId) {
+    public LoanPassExecuteSummaryRequest {
+      creditApplicationFields = List.copyOf(creditApplicationFields == null ? List.of() : creditApplicationFields);
+      ausFields = List.copyOf(ausFields == null ? List.of() : ausFields);
+      outputFieldsFilter = Map.copyOf(outputFieldsFilter == null ? Map.of() : outputFieldsFilter);
+      publishedVersionRequest = Map.copyOf(publishedVersionRequest == null ? Map.of() : publishedVersionRequest);
+    }
+  }
+
+  public record LoanPassExecuteProductRequest(
+      String tenantId,
+      String productId,
+      String pricingProfileId,
+      java.time.Instant currentTime,
+      List<CreditApplicationField> creditApplicationFields,
+      List<CreditApplicationField> ausFields,
+      Map<String, Object> outputFieldsFilter,
+      Map<String, Object> publishedVersionRequest,
+      String pipelineRecordId) {
+    public LoanPassExecuteProductRequest {
+      creditApplicationFields = List.copyOf(creditApplicationFields == null ? List.of() : creditApplicationFields);
+      ausFields = List.copyOf(ausFields == null ? List.of() : ausFields);
+      outputFieldsFilter = Map.copyOf(outputFieldsFilter == null ? Map.of() : outputFieldsFilter);
+      publishedVersionRequest = Map.copyOf(publishedVersionRequest == null ? Map.of() : publishedVersionRequest);
+    }
+  }
+
+  public record LoanPassExecutionSummaryResponse(
+      LoanPassExecutionSummaryTotals totals,
+      List<LoanPassExecutionProductSummary> products,
+      String versionNumber,
+      Map<String, Object> metadata) {
+    public LoanPassExecutionSummaryResponse {
+      products = List.copyOf(products == null ? List.of() : products);
+      metadata = Map.copyOf(metadata == null ? Map.of() : metadata);
+    }
+  }
+
+  public record LoanPassExecutionSummaryTotals(
+      int approved,
+      int reviewRequired,
+      int available,
+      int rejected,
+      int error) {}
+
+  public record LoanPassExecutionProductSummary(
+      String productId,
+      String productName,
+      String productCode,
+      String investorName,
+      String investorCode,
+      List<CreditApplicationField> productFields,
+      List<CreditApplicationField> calculatedFields,
+      Boolean isPricingEnabled,
+      Map<String, Object> status,
+      String versionNumber) {
+    public LoanPassExecutionProductSummary {
+      productFields = List.copyOf(productFields == null ? List.of() : productFields);
+      calculatedFields = List.copyOf(calculatedFields == null ? List.of() : calculatedFields);
+      status = Map.copyOf(status == null ? Map.of() : status);
+    }
+  }
+
+  public record LoanPassProductExecutionResult(
+      String productId,
+      String productName,
+      String productCode,
+      String investorName,
+      String investorCode,
+      Boolean isPricingEnabled,
+      List<CreditApplicationField> productFields,
+      List<CreditApplicationField> calculatedFields,
+      Map<String, Object> status,
+      String versionNumber,
+      Map<String, Object> metadata) {
+    public LoanPassProductExecutionResult {
+      productFields = List.copyOf(productFields == null ? List.of() : productFields);
+      calculatedFields = List.copyOf(calculatedFields == null ? List.of() : calculatedFields);
+      status = Map.copyOf(status == null ? Map.of() : status);
+      metadata = Map.copyOf(metadata == null ? Map.of() : metadata);
+    }
+  }
+
   public record WaterfallStep(String step, BigDecimal input, String operation, BigDecimal output) {
   }
 

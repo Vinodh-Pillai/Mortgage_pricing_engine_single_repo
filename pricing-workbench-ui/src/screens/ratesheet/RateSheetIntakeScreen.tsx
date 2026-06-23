@@ -12,10 +12,10 @@ const rateSheetConfig: FunctionalityPageConfig<RateSheetRow> = {
   breadcrumb: 'Pricing / Rate sheets',
   eyebrow: 'Rate sheet service',
   title: 'Rate Sheet Intake',
-  summary: 'Captures upload/import workflow, validation results, rate grid references, investor mapping, effective dates, and publish readiness using backend-owned validation.',
+  summary: 'Supports rate sheet upload, validation review, investor mapping, effective dates, and publish readiness.',
   dataBoundary: 'rate-sheet-service: GET/PATCH /api/v1/rate-sheets',
   sections: [
-    { id: 'upload-import', eyebrow: 'Import', title: 'Upload/Import', summary: 'File intake and upload progress.', status: 'ready', items: ['Select file', 'Upload progress', 'Checksum ref'] },
+    { id: 'upload-import', eyebrow: 'Import', title: 'Upload/Import', summary: 'File intake and upload progress.', status: 'ready', items: ['Select file', 'Upload progress', 'File validation'] },
     { id: 'validation-results', eyebrow: 'Validation', title: 'Validation Results', summary: 'Row-level errors and remediation refs.', status: 'needs-attention', items: ['Schema result', 'Row errors', 'Remediation owner'] },
     { id: 'rate-grid', eyebrow: 'Grid', title: 'Rate Grid', summary: 'Read-only grid metadata from backend.', status: 'blocked', items: ['Grid ref', 'Cell lineage', 'Source version'] },
     { id: 'investor-mapping', eyebrow: 'Investor', title: 'Investor Mapping', summary: 'Investor mapping references.', status: 'needs-attention', items: ['Investor key', 'Mapping status', 'Review ref'] },
@@ -25,7 +25,7 @@ const rateSheetConfig: FunctionalityPageConfig<RateSheetRow> = {
   metrics: [
     { label: 'Upload', value: 'Ready', help: 'Drag/drop and browse supported' },
     { label: 'Validation', value: 'Row-level', help: 'Remediation table included' },
-    { label: 'Publish', value: 'Guarded', help: 'Disabled when blocked' },
+    { label: 'Publish', value: 'Guarded', help: 'Publishing stays disabled until required review is complete.' },
   ],
   rows: [
     { id: 'rs-001', investor: 'Investor mapping A', effectiveDate: 'service-owned', status: 'needs-attention' },

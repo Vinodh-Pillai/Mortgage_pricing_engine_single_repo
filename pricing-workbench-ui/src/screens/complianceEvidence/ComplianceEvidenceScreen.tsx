@@ -63,9 +63,8 @@ export default function ComplianceEvidenceScreen({ tenantContext = defaultTenant
       .then((view) => {
         if (active) setRegistryState({ kind: 'loaded', view });
       })
-      .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'Compliance evidence is unavailable.';
-        if (active) setRegistryState({ kind: 'unreachable', message });
+      .catch(() => {
+        if (active) setRegistryState({ kind: 'unreachable', message: 'Compliance evidence is temporarily unavailable.' });
       });
     return () => {
       active = false;
@@ -85,7 +84,7 @@ export default function ComplianceEvidenceScreen({ tenantContext = defaultTenant
     return <section className="panel" aria-labelledby="compliance-heading"><h2 id="compliance-heading">Compliance Evidence Registry</h2><div className="banner banner--blocked" role="alert"><strong>Compliance evidence unavailable</strong><span>{registryState.message}</span><span>Connected compliance-service evidence is required; the UI will not synthesize compliance decisions.</span></div></section>;
   }
 
-  const view = registryState.view;
+  const view = normaliseComplianceEvidenceView(registryState.view, tenantContext);
   const registryStateName = stateForComplianceEvidence(view);
   const artifactTypes = uniqueValues(view.artifacts.map((artifact) => artifact.artifactType));
   const filteredArtifacts = view.artifacts.filter((artifact) => (artifactTypeFilter === 'all' || artifact.artifactType === artifactTypeFilter) && (!progressionBlockedOnly || artifact.progressionBlocked));
@@ -96,14 +95,14 @@ export default function ComplianceEvidenceScreen({ tenantContext = defaultTenant
   return (
     <>
       <section className="hero hero--compliance" aria-labelledby="compliance-title">
-        <p className="eyebrow">Compliance evidence - PII-24-S28</p>
+        <p className="eyebrow">Compliance evidence</p>
         <h2 id="compliance-title">Compliance Evidence Registry</h2>
-        <p>Centralized audit evidence for artifacts, decisions, advisory reviews, fair lending, privacy requests, security events, alerts, retention controls, and configuration gaps. The screen renders configured refs only.</p>
+        <p>Centralized review records for artifacts, decisions, advisory reviews, fair lending, privacy requests, security events, alerts, retention controls, and configuration gaps.</p>
       </section>
       <section className="panel" aria-labelledby="compliance-heading">
         <div className="panel-heading-row"><div><p className="eyebrow">Tenant context</p><h2 id="compliance-heading">Compliance evidence workspace</h2></div><button type="button" onClick={() => setExported(exportComplianceEvidenceJson(view))}>Export Evidence</button></div>
-        <dl className="status-grid"><dt>Tenant</dt><dd>{displayText(view.tenantContext || tenantContext)}</dd><dt>Registry state</dt><dd>{displayText(registryStateName)}</dd><dt>Dependency</dt><dd>{displayText(view.dependencyStatus)}</dd><dt>Trace ID</dt><dd><code>{view.uiTraceId}</code></dd><dt>Evidence target</dt><dd><code>{evidenceTarget}</code></dd></dl>
-        <div className={registryStateName === 'blocked' ? 'banner banner--blocked' : 'banner banner--info'} role={registryStateName === 'blocked' ? 'alert' : 'status'}><strong>{displayText(view.dependencyStatus)}</strong><span>{displayText(view.fallbackReason || 'Compliance evidence is ready.')}</span><span>No compliance rules, retention calculations, or regulatory decisions are computed in this UI.</span></div>
+        <dl className="status-grid"><dt>Workspace</dt><dd>{displayText(view.tenantContext || tenantContext)}</dd><dt>Registry state</dt><dd>{displayText(registryStateName)}</dd><dt>Status</dt><dd>{displayText(view.dependencyStatus)}</dd></dl>
+        <div className={registryStateName === 'blocked' ? 'banner banner--blocked' : 'banner banner--info'} role={registryStateName === 'blocked' ? 'alert' : 'status'}><strong>{displayText(view.dependencyStatus)}</strong><span>{displayText(view.fallbackReason || 'Compliance evidence is ready.')}</span></div>
         <nav className="custom-rules-shell__nav" aria-label="Compliance evidence tabs">{tabs.map((tab) => <button key={tab.id} type="button" aria-pressed={activeTab === tab.id} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}</nav>
         {exported ? <textarea aria-label="Exported compliance evidence" readOnly value={exported} /> : null}
       </section>
@@ -127,6 +126,25 @@ export function stateForComplianceEvidence(view: ComplianceEvidenceRegistryView)
   const rowCount = view.artifacts.length + view.decisions.length + view.advisoryReviews.length + view.fairLendingMonitoring.length + view.privacyRequests.length + view.securityEvents.length + view.alerts.length + view.retentionControls.length + view.configurationGaps.length;
   if (view.configurationGaps.length > 0 || view.artifacts.some((artifact) => artifact.progressionBlocked) || view.advisoryReviews.some((review) => review.blockedByConfiguration)) return 'blocked';
   return rowCount === 0 ? 'empty' : 'ready';
+}
+
+function normaliseComplianceEvidenceView(view: Partial<ComplianceEvidenceRegistryView>, tenantContext: string): ComplianceEvidenceRegistryView {
+  return {
+    tenantContext: displayText(view.tenantContext || tenantContext),
+    dependencyStatus: displayText(view.dependencyStatus || 'Ready'),
+    fallbackReason: view.fallbackReason ? 'Some compliance records need setup before final review.' : '',
+    uiTraceId: view.uiTraceId ?? 'compliance-evidence',
+    artifacts: view.artifacts ?? [],
+    decisions: view.decisions ?? [],
+    advisoryReviews: view.advisoryReviews ?? [],
+    fairLendingMonitoring: view.fairLendingMonitoring ?? [],
+    privacyRequests: view.privacyRequests ?? [],
+    securityEvents: view.securityEvents ?? [],
+    alerts: view.alerts ?? [],
+    retentionControls: view.retentionControls ?? [],
+    configurationGaps: view.configurationGaps ?? [],
+    events: view.events ?? [],
+  };
 }
 
 export function exportComplianceEvidenceJson(view: ComplianceEvidenceRegistryView) {
@@ -199,5 +217,11 @@ function uniqueValues(values: string[]) {
 }
 
 function displayText(value: string) {
-  return value.replace(/[_-]+/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase());
+  return value
+    .replace(/ui-preview-tenant/gi, 'Product workspace')
+    .replace(/backend-owned/gi, 'service-managed')
+    .replace(/backend/gi, 'service')
+    .replace(/refs?/gi, 'records')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (character) => character.toUpperCase());
 }

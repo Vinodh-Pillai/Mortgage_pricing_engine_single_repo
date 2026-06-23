@@ -7,11 +7,12 @@ import { ContentArea } from './ContentArea';
 import { Footer } from './Footer';
 import { themeStorageKey } from '../design-system';
 import { Header } from './Header';
+import { PageActionsProvider } from './PageActionsContext';
 import { useNavRailMode } from './hooks/useNavRailMode';
 import './layout.css';
 import { Sidebar } from './Sidebar';
 import { SkipLink } from './SkipLink';
-import { persistNavRailCollapsed, readPersistedNavRailCollapsed } from './state/navRailState';
+import { persistNavRailCollapsed } from './state/navRailState';
 
 export type Notification = { id: string; label: string; attentionRequired?: boolean };
 
@@ -35,13 +36,7 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, fullS
   const currentUser = auth?.currentPersona ? { name: auth.currentPersona.name, role: roleLabels[auth.currentPersona.role], avatar: auth.currentPersona.avatar } : user;
   const mode = useNavRailMode();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [navCollapsed, setNavCollapsed] = useState(() => {
-    try {
-      return readPersistedNavRailCollapsed();
-    } catch {
-      return false;
-    }
-  });
+  const [navCollapsed, setNavCollapsed] = useState(true);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const notificationsRef = useRef<HTMLElement>(null);
   const navigationMode = fullScreenWorkspace ? 'drawer' : mode;
@@ -98,6 +93,7 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, fullS
     });
   }, []);
   return (
+    <PageActionsProvider>
     <div className={`layout-shell layout-shell--${mode}${railCollapsed ? ' layout-shell--nav-collapsed' : ''}${fullScreenWorkspace ? ' layout-shell--workspace' : ''}`} data-breakpoint-mode={mode} data-nav-collapsed={railCollapsed ? 'true' : 'false'} data-full-screen-workspace={fullScreenWorkspace ? 'true' : 'false'}>
       <SkipLink />
       <Header
@@ -142,5 +138,6 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, fullS
       ) : null}
       {fullScreenWorkspace ? null : <Footer />}
     </div>
+    </PageActionsProvider>
   );
 }

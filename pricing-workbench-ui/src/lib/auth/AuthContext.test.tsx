@@ -96,7 +96,7 @@ describe('AuthContext', () => {
   });
 
   it('AuthTest.staleMeFailureDoesNotClearLoggedInUser', async () => {
-    let resolveMe: ((response: Response) => void) | null = null;
+    let resolveMe: (response: Response) => void = () => undefined;
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input), 'http://localhost');
       if (url.pathname === '/api/auth/me') {

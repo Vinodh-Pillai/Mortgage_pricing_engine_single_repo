@@ -1449,7 +1449,7 @@ function DataRequiredPanel({ fields, onNextField }: { fields: PipelineRequiredFi
         <span className="quote-intake-data-required__state" aria-label="Required field count">{fields.length} {fields.length === 1 ? 'field' : 'fields'} missing</span>
       </div>
       <ul aria-label="Missing required fields">
-        {fields.map((field) => <li key={String(field.fieldId)} data-field-id={String(field.fieldId)}>{field.label}</li>)}
+        {fields.map((field, index) => <li key={`${String(field.fieldId)}-${index}`} data-field-id={String(field.fieldId)}>{field.label}</li>)}
       </ul>
       <button type="button" className="quote-filter-clear" onClick={onNextField}>Next Field</button>
     </section>
@@ -1953,11 +1953,11 @@ function QuickQuotePrefillGroups({ sections, values, mappings, overrides }: { se
           <li key={step.section}>
             <div className="quickquote-prefill-group__summary"><span>{step.label}</span><strong>{mapped}/{fields.length}</strong></div>
             <ul className="quickquote-prefill-metadata" aria-label={`${step.label} borrower detail status`}>
-              {fields.slice(0, 4).map((field) => {
+              {fields.slice(0, 4).map((field, index) => {
                 const mapping = mappingForField(mappings, field);
                 const override = overrides[String(field.fieldId)];
                 return (
-                  <li key={String(field.fieldId)} data-value-state={override ? 'overridden' : (values[field.fieldId] ?? '').trim() ? 'prefilled' : 'missing'}>
+                  <li key={`${String(field.fieldId)}-${index}`} data-value-state={override ? 'overridden' : (values[field.fieldId] ?? '').trim() ? 'prefilled' : 'missing'}>
                     <span>{field.label}</span>
                     <small>{prefillValueState(field, values, override)} · {missingCategoryLabel(mapping.missingCategory)}</small>
                   </li>
@@ -1982,7 +1982,7 @@ function QuickQuoteMissingFacts({ fields, mappings, values }: { fields: Pipeline
         <span>Improves pricing: {grouped.improvesPricing.length}</span>
         <span>Before lock: {grouped.requiredBeforeLock.length}</span>
       </div>
-      {missingMapped.length > 0 ? <ul>{missingMapped.slice(0, 8).map((mapping) => <li key={String(mapping.fieldId)}>{mapping.wcpeField} <small>{missingCategoryLabel(mapping.missingCategory)}</small></li>)}</ul> : fields.length > 0 ? <ul>{fields.slice(0, 6).map((field) => <li key={String(field.fieldId)}>{field.label}</li>)}</ul> : <span className="quickquote-ready-chip">No required pricing facts missing</span>}
+      {missingMapped.length > 0 ? <ul>{missingMapped.slice(0, 8).map((mapping, index) => <li key={`${String(mapping.fieldId)}-${index}`}>{mapping.wcpeField} <small>{missingCategoryLabel(mapping.missingCategory)}</small></li>)}</ul> : fields.length > 0 ? <ul>{fields.slice(0, 6).map((field, index) => <li key={`${String(field.fieldId)}-${index}`}>{field.label}</li>)}</ul> : <span className="quickquote-ready-chip">No required pricing facts missing</span>}
     </section>
   );
 }

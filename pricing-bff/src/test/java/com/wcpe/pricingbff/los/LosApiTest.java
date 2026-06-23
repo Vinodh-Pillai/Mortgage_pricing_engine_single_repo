@@ -125,7 +125,12 @@ class LosApiTest {
     assertThat(quoteClient.lastRequest.clientContext())
         .containsEntry("pipelineScenarioLinked", "false")
         .containsEntry("requestSnapshotRef", "los-request-snapshot:tenant-los:los-no-scenario")
-        .containsEntry("mappingConfigRef", "los-mapping-config:tenant-los");
+        .containsEntry("mappingConfigRef", "los-mapping-config:tenant-los")
+        .containsEntry("loanPassPublicApiDocsUrl", LosPricingService.LOANPASS_PUBLIC_API_DOCS_URL)
+        .containsEntry("loanPassPublicApiSchemaUrl", LosPricingService.LOANPASS_PUBLIC_API_SCHEMA_URL)
+        .containsEntry("loanPassPublicApiOperationConcepts", "execute-summary,execute-product")
+        .containsEntry("loanPassContractFieldPolicy", LosPricingService.LOANPASS_CONTRACT_FIELD_POLICY)
+        .containsEntry("productAuthorizationPolicy", "fail-closed-until-tenant-product-authorization-metadata-exists");
   }
 
   @Test
@@ -398,6 +403,10 @@ class LosApiTest {
   void endpointScopeMatrixDocumentsRepresentativeLosPermissions() {
     assertThat(LosAuthFilter.requiredScopesFor("POST", "/api/v1/los/pricing-requests"))
         .containsExactly("los:pricing-request:write");
+    assertThat(LosAuthFilter.requiredScopesFor("POST", "/api/v1/los/execute-summary"))
+        .containsExactly("los:pricing-request:write");
+    assertThat(LosAuthFilter.requiredScopesFor("POST", "/api/v1/los/execute-product"))
+        .containsExactly("los:pricing-request:write");
     assertThat(LosAuthFilter.requiredScopesFor("GET", "/api/v1/los/products/search"))
         .containsExactly("los:product-catalog:read");
     assertThat(LosAuthFilter.requiredScopesFor("POST", "/api/v1/los/product-eligibility"))
@@ -480,7 +489,167 @@ class LosApiTest {
         .andExpect(jsonPath("$.authorizationStatus").value("BLOCKED"))
         .andExpect(jsonPath("$.blockedReason").value("CATALOG_METADATA_NOT_CONFIGURED"))
         .andExpect(jsonPath("$.metadata.source").value("fail-closed"))
+        .andExpect(jsonPath("$.metadata.loanPassPublicApiDocsUrl").value(LosPricingService.LOANPASS_PUBLIC_API_DOCS_URL))
+        .andExpect(jsonPath("$.metadata.loanPassPublicApiSchemaUrl").value(LosPricingService.LOANPASS_PUBLIC_API_SCHEMA_URL))
+        .andExpect(jsonPath("$.metadata.loanPassPublicApiOperationConcepts[0]").value("execute-summary"))
+        .andExpect(jsonPath("$.metadata.loanPassPublicApiOperationConcepts[1]").value("execute-product"))
+        .andExpect(jsonPath("$.metadata.loanPassContractFieldPolicy").value(LosPricingService.LOANPASS_CONTRACT_FIELD_POLICY))
         .andExpect(jsonPath("$.metadata.requestedFilters.channel").value("retail"));
+  }
+
+  @Test
+  void executeSummaryFailsClosedWhenCatalogAuthorizationMetadataUnavailable() throws Exception {
+    mockMvc.perform(post("/api/v1/los/execute-summary")
+            .headers(Headers.auth())
+            .header("X-Tenant-ID", "tenant-los")
+            .header("X-Request-ID", "execute-summary-001")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""
+                {
+                  "pricingProfileId": "profile-1",
+                  "currentTime": "2026-06-18T08:00:00Z",
+                  "creditApplicationFields": [
+                    { "fieldId": "field@base-loan-amount", "value": { "type": "number", "value": 450000 } }
+                  ],
+                  "outputFieldsFilter": { "type": "only", "fieldIds": [] },
+                  "publishedVersionRequest": { "type": "current" },
+                  "pipelineRecordId": "pipeline-1"
+                }
+                """))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.totals.approved").value(0))
+        .andExpect(jsonPath("$.totals.error").value(0))
+        .andExpect(jsonPath("$.products.length()").value(0))
+        .andExpect(jsonPath("$.metadata.authorizationStatus").value("BLOCKED"))
+        .andExpect(jsonPath("$.metadata.authorizationMetadataStatus").value("UNAVAILABLE"))
+        .andExpect(jsonPath("$.metadata.missingMetadata").value(org.hamcrest.Matchers.contains(
+            "productCatalogRef", "productAuthorizationMetadataRef", "ruleCatalogRef", "stipulationCatalogRef",
+            "rateCatalogRef", "lockTermCatalogRef", "products")))
+        .andExpect(jsonPath("$.metadata.rateMetadataStatus").value("UNAVAILABLE"))
+        .andExpect(jsonPath("$.metadata.lockPeriodMetadataStatus").value("UNAVAILABLE"))
+        .andExpect(jsonPath("$.metadata.operationConcept").value("execute-summary"))
+        .andExpect(jsonPath("$.metadata.loanPassPublicApiOperationConcepts[0]").value("execute-summary"))
+        .andExpect(jsonPath("$.metadata.requestedContext.pipelineRecordId").value("pipeline-1"));
+  }
+
+  @Test
+  void executeSummaryTransformsCatalogBackedProductRuleStipulationRateAndLockMetadata() throws Exception {
+    mockMvc.perform(post("/api/v1/los/execute-summary")
+            .headers(Headers.auth())
+            .header("X-Tenant-ID", "tenant-los")
+            .header("X-Request-ID", "execute-summary-catalog-001")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""
+                {
+                  "pricingProfileId": "profile-1",
+                  "currentTime": "2026-06-18T08:00:00Z",
+                  "creditApplicationFields": [
+                    { "fieldId": "field@base-loan-amount", "value": { "type": "number", "value": 450000 } }
+                  ],
+                  "publishedVersionRequest": %s,
+                  "pipelineRecordId": "pipeline-1"
+                }
+                """.formatted(catalogBackedExecuteMetadata())))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.totals.available").value(1))
+        .andExpect(jsonPath("$.products[0].productId").value("lh-bankstatement-12-24"))
+        .andExpect(jsonPath("$.products[0].productName").value("12-24 Month Bank Statement"))
+        .andExpect(jsonPath("$.products[0].isPricingEnabled").value(true))
+        .andExpect(jsonPath("$.products[0].productFields[0].fieldId").value("field@product-rules"))
+        .andExpect(jsonPath("$.products[0].productFields[1].fieldId").value("field@product-stipulations"))
+        .andExpect(jsonPath("$.products[0].calculatedFields[0].fieldId").value("field@rate-options"))
+        .andExpect(jsonPath("$.products[0].calculatedFields[1].fieldId").value("field@lock-periods"))
+        .andExpect(jsonPath("$.metadata.source").value("catalog-backed"))
+        .andExpect(jsonPath("$.metadata.rateMetadataStatus").value("AVAILABLE"))
+        .andExpect(jsonPath("$.metadata.lockPeriodMetadataStatus").value("AVAILABLE"));
+  }
+
+  @Test
+  void executeProductFailsClosedWhenCatalogAuthorizationMetadataUnavailable() throws Exception {
+    mockMvc.perform(post("/api/v1/los/execute-product")
+            .headers(Headers.auth())
+            .header("X-Tenant-ID", "tenant-los")
+            .header("X-Request-ID", "execute-product-001")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""
+                {
+                  "productId": "lp-prod-001",
+                  "pricingProfileId": "profile-1",
+                  "currentTime": "2026-06-18T08:00:00Z",
+                  "creditApplicationFields": [
+                    { "fieldId": "field@base-loan-amount", "value": { "type": "number", "value": 450000 } }
+                  ],
+                  "publishedVersionRequest": { "type": "current" }
+                }
+                """))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.productId").value("lp-prod-001"))
+        .andExpect(jsonPath("$.productName").value(""))
+        .andExpect(jsonPath("$.productCode").value(""))
+        .andExpect(jsonPath("$.investorName").value(""))
+        .andExpect(jsonPath("$.investorCode").value(""))
+        .andExpect(jsonPath("$.isPricingEnabled").value(false))
+        .andExpect(jsonPath("$.productFields.length()").value(0))
+        .andExpect(jsonPath("$.calculatedFields.length()").value(0))
+        .andExpect(jsonPath("$.status.type").value("error"))
+        .andExpect(jsonPath("$.status.errors[0].kind.code").value("TENANT_PRODUCT_AUTHORIZATION_UNAVAILABLE"))
+        .andExpect(jsonPath("$.metadata.authorizationStatus").value("BLOCKED"))
+        .andExpect(jsonPath("$.metadata.authorizationMetadataStatus").value("UNAVAILABLE"))
+        .andExpect(jsonPath("$.metadata.missingMetadata").value(org.hamcrest.Matchers.contains(
+            "productCatalogRef", "productAuthorizationMetadataRef", "ruleCatalogRef", "stipulationCatalogRef",
+            "rateCatalogRef", "lockTermCatalogRef", "products")))
+        .andExpect(jsonPath("$.metadata.rateMetadataStatus").value("UNAVAILABLE"))
+        .andExpect(jsonPath("$.metadata.lockPeriodMetadataStatus").value("UNAVAILABLE"))
+        .andExpect(jsonPath("$.metadata.operationConcept").value("execute-product"))
+        .andExpect(jsonPath("$.metadata.loanPassPublicApiOperationConcepts[1]").value("execute-product"));
+  }
+
+  @Test
+  void executeProductTransformsRequestedCatalogBackedProductDetail() throws Exception {
+    mockMvc.perform(post("/api/v1/los/execute-product")
+            .headers(Headers.auth())
+            .header("X-Tenant-ID", "tenant-los")
+            .header("X-Request-ID", "execute-product-catalog-001")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""
+                {
+                  "productId": "lh-bankstatement-12-24",
+                  "pricingProfileId": "profile-1",
+                  "currentTime": "2026-06-18T08:00:00Z",
+                  "creditApplicationFields": [
+                    { "fieldId": "field@base-loan-amount", "value": { "type": "number", "value": 450000 } }
+                  ],
+                  "publishedVersionRequest": %s
+                }
+                """.formatted(catalogBackedExecuteMetadata())))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.productId").value("lh-bankstatement-12-24"))
+        .andExpect(jsonPath("$.productName").value("12-24 Month Bank Statement"))
+        .andExpect(jsonPath("$.productCode").value("bankstatement-12-24"))
+        .andExpect(jsonPath("$.investorName").value("LoanHouse"))
+        .andExpect(jsonPath("$.status.type").value("available"))
+        .andExpect(jsonPath("$.calculatedFields[0].value.enumTypeId").value("rate-catalog"))
+        .andExpect(jsonPath("$.calculatedFields[1].value.enumTypeId").value("lock-term-catalog"))
+        .andExpect(jsonPath("$.metadata.metadataRefs.rateCatalogRef").value("loanhouse-rate-catalog:sanitized:v1"));
+  }
+
+  @Test
+  void executeProductRequiresProductIdBeforePricingCanRun() throws Exception {
+    mockMvc.perform(post("/api/v1/los/execute-product")
+            .headers(Headers.auth())
+            .header("X-Tenant-ID", "tenant-los")
+            .header("X-Request-ID", "execute-product-missing-product")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""
+                {
+                  "currentTime": "2026-06-18T08:00:00Z",
+                  "creditApplicationFields": [
+                    { "fieldId": "field@base-loan-amount", "value": { "type": "number", "value": 450000 } }
+                  ]
+                }
+                """))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("LOANPASS_PRODUCT_ID_REQUIRED"));
   }
 
   @Test
@@ -516,6 +685,7 @@ class LosApiTest {
         .andExpect(jsonPath("$.blockedReason").value("CATALOG_METADATA_NOT_CONFIGURED"))
         .andExpect(jsonPath("$.metadata.endpoint").value("/api/v1/los/products/search"))
         .andExpect(jsonPath("$.metadata.searchScope").value("catalog-metadata-only"))
+        .andExpect(jsonPath("$.metadata.loanPassContractEvidenceStatus").value("public-docs-accessible-schema-url-discovered-field-shapes-not-adopted"))
         .andExpect(jsonPath("$.metadata.appliedFilters.productFamily").value("CONVENTIONAL"))
         .andExpect(jsonPath("$.metadata.appliedFilters.query").value("30 year fixed"))
         .andExpect(jsonPath("$.metadata.appliedFilters.effectiveDate").value("2026-03-01"));
@@ -554,6 +724,7 @@ class LosApiTest {
         .andExpect(jsonPath("$.conditionalFields.length()").value(0))
         .andExpect(jsonPath("$.mappingMetadataStatus").value("INCOMPLETE"))
         .andExpect(jsonPath("$.quoteCompatibility.status").value("BLOCKED"))
+        .andExpect(jsonPath("$.metadata.loanPassPublicApiOperationConcepts[1]").value("execute-product"))
         .andExpect(jsonPath("$.metadata.endpoint").value("/api/v1/los/products/{productId}"));
   }
 
@@ -589,7 +760,8 @@ class LosApiTest {
         .andExpect(jsonPath("$.results[0].eligibility").value("ineligible"))
         .andExpect(jsonPath("$.results[0].reasonCodes[0]").value("TENANT_PRODUCT_AUTHORIZATION_UNAVAILABLE"))
         .andExpect(jsonPath("$.results[0].ruleConfigRefs[0].source").value("catalog-service"))
-        .andExpect(jsonPath("$.metadata.authorizationMetadataStatus").value("UNAVAILABLE"));
+        .andExpect(jsonPath("$.metadata.authorizationMetadataStatus").value("UNAVAILABLE"))
+        .andExpect(jsonPath("$.metadata.loanPassPublicApiOperationConcepts[0]").value("execute-summary"));
   }
 
   @Test
@@ -704,6 +876,46 @@ class LosApiTest {
           ]
         }
         """.formatted(requestId);
+  }
+
+  private String catalogBackedExecuteMetadata() {
+    return """
+        {
+          "catalogMetadataRef": "loanhouse-public-schema-facts:sanitized:v1",
+          "productCatalogRef": "loanhouse-product-catalog:sanitized:v1",
+          "productAuthorizationMetadataRef": "loanhouse-product-auth:tenant-los:sanitized:v1",
+          "ruleCatalogRef": "loanhouse-rule-catalog:sanitized:v1",
+          "stipulationCatalogRef": "loanhouse-stipulation-catalog:sanitized:v1",
+          "rateCatalogRef": "loanhouse-rate-catalog:sanitized:v1",
+          "lockTermCatalogRef": "loanhouse-lock-term-catalog:sanitized:v1",
+          "versionNumber": "loanhouse-sanitized-capture-v1",
+          "products": [
+            {
+              "productId": "lh-bankstatement-12-24",
+              "productName": "12-24 Month Bank Statement",
+              "productCode": "bankstatement-12-24",
+              "investorName": "LoanHouse",
+              "investorCode": "loanhouse",
+              "isPricingEnabled": true,
+              "metadataRef": "loanhouse-product-catalog:sanitized:v1#lh-bankstatement-12-24",
+              "rules": [
+                { "name": "Occupancy", "metadataRef": "loanhouse-rule-catalog:sanitized:v1#occupancy" }
+              ],
+              "stipulations": [
+                { "stipulationLoanStatusCategoryType": "101", "metadataRef": "loanhouse-stipulation-catalog:sanitized:v1#101" }
+              ],
+              "rateOptions": [
+                { "rate": "captured-reference-only", "price": "captured-reference-only", "lockPeriodDays": 30, "metadataRef": "loanhouse-rate-catalog:sanitized:v1#30" }
+              ],
+              "lockPeriods": [
+                { "lockPeriodDays": 30, "metadataRef": "loanhouse-lock-term-catalog:sanitized:v1#30" },
+                { "lockPeriodDays": 45, "metadataRef": "loanhouse-lock-term-catalog:sanitized:v1#45" },
+                { "lockPeriodDays": 60, "metadataRef": "loanhouse-lock-term-catalog:sanitized:v1#60" }
+              ]
+            }
+          ]
+        }
+        """;
   }
 
   private LosApiModels.LosPricingRequest sampleRequest(String requestId, String scenarioId, Integer scenarioVersion) {

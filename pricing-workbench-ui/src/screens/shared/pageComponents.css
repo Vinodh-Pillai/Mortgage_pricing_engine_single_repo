@@ -40,6 +40,7 @@
 
 .page-header__crumb,
 .page-header__meta,
+.page-header__help,
 .section-card__eyebrow,
 .page-state__eyebrow {
   color: var(--ds-color-text-muted);
@@ -48,6 +49,24 @@
   letter-spacing: 0.08em;
   margin: 0;
   text-transform: uppercase;
+}
+
+.page-header__help summary,
+.page-metric summary {
+  align-items: center;
+  border: 1px solid var(--ds-color-border);
+  border-radius: var(--ds-radius-full);
+  cursor: help;
+  display: inline-flex;
+  height: 1.55rem;
+  justify-content: center;
+  list-style: none;
+  width: 1.55rem;
+}
+
+.page-header__help summary::-webkit-details-marker,
+.page-metric summary::-webkit-details-marker {
+  display: none;
 }
 
 .page-header h1,
@@ -259,6 +278,10 @@
   border: 1px solid var(--ds-color-border);
   border-radius: var(--ds-radius-md);
   padding: var(--ds-space-3);
+}
+
+.page-metric details {
+  margin-top: var(--ds-space-1);
 }
 
 .page-metric strong {

@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
+import { usePageActions } from '../../layout/PageActionsContext';
 
 export interface PageHeaderProps {
   eyebrow: string;
@@ -10,6 +11,13 @@ export interface PageHeaderProps {
 }
 
 export function PageHeader({ eyebrow, title, breadcrumb, summary, meta, actions }: PageHeaderProps) {
+  const { setPromotedActions } = usePageActions();
+
+  useEffect(() => {
+    setPromotedActions(actions ? { label: `${title} page actions`, actions } : null);
+    return () => setPromotedActions(null);
+  }, [setPromotedActions, title]);
+
   return (
     <header className="page-header" aria-labelledby={`${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-heading`}>
       <div>

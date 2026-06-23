@@ -58,7 +58,11 @@ class LosQuoteIntegrationControllerTest {
 
     mockMvc.perform(get("/api/v1/los/quote-requests/{id}", firstBody.path("jobId").asText()))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.status").value("QUEUED"));
+        .andExpect(jsonPath("$.status").value("QUEUED"))
+        .andExpect(jsonPath("$.progress.loanPassPublicApiDocsUrl").value("https://docs.loanpass.io/public-api/index.html"))
+        .andExpect(jsonPath("$.progress.loanPassPublicApiSchemaUrl").value("https://api.loanpass.io/v1/swagger/schema.json"))
+        .andExpect(jsonPath("$.progress.loanPassPublicApiOperationConcepts").value("execute-summary,execute-product"))
+        .andExpect(jsonPath("$.progress.productAuthorizationPolicy").value("fail-closed-unless-product-catalog-and-authorization-metadata-refs-exist"));
   }
 
   @Test

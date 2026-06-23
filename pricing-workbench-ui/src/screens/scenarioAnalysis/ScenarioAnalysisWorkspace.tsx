@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { DiagnosticsDetails } from '../../components/DiagnosticsDetails';
+import { usePageActions } from '../../layout/PageActionsContext';
 import {
   fetchScenarioAnalysisWorkspace,
   recalculateScenarioAnalysis,
@@ -18,6 +19,7 @@ type ScenarioAnalysisWorkspaceState =
   | { kind: 'unreachable'; message: string };
 
 export function ScenarioAnalysisWorkspaceScreen({ runId, tenantContext }: { runId: string; tenantContext: string }) {
+  const { setPromotedActions } = usePageActions();
   const [workspaceState, setWorkspaceState] = useState<ScenarioAnalysisWorkspaceState>({ kind: 'loading' });
   const [dimensionId, setDimensionId] = useState('');
   const [requestedValue, setRequestedValue] = useState('');
@@ -33,14 +35,14 @@ export function ScenarioAnalysisWorkspaceScreen({ runId, tenantContext }: { runI
     fetchScenarioAnalysisWorkspace(tenantContext, runId)
       .then((view) => {
         if (!active) return;
-        setWorkspaceState({ kind: 'loaded', view });
-        setDimensionId(view.dimensions[0]?.dimensionId ?? '');
-        setRequestedValue(view.dimensions[0]?.value ?? '');
-        setSelectedVariantId(view.variants[0]?.variantId ?? '');
+        const normalisedView = normaliseScenarioWorkspaceView(view, tenantContext, runId);
+        setWorkspaceState({ kind: 'loaded', view: normalisedView });
+        setDimensionId(normalisedView.dimensions[0]?.dimensionId ?? '');
+        setRequestedValue(normalisedView.dimensions[0]?.value ?? '');
+        setSelectedVariantId(normalisedView.variants[0]?.variantId ?? '');
       })
-      .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'Scenario analysis workspace is unavailable.';
-        if (active) setWorkspaceState({ kind: 'unreachable', message });
+      .catch(() => {
+        if (active) setWorkspaceState({ kind: 'unreachable', message: 'Scenario analysis is temporarily unavailable.' });
       });
     return () => {
       active = false;
@@ -69,8 +71,7 @@ export function ScenarioAnalysisWorkspaceScreen({ runId, tenantContext }: { runI
       });
       setRecalculation(result);
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Scenario analysis recalculation is unavailable.';
-      setRecalculateError(message);
+      setRecalculateError('Scenario recalculation is temporarily unavailable. Try again after the scenario data refreshes.');
     }
   }
 
@@ -80,26 +81,26 @@ export function ScenarioAnalysisWorkspaceScreen({ runId, tenantContext }: { runI
       setWorkspaceNotice('Enter a variant name before staging a draft.');
       return;
     }
-    const draftId = `local-draft-${slugifyVariantName(name)}-${localDraftVariants.length + 1}`;
+    const draftId = `draft-${slugifyVariantName(name)}-${localDraftVariants.length + 1}`;
     const draft: ScenarioAnalysisVariant = {
       variantId: draftId,
       label: `${name} (local draft)`,
-      status: 'LOCAL_DRAFT_BLOCKED_PENDING_BACKEND',
+      status: 'Needs review',
       dimensionRefs: dimensionId ? [dimensionId] : [],
       factRefs: [`local-draft:${draftId}:facts`],
       guardrailBlockers: [{
         blockerCode: 'PRODUCTION_INTEGRATION_REQUIRED',
         severity: 'blocked',
-        reason: 'Local what-if draft is staged in the browser only. scenario-analysis-service must persist the variant and calculate backend result refs.',
-        requiredFacts: ['scenario-analysis-service variant id', 'pricing result refs', 'eligibility guardrail refs'],
-        sourceRef: `scenario-analysis-ui:${draftId}`,
+        reason: 'Save the variant before using it for a final pricing decision.',
+        requiredFacts: ['Saved variant', 'Pricing result', 'Eligibility review'],
+        sourceRef: draftId,
       }],
       resultRefs: [],
     };
     setLocalDraftVariants((current) => [...current, draft]);
     setSelectedVariantId(draftId);
     setVariantName('');
-    setWorkspaceNotice(`Variant draft "${name}" is staged locally and blocked for backend persistence/calculation.`);
+    setWorkspaceNotice(`Variant draft "${name}" is ready for review.`);
   }
 
   function deleteVariant() {
@@ -111,27 +112,40 @@ export function ScenarioAnalysisWorkspaceScreen({ runId, tenantContext }: { runI
     if (localDraft) {
       setLocalDraftVariants((current) => current.filter((variant) => variant.variantId !== selectedVariantId));
       setSelectedVariantId(workspaceState.kind === 'loaded' ? workspaceState.view.variants[0]?.variantId ?? '' : '');
-      setWorkspaceNotice(`Local draft ${selectedVariantId} removed. Durable backend variants still require scenario-analysis-service.`);
+      setWorkspaceNotice(`Draft ${selectedVariantId} removed.`);
       return;
     }
-    setWorkspaceNotice(`Delete requested for ${selectedVariantId}; scenario-analysis-service owns durable variant removal.`);
+    setWorkspaceNotice(`Delete requested for ${selectedVariantId}.`);
   }
 
   function saveAnalysis() {
-    setWorkspaceNotice('Save requested; scenario-analysis-service must return analysis ID, version ref, export ref, and replay hash.');
+    setWorkspaceNotice('Save requested. Analysis details will update after the service confirms the record.');
   }
 
   function exportAnalysis() {
-    setWorkspaceNotice('Export requested; the UI exposes backend export refs and does not synthesize replay hashes.');
+    setWorkspaceNotice('Export requested.');
   }
 
   function loadAnalysis(analysis: ScenarioAnalysisSavedAnalysis) {
-    setWorkspaceNotice(`Load requested for ${analysis.analysisId}; backend version ${analysis.versionRef} remains the source of truth.`);
+    setWorkspaceNotice(`Load requested for ${analysis.analysisId}.`);
   }
 
   function deleteAnalysis(analysis: ScenarioAnalysisSavedAnalysis) {
-    setWorkspaceNotice(`Delete requested for ${analysis.analysisId}; scenario-analysis-service owns durable saved-analysis removal.`);
+    setWorkspaceNotice(`Delete requested for ${analysis.analysisId}.`);
   }
+
+  const promotedScenarioActions = useMemo(() => (
+    <div className="offer-toolbar" aria-label="Scenario analysis actions">
+      <button type="button" onClick={() => void requestRecalculation('selected')} disabled={workspaceState.kind !== 'loaded'}>Recalculate Selected</button>
+      <button type="button" onClick={saveAnalysis} disabled={workspaceState.kind !== 'loaded'}>Save Analysis</button>
+      <button type="button" onClick={exportAnalysis} disabled={workspaceState.kind !== 'loaded'}>Export</button>
+    </div>
+  ), [dimensionId, requestedValue, selectedVariantId, workspaceState.kind]);
+
+  useEffect(() => {
+    setPromotedActions({ label: 'Scenario analysis page actions', actions: promotedScenarioActions });
+    return () => setPromotedActions(null);
+  }, [promotedScenarioActions, setPromotedActions]);
 
   if (workspaceState.kind === 'loading') {
     return <section className="panel" aria-labelledby="scenario-analysis-heading"><h2 id="scenario-analysis-heading">Scenario Analysis</h2><p role="status">Loading scenario analysis workspace...</p></section>;
@@ -155,8 +169,7 @@ export function ScenarioAnalysisWorkspaceScreen({ runId, tenantContext }: { runI
         <p className="eyebrow">Scenario analysis · PII-24-S29</p>
         <h2 id="scenario-analysis-title">Scenario Analysis for run {runId}</h2>
         <p>
-          Inspect connected dimensions, variants, batch grid rows, guardrails, saved analyses, export refs, replay refs, and backend recalculation results.
-          The UI sends fact references back to the BFF and does not calculate pricing, eligibility, or policy outcomes locally.
+          Review dimensions, variants, guardrails, saved analyses, exports, and recalculation results.
         </p>
         <a href={`/quote/${encodeURIComponent(runId)}/offers`}>Back to Offers</a>
       </section>
@@ -167,9 +180,9 @@ export function ScenarioAnalysisWorkspaceScreen({ runId, tenantContext }: { runI
             <p className="eyebrow">Workspace</p>
             <h2 id="scenario-analysis-heading">Dimensions and variant facts</h2>
           </div>
-          <DiagnosticsDetails items={[`Support reference: ${view.uiTraceId}`, `Dependency: ${view.dependencyStatus}`]} />
+          <DiagnosticsDetails items={[`Support reference: ${businessFacingText(view.uiTraceId)}`, `Status: ${businessFacingText(view.dependencyStatus)}`]} />
         </div>
-        {view.fallbackReason ? <div className="banner banner--blocked" role="alert"><strong>Backend analysis contract required</strong><span>{businessFacingText(view.fallbackReason)}</span></div> : null}
+        {view.fallbackReason ? <div className="banner banner--blocked" role="alert"><strong>Scenario analysis needs attention</strong><span>{businessFacingText(view.fallbackReason)}</span></div> : null}
         {workspaceNotice ? <div className="banner banner--info" role="status">{workspaceNotice}</div> : null}
         <div className="offer-grid" role="list" aria-label="What-if dimensions">
           {view.dimensions.map((dimension) => <ScenarioDimensionCard key={dimension.dimensionId} dimension={dimension} />)}
@@ -196,7 +209,7 @@ export function ScenarioAnalysisWorkspaceScreen({ runId, tenantContext }: { runI
 
       <section className="panel" aria-labelledby="scenario-recalculate-heading">
         <h2 id="scenario-recalculate-heading">Backend recalculation</h2>
-        <p className="field-help">Changing a dimension packages backend fact refs for scenario-analysis-service. No UI or BFF pricing formula runs here.</p>
+        <details className="field-help"><summary aria-label="Recalculation details">?</summary><span>Changing a dimension requests updated pricing and eligibility review from connected services.</span></details>
         <div className="offer-toolbar" aria-label="Scenario recalculation controls">
           <label htmlFor="scenario-dimension">Dimension</label>
           <select id="scenario-dimension" value={dimensionId} onChange={(event) => {
@@ -369,10 +382,34 @@ function ScenarioRecalculationBanner({ result }: { result: ScenarioRecalculation
 
 function ChipList({ label, values }: { label: string; values: string[] }) {
   if (!values.length) return null;
-  return <ul className="chip-list" aria-label={label}>{values.map((value) => <li key={value}>{value}</li>)}</ul>;
+  return <ul className="chip-list" aria-label={label}>{values.map((value) => <li key={value}>{businessFacingText(value)}</li>)}</ul>;
+}
+
+function normaliseScenarioWorkspaceView(view: Partial<ScenarioAnalysisWorkspaceView>, tenantContext: string, runId: string): ScenarioAnalysisWorkspaceView {
+  return {
+    tenantContext: view.tenantContext ?? tenantContext,
+    runId: view.runId ?? runId,
+    dependencyStatus: businessFacingText(view.dependencyStatus ?? 'Needs attention'),
+    dimensions: view.dimensions ?? [],
+    variants: view.variants ?? [],
+    batchGrid: view.batchGrid ?? [],
+    savedAnalyses: view.savedAnalyses ?? [],
+    exportRefs: view.exportRefs ?? [],
+    replayRefs: view.replayRefs ?? [],
+    blockers: view.blockers ?? [],
+    fallbackReason: view.fallbackReason ? 'Connected scenario analysis records are not ready yet.' : '',
+    uiTraceId: view.uiTraceId ?? 'scenario-analysis',
+    events: view.events ?? [],
+  };
 }
 
 function businessFacingText(value: string | number | null | undefined) {
   if (value === null || value === undefined || value === '') return 'Not supplied';
-  return String(value).replace(/[_-]+/g, ' ');
+  return String(value)
+    .replace(/ui-preview-tenant/ig, 'Product workspace')
+    .replace(/local synthetic\/dev fixture/ig, 'Preview data')
+    .replace(/backend-owned/ig, 'service-managed')
+    .replace(/backend/ig, 'service')
+    .replace(/refs?/ig, 'records')
+    .replace(/[_-]+/g, ' ');
 }

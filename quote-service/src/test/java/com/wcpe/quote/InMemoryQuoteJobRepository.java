@@ -15,6 +15,13 @@ public class InMemoryQuoteJobRepository implements QuoteJobRepository {
     }
 
     @Override
+    public Optional<QuoteJob> findByJobId(UUID jobId) {
+        return byId.values().stream()
+            .filter(job -> job.jobId().equals(jobId))
+            .findFirst();
+    }
+
+    @Override
     public Optional<QuoteJob> findByIdempotencyKey(UUID tenantId, String idempotencyKey) {
         return Optional.ofNullable(byIdempotencyKey.get(tenantId + ":" + idempotencyKey));
     }
