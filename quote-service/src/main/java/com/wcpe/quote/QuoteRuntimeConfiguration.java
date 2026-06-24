@@ -3,6 +3,7 @@ package com.wcpe.quote;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wcpe.quote.parallel.ParallelPricingOrchestrator;
 import java.time.Clock;
+import java.util.UUID;
 import java.util.List;
 import java.util.Optional;
 import javax.sql.DataSource;
@@ -43,6 +44,44 @@ class QuoteRuntimeConfiguration {
     @ConditionalOnProperty(prefix = "quote.persistence", name = "mode", havingValue = "postgres", matchIfMissing = true)
     QuoteSnapshotRepository jdbcQuoteSnapshotRepository(DataSource dataSource, ObjectMapper objectMapper) {
         return new JdbcQuoteSnapshotRepository(dataSource, objectMapper);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "quote.persistence", name = "mode", havingValue = "postgres", matchIfMissing = true)
+    LoanPassQuoteCatalogRepository jdbcLoanPassQuoteCatalogRepository(DataSource dataSource, ObjectMapper objectMapper) {
+        return new JdbcLoanPassQuoteCatalogRepository(dataSource, objectMapper);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    LoanPassWarmEvaluator loanPassWarmEvaluator() {
+        return new LoanPassWarmEvaluator();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    LoanPassQuoteService loanPassQuoteService(LoanPassQuoteCatalogRepository repository, LoanPassWarmEvaluator evaluator) {
+        return new LoanPassQuoteService(repository, evaluator);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "quote.persistence", name = "mode", havingValue = "fail-closed")
+    LoanPassQuoteCatalogRepository failClosedLoanPassQuoteCatalogRepository() {
+        return new FailClosedLoanPassQuoteCatalogRepository();
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "quote.loanpass.synthetic-loader", name = "enabled", havingValue = "true")
+    LoanPassSyntheticCatalogLoader loanPassSyntheticCatalogLoader(
+        LoanPassQuoteCatalogRepository repository,
+        Clock clock,
+        @Value("${quote.loanpass.synthetic-loader.tenant-id:11111111-1111-1111-1111-111111111111}") UUID tenantId,
+        @Value("${quote.loanpass.synthetic-loader.product-count:1536}") int productCount,
+        @Value("${quote.loanpass.synthetic-loader.seed:lpq-02-dev}") String seed
+    ) {
+        return new LoanPassSyntheticCatalogLoader(repository, clock, tenantId, productCount, seed);
     }
 
     @Bean
@@ -141,6 +180,18 @@ class QuoteRuntimeConfiguration {
                 "QUOTE_DEPENDENCIES_UNCONFIGURED",
                 "Quote runtime dependencies are not configured; refusing to fabricate pricing or ranking data"
             );
+        }
+    }
+
+    private static final class FailClosedLoanPassQuoteCatalogRepository implements LoanPassQuoteCatalogRepository {
+        @Override
+        public Optional<LoanPassQuoteModels.CatalogSnapshot> activeSnapshot(UUID tenantId) {
+            return Optional.empty();
+        }
+
+        @Override
+        public LoanPassQuoteModels.CatalogSnapshot saveSnapshot(LoanPassQuoteModels.CatalogSnapshot snapshot) {
+            throw new IllegalStateException("LOANPASS_CATALOG_POSTGRES_REQUIRED: durable LoanPass catalog snapshots require PostgreSQL");
         }
     }
 }

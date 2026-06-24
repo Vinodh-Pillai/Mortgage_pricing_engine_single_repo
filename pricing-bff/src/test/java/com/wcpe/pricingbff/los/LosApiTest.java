@@ -20,6 +20,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -150,6 +151,98 @@ class LosApiTest {
         .containsEntry("pipelineScenarioLinked", "true")
         .containsEntry("scenarioRef", "scenario-los-123")
         .containsEntry("scenarioVersion", "3");
+  }
+
+  @Test
+  void executeFlowUsesDurableQuoteServiceWhenConfiguredAndDoesNotTrustClientPublishedVersionMetadata() {
+    CapturingQuoteClient quoteClient = new CapturingQuoteClient();
+    LosFeatureFlagService flagService = new LosFeatureFlagService();
+    flagService.configure(flags("tenant-los", true, true, true, 2));
+    LosPricingService service = new LosPricingService(new ObjectMapper(), new LosScenarioAdapter(), quoteClient,
+        new LosLockServiceClient(org.springframework.web.client.RestClient.builder(), ""), new LosWebhookRegistry(new ObjectMapper(), false), new LosIdempotencyStore(), flagService);
+    List<LosApiModels.CreditApplicationField> fields = List.of(new LosApiModels.CreditApplicationField("field@base-loan-amount",
+        new LosApiModels.CreditApplicationValue("number", 450000, null, null)));
+    Map<String, Object> clientSuppliedMetadata = Map.of(
+        "productCatalogRef", "client-supplied-ref",
+        "productAuthorizationMetadataRef", "client-supplied-ref",
+        "ruleCatalogRef", "client-supplied-ref",
+        "stipulationCatalogRef", "client-supplied-ref",
+        "rateCatalogRef", "client-supplied-ref",
+        "lockTermCatalogRef", "client-supplied-ref",
+        "products", List.of(Map.of("productId", "client-fabricated", "productName", "Client Fabricated")));
+
+    LosApiModels.LoanPassExecutionSummaryResponse summary = service.executeSummary(
+        new LosApiModels.LoanPassExecuteSummaryRequest("tenant-los", "profile-1", Instant.parse("2026-06-18T08:00:00Z"),
+            fields, List.of(), Map.of(), clientSuppliedMetadata, "pipeline-1"), null, "corr-durable-summary");
+    LosApiModels.LoanPassProductExecutionResult product = service.executeProduct(
+        new LosApiModels.LoanPassExecuteProductRequest("tenant-los", "durable-product", "profile-1", Instant.parse("2026-06-18T08:00:00Z"),
+            fields, List.of(), Map.of(), clientSuppliedMetadata, "pipeline-1"), null, "corr-durable-product");
+
+    assertThat(summary.products()).extracting(LosApiModels.LoanPassExecutionProductSummary::productId)
+        .containsExactly("durable-product");
+    assertThat(summary.metadata())
+        .containsEntry("source", "quote-service")
+        .containsEntry("clientPublishedVersionRequestSourceOfTruth", false)
+        .containsEntry("durableQuoteServiceSource", true);
+    assertThat(product.productId()).isEqualTo("durable-product");
+    assertThat(product.metadata()).containsEntry("source", "quote-service");
+    assertThat(quoteClient.lastExecuteSummaryRequest).containsEntry("publishedVersionRequest", clientSuppliedMetadata);
+  }
+
+  @Test
+  void durableExecuteSummaryPreservesNoPricingStatusCounts() {
+    CapturingQuoteClient quoteClient = new CapturingQuoteClient();
+    LosPricingService service = durableService(quoteClient);
+    quoteClient.durableSummaryResponse = Map.of(
+        "success", true,
+        "operation", "execute-summary",
+        "snapshotId", "durable-snapshot-no-pricing",
+        "productCount", 3,
+        "statusCounts", Map.of("approved", 1, "no_pricing", 2),
+        "products", List.of(Map.of(
+            "productId", "durable-no-pricing",
+            "productName", "Durable No Pricing",
+            "status", "no_pricing",
+            "success", false)),
+        "versionMetadata", Map.of("schemaVersion", "durable-v1"));
+
+    LosApiModels.LoanPassExecutionSummaryResponse summary = service.executeSummary(
+        durableSummaryRequest(), null, "corr-no-pricing-summary");
+
+    assertThat(summary.totals().available()).isEqualTo(3);
+    assertThat(summary.totals().approved()).isEqualTo(1);
+    assertThat(summary.totals().noPricing()).isEqualTo(2);
+    assertThat(summary.products()).extracting(LosApiModels.LoanPassExecutionProductSummary::isPricingEnabled)
+        .containsExactly(false);
+    assertThat(summary.metadata()).containsKey("quoteServiceStatusCounts");
+    assertThat(((Map<?, ?>) summary.metadata().get("quoteServiceStatusCounts")).get("no_pricing"))
+        .isEqualTo(2);
+  }
+
+  @Test
+  void durableExecuteProductHonorsQuoteServiceSuccessFalseForNonPricingStatuses() {
+    CapturingQuoteClient quoteClient = new CapturingQuoteClient();
+    LosPricingService service = durableService(quoteClient);
+    List<Object> statuses = List.of("rejected", "no_pricing", "error", Map.of("type", "missing_executable_pricing"));
+
+    for (Object status : statuses) {
+      quoteClient.durableProductResponse = Map.ofEntries(
+          Map.entry("success", false),
+          Map.entry("operation", "execute-product"),
+          Map.entry("snapshotId", "durable-snapshot-false"),
+          Map.entry("productId", "durable-product"),
+          Map.entry("productName", "Durable Product"),
+          Map.entry("status", status),
+          Map.entry("versionMetadata", Map.of("schemaVersion", "durable-v1")));
+
+      LosApiModels.LoanPassProductExecutionResult product = service.executeProduct(
+          durableProductRequest(), null, "corr-product-false");
+
+      assertThat(product.isPricingEnabled()).as("status %s", status).isFalse();
+      assertThat(product.metadata())
+          .containsEntry("source", "quote-service")
+          .containsEntry("quoteServiceSuccess", false);
+    }
   }
 
   @Test
@@ -929,6 +1022,30 @@ class LosApiTest {
             new LosApiModels.CreditApplicationValue("number", 450000, null, null))));
   }
 
+  private LosPricingService durableService(CapturingQuoteClient quoteClient) {
+    LosFeatureFlagService flagService = new LosFeatureFlagService();
+    flagService.configure(flags("tenant-los", true, true, true, 2));
+    return new LosPricingService(new ObjectMapper(), new LosScenarioAdapter(), quoteClient,
+        new LosLockServiceClient(org.springframework.web.client.RestClient.builder(), ""),
+        new LosWebhookRegistry(new ObjectMapper(), false), new LosIdempotencyStore(), flagService);
+  }
+
+  private LosApiModels.LoanPassExecuteSummaryRequest durableSummaryRequest() {
+    return new LosApiModels.LoanPassExecuteSummaryRequest("tenant-los", "profile-1",
+        Instant.parse("2026-06-18T08:00:00Z"), List.of(new LosApiModels.CreditApplicationField("field@base-loan-amount",
+            new LosApiModels.CreditApplicationValue("number", 450000, null, null))),
+        List.of(), Map.of(), Map.of("products", List.of(Map.of("productId", "client-fabricated", "productName", "Client Fabricated"))),
+        "pipeline-1");
+  }
+
+  private LosApiModels.LoanPassExecuteProductRequest durableProductRequest() {
+    return new LosApiModels.LoanPassExecuteProductRequest("tenant-los", "durable-product", "profile-1",
+        Instant.parse("2026-06-18T08:00:00Z"), List.of(new LosApiModels.CreditApplicationField("field@base-loan-amount",
+            new LosApiModels.CreditApplicationValue("number", 450000, null, null))),
+        List.of(), Map.of(), Map.of("products", List.of(Map.of("productId", "client-fabricated", "productName", "Client Fabricated"))),
+        "pipeline-1");
+  }
+
   private static LoanPassTenantFlags flags(String tenantId, boolean compatibilityEnabled, boolean strictMappingEnabled,
       boolean callbackDeliveryEnabled, int version) {
     return new LoanPassTenantFlags(tenantId, compatibilityEnabled, strictMappingEnabled, callbackDeliveryEnabled,
@@ -939,6 +1056,9 @@ class LosApiTest {
 
   private static class CapturingQuoteClient extends LosQuoteServiceClient {
     private LosApiModels.QuoteServiceRequest lastRequest;
+    private Map<String, Object> lastExecuteSummaryRequest;
+    private Map<String, Object> durableSummaryResponse;
+    private Map<String, Object> durableProductResponse;
 
     CapturingQuoteClient() {
       super(org.springframework.web.client.RestClient.builder(), "");
@@ -949,6 +1069,49 @@ class LosApiTest {
       this.lastRequest = request;
       return new LosApiModels.QuoteServiceResponse("job-" + request.requestId(), "QUEUED",
           "/api/v1/los/quote-requests/job-" + request.requestId(), request.correlationId());
+    }
+
+    @Override
+    boolean hasDurableLoanPassExecuteIntegration() {
+      return true;
+    }
+
+    @Override
+    Map<String, Object> executeSummary(Map<String, Object> request, String tenantId, String correlationId) {
+      this.lastExecuteSummaryRequest = request;
+      if (durableSummaryResponse != null) return durableSummaryResponse;
+      return Map.of(
+          "success", true,
+          "operation", "execute-summary",
+          "snapshotId", "durable-snapshot-001",
+          "sourceSystem", "quote-service-durable-catalog",
+          "productCount", 1,
+          "statusCounts", Map.of("approved", 1),
+          "products", List.of(Map.of(
+              "productId", "durable-product",
+              "productName", "Durable Product",
+              "investorName", "Durable Investor",
+              "productType", "durable-source-derived",
+              "status", "approved")),
+          "versionMetadata", Map.of("schemaVersion", "durable-v1", "payloadHash", "durable-hash"));
+    }
+
+    @Override
+    Map<String, Object> executeProduct(Map<String, Object> request, String tenantId, String correlationId) {
+      if (durableProductResponse != null) return durableProductResponse;
+      return Map.ofEntries(
+          Map.entry("success", true),
+          Map.entry("operation", "execute-product"),
+          Map.entry("snapshotId", "durable-snapshot-001"),
+          Map.entry("sourceSystem", "quote-service-durable-catalog"),
+          Map.entry("productId", "durable-product"),
+          Map.entry("productName", "Durable Product"),
+          Map.entry("investorName", "Durable Investor"),
+          Map.entry("status", "approved"),
+          Map.entry("rates", List.of(Map.of("lockPeriodDays", "30", "noteRatePercent", "6.12500"))),
+          Map.entry("lockPeriods", List.of(30)),
+          Map.entry("calculations", Map.of("calculationPolicy", "durable-source-derived")),
+          Map.entry("versionMetadata", Map.of("schemaVersion", "durable-v1", "payloadHash", "durable-hash")));
     }
   }
 

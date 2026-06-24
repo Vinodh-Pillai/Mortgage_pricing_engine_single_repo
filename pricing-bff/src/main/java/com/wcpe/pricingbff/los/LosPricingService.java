@@ -121,6 +121,9 @@ class LosPricingService {
     LoanPassTenantFlags flags = flagsForTenant(tenantId);
     requireLoanPassCompatibility(flags);
     validateCreditApplicationEnumMappings(request.creditApplicationFields(), flags);
+    if (quoteClient.hasDurableLoanPassExecuteIntegration()) {
+      return durableQuoteExecuteSummary(request, tenantId, correlationId);
+    }
     Map<String, Object> metadata = executeMetadata("/api/v1/los/execute-summary", "execute-summary", tenantId,
         request.pricingProfileId(), request.pipelineRecordId(), request.currentTime(), request.outputFieldsFilter(),
         request.publishedVersionRequest(), request.creditApplicationFields().size(), request.ausFields().size(), correlationId, flags);
@@ -143,6 +146,9 @@ class LosPricingService {
     LoanPassTenantFlags flags = flagsForTenant(tenantId);
     requireLoanPassCompatibility(flags);
     validateCreditApplicationEnumMappings(request.creditApplicationFields(), flags);
+    if (quoteClient.hasDurableLoanPassExecuteIntegration()) {
+      return durableQuoteExecuteProduct(request, tenantId, correlationId);
+    }
     Map<String, Object> metadata = executeMetadata("/api/v1/los/execute-product", "execute-product", tenantId,
         request.pricingProfileId(), request.pipelineRecordId(), request.currentTime(), request.outputFieldsFilter(),
         request.publishedVersionRequest(), request.creditApplicationFields().size(), request.ausFields().size(), correlationId, flags);
@@ -186,6 +192,166 @@ class LosPricingService {
       context.put("scenarioVersion", Integer.toString(scenario.scenarioVersion()));
     }
     return Map.copyOf(context);
+  }
+
+  private LoanPassExecutionSummaryResponse durableQuoteExecuteSummary(LoanPassExecuteSummaryRequest request, String tenantId,
+      String correlationId) {
+    Map<String, Object> quoteRequest = durableQuoteExecuteSummaryRequest(request);
+    Map<String, Object> durable = quoteClient.executeSummary(quoteRequest, tenantId, correlationId);
+    List<Map<String, Object>> quoteProducts = listOfMaps(durable.get("products"));
+    List<LoanPassExecutionProductSummary> products = quoteProducts.stream()
+        .map(product -> new LoanPassExecutionProductSummary(
+            text(product, "productId"), text(product, "productName"), text(product, "productCode"),
+            text(product, "investorName"), text(product, "investorCode"), List.of(),
+            durableCalculatedFields(product), booleanValue(product.get("success")), durableStatus(product.get("status")),
+            durableVersion(durable)))
+        .toList();
+    Map<?, ?> counts = durable.get("statusCounts") instanceof Map<?, ?> rawCounts ? rawCounts : Map.of();
+    LoanPassExecutionSummaryTotals totals = new LoanPassExecutionSummaryTotals(
+        number(counts.get("approved")), number(counts.get("review_required")),
+        numberOrDefault(durable.get("productCount"), products.size()), number(counts.get("rejected")), number(counts.get("error")),
+        number(counts.get("no_pricing")));
+    return new LoanPassExecutionSummaryResponse(totals, products, durableVersion(durable),
+        durableMetadata(durable, "execute-summary", "/api/v1/los/execute-summary"));
+  }
+
+  private LoanPassProductExecutionResult durableQuoteExecuteProduct(LoanPassExecuteProductRequest request, String tenantId,
+      String correlationId) {
+    Map<String, Object> quoteRequest = durableQuoteExecuteProductRequest(request);
+    Map<String, Object> durable = quoteClient.executeProduct(quoteRequest, tenantId, correlationId);
+    return new LoanPassProductExecutionResult(text(durable, "productId"), text(durable, "productName"),
+        text(durable, "productCode"), text(durable, "investorName"), text(durable, "investorCode"),
+        durableProductPricingEnabled(durable), durableProductFields(durable), durableCalculatedFields(durable),
+        durableStatus(durable.get("status")), durableVersion(durable),
+        durableMetadata(durable, "execute-product", "/api/v1/los/execute-product"));
+  }
+
+  private Map<String, Object> durableQuoteExecuteSummaryRequest(LoanPassExecuteSummaryRequest request) {
+    Map<String, Object> payload = new LinkedHashMap<>();
+    putIfPresent(payload, "tenantId", request.tenantId());
+    putIfPresent(payload, "pricingProfileId", request.pricingProfileId());
+    payload.put("currentTime", request.currentTime().toString());
+    payload.put("creditApplicationFields", request.creditApplicationFields());
+    payload.put("ausFields", request.ausFields());
+    payload.put("outputFieldsFilter", request.outputFieldsFilter());
+    payload.put("publishedVersionRequest", request.publishedVersionRequest());
+    putIfPresent(payload, "pipelineRecordId", request.pipelineRecordId());
+    return Map.copyOf(payload);
+  }
+
+  private Map<String, Object> durableQuoteExecuteProductRequest(LoanPassExecuteProductRequest request) {
+    Map<String, Object> payload = new LinkedHashMap<>();
+    putIfPresent(payload, "tenantId", request.tenantId());
+    putIfPresent(payload, "productId", request.productId());
+    putIfPresent(payload, "selectedProgramId", request.productId());
+    putIfPresent(payload, "pricingProfileId", request.pricingProfileId());
+    payload.put("currentTime", request.currentTime().toString());
+    payload.put("creditApplicationFields", request.creditApplicationFields());
+    payload.put("ausFields", request.ausFields());
+    payload.put("outputFieldsFilter", request.outputFieldsFilter());
+    payload.put("publishedVersionRequest", request.publishedVersionRequest());
+    putIfPresent(payload, "pipelineRecordId", request.pipelineRecordId());
+    return Map.copyOf(payload);
+  }
+
+  private List<Map<String, Object>> listOfMaps(Object value) {
+    if (!(value instanceof List<?> values)) return List.of();
+    List<Map<String, Object>> mapped = new ArrayList<>();
+    for (Object item : values) {
+      if (item instanceof Map<?, ?> raw) {
+        Map<String, Object> product = new LinkedHashMap<>();
+        raw.forEach((key, rawValue) -> {
+          if (key != null) product.put(key.toString(), rawValue);
+        });
+        mapped.add(Map.copyOf(product));
+      }
+    }
+    return List.copyOf(mapped);
+  }
+
+  private List<CreditApplicationField> durableProductFields(Map<String, Object> durable) {
+    List<CreditApplicationField> fields = new ArrayList<>();
+    addMetadataField(fields, "field@quote-service-rules", "quote-service-rules", durable.get("rules"));
+    addMetadataField(fields, "field@quote-service-stipulations", "quote-service-stipulations", durable.get("stipulations"));
+    addMetadataField(fields, "field@quote-service-rejections", "quote-service-rejections", durable.get("rejections"));
+    return List.copyOf(fields);
+  }
+
+  private List<CreditApplicationField> durableCalculatedFields(Map<String, Object> durable) {
+    List<CreditApplicationField> fields = new ArrayList<>();
+    addMetadataField(fields, "field@quote-service-rates", "quote-service-rates", durable.get("rates"));
+    addMetadataField(fields, "field@quote-service-lock-periods", "quote-service-lock-periods", durable.get("lockPeriods"));
+    addMetadataField(fields, "field@quote-service-calculations", "quote-service-calculations", durable.get("calculations"));
+    return List.copyOf(fields);
+  }
+
+  private Map<String, Object> durableStatus(Object status) {
+    if (status instanceof Map<?, ?> rawStatus) {
+      Map<String, Object> mapped = new LinkedHashMap<>();
+      rawStatus.forEach((key, value) -> {
+        if (key != null) mapped.put(key.toString(), value);
+      });
+      return Map.copyOf(mapped);
+    }
+    Map<String, Object> mapped = new LinkedHashMap<>();
+    mapped.put("type", blankObject(status) ? "available" : status.toString());
+    mapped.put("source", "quote-service");
+    return Map.copyOf(mapped);
+  }
+
+  private boolean durableProductPricingEnabled(Map<String, Object> durable) {
+    if (durable.containsKey("success")) return booleanValue(durable.get("success"));
+    String statusType = normalizedStatusType(durable.get("status"));
+    return !Set.of("rejected", "no_pricing", "error", "missing_executable_pricing").contains(statusType);
+  }
+
+  private String normalizedStatusType(Object status) {
+    String raw = "";
+    if (status instanceof Map<?, ?> rawStatus) {
+      Object type = rawStatus.get("type");
+      raw = type == null ? text(rawStatus, "status") : type.toString();
+    } else if (!blankObject(status)) {
+      raw = status.toString();
+    }
+    return raw.trim().toLowerCase().replace('-', '_').replace(' ', '_');
+  }
+
+  private Map<String, Object> durableMetadata(Map<String, Object> durable, String operationConcept, String bffEndpoint) {
+    Map<String, Object> metadata = new LinkedHashMap<>();
+    metadata.put("source", "quote-service");
+    metadata.put("endpoint", bffEndpoint);
+    metadata.put("operationConcept", operationConcept);
+    metadata.put("durableQuoteServiceSource", true);
+    metadata.put("clientPublishedVersionRequestSourceOfTruth", false);
+    putIfPresent(metadata, "quoteServiceOperation", text(durable, "operation"));
+    putIfPresent(metadata, "quoteServiceSnapshotId", text(durable, "snapshotId"));
+    putIfPresent(metadata, "quoteServiceSourceSystem", text(durable, "sourceSystem"));
+    if (durable.containsKey("success")) metadata.put("quoteServiceSuccess", durable.get("success"));
+    if (durable.get("statusCounts") instanceof Map<?, ?> statusCounts) metadata.put("quoteServiceStatusCounts", Map.copyOf(statusCounts));
+    if (durable.containsKey("synthetic")) metadata.put("quoteServiceSynthetic", durable.get("synthetic"));
+    if (durable.get("versionMetadata") instanceof Map<?, ?> versionMetadata) metadata.put("quoteServiceVersionMetadata", Map.copyOf(versionMetadata));
+    addLoanPassPublicApiMetadata(metadata);
+    return Map.copyOf(metadata);
+  }
+
+  private String durableVersion(Map<String, Object> durable) {
+    if (durable.get("versionMetadata") instanceof Map<?, ?> versionMetadata) {
+      String schemaVersion = text(versionMetadata, "schemaVersion");
+      if (!blank(schemaVersion)) return schemaVersion;
+      String payloadHash = text(versionMetadata, "payloadHash");
+      if (!blank(payloadHash)) return payloadHash;
+    }
+    return text(durable, "snapshotId");
+  }
+
+  private int number(Object value) {
+    return numberOrDefault(value, 0);
+  }
+
+  private int numberOrDefault(Object value, int defaultValue) {
+    if (value instanceof Number number) return number.intValue();
+    if (value == null || value.toString().isBlank()) return defaultValue;
+    return Integer.parseInt(value.toString());
   }
 
   private Map<String, Object> executeMetadata(String endpoint, String operationConcept, String tenantId,

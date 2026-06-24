@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { ChangeEvent, FormEvent } from 'react';
+import type { ChangeEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { fetchProductAdmin, type ProductAdminMapping, type ProductAdminProduct, type ProductAdminStipulation, type ProductAdminView } from '../../lib/api/products';
 import { usePageActions } from '../../layout/PageActionsContext';
 
@@ -135,6 +135,7 @@ export function ProductManagementScreen({ fetchImpl = fetch, tenantContext = 'ui
   const mappings = view?.mappings ?? [];
   const pricingRuleSets = view?.pricingRuleSets ?? [];
   const lifecycleOptions = useMemo(() => Array.from(new Set([...(view?.lifecycle ?? []), 'DRAFT', 'ACTIVE', 'DISABLED'])).filter(Boolean), [view?.lifecycle]);
+  const isLoading = state.kind === 'loading';
 
   const filterOptions = useMemo(() => ({
     investor: selectOptions(products.map((product) => product.investorCode)),
@@ -181,15 +182,40 @@ export function ProductManagementScreen({ fetchImpl = fetch, tenantContext = 'ui
     setExportText(JSON.stringify(payload.map(toExportProduct), null, 2));
   }
 
+  function closeSlideOver() {
+    setSlideOver(null);
+  }
+
+  function openProductDetail(productId: string) {
+    if (isLoading) return;
+    setSlideOver({ kind: 'detail', productId });
+    setActiveTab('General');
+  }
+
+  function handleOpenProductKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>, productId: string) {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    openProductDetail(productId);
+  }
+
+  useEffect(() => {
+    if (!slideOver) return undefined;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeSlideOver();
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [slideOver]);
+
   const promotedProductActions = useMemo(() => (
     <div className="pm-actions" aria-label="Product management actions">
-      <button type="button" className="pm-primary" onClick={() => setSlideOver({ kind: 'add' })}>Add Product</button>
-      <button type="button" onClick={() => bulkStatus('ACTIVE')} disabled={!selectedIds.size}>Enable</button>
-      <button type="button" onClick={() => bulkStatus('DISABLED')} disabled={!selectedIds.size}>Disable</button>
-      <button type="button" onClick={assignBulkInvestor} disabled={!selectedIds.size || !bulkInvestor.trim()}>Assign</button>
-      <button type="button" onClick={exportSelected}>Export</button>
+      <button type="button" className="pm-primary" onClick={() => setSlideOver({ kind: 'add' })} disabled={isLoading}>Add Product</button>
+      <button type="button" onClick={() => bulkStatus('ACTIVE')} disabled={isLoading || !selectedIds.size}>Enable</button>
+      <button type="button" onClick={() => bulkStatus('DISABLED')} disabled={isLoading || !selectedIds.size}>Disable</button>
+      <button type="button" onClick={assignBulkInvestor} disabled={isLoading || !selectedIds.size || !bulkInvestor.trim()}>Assign</button>
+      <button type="button" onClick={exportSelected} disabled={isLoading}>Export</button>
     </div>
-  ), [bulkInvestor, filteredProducts, selectedIds.size, selectedProducts]);
+  ), [bulkInvestor, filteredProducts, isLoading, selectedIds.size, selectedProducts]);
 
   useEffect(() => {
     setPromotedActions({ label: 'Product management page actions', actions: promotedProductActions });
@@ -246,9 +272,9 @@ export function ProductManagementScreen({ fetchImpl = fetch, tenantContext = 'ui
 
   if (state.kind === 'loading') {
     return (
-      <section className="pm-shell pm-shell--loading" aria-labelledby="product-management-title">
+      <section className="pm-shell pm-shell--loading" aria-labelledby="product-management-title" aria-busy="true">
         <style>{productManagementStyles}</style>
-        <div className="pm-glass pm-loader" role="status">Loading</div>
+        <div className="pm-glass pm-loader" role="status" aria-live="polite">Loading products…</div>
       </section>
     );
   }
@@ -275,7 +301,7 @@ export function ProductManagementScreen({ fetchImpl = fetch, tenantContext = 'ui
             {state.kind === 'blocked' ? <span className="pm-pill pm-pill--warn">Connected product catalog unavailable</span> : null}
           </div>
           <div className="pm-actions">
-            <button type="button" className="pm-primary" onClick={() => setSlideOver({ kind: 'add' })}>Add Product</button>
+            <button type="button" className="pm-primary" onClick={() => setSlideOver({ kind: 'add' })} disabled={isLoading}>Add Product</button>
           </div>
         </header>
 
@@ -284,11 +310,11 @@ export function ProductManagementScreen({ fetchImpl = fetch, tenantContext = 'ui
           <details className="pm-bulk-details">
             <summary>Bulk actions</summary>
             <div className="pm-bulk-details__controls">
-              <button type="button" onClick={() => bulkStatus('ACTIVE')} disabled={!selectedIds.size}>Enable</button>
-              <button type="button" onClick={() => bulkStatus('DISABLED')} disabled={!selectedIds.size}>Disable</button>
+              <button type="button" onClick={() => bulkStatus('ACTIVE')} disabled={isLoading || !selectedIds.size}>Enable</button>
+              <button type="button" onClick={() => bulkStatus('DISABLED')} disabled={isLoading || !selectedIds.size}>Disable</button>
               <input value={bulkInvestor} onChange={(event) => setBulkInvestor(event.target.value)} placeholder="Investor" aria-label="Bulk investor" />
-              <button type="button" onClick={assignBulkInvestor} disabled={!selectedIds.size || !bulkInvestor.trim()}>Assign</button>
-              <button type="button" onClick={exportSelected}>Export</button>
+              <button type="button" onClick={assignBulkInvestor} disabled={isLoading || !selectedIds.size || !bulkInvestor.trim()}>Assign</button>
+              <button type="button" onClick={exportSelected} disabled={isLoading}>Export</button>
             </div>
           </details>
           <span className="pm-count">{filteredProducts.length}/{products.length}</span>
@@ -298,7 +324,7 @@ export function ProductManagementScreen({ fetchImpl = fetch, tenantContext = 'ui
 
         <section className="pm-grid" aria-label="Products">
           {filteredProducts.map((product, index) => (
-            <article className="pm-card pm-glass" key={`${product.productId}-${index}`} onClick={() => { setSlideOver({ kind: 'detail', productId: product.productId }); setActiveTab('General'); }}>
+            <article className="pm-card pm-glass" key={`${product.productId}-${index}`} onClick={() => openProductDetail(product.productId)}>
               <div className="pm-card-top">
                 <input type="checkbox" aria-label={`Select ${product.productCode}`} checked={selectedIds.has(product.productId)} onClick={(event) => event.stopPropagation()} onChange={() => toggleSelected(product.productId)} />
                 <span className={`pm-status pm-status--${String(product.status).toLowerCase()}`}>{product.status}</span>
@@ -313,13 +339,14 @@ export function ProductManagementScreen({ fetchImpl = fetch, tenantContext = 'ui
                 </select>
                 <input value={product.investorCode} aria-label={`${product.productCode} investor`} onChange={(event) => patchProduct(product.productId, { investorCode: event.target.value })} />
               </div>
+              <button type="button" className="pm-card-open" onClick={(event) => { event.stopPropagation(); openProductDetail(product.productId); }} onKeyDown={(event) => handleOpenProductKeyDown(event, product.productId)}>Open {product.productName} details</button>
             </article>
           ))}
         </section>
       </main>
 
-      {slideOver?.kind === 'add' ? <AddProductPanel onClose={() => setSlideOver(null)} onSubmit={createProduct} pricingRuleSets={pricingRuleSets} /> : null}
-      {activeProduct ? <ProductDetailPanel product={activeProduct} activeTab={activeTab} tabs={detailTabs} stipulations={stipulations} mappings={mappings} onTab={setActiveTab} onClose={() => setSlideOver(null)} onPatch={(patch) => patchProduct(activeProduct.productId, patch)} /> : null}
+      {slideOver?.kind === 'add' ? <AddProductPanel onClose={closeSlideOver} onSubmit={createProduct} pricingRuleSets={pricingRuleSets} /> : null}
+      {activeProduct ? <ProductDetailPanel product={activeProduct} activeTab={activeTab} tabs={detailTabs} stipulations={stipulations} mappings={mappings} onTab={setActiveTab} onClose={closeSlideOver} onPatch={(patch) => patchProduct(activeProduct.productId, patch)} /> : null}
     </section>
   );
 }
@@ -337,7 +364,7 @@ function AddProductPanel({ onClose, onSubmit, pricingRuleSets }: { onClose: () =
   return (
     <div className="pm-scrim" role="presentation">
       <aside className="pm-panel pm-glass" role="dialog" aria-modal="true" aria-labelledby="add-product-title">
-        <div className="pm-panel-head"><h2 id="add-product-title">Add Product</h2><button type="button" onClick={onClose}>×</button></div>
+        <div className="pm-panel-head"><h2 id="add-product-title">Add Product</h2><button type="button" onClick={onClose} aria-label="Close add product dialog">×</button></div>
         <form className="pm-form" onSubmit={onSubmit}>
           <Field name="productCode" label="Code" required />
           <Field name="productName" label="Name" required />
@@ -383,7 +410,7 @@ function ProductDetailPanel({ product, activeTab, tabs, stipulations, mappings, 
   return (
     <div className="pm-scrim" role="presentation">
       <aside className="pm-panel pm-panel--detail pm-glass" role="dialog" aria-modal="true" aria-labelledby="product-detail-title">
-        <div className="pm-panel-head"><div><p className="pm-kicker">{product.productCode}</p><h2 id="product-detail-title">{product.productName}</h2></div><button type="button" onClick={onClose}>×</button></div>
+        <div className="pm-panel-head"><div><p className="pm-kicker">{product.productCode}</p><h2 id="product-detail-title">{product.productName}</h2></div><button type="button" onClick={onClose} aria-label={`Close ${product.productName} details`}>×</button></div>
         <nav className="pm-tabs" aria-label="Product detail tabs">{tabs.map((tab) => <button key={tab} type="button" aria-pressed={activeTab === tab} onClick={() => onTab(tab)}>{tab}</button>)}</nav>
         {activeTab === 'General' ? (
           <div className="pm-detail-grid">
@@ -537,12 +564,13 @@ const productManagementStyles = `
 .pm-primary, .pm-secondary, .pm-shell button { border: 0; border-radius: 999px; color: #f8fbff; background: rgba(255, 255, 255, .14); padding: 10px 14px; cursor: pointer; font-weight: 800; }
 .pm-primary { background: linear-gradient(135deg, #27d5ff, #8b5cf6); color: #06101d; }
 .pm-secondary { width: 100%; color: #cde7ff; }
+.pm-shell button:focus-visible, .pm-card:focus-within { outline: 2px solid #8fd7ff; outline-offset: 3px; }
 .pm-shell button:disabled { opacity: .42; cursor: not-allowed; }
 .pm-pill { display: inline-flex; margin-top: 5px; border-radius: 999px; padding: 4px 9px; font-size: 11px; background: rgba(255,255,255,.12); }
 .pm-pill--warn { color: #ffe0a3; }
 .pm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(245px, 1fr)); gap: 14px; }
 .pm-card { min-height: 206px; border-radius: 26px; padding: 16px; cursor: pointer; display: grid; gap: 10px; align-content: start; transition: transform .16s ease, border-color .16s ease; }
-.pm-card:hover { transform: translateY(-2px); border-color: rgba(88, 218, 255, .48); }
+.pm-card:hover, .pm-card:focus-visible { transform: translateY(-2px); border-color: rgba(88, 218, 255, .48); }
 .pm-card-top, .pm-card-meta, .pm-quick-row { display: flex; align-items: center; gap: 8px; }
 .pm-card-top { justify-content: space-between; }
 .pm-status { border-radius: 999px; padding: 4px 9px; background: rgba(148, 163, 184, .18); color: #dbeafe; font-size: 11px; font-weight: 900; }
@@ -555,6 +583,7 @@ const productManagementStyles = `
 .pm-rate { font-size: 21px; font-weight: 900; color: #b8f3ff; }
 .pm-quick-row select { flex: 1; min-width: 110px; }
 .pm-quick-row input { flex: 1; min-width: 90px; }
+.pm-card-open { justify-self: start; }
 .pm-export { min-height: 108px; border-radius: 22px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .pm-scrim { position: fixed; inset: 0; z-index: 30; display: flex; justify-content: flex-end; background: rgba(2, 6, 23, .48); }
 .pm-panel { width: min(760px, 96vw); height: 100vh; overflow: auto; border-radius: 30px 0 0 30px; padding: 18px; }

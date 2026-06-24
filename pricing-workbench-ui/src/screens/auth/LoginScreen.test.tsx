@@ -1,4 +1,5 @@
 import '@testing-library/jest-dom/vitest';
+import type { ComponentProps } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
@@ -38,13 +39,13 @@ function LocationProbe() {
   return <p data-testid="location">{location.pathname}</p>;
 }
 
-function renderLogin(initialEntries = ['/login']) {
+function renderLogin(initialEntries = ['/login'], props: Partial<ComponentProps<typeof LoginScreen>> = {}) {
   return render(
     <LocaleProvider>
       <AuthProvider>
         <MemoryRouter initialEntries={initialEntries}>
           <Routes>
-            <Route path="/login" element={<LoginScreen />} />
+            <Route path="/login" element={<LoginScreen {...props} />} />
             <Route path="*" element={<LocationProbe />} />
           </Routes>
         </MemoryRouter>
@@ -71,6 +72,18 @@ describe('LoginScreenTest', () => {
     expect(await screen.findByLabelText('Email')).toBeInTheDocument();
     expect(screen.getByLabelText('Password')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /forgot password/i })).toBeInTheDocument();
+  });
+
+  it('LoginScreenTest.removesMisleadingPasswordPrefix', async () => {
+    renderLogin();
+    expect(await screen.findByLabelText('Password')).toBeInTheDocument();
+    expect(screen.queryByText('••')).not.toBeInTheDocument();
+  });
+
+  it('LoginScreenTest.showsExplicitAuthLoadingState', async () => {
+    renderLogin(['/login'], { loading: true, disableAutoRedirect: true });
+    expect(await screen.findByRole('status')).toHaveTextContent('Checking your session before sign in…');
+    expect(screen.getByRole('button', { name: 'Checking session…' })).toBeDisabled();
   });
 
   it('LoginScreenTest.noShellWrapper', async () => {
@@ -108,7 +121,7 @@ describe('LoginScreenTest', () => {
 
   it('LoginScreenTest.showsInvalidCredentialsError', async () => {
     rejectLogin = true;
-    renderLogin();
+    renderLogin(['/login'], { disableAutoRedirect: true });
     fireEvent.change(await screen.findByLabelText('Email'), { target: { value: 'bad@example.com' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'bad' } });
     fireEvent.click(screen.getByRole('button', { name: /sign in/i }));

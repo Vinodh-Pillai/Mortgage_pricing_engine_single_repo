@@ -27,6 +27,25 @@ export function AccessDenied({ route }: { route: string }) {
   );
 }
 
+function AuthGateLoading() {
+  return (
+    <section className="auth-gate auth-gate--loading panel" aria-labelledby="auth-gate-heading" data-testid="auth-gate">
+      <p className="eyebrow">Authentication</p>
+      <h2 id="auth-gate-heading">Checking session</h2>
+      <p role="status">Checking authentication…</p>
+    </section>
+  );
+}
+
+function UnauthenticatedRedirect({ to }: { to: string }) {
+  return (
+    <>
+      <span className="auth-gate auth-gate--redirecting" data-testid="auth-gate" aria-hidden="true" hidden />
+      <Navigate to={to} replace state={{ from: useLocation() }} />
+    </>
+  );
+}
+
 export function RouteGuard({ children, route, requiredPermission, publicRoutes = ['/login'], accessDeniedComponent }: RouteGuardProps) {
   const location = useLocation();
   const { isAuthenticated, isLoading, hasPermission, canAccessRoute } = useAuth();
@@ -37,11 +56,11 @@ export function RouteGuard({ children, route, requiredPermission, publicRoutes =
   if (isPublic) return children;
 
   if (isLoading) {
-    return <section className="panel"><p role="status">Checking authentication…</p></section>;
+    return <AuthGateLoading />;
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace state={{ from: location }} />;
+    return <UnauthenticatedRedirect to="/login" />;
   }
 
   const allowed = requiredPermission ? hasPermission(requiredPermission) : canAccessRoute(targetRoute);

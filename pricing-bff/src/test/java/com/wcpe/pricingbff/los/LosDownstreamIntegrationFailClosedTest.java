@@ -46,6 +46,30 @@ class LosDownstreamIntegrationFailClosedTest {
   }
 
   @Test
+  void loanPassExecuteClientDefaultsToDurableQuoteServicePaths() {
+    RestClient.Builder builder = RestClient.builder();
+    MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+    server.expect(requestTo("https://quote-service.test/api/v1/loanpass/execute-summary"))
+        .andExpect(method(HttpMethod.POST))
+        .andRespond(withSuccess("""
+            {"success":true,"operation":"execute-summary","snapshotId":"snap-1","productCount":0,"products":[],"versionMetadata":{"schemaVersion":"loanpass-public-concept-aligned-v1"}}
+            """, MediaType.APPLICATION_JSON));
+    server.expect(requestTo("https://quote-service.test/api/v1/loanpass/execute-product"))
+        .andExpect(method(HttpMethod.POST))
+        .andRespond(withSuccess("""
+            {"success":true,"operation":"execute-product","snapshotId":"snap-1","productId":"lp-product-1","productName":"LP Product","status":"approved","rates":[],"lockPeriods":[],"versionMetadata":{"schemaVersion":"loanpass-public-concept-aligned-v1"}}
+            """, MediaType.APPLICATION_JSON));
+
+    LosQuoteServiceClient client = new LosQuoteServiceClient(builder, "https://quote-service.test");
+
+    assertThat(client.executeSummary(java.util.Map.of("tenantId", "tenant-los"), "tenant-los", "corr-1"))
+        .containsEntry("operation", "execute-summary");
+    assertThat(client.executeProduct(java.util.Map.of("productId", "lp-product-1"), "tenant-los", "corr-1"))
+        .containsEntry("operation", "execute-product");
+    server.verify();
+  }
+
+  @Test
   void lockClientFailsClosedWhenBaseUrlMissing() {
     LosLockServiceClient client = new LosLockServiceClient(RestClient.builder(), "");
     LosApiModels.LosLockRequest request = new LosApiModels.LosLockRequest("pricing-1", "offer-1", 30, "loan-officer");

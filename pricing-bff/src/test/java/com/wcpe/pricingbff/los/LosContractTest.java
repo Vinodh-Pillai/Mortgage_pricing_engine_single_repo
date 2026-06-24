@@ -33,6 +33,15 @@ class LosContractTest {
   }
 
   @Test
+  void loanPassExecuteSchemasAndScopesAreDocumented() {
+    assertThat(spec).contains("/execute-summary:", "executeLoanPassSummary", "LoanPassExecuteSummaryRequest:",
+        "LoanPassExecutionSummaryResponse:", "LoanPassExecutionSummaryTotals:", "LoanPassExecutionProductSummary:",
+        "operationConcept", "los:pricing-request:write scope");
+    assertThat(spec).contains("/execute-product:", "executeLoanPassProduct", "LoanPassExecuteProductRequest:",
+        "LoanPassProductExecutionResult:", "Tenant-authorized product identifier", "Product-specific fields");
+  }
+
+  @Test
   void lockRequestSchema() {
     assertThat(spec).contains("LosLockRequest:", "LosLockResponse:", "/locks:", "/locks/{id}/extend:");
   }
@@ -47,7 +56,8 @@ class LosContractTest {
 
   @Test
   void permissionScopeMatrixAndDeniedPayloadsAreDocumented() {
-    assertThat(spec).contains("x-los-permission-scopes:", "requiredScope: los:pricing-request:write",
+    assertThat(spec).contains("x-los-permission-scopes:", "path: /execute-summary", "path: /execute-product",
+        "requiredScope: los:pricing-request:write",
         "requiredScope: los:product-catalog:read", "requiredScope: los:product-eligibility:write",
         "requiredScope: los:webhook:write", "X-LOS-Scopes", "X-LOS-Service-Scopes",
         "Permission denied because a required LOS API scope is missing", "'403':");

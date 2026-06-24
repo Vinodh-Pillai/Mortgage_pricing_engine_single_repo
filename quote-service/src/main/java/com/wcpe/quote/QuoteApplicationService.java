@@ -705,7 +705,7 @@ public class QuoteApplicationService {
         facts.put("noteRatePercent", candidate.noteRatePercent());
         facts.put("basePriceBps", candidate.basePriceBps());
         facts.put("scenarioVersion", request.scenarioVersion());
-        BasePriceDecisionStub baseDecision = new BasePriceDecisionStub(
+        BasePriceDecision baseDecision = new BasePriceDecision(
             request.scenarioId().toString(), candidate.candidateId(), candidate.productId(),
             candidate.basePriceBps().movePointLeft(2).doubleValue(), request.presentationCurrency(), "quote-service");
         return new AdjustmentCalculationRequest(

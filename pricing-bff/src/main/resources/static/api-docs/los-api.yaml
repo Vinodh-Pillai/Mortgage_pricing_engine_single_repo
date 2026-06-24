@@ -14,6 +14,14 @@ x-los-permission-scopes:
     path: /pricing-requests
     requiredScope: los:pricing-request:write
     clientType: interactive
+  - method: POST
+    path: /execute-summary
+    requiredScope: los:pricing-request:write
+    clientType: interactive
+  - method: POST
+    path: /execute-product
+    requiredScope: los:pricing-request:write
+    clientType: interactive
   - method: GET
     path: /pricing-requests/{id}
     requiredScope: los:pricing-request:read
@@ -247,6 +255,70 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LosPricingResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /execute-summary:
+    post:
+      operationId: executeLoanPassSummary
+      summary: Execute LoanPass-compatible pricing summary through the BFF fail-closed boundary.
+      description: Runs the LoanPass public API execute-summary concept only for authenticated interactive LOS clients with los:pricing-request:write scope. The BFF calls quote-service through its internal /api/v1/loanpass route and fails closed when durable product catalog, authorization, rules, stipulations, rate, or lock-period metadata is unavailable; browsers and LOS clients must not call quote-service directly.
+      parameters:
+        - $ref: '#/components/parameters/LosSystem'
+        - $ref: '#/components/parameters/LosVersion'
+        - $ref: '#/components/parameters/LosScopes'
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: X-Tenant-ID
+          in: header
+          required: false
+          schema: { type: string }
+          description: Tenant context used to authorize product visibility. Missing tenant context fails closed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoanPassExecuteSummaryRequest' }
+      responses:
+        '200':
+          description: LoanPass-compatible summary response or explicit fail-closed metadata.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoanPassExecutionSummaryResponse' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /execute-product:
+    post:
+      operationId: executeLoanPassProduct
+      summary: Execute one LoanPass-compatible product detail through the BFF fail-closed boundary.
+      description: Runs the LoanPass public API execute-product concept only for authenticated interactive LOS clients with los:pricing-request:write scope. Product-specific fields, calculated fields, rates, lock periods, and stipulations are returned only from durable configured metadata; missing catalog or authorization metadata returns explicit blocked/error metadata instead of inferred pricing rules.
+      parameters:
+        - $ref: '#/components/parameters/LosSystem'
+        - $ref: '#/components/parameters/LosVersion'
+        - $ref: '#/components/parameters/LosScopes'
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: X-Tenant-ID
+          in: header
+          required: false
+          schema: { type: string }
+          description: Tenant context used to authorize product visibility. Missing tenant context fails closed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoanPassExecuteProductRequest' }
+      responses:
+        '200':
+          description: LoanPass-compatible product response or explicit fail-closed metadata.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoanPassProductExecutionResult' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -539,6 +611,89 @@ components:
         value: {}
         enumTypeId: { type: string }
         variantId: { type: string }
+    LoanPassExecuteSummaryRequest:
+      type: object
+      description: LoanPass-compatible execute-summary request accepted only through the BFF LOS API with los:pricing-request:write scope.
+      properties:
+        tenantId:
+          type: string
+          description: Tenant mapping identifier. May also be supplied by X-Tenant-ID.
+        pricingProfileId: { type: string }
+        currentTime: { type: string, format: date-time }
+        creditApplicationFields:
+          type: array
+          items: { $ref: '#/components/schemas/CreditApplicationField' }
+        ausFields:
+          type: array
+          items: { $ref: '#/components/schemas/CreditApplicationField' }
+        outputFieldsFilter:
+          type: object
+          additionalProperties: true
+        publishedVersionRequest:
+          type: object
+          additionalProperties: true
+          description: Must carry configured catalog and authorization metadata references when product-specific execution is requested.
+        pipelineRecordId: { type: string }
+    LoanPassExecuteProductRequest:
+      allOf:
+        - $ref: '#/components/schemas/LoanPassExecuteSummaryRequest'
+        - type: object
+          required: [productId]
+          properties:
+            productId:
+              type: string
+              description: Tenant-authorized product identifier. Missing or unauthorized products fail closed.
+    LoanPassExecutionSummaryResponse:
+      type: object
+      required: [totals, products, metadata]
+      properties:
+        totals: { $ref: '#/components/schemas/LoanPassExecutionSummaryTotals' }
+        products:
+          type: array
+          items: { $ref: '#/components/schemas/LoanPassExecutionProductSummary' }
+        versionNumber: { type: string }
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Includes operationConcept, required metadata refs, authorization status, and fail-closed reasons when execution cannot proceed.
+    LoanPassExecutionSummaryTotals:
+      type: object
+      required: [approved, reviewRequired, available, rejected, error]
+      properties:
+        approved: { type: integer, minimum: 0 }
+        reviewRequired: { type: integer, minimum: 0 }
+        available: { type: integer, minimum: 0 }
+        rejected: { type: integer, minimum: 0 }
+        error: { type: integer, minimum: 0 }
+    LoanPassExecutionProductSummary:
+      type: object
+      required: [productId, productName, productCode, investorName, investorCode, isPricingEnabled, productFields, calculatedFields, status]
+      properties:
+        productId: { type: string }
+        productName: { type: string }
+        productCode: { type: string }
+        investorName: { type: string }
+        investorCode: { type: string }
+        productFields:
+          type: array
+          items: { $ref: '#/components/schemas/CreditApplicationField' }
+        calculatedFields:
+          type: array
+          items: { $ref: '#/components/schemas/CreditApplicationField' }
+        isPricingEnabled: { type: boolean }
+        status:
+          type: object
+          additionalProperties: true
+        versionNumber: { type: string }
+    LoanPassProductExecutionResult:
+      allOf:
+        - $ref: '#/components/schemas/LoanPassExecutionProductSummary'
+        - type: object
+          properties:
+            metadata:
+              type: object
+              additionalProperties: true
+              description: Includes operationConcept, product authorization status, and fail-closed metadata gaps.
     LosPricingResponse:
       type: object
       required: [requestId, pricingRequestId, status, offers, waterfall]

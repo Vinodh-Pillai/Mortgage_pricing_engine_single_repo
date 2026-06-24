@@ -69,6 +69,14 @@ describe('RouteGuard', () => {
     expect(await screen.findByRole('button', { name: 'login from /ops/dashboard' })).toBeInTheDocument();
   });
 
+  it('RouteGuardTest.showsAuthGateWhileSessionIsUnresolved', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => undefined)));
+    renderGuard('/ops/dashboard');
+    expect(await screen.findByTestId('auth-gate')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Checking authentication…');
+    expect(screen.queryByText('ops allowed')).not.toBeInTheDocument();
+  });
+
   it('RouteGuardTest.showsDeniedForUnauthorized', async () => {
     sessionUser = borrowerUser;
     renderGuard('/admin/governance');

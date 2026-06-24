@@ -11,9 +11,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wcpe.quote.InMemoryQuoteJobRepository;
 import com.wcpe.quote.InMemoryQuoteRepository;
 import com.wcpe.quote.InMemoryQuoteSnapshotRepository;
+import com.wcpe.quote.LoanPassQuoteCatalogRepository;
+import com.wcpe.quote.LoanPassQuoteModels.CatalogSnapshot;
 import com.wcpe.quote.QuoteJobRepository;
 import com.wcpe.quote.QuoteRepository;
 import com.wcpe.quote.QuoteSnapshotRepository;
+import java.util.Optional;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -115,6 +119,16 @@ class LosQuoteIntegrationControllerTest {
         .andExpect(jsonPath("$.code").value("LOS_QUOTE_PRODUCT_AUTHORIZATION_UNAVAILABLE"));
   }
 
+  @Test
+  void unauthenticatedLosExecuteAliasIsNotExposedByQuoteService() throws Exception {
+    mockMvc.perform(post("/api/v1/los/execute-summary")
+            .header("X-Tenant-ID", "11111111-1111-1111-1111-111111111111")
+            .header("X-Correlation-ID", "corr-los-alias")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{}"))
+        .andExpect(status().isNotFound());
+  }
+
   private String validPayload() {
     return """
         {"tenantId":"tenant-los","requestId":"quote-001","scenarioId":"scenario-los-001","scenarioVersion":1,"requestedLockPeriods":[30],"clientContext":{"source":"LOS"},"actorId":"los:request","idempotencyKey":"idem-los","correlationId":"corr-los","preferAsync":true,"quoteBorrowerInfo":{"borrowerLastName":"Rivera","loanNumber":"LN-001","numberOfBorrowers":1},"quoteAddressDTO":{"state":"TX","zip":"78701"},"requestedLoanAmount":450000,"transactionType":"purchase","propertyInformationType":"single-family","occupancyType":"primary-residence","numberOfUnits":1,"incomeDocumentationType":"full-documentation","creditScore":745,"mortgageType":"conventional","amortizationType":"fixed","loanTermType":"30-year","desiredRateLockPeriod":30,"lockPeriodType":"30-day","creditApplicationFields":[{"fieldId":"field@base-loan-amount","value":{"type":"number","value":450000}},{"fieldId":"field@decision-credit-score","value":{"type":"number","value":745}}]}
@@ -136,6 +150,21 @@ class LosQuoteIntegrationControllerTest {
     @Bean
     QuoteSnapshotRepository testQuoteSnapshotRepository() {
       return new InMemoryQuoteSnapshotRepository();
+    }
+
+    @Bean
+    LoanPassQuoteCatalogRepository testLoanPassQuoteCatalogRepository() {
+      return new LoanPassQuoteCatalogRepository() {
+        @Override
+        public Optional<CatalogSnapshot> activeSnapshot(UUID tenantId) {
+          return Optional.empty();
+        }
+
+        @Override
+        public CatalogSnapshot saveSnapshot(CatalogSnapshot snapshot) {
+          return snapshot;
+        }
+      };
     }
   }
 }

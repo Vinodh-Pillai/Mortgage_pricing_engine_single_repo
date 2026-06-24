@@ -338,12 +338,17 @@ function MetadataDrivenField({
   const selectOptions = optionsForField(field, value, dropdownOptions, dropdownLoading);
   const renderedValue = displayValue(field.fieldId, value);
   const validationMessages = field.validationMessages ?? [];
+  const errorId = error ? `${field.fieldId}-error` : undefined;
+  const guidanceId = validationMessages.length > 0 ? `${field.fieldId}-guidance` : undefined;
+  const describedBy = [errorId, guidanceId].filter(Boolean).join(' ') || undefined;
   const commonProps = {
     id: field.fieldId,
     name: field.fieldId,
     value: renderedValue,
     required: field.required,
     'aria-invalid': Boolean(error),
+    'aria-describedby': describedBy,
+    'aria-errormessage': errorId,
     onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => onChange(field.fieldId, event.target.value),
   };
 
@@ -362,8 +367,9 @@ function MetadataDrivenField({
       ) : (
         <input {...commonProps} {...numericConstraintAttributes(field)} type={inputTypeForField(field)} inputMode={fieldValueType(field) === 'duration' ? 'numeric' : undefined} />
       )}
+      {error ? <p id={errorId} className="quote-intake-field-error" role="alert">{error}</p> : null}
       {validationMessages.length > 0 ? (
-        <ul className="quote-intake-validation-hints" aria-label={`${field.label} validation guidance`}>
+        <ul id={guidanceId} className="quote-intake-validation-hints" aria-label={`${field.label} validation guidance`}>
           {validationMessages.map((message) => <li key={message}>{message}</li>)}
         </ul>
       ) : null}

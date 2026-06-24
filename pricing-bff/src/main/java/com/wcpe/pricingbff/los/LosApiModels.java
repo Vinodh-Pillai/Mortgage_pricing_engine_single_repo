@@ -266,7 +266,12 @@ public final class LosApiModels {
       int reviewRequired,
       int available,
       int rejected,
-      int error) {}
+      int error,
+      int noPricing) {
+    public LoanPassExecutionSummaryTotals(int approved, int reviewRequired, int available, int rejected, int error) {
+      this(approved, reviewRequired, available, rejected, error, 0);
+    }
+  }
 
   public record LoanPassExecutionProductSummary(
       String productId,

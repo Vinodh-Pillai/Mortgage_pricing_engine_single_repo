@@ -25,6 +25,10 @@ export type OfferSummary = {
   snapshotRefs?: string[];
   auditIds?: string[];
   explanationSections?: string[];
+  productRuleRefs?: string[];
+  stipulationRefs?: string[];
+  rateRefs?: string[];
+  lockPeriodOptions?: string[];
 };
 
 export type OfferComparisonView = {
@@ -183,6 +187,10 @@ function normalizeOffer(raw: unknown, index: number): OfferSummary | null {
     snapshotRefs: stringArray(value.snapshotRefs),
     auditIds: stringArray(value.auditIds),
     explanationSections: stringArray(value.explanationSections),
+    productRuleRefs: stringArray(value.productRuleRefs),
+    stipulationRefs: stringArray(value.stipulationRefs),
+    rateRefs: stringArray(value.rateRefs),
+    lockPeriodOptions: stringArray(value.lockPeriodOptions),
   };
 }
 

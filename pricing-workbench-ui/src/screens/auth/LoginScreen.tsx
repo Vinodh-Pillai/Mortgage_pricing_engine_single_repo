@@ -66,7 +66,8 @@ export function LoginScreen({ initialEmail = '', loading = false, disableAutoRed
     emitLoginEvidence({ type: 'forgot-password', target: '/forgot-password' });
   }
 
-  const busy = loading || isLoading || submitting;
+  const authResolving = loading || isLoading;
+  const busy = authResolving || submitting;
 
   return (
     <main className="login-page" aria-labelledby="login-title" data-testid="login-page">
@@ -99,8 +100,7 @@ export function LoginScreen({ initialEmail = '', loading = false, disableAutoRed
           </div>
 
           <label htmlFor="login-password" className="login-search-label">Password</label>
-          <div className="login-search-shell">
-            <span aria-hidden="true">••</span>
+          <div className="login-search-shell login-search-shell--password">
             <Input
               id="login-password"
               type="password"
@@ -115,11 +115,12 @@ export function LoginScreen({ initialEmail = '', loading = false, disableAutoRed
             />
           </div>
 
+          {authResolving ? <p className="login-status" role="status">Checking your session before sign in…</p> : null}
           {error ? <p className="login-error" role="alert">{error}</p> : null}
 
           <div className="login-form__actions">
             <Button type="submit" variant="primary" size="lg" className="login-submit" disabled={busy}>
-              {submitting ? 'Signing in…' : 'Sign in'}
+              {authResolving ? 'Checking session…' : submitting ? 'Signing in…' : 'Sign in'}
             </Button>
             <a href="/forgot-password" className="login-forgot" onClick={handleForgotPassword}>Forgot password?</a>
           </div>

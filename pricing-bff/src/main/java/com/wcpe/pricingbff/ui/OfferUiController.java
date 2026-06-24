@@ -18,9 +18,9 @@ class OfferUiController {
   }
 
   @GetMapping("/api/v1/tenants/{tenantId}/quote-runs/{runId}/offers")
-  Object offerComparison(@PathVariable String runId,
+  Object offerComparison(@PathVariable String tenantId, @PathVariable String runId,
       @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
-    return adapter.offerComparison(runId, uiTraceId);
+    return adapter.offerComparison(tenantId, runId, uiTraceId);
   }
 
   @GetMapping("/api/v1/tenants/{tenantId}/quote-runs/{runId}/offers/{offerId}/explain")

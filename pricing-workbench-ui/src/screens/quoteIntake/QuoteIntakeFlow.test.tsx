@@ -547,7 +547,11 @@ describe('PipelineIntakeTest', () => {
     const invalidMortgageType = container.querySelector('#mortgageType') as HTMLSelectElement;
     await waitFor(() => expect(invalidMortgageType).toHaveFocus());
     expect(invalidMortgageType).toHaveAttribute('aria-invalid', 'true');
+    expect(invalidMortgageType).toHaveAttribute('aria-describedby', expect.stringContaining('mortgageType-error'));
+    expect(container.querySelector('#mortgageType-error')).toHaveTextContent(/Mortgage Type needs attention/i);
     expect(container.querySelector('#loanPurpose')).toHaveAttribute('aria-invalid', 'true');
+    expect(container.querySelector('#loanPurpose')).toHaveAttribute('aria-describedby', expect.stringContaining('loanPurpose-error'));
+    expect(container.querySelector('#loanPurpose-error')).toHaveTextContent(/Loan Purpose needs attention/i);
     expect(container.querySelector('#baseLoanAmount')).toHaveAttribute('aria-invalid', 'true');
     expect(screen.queryByText(/is required before pricing refresh/i)).not.toBeInTheDocument();
   }, 30000);

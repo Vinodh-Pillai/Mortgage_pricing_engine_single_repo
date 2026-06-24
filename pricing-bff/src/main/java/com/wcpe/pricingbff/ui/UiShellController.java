@@ -1,5 +1,9 @@
 package com.wcpe.pricingbff.ui;
 
+import com.wcpe.pricingbff.los.LosApiModels.CreditApplicationField;
+import com.wcpe.pricingbff.los.LosApiModels.LoanPassExecutionProductSummary;
+import com.wcpe.pricingbff.los.LosApiModels.LoanPassExecutionSummaryResponse;
+import com.wcpe.pricingbff.los.LosApiModels.LoanPassProductExecutionResult;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -22,6 +26,11 @@ import org.springframework.web.bind.annotation.RestController;
 class PricingBffUiFallbackAdapter {
   private static final String DURABLE_UI_STORE_REQUIRED =
       "Durable UI persistence is not configured; process-local tenant and draft state is disabled.";
+  private final PricingBffQuoteServiceLoanPassClient quoteServiceClient;
+
+  PricingBffUiFallbackAdapter(PricingBffQuoteServiceLoanPassClient quoteServiceClient) {
+    this.quoteServiceClient = quoteServiceClient;
+  }
 
   @GetMapping("/api/ui/health")
   UiHealth health(@RequestHeader(value = "X-Correlation-Id", required = false) String correlationId) {
@@ -779,9 +788,15 @@ class PricingBffUiFallbackAdapter {
   }
 
   @GetMapping("/api/v1/tenants/{tenantId}/quote-runs/{runId}/offers")
-  OfferComparisonView offerComparison(@PathVariable String runId,
+  OfferComparisonView offerComparison(@PathVariable String tenantId, @PathVariable String runId,
       @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
-    return OfferComparisonView.contractVisible(runId, normalizeTrace(uiTraceId));
+    String traceId = normalizeTrace(uiTraceId);
+    try {
+      LoanPassExecutionSummaryResponse response = quoteServiceClient.executeSummary(tenantId, runId, traceId);
+      return OfferComparisonView.fromLoanPassSummary(runId, traceId, response);
+    } catch (PricingBffQuoteServiceLoanPassClient.QuoteServiceUnavailableException ex) {
+      return OfferComparisonView.upstreamMissing(runId, traceId, ex.getMessage());
+    }
   }
 
   @GetMapping("/api/v1/tenants/{tenantId}/quote-runs/{runId}/offers/{offerId}/explain")
@@ -793,6 +808,15 @@ class PricingBffUiFallbackAdapter {
   QuoteDetailView quoteDetail(String tenantId, String runId, String offerId, String uiTraceId) {
     String optionId = offerId == null || offerId.isBlank() ? "quote-option-contract-required" : offerId;
     String traceId = uiTraceId == null || uiTraceId.isBlank() ? "qd-s23-local-trace" : uiTraceId;
+    try {
+      LoanPassProductExecutionResult result = quoteServiceClient.executeProduct(tenantId, runId, optionId, traceId);
+      return QuoteDetailView.fromLoanPassProduct(tenantId, runId, optionId, traceId, result);
+    } catch (PricingBffQuoteServiceLoanPassClient.QuoteServiceUnavailableException ex) {
+      return QuoteDetailView.blocked(tenantId, runId, optionId, traceId, ex.getMessage());
+    }
+  }
+
+  private QuoteDetailView quoteDetailFallback(String tenantId, String runId, String optionId, String traceId) {
     OfferSummary summary = OfferComparisonView.contractVisible(runId, traceId).offers().stream()
         .filter(offer -> offer.offerId().equals(optionId))
         .findFirst()
@@ -803,7 +827,8 @@ class PricingBffUiFallbackAdapter {
             List.of("quote-service.option:" + optionId, "pricing-service:waterfall-ref-required"),
             List.of("lock-eligibility:pending:" + optionId), List.of("snapshot:quote-service:run:" + runId),
             List.of("audit:quote-ready-required", "replay-hash-required"),
-            List.of("summary", "ranking", "waterfall", "compliance", "audit-replay")));
+            List.of("summary", "ranking", "waterfall", "compliance", "audit-replay"),
+            List.of(), List.of(), List.of(), List.of()));
     PricingWaterfallView waterfall = pricingWaterfall(tenantId, runId, traceId);
     return new QuoteDetailView(tenantId, runId, optionId, "DETAIL_VISIBLE_WITH_BACKEND_REFS", summary,
         OfferExplanationView.available(runId, optionId, traceId), waterfall,
@@ -827,6 +852,103 @@ class PricingBffUiFallbackAdapter {
         "quote-detail-replay-hash-required", "quote-detail-evidence-hash-required", traceId,
         List.of("QuoteDetailOpened", "QuoteDetailBackendRefsBound"),
         "Configured quote, pricing, compliance, and review record setup is unavailable; pricing-bff exposes non-secret refs, redaction reasons, blockers, and processing records only.");
+  }
+
+  private static PricingWaterfallView blockedWaterfall(String tenantId, String runId, String traceId, String reason) {
+    RedactedWaterfallValue unavailable = new RedactedWaterfallValue(null, true, reason);
+    return new PricingWaterfallView(tenantId, runId, "BLOCKED", false, "QUOTE_SERVICE_CLIENT_REQUIRED",
+        new WaterfallBaseSelection("quote-service-product-detail-unavailable", "quote-service.execute-product", unavailable,
+            unavailable, List.of("quote-service execute-product required")),
+        new WaterfallFinalPrice("quote-service-product-detail-unavailable", unavailable, List.of(), List.of(), List.of()),
+        List.of(new WaterfallBlocker("QUOTE_SERVICE_CLIENT_REQUIRED", reason, "quote-service.execute-product")),
+        List.of(), List.of("audit:quote-service-product-detail-blocked"), "replay-unavailable", "version-graph-unavailable",
+        "result-unavailable", "evidence-unavailable", traceId, List.of("QuoteServiceWaterfallFailClosed"), reason);
+  }
+
+  private static PricingWaterfallView waterfallFromLoanPassProduct(String tenantId, String runId, String traceId,
+      LoanPassProductExecutionResult product) {
+    List<WaterfallLedgerRow> rows = new ArrayList<>();
+    int ordinal = 1;
+    for (CreditApplicationField field : product.calculatedFields()) {
+      String fieldId = safeText(field.fieldId(), "calculated-field-" + ordinal);
+      String value = fieldValueText(field);
+      rows.add(new WaterfallLedgerRow(ordinal++, fieldId, new RedactedWaterfallValue(value, false, null),
+          "QUOTE_SERVICE_CALCULATED_FIELD", new RedactedWaterfallValue(value, false, null),
+          "quote-service.calculatedFields." + fieldId, fieldId, null));
+    }
+    RedactedWaterfallValue noteRate = new RedactedWaterfallValue(fieldValue(product.calculatedFields(), List.of("rate", "noteRate")), false, null);
+    RedactedWaterfallValue price = new RedactedWaterfallValue(fieldValue(product.calculatedFields(), List.of("price")), false, null);
+    return new PricingWaterfallView(tenantId, runId, "QUOTE_SERVICE_LOANPASS_PRODUCT_VISIBLE", true,
+        statusText(product.metadata(), "source", "quote-service.execute-product"),
+        new WaterfallBaseSelection("quote-service-product:" + product.productId(),
+            statusText(product.metadata(), "versionNumber", safeText(product.versionNumber(), "version-unavailable")), noteRate, price,
+            rows.stream().map(WaterfallLedgerRow::step).toList()),
+        new WaterfallFinalPrice("quote-service-product:" + product.productId(), price, rows,
+            fieldRefs(product.calculatedFields(), List.of("adjustment")), fieldRefs(product.calculatedFields(), List.of("round"))),
+        List.of(), metadataStrings(product.metadata(), "metadataRefs"), List.of("audit:quote-service-product:" + product.productId()),
+        "replay:quote-service-product:" + product.productId(), "version-graph:quote-service-product:" + product.productId(),
+        "result:quote-service-product:" + product.productId(), "evidence:quote-service-product:" + product.productId(),
+        traceId, List.of("QuoteServiceProductWaterfallBound"), "");
+  }
+
+  private static List<String> fieldRefs(List<CreditApplicationField> fields, List<String> keywords) {
+    return fields.stream()
+        .map(field -> safeText(field.fieldId(), ""))
+        .filter(fieldId -> keywords.stream().anyMatch(keyword -> fieldId.toLowerCase(Locale.ROOT).contains(keyword.toLowerCase(Locale.ROOT))))
+        .toList();
+  }
+
+  private static String fieldValue(List<CreditApplicationField> fields, List<String> keywords) {
+    return fields.stream()
+        .filter(field -> keywords.stream().anyMatch(keyword -> safeText(field.fieldId(), "").toLowerCase(Locale.ROOT).contains(keyword.toLowerCase(Locale.ROOT))))
+        .map(PricingBffUiFallbackAdapter::fieldValueText)
+        .filter(value -> !value.isBlank())
+        .findFirst()
+        .orElse(null);
+  }
+
+  private static String fieldValueText(CreditApplicationField field) {
+    if (field == null || field.value() == null || field.value().value() == null) return "";
+    return String.valueOf(field.value().value());
+  }
+
+  private static List<String> metadataStrings(Map<String, Object> metadata, String key) {
+    Object value = metadata == null ? null : metadata.get(key);
+    if (value instanceof Map<?, ?> map) {
+      return map.entrySet().stream().map(entry -> entry.getKey() + ":" + entry.getValue()).toList();
+    }
+    if (value instanceof Iterable<?> iterable) {
+      List<String> values = new ArrayList<>();
+      for (Object item : iterable) values.add(String.valueOf(item));
+      return values;
+    }
+    return value == null ? List.of() : List.of(String.valueOf(value));
+  }
+
+  private static List<String> statusMessages(Map<String, Object> status) {
+    List<String> errors = metadataStrings(status, "errors");
+    return errors.isEmpty() ? List.of("Quote-service supplied LoanPass product status.") : errors;
+  }
+
+  private static List<String> statusFlags(Map<String, Object> status) {
+    String type = statusText(status, "type", "UNKNOWN");
+    return type.isBlank() ? List.of() : List.of(type.toUpperCase(Locale.ROOT));
+  }
+
+  private static String statusText(Map<String, Object> metadata, String key, String fallback) {
+    Object value = metadata == null ? null : metadata.get(key);
+    return value == null || String.valueOf(value).isBlank() ? fallback : String.valueOf(value);
+  }
+
+  private static String safeText(String value, String fallback) {
+    return value == null || value.isBlank() ? fallback : value;
+  }
+
+  private static String firstNonBlank(String... values) {
+    for (String value : values) {
+      if (value != null && !value.isBlank()) return value;
+    }
+    return "";
   }
 
   EligibilityModuleView eligibilityModule(String runId, String quoteOptionId, String uiTraceId) {
@@ -2469,11 +2591,38 @@ class PricingBffUiFallbackAdapter {
       String selectedOfferId, boolean commitBlocked, String fallbackReason, List<String> requiredFacts,
       List<String> backendRefs, String uiTraceId, List<String> events) {
     static OfferComparisonView upstreamMissing(String runId, String traceId) {
+      return upstreamMissing(runId, traceId,
+          "Offer comparison requires a configured quote-service LoanPass execute-summary client before commit.");
+    }
+
+    static OfferComparisonView upstreamMissing(String runId, String traceId, String reason) {
       return new OfferComparisonView(runId, "UPSTREAM_EXPLAINABILITY_REQUIRED", List.of(),
           List.of("payment", "apr", "confidence"), null, true,
-          "Offer comparison requires a configured quote-service offers and explainability contract before commit.",
-          List.of("requestedLockPeriods", "scenarioVersion"), List.of("quote-service.offers"), traceId,
+          reason,
+          List.of("quote-service LoanPass execute-summary", "publishedVersionRequest metadata"),
+          List.of("quote-service.execute-summary"), traceId,
           List.of("OfferListRendered"));
+    }
+
+    static OfferComparisonView fromLoanPassSummary(String runId, String traceId, LoanPassExecutionSummaryResponse response) {
+      List<LoanPassExecutionProductSummary> products = response == null ? List.of() : response.products();
+      List<OfferSummary> offers = new ArrayList<>();
+      for (int i = 0; i < products.size(); i++) {
+        offers.add(OfferSummary.fromLoanPassSummary(runId, products.get(i), i + 1));
+      }
+      Map<String, Object> metadata = response == null ? Map.of() : response.metadata();
+      List<String> warnings = metadataStrings(metadata, "warnings");
+      if (offers.isEmpty()) {
+        return new OfferComparisonView(runId, "QUOTE_SERVICE_FAIL_CLOSED", List.of(),
+            List.of("rank", "rate", "apr", "lockPeriodDays"), null, true,
+            "Quote-service LoanPass execute-summary returned no products; BFF kept browser flow fail-closed.",
+            warnings.isEmpty() ? List.of("quote-service execute-summary products") : warnings,
+            List.of("quote-service.execute-summary"), traceId, List.of("QuoteServiceSummaryFailClosed"));
+      }
+      return new OfferComparisonView(runId, "QUOTE_SERVICE_LOANPASS_SUMMARY_VISIBLE", offers,
+          List.of("rank", "rate", "apr", "lockPeriodDays", "confidence"), null, false,
+          "Quote-service LoanPass execute-summary response was normalized by pricing-bff; browser did not call quote-service directly.",
+          warnings, List.of("quote-service.execute-summary"), traceId, List.of("QuoteServiceSummaryBound"));
     }
 
     static OfferComparisonView contractVisible(String runId, String traceId) {
@@ -2486,7 +2635,7 @@ class PricingBffUiFallbackAdapter {
               List.of("lock-eligibility:pending:quote-option-contract-required"),
               List.of("snapshot:quote-service:run:" + runId),
               List.of("audit:quote-ready-required", "replay-hash-required"),
-              List.of("ranking", "comparison", "detail")),
+              List.of("ranking", "comparison", "detail"), List.of(), List.of(), List.of(), List.of()),
           new OfferSummary("quote-option-backup-contract", 2, "Alternate backend-ranked offer", "payment-ref-required",
               "apr-ref-required", "score:backend-owned", "rank-score-ref-required-secondary",
               List.of("Rank 2 remains selectable only when configured selection policy permits it"),
@@ -2495,7 +2644,7 @@ class PricingBffUiFallbackAdapter {
               List.of("lock-eligibility:pending:quote-option-backup-contract"),
               List.of("snapshot:quote-service:run:" + runId),
               List.of("audit:quote-ready-required", "audit:alternate-option-required"),
-              List.of("ranking", "comparison", "detail"))),
+              List.of("ranking", "comparison", "detail"), List.of(), List.of(), List.of(), List.of())),
           List.of("rank", "score", "confidence"), null, false,
           "Quote-service offer evidence is represented with backend-owned refs; UI actions stay blocked only when required facts are missing.",
           List.of("requestedLockPeriods", "scenarioVersion", "filterFacts"),
@@ -2507,7 +2656,42 @@ class PricingBffUiFallbackAdapter {
   record OfferSummary(String offerId, int rank, String productLabel, String payment, String apr, String confidence,
       String rankScore, List<String> rationaleChips, List<String> scenarioFlags, String explanationStatus,
       String sourceScenarioId, int scenarioVersion, List<String> upstreamRefs, List<String> lockEligibilityRefs,
-      List<String> snapshotRefs, List<String> auditIds, List<String> explanationSections) {}
+      List<String> snapshotRefs, List<String> auditIds, List<String> explanationSections,
+      List<String> productRuleRefs, List<String> stipulationRefs, List<String> rateRefs, List<String> lockPeriodOptions) {
+    static OfferSummary fromLoanPassSummary(String runId, LoanPassExecutionProductSummary product, int rank) {
+      String productId = safeText(product.productId(), "loanpass-product-" + rank);
+      Map<String, Object> status = product.status();
+      List<String> productRules = fieldRefs(product.productFields(), List.of("rule", "requirement", "eligibility"));
+      List<String> stipulations = fieldRefs(product.calculatedFields(), List.of("stip", "condition"));
+      List<String> rates = fieldRefs(product.calculatedFields(), List.of("rate", "apr", "price", "payment"));
+      List<String> locks = fieldRefs(product.calculatedFields(), List.of("lock"));
+      return new OfferSummary(productId, rank, firstNonBlank(product.productName(), product.productCode(), productId),
+          fieldValue(product.calculatedFields(), List.of("payment")), fieldValue(product.calculatedFields(), List.of("apr")),
+          statusText(status, "type", product.isPricingEnabled() == null || product.isPricingEnabled() ? "AVAILABLE" : "PRICING_DISABLED"),
+          "rank:" + rank, statusMessages(status), statusFlags(status), statusText(status, "type", "AVAILABLE"),
+          runId, 1, List.of("quote-service.execute-summary:product:" + productId),
+          locks.isEmpty() ? List.of("lock-period:quote-service-ref-required") : locks,
+          List.of("snapshot:quote-service:run:" + runId), List.of("audit:quote-service-summary:" + productId),
+          List.of("summary", "rates", "rules", "stipulations", "locks"), productRules, stipulations, rates, locks);
+    }
+
+    static OfferSummary fromLoanPassProduct(String runId, LoanPassProductExecutionResult product, String fallbackOfferId) {
+      String productId = safeText(product.productId(), fallbackOfferId);
+      Map<String, Object> status = product.status();
+      List<String> productRules = fieldRefs(product.productFields(), List.of("rule", "requirement", "eligibility"));
+      List<String> stipulations = fieldRefs(product.calculatedFields(), List.of("stip", "condition"));
+      List<String> rates = fieldRefs(product.calculatedFields(), List.of("rate", "apr", "price", "payment"));
+      List<String> locks = fieldRefs(product.calculatedFields(), List.of("lock"));
+      return new OfferSummary(productId, 1, firstNonBlank(product.productName(), product.productCode(), productId),
+          fieldValue(product.calculatedFields(), List.of("payment")), fieldValue(product.calculatedFields(), List.of("apr")),
+          statusText(status, "type", product.isPricingEnabled() == null || product.isPricingEnabled() ? "AVAILABLE" : "PRICING_DISABLED"),
+          "quote-service-product-detail", statusMessages(status), statusFlags(status), statusText(status, "type", "AVAILABLE"),
+          runId, 1, List.of("quote-service.execute-product:product:" + productId),
+          locks, List.of("snapshot:quote-service:run:" + runId + ":product:" + productId),
+          List.of("audit:quote-service-product:" + productId),
+          List.of("summary", "rates", "rules", "stipulations", "locks"), productRules, stipulations, rates, locks);
+    }
+  }
 
   record OfferExplanationView(String runId, String offerId, String status, List<String> rationaleLines,
       List<String> scenarioFlags, List<String> upstreamRefs, List<String> snapshotRefs, List<String> auditIds,
@@ -2533,7 +2717,47 @@ class PricingBffUiFallbackAdapter {
   record QuoteDetailView(String tenantContext, String runId, String offerId, String status, OfferSummary summary,
       OfferExplanationView explanation, PricingWaterfallView waterfall, List<QuoteDetailPanel> panels,
       List<QuoteDetailRedaction> redactions, List<String> complianceFlags, List<String> auditRefs, String replayHash,
-      String evidenceHash, String uiTraceId, List<String> events, String fallbackReason) {}
+      String evidenceHash, String uiTraceId, List<String> events, String fallbackReason) {
+    static QuoteDetailView blocked(String tenantId, String runId, String offerId, String traceId, String reason) {
+      OfferSummary summary = new OfferSummary(offerId, 0, "Quote service product detail unavailable", null, null,
+          "BLOCKED", "N/A", List.of(reason), List.of("QUOTE_SERVICE_CLIENT_REQUIRED"), "BLOCKED",
+          runId, 0, List.of("quote-service.execute-product"), List.of(), List.of(), List.of(),
+          List.of("product-detail"), List.of(), List.of(), List.of(), List.of());
+      PricingWaterfallView waterfall = blockedWaterfall(tenantId, runId, traceId, reason);
+      return new QuoteDetailView(tenantId, runId, offerId, "BLOCKED", summary,
+          OfferExplanationView.missing(runId, offerId, traceId), waterfall,
+          List.of(new QuoteDetailPanel("summary", "LoanPass product detail", "BLOCKED",
+              List.of("rules", "stipulations", "rates", "lock periods"), List.of("quote-service.execute-product"), List.of(reason))),
+          List.of(), List.of(), List.of("audit:quote-service-product-detail-blocked"),
+          "quote-detail-replay-hash-unavailable", "quote-detail-evidence-hash-unavailable", traceId,
+          List.of("QuoteServiceProductDetailFailClosed"), reason);
+    }
+
+    static QuoteDetailView fromLoanPassProduct(String tenantId, String runId, String offerId, String traceId,
+        LoanPassProductExecutionResult product) {
+      OfferSummary summary = OfferSummary.fromLoanPassProduct(runId, product, offerId);
+      PricingWaterfallView waterfall = waterfallFromLoanPassProduct(tenantId, runId, traceId, product);
+      List<String> blockers = metadataStrings(product.metadata(), "warnings");
+      return new QuoteDetailView(tenantId, runId, summary.offerId(),
+          blockers.isEmpty() ? "QUOTE_SERVICE_LOANPASS_PRODUCT_VISIBLE" : "QUOTE_SERVICE_PRODUCT_FAIL_CLOSED",
+          summary, OfferExplanationView.available(runId, summary.offerId(), traceId), waterfall,
+          List.of(
+              new QuoteDetailPanel("summary", "LoanPass product summary", "VISIBLE",
+                  List.of("productId", "productName", "productCode", "investorName"), List.of("quote-service.execute-product"), List.of()),
+              new QuoteDetailPanel("rules", "Rules", summary.productRuleRefs().isEmpty() ? "EMPTY" : "VISIBLE",
+                  summary.productRuleRefs(), List.of("quote-service.productFields"), List.of()),
+              new QuoteDetailPanel("stipulations", "Stipulations", summary.stipulationRefs().isEmpty() ? "EMPTY" : "VISIBLE",
+                  summary.stipulationRefs(), List.of("quote-service.calculatedFields"), List.of()),
+              new QuoteDetailPanel("rates", "Rates", summary.rateRefs().isEmpty() ? "EMPTY" : "VISIBLE",
+                  summary.rateRefs(), List.of("quote-service.calculatedFields"), List.of()),
+              new QuoteDetailPanel("locks", "Lock periods", summary.lockPeriodOptions().isEmpty() ? "EMPTY" : "VISIBLE",
+                  summary.lockPeriodOptions(), List.of("quote-service.calculatedFields"), List.of())),
+          List.of(), statusFlags(product.status()), List.of("audit:quote-service-product-detail:" + summary.offerId()),
+          "replay:quote-service-product:" + summary.offerId(), "evidence:quote-service-product:" + summary.offerId(), traceId,
+          List.of("QuoteServiceProductDetailBound"),
+          "Quote-service LoanPass execute-product response was normalized by pricing-bff; browser did not call quote-service directly.");
+    }
+  }
 
   record QuoteDetailPanel(String panelId, String label, String status, List<String> fields, List<String> backendRefs,
       List<String> blockers) {}

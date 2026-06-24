@@ -1,15 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { QuoteDetailRedaction, QuoteDetailView } from '../../lib/api/offers';
+import { fetchQuoteDetail, type QuoteDetailRedaction, type QuoteDetailView } from '../../lib/api/offers';
 import type { PricingWaterfallView, RedactedWaterfallValue } from '../../lib/api/quoteRuns';
 import type { ScreenProps } from '../contract/ScreenProps';
-import { deterministicQuoteDetail } from './fixtures';
 
 export type QuoteDetailScreenProps = Partial<ScreenProps> & {
-  detail?: QuoteDetailView;
+  detail?: QuoteDetailView | null;
+  fetchImpl?: typeof fetch;
   onNavigate?: (path: string) => void;
 };
 
 type PanelId = 'summary' | 'waterfall' | 'compliance' | 'audit';
+type LoadState =
+  | { kind: 'loading' }
+  | { kind: 'loaded'; detail: QuoteDetailView }
+  | { kind: 'empty'; message: string }
+  | { kind: 'error'; message: string };
 
 const panelOrder: Array<{ id: PanelId; label: string }> = [
   { id: 'summary', label: 'Summary' },
@@ -18,24 +23,64 @@ const panelOrder: Array<{ id: PanelId; label: string }> = [
   { id: 'audit', label: 'Audit / Replay' },
 ];
 
-export default function QuoteDetailScreen({ tenantId = 'tenant-fixture', runId, optionId, uiTraceId = 'pii-24-s11-local-trace', detail = deterministicQuoteDetail, onEvidenceCapture, onNavigate }: QuoteDetailScreenProps) {
-  const activeRunId = runId ?? detail.runId;
-  const activeOfferId = optionId ?? detail.offerId;
+const evidenceTarget = '.local-harness/evidence/PII-24-S11/quote-detail.json';
+
+export default function QuoteDetailScreen({ tenantId = 'tenant-fixture', runId, optionId, uiTraceId = 'pii-24-s11-local-trace', detail, fetchImpl, onEvidenceCapture, onNavigate }: QuoteDetailScreenProps) {
+  const [loadState, setLoadState] = useState<LoadState>(() => detail ? { kind: 'loaded', detail } : { kind: 'empty', message: 'Select a quote option to load backend quote detail evidence.' });
   const [activePanel, setActivePanel] = useState<PanelId>('summary');
   const [exportText, setExportText] = useState('');
-  const visualState = stateForDetail(detail);
+  const loadedDetail = loadState.kind === 'loaded' ? loadState.detail : null;
+  const activeRunId = runId ?? loadedDetail?.runId ?? 'quote-run-not-selected';
+  const activeOfferId = optionId ?? loadedDetail?.offerId ?? 'quote-option-not-selected';
+  const visualState = stateForLoad(loadState);
+  const panelStatus = useMemo(() => Object.fromEntries((loadedDetail?.panels ?? []).map((panel) => [panel.panelId, panel.status])), [loadedDetail?.panels]);
+
+  useEffect(() => {
+    if (detail) setLoadState({ kind: 'loaded', detail });
+    else if (!fetchImpl) setLoadState({ kind: 'empty', message: 'Backend quote detail evidence is not loaded for this option.' });
+  }, [detail, fetchImpl]);
+
+  useEffect(() => {
+    if (detail || !fetchImpl) return;
+    if (!runId || !optionId) {
+      setLoadState({ kind: 'empty', message: 'Run and offer identifiers are required before quote detail can be loaded.' });
+      return;
+    }
+    let cancelled = false;
+    setLoadState({ kind: 'loading' });
+    fetchQuoteDetail(tenantId, runId, optionId, fetchImpl)
+      .then((nextDetail) => {
+        if (!cancelled) setLoadState(hasRenderableDetail(nextDetail) ? { kind: 'loaded', detail: nextDetail } : { kind: 'empty', message: 'Backend quote detail response did not include summary and waterfall evidence.' });
+      })
+      .catch((error: Error) => {
+        if (!cancelled) setLoadState({ kind: 'error', message: error.message || 'Quote detail evidence is temporarily unavailable.' });
+      });
+    return () => { cancelled = true; };
+  }, [detail, fetchImpl, optionId, runId, tenantId]);
 
   useEffect(() => {
     onEvidenceCapture?.({
       screenId: 'quote-detail',
       timestamp: new Date().toISOString(),
       state: visualState,
-      dataRefs: [tenantId, activeRunId, activeOfferId, detail.uiTraceId, uiTraceId, detail.replayHash, detail.evidenceHash],
-      blockers: visualState === 'blocked' ? detail.panels.flatMap((panel) => panel.blockers) : [],
+      dataRefs: [tenantId, activeRunId, activeOfferId, loadedDetail?.uiTraceId, uiTraceId, loadedDetail?.replayHash, loadedDetail?.evidenceHash, evidenceTarget].filter(Boolean) as string[],
+      blockers: blockersForLoad(loadState),
     });
-  }, [activeOfferId, activeRunId, detail, onEvidenceCapture, tenantId, uiTraceId, visualState]);
+  }, [activeOfferId, activeRunId, loadState, loadedDetail, onEvidenceCapture, tenantId, uiTraceId, visualState]);
 
-  const panelStatus = useMemo(() => Object.fromEntries(detail.panels.map((panel) => [panel.panelId, panel.status])), [detail.panels]);
+  if (loadState.kind === 'loading') {
+    return <main className="quote-detail-screen" aria-busy="true"><section className="panel"><p role="status">Loading quote detail evidence...</p></section></main>;
+  }
+
+  if (loadState.kind === 'error') {
+    return <main className="quote-detail-screen"><section className="panel" aria-labelledby="quote-detail-error-heading"><h1 id="quote-detail-error-heading">Quote Detail Waterfall</h1><div className="banner banner--blocked" role="alert">{loadState.message}</div></section></main>;
+  }
+
+  if (loadState.kind === 'empty') {
+    return <main className="quote-detail-screen"><section className="panel" aria-labelledby="quote-detail-empty-heading"><h1 id="quote-detail-empty-heading">Quote Detail Waterfall</h1><div className="banner banner--info">{loadState.message}</div></section></main>;
+  }
+
+  const { detail: activeDetail } = loadState;
 
   function navigate(path: string) {
     onNavigate?.(path);
@@ -50,8 +95,8 @@ export default function QuoteDetailScreen({ tenantId = 'tenant-fixture', runId, 
         <div className="status-grid" aria-label="Offer summary header">
           <dt>Run</dt><dd><code>{activeRunId}</code></dd>
           <dt>Offer</dt><dd><code>{activeOfferId}</code></dd>
-          <dt>Product</dt><dd>{valueText(detail.summary.productLabel)}</dd>
-          <dt>Rate / Price</dt><dd>{valueText(detail.summary.rate)} / {redactedValue(detail.waterfall.finalPrice.roundedFinalPrice, redactionFor(detail.redactions, 'waterfall.finalPrice.roundedFinalPrice'), navigate)}</dd>
+          <dt>Product</dt><dd>{valueText(activeDetail.summary.productLabel)}</dd>
+          <dt>Rate / Price</dt><dd>{valueText(activeDetail.summary.rate)} / {redactedValue(activeDetail.waterfall.finalPrice.roundedFinalPrice, redactionFor(activeDetail.redactions, 'waterfall.finalPrice.roundedFinalPrice'), navigate)}</dd>
         </div>
         <button type="button" className="button-secondary" onClick={() => navigate(`/quote/${encodeURIComponent(activeRunId)}/offers`)}>Back to offers</button>
       </section>
@@ -62,7 +107,7 @@ export default function QuoteDetailScreen({ tenantId = 'tenant-fixture', runId, 
       <nav className="panel" aria-label="Quote detail panel navigation">
         <div className="ds-tab-list" role="tablist" aria-label="Quote detail panels">
           {panelOrder.map((panel) => (
-            <button key={panel.id} type="button" role="tab" aria-selected={activePanel === panel.id} aria-controls={`${panel.id}-panel`} onClick={() => setActivePanel(panel.id)}>
+            <button key={panel.id} id={`${panel.id}-tab`} type="button" role="tab" aria-selected={activePanel === panel.id} aria-controls={`${panel.id}-panel`} tabIndex={activePanel === panel.id ? 0 : -1} onClick={() => setActivePanel(panel.id)}>
               {panel.label} <span className="trace-badge">{panelStatus[panel.id] ?? 'READY'}</span>
             </button>
           ))}
@@ -70,23 +115,25 @@ export default function QuoteDetailScreen({ tenantId = 'tenant-fixture', runId, 
       </nav>
 
       <section className="quote-detail-layout" aria-label="Responsive quote detail layout" style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 20rem), 1fr))' }}>
-        <div id="summary-panel" role="tabpanel" aria-label="Summary and explanation panel" hidden={false}>
-          <SummaryPanel detail={detail} active={activePanel === 'summary'} onNavigate={navigate} />
-          <ExplanationPanel detail={detail} />
+        <div id="summary-panel" role="tabpanel" aria-labelledby="summary-tab" hidden={activePanel !== 'summary'}>
+          <SummaryPanel detail={activeDetail} onNavigate={navigate} />
+          <ExplanationPanel detail={activeDetail} />
         </div>
-        <div id="waterfall-panel" role="tabpanel" aria-label="Pricing waterfall panel" hidden={false}>
-          <WaterfallPanel waterfall={detail.waterfall} redactions={detail.redactions} exportText={exportText} onExport={setExportText} onNavigate={navigate} />
+        <div id="waterfall-panel" role="tabpanel" aria-labelledby="waterfall-tab" hidden={activePanel !== 'waterfall'}>
+          <WaterfallPanel waterfall={activeDetail.waterfall} redactions={activeDetail.redactions} exportText={exportText} onExport={setExportText} onNavigate={navigate} />
         </div>
-        <div id="compliance-panel" role="tabpanel" aria-label="Compliance and audit panel" hidden={false}>
-          <CompliancePanel flags={detail.complianceFlags} onNavigate={navigate} />
-          <AuditReplayPanel detail={detail} onNavigate={navigate} />
+        <div id="compliance-panel" role="tabpanel" aria-labelledby="compliance-tab" hidden={activePanel !== 'compliance'}>
+          <CompliancePanel flags={activeDetail.complianceFlags} onNavigate={navigate} />
+        </div>
+        <div id="audit-panel" role="tabpanel" aria-labelledby="audit-tab" hidden={activePanel !== 'audit'}>
+          <AuditReplayPanel detail={activeDetail} onNavigate={navigate} />
         </div>
       </section>
     </main>
   );
 }
 
-function SummaryPanel({ detail, onNavigate }: { detail: QuoteDetailView; active: boolean; onNavigate: (path: string) => void }) {
+function SummaryPanel({ detail, onNavigate }: { detail: QuoteDetailView; onNavigate: (path: string) => void }) {
   const { summary } = detail;
   return (
     <section className="panel" aria-labelledby="summary-heading">
@@ -106,6 +153,10 @@ function SummaryPanel({ detail, onNavigate }: { detail: QuoteDetailView; active:
       </dl>
       <ChipList label="Scenario flags" values={summary.scenarioFlags} />
       <ChipList label="Backend adjustment and margin summaries" values={summary.explanationSections ?? []} />
+      <ChipList label="LoanPass product rules" values={summary.productRuleRefs ?? []} />
+      <ChipList label="LoanPass stipulations" values={summary.stipulationRefs ?? []} />
+      <ChipList label="LoanPass rates" values={summary.rateRefs ?? []} />
+      <ChipList label="LoanPass lock periods" values={summary.lockPeriodOptions ?? []} />
     </section>
   );
 }
@@ -255,6 +306,23 @@ function parseComplianceFlag(flag: string) {
 function exportWaterfall(waterfall: PricingWaterfallView, redactions: QuoteDetailRedaction[]) {
   const rows = waterfall.finalPrice.ledger.map((row) => [row.ordinal, row.step, valueText(row.inputValue.value), row.inputValue.redacted ? row.inputValue.reason : '', row.operation, valueText(row.outputValue.value), row.outputValue.redacted ? row.outputValue.reason : '', row.configRef, row.reasonCode, valueText(row.roundingMode)].join(','));
   return [`# JSON`, JSON.stringify({ waterfall, redactions }, null, 2), `# CSV`, 'ordinal,step,input,redactedInputReason,operation,output,redactedOutputReason,configRef,reasonCode,roundingMode', ...rows].join('\n');
+}
+
+function stateForLoad(loadState: LoadState) {
+  if (loadState.kind === 'loading') return 'loading';
+  if (loadState.kind === 'empty') return 'empty';
+  if (loadState.kind === 'error') return 'blocked';
+  return stateForDetail(loadState.detail);
+}
+
+function blockersForLoad(loadState: LoadState) {
+  if (loadState.kind === 'error') return [loadState.message];
+  if (loadState.kind !== 'loaded') return [];
+  return stateForDetail(loadState.detail) === 'blocked' ? loadState.detail.panels.flatMap((panel) => panel.blockers) : [];
+}
+
+function hasRenderableDetail(detail: QuoteDetailView) {
+  return Boolean(detail.summary && detail.waterfall);
 }
 
 function stateForDetail(detail: QuoteDetailView) {

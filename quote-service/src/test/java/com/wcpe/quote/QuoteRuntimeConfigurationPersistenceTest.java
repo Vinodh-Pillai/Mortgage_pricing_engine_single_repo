@@ -55,9 +55,9 @@ class QuoteRuntimeConfigurationPersistenceTest {
     }
 
     @Test
-    void inMemoryModeDoesNotWireProductionSourceOfTruthRepositories() {
+    void failClosedModeDoesNotWireProductionSourceOfTruthRepositories() {
         contextRunner
-            .withPropertyValues("quote.persistence.mode=in-memory")
+            .withPropertyValues("quote.persistence.mode=fail-closed")
             .run(context -> {
                 assertThat(context).hasFailed();
                 assertThat(context.getStartupFailure())
@@ -70,7 +70,7 @@ class QuoteRuntimeConfigurationPersistenceTest {
         new ApplicationContextRunner()
             .withUserConfiguration(QuoteRuntimeConfiguration.class, TestOnlyInMemoryPersistenceConfiguration.class)
             .withBean(ObjectMapper.class, ObjectMapper::new)
-            .withPropertyValues("quote.persistence.mode=in-memory")
+            .withPropertyValues("quote.persistence.mode=fail-closed")
             .run(context -> {
                 assertThat(context).hasNotFailed();
                 assertThat(context.getBean(QuoteRepository.class)).isInstanceOf(InMemoryQuoteRepository.class);

@@ -4,11 +4,13 @@
     linear-gradient(135deg, var(--ds-color-background), color-mix(in srgb, var(--ds-color-background) 84%, #000 16%));
   box-sizing: border-box;
   min-height: 100vh;
+  min-height: 100dvh;
   margin: 0;
   padding: clamp(var(--ds-space-6), 5vw, var(--ds-space-12));
   color: var(--ds-color-text);
   background: var(--login-bg);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .login-container {
@@ -140,6 +142,12 @@
   font-weight: 700;
 }
 
+.login-status {
+  margin: 0;
+  color: var(--ds-color-text-muted);
+  font-weight: 700;
+}
+
 .login-search-label {
   font-weight: 800;
 }
@@ -152,6 +160,10 @@
   border-radius: var(--ds-radius-xl);
   padding: var(--ds-space-2) var(--ds-space-4);
   background: color-mix(in srgb, var(--ds-color-background-raised) 72%, transparent);
+}
+
+.login-search-shell--password {
+  gap: 0;
 }
 
 .login-search-shell:focus-within {
@@ -387,6 +399,8 @@
   .login-page {
     margin: calc(var(--ds-space-4) * -1);
     padding: var(--ds-space-4);
+    min-height: 100dvh;
+    overflow-y: auto;
   }
 
   .login-selected {

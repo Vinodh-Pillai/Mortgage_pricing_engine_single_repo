@@ -6,7 +6,7 @@ import java.util.Map;
 import java.util.UUID;
 
 record AdjustmentCalculationRequest(
-    BasePriceDecisionStub basePriceDecision,
+    BasePriceDecision basePriceDecision,
     Map<String, String> loanAttributes,
     List<AdjustmentFactor> adjustmentFactors,
     String referenceDataVersion,
@@ -22,7 +22,7 @@ record AdjustmentCalculationRequest(
     }
 }
 
-record BasePriceDecisionStub(String scenarioId, String basePriceId, String baseRateBasis, double basePriceAmount, String currency, String source) {}
+record BasePriceDecision(String scenarioId, String basePriceId, String baseRateBasis, double basePriceAmount, String currency, String source) {}
 
 record RuleBookSelector(String productFamily, String investor, String channel) {}
 

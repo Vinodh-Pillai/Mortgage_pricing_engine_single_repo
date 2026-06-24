@@ -8,7 +8,6 @@ import { LockStatusBanner } from './LockStatusBanner';
 import { LockTermsPanel } from './LockTermsPanel';
 import { PostLockActions } from './PostLockActions';
 import { BlockedLock } from './BlockedLock';
-import { deterministicLockConfirmation, deterministicLockWorkflow } from './fixtures';
 import { valueText } from './lockWorkflowUtils';
 export { countdownWarning, valueText } from './lockWorkflowUtils';
 
@@ -19,25 +18,29 @@ export type QuoteLockScreenProps = Partial<ScreenProps> & {
   onNavigate?: (path: string) => void;
 };
 
-export default function QuoteLockScreen({ tenantId = 'tenant-fixture', runId, optionId, uiTraceId = 'pii-24-s12-local-trace', workflow = deterministicLockWorkflow, confirmLock, fetchImpl, onEvidenceCapture, onNavigate }: QuoteLockScreenProps) {
-  const [workflowState, setWorkflowState] = useState<LockWorkflowView>(workflow);
-  const activeRunId = runId ?? workflow.runId;
-  const activeOfferId = optionId ?? workflow.selectedOfferId;
+export default function QuoteLockScreen({ tenantId = 'tenant-fixture', runId, optionId, uiTraceId = 'pii-24-s12-local-trace', workflow, confirmLock, fetchImpl, onEvidenceCapture, onNavigate }: QuoteLockScreenProps) {
+  const [workflowState, setWorkflowState] = useState<LockWorkflowView>(() => workflow ?? createUnavailableLockWorkflow(tenantId, runId, optionId));
+  const activeRunId = runId ?? workflowState.runId;
+  const activeOfferId = optionId ?? workflowState.selectedOfferId;
   const [currentStatus, setCurrentStatus] = useState<LockWorkflowStatus>(workflowState.status);
   const [scrollComplete, setScrollComplete] = useState(false);
   const [checked, setChecked] = useState(false);
   const [signatureName, setSignatureName] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [confirmation, setConfirmation] = useState<LockConfirmationResult | null>(workflowState.lockId ? { ...deterministicLockConfirmation, lockId: workflowState.lockId, expiresAt: workflowState.terms.expiresAt } : null);
+  const [confirmation, setConfirmation] = useState<LockConfirmationResult | null>(null);
   const [selectedAction, setSelectedAction] = useState<LockWorkflowAction | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
+  const [actionFailure, setActionFailure] = useState<string | null>(null);
   const visualState = stateForLockWorkflow({ ...workflowState, status: currentStatus });
   const disclosuresAccepted = scrollComplete && checked && signatureName.trim().length > 0;
   const displayedHistory = confirmation?.historyEvent ? [...workflowState.history, confirmation.historyEvent] : workflowState.history;
 
   useEffect(() => {
+    if (!workflow) return;
     setWorkflowState(workflow);
     setCurrentStatus(workflow.status);
+    setConfirmation(null);
+    setActionFailure(null);
   }, [workflow]);
 
   useEffect(() => {
@@ -49,13 +52,14 @@ export default function QuoteLockScreen({ tenantId = 'tenant-fixture', runId, op
         if (!cancelled) {
           setWorkflowState(nextWorkflow);
           setCurrentStatus(nextWorkflow.status);
-          if (nextWorkflow.lockId) setConfirmation({ ...deterministicLockConfirmation, lockId: nextWorkflow.lockId, expiresAt: nextWorkflow.terms.expiresAt });
+          setActionFailure(null);
         }
       } catch {
-        if (!cancelled) setWorkflowState((current) => current ?? deterministicLockWorkflow);
+        if (!cancelled) setWorkflowState((current) => markWorkflowUnavailable(current));
       }
     }
 
+    if (workflow && !fetchImpl) return () => { cancelled = true; };
     void loadWorkflow();
     if (currentStatus !== 'CONFIRMED') return () => { cancelled = true; };
 
@@ -64,7 +68,7 @@ export default function QuoteLockScreen({ tenantId = 'tenant-fixture', runId, op
       cancelled = true;
       window.clearInterval(poll);
     };
-  }, [activeOfferId, activeRunId, currentStatus, fetchImpl, tenantId]);
+  }, [activeOfferId, activeRunId, currentStatus, fetchImpl, tenantId, workflow]);
 
   useEffect(() => {
     onEvidenceCapture?.({
@@ -86,12 +90,15 @@ export default function QuoteLockScreen({ tenantId = 'tenant-fixture', runId, op
       signedAt: new Date().toISOString(),
     };
     setIsConfirming(true);
+    setActionFailure(null);
     try {
-      const result = await (confirmLock?.(request) ?? confirmLockWorkflowAction(tenantId, activeRunId, request, fetchImpl).catch(() => localSyntheticLockResult(action, workflowState, confirmation)));
+      const result = await (confirmLock?.(request) ?? confirmLockWorkflowAction(tenantId, activeRunId, request, fetchImpl));
       setConfirmation(result);
       if (result.status === 'CONFIRMED') setCurrentStatus(action === 'confirm' ? 'CONFIRMED' : action === 'float_down' ? 'FLOAT_DOWN' : action === 'relock' ? 'RELOCKED' : 'EXTENDED');
       setDialogOpen(false);
       setSelectedAction(null);
+    } catch {
+      setActionFailure(lockActionUnavailableMessage(action, currentStatus));
     } finally {
       setIsConfirming(false);
     }
@@ -115,6 +122,7 @@ export default function QuoteLockScreen({ tenantId = 'tenant-fixture', runId, op
       </section>
 
       <LockStatusBanner status={currentStatus} lockId={confirmation?.lockId ?? workflowState.lockId} expiresAt={confirmation?.expiresAt ?? workflowState.terms.expiresAt} extensionCount={displayedHistory.filter((event) => event.eventType === 'extended').length} />
+      {actionFailure ? <div className="banner banner--warning" role="alert">{actionFailure}</div> : null}
       {confirmation?.message ? <div className="banner banner--info" role="status">{confirmation.message}</div> : null}
 
       <section className="quote-detail-layout" aria-label="Responsive lock workflow layout" style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 22rem), 1fr))' }}>
@@ -147,33 +155,68 @@ export default function QuoteLockScreen({ tenantId = 'tenant-fixture', runId, op
   );
 }
 
-function localSyntheticLockResult(action: LockConfirmationRequest['action'], workflow: LockWorkflowView, currentConfirmation: LockConfirmationResult | null): LockConfirmationResult {
-  const actionLabel = action === 'confirm' ? 'confirm lock' : action === 'float_down' ? 'request float-down' : action === 'relock' ? 'request relock' : 'request extension';
-  const eventType = action === 'confirm' ? 'confirmed' : action === 'float_down' ? 'float-down-requested' : action === 'relock' ? 'relock-requested' : 'extended';
-  const lockId = currentConfirmation?.lockId ?? workflow.lockId ?? workflow.lockIdPreview;
-  const timestamp = new Date().toISOString();
+function lockActionUnavailableMessage(action: LockConfirmationRequest['action'], currentStatus: LockWorkflowStatus) {
+  const actionLabel = action === 'confirm' ? 'lock confirmation' : action === 'float_down' ? 'float-down request' : action === 'relock' ? 'relock request' : 'lock extension request';
+  return `Lock-service ${actionLabel} is blocked or unavailable. Current lock status remains ${currentStatus}. No synthetic success was applied.`;
+}
+
+function createUnavailableLockWorkflow(tenantId: string, runId?: string, optionId?: string): LockWorkflowView {
   return {
-    status: 'CONFIRMED',
-    lockId,
-    expiresAt: currentConfirmation?.expiresAt ?? workflow.terms.expiresAt,
-    message: `Local synthetic/dev fixture staged ${actionLabel}. Production lock-service, investor, and compliance integrations must confirm durable status before borrower reliance.`,
-    conflictResolution: null,
-    auditRef: `audit:local-synthetic:${action}`,
-    historyEvent: {
-      eventId: `evt-local-${action}-${timestamp}`,
-      eventType,
-      timestamp,
-      actor: 'loan-officer-local-fixture',
-      terms: `Local synthetic ${actionLabel} event; no fees, cutoffs, investor calendars, or pricing rules were calculated in the UI.`,
-      approvalRef: 'production-integration-required',
-      auditRef: `audit:local-synthetic:${action}`,
+    tenantContext: tenantId,
+    runId: runId ?? 'run-unavailable',
+    selectedOfferId: optionId ?? 'offer-unavailable',
+    status: 'BLOCKED',
+    lockIdPreview: 'lock-service-unavailable',
+    lockId: null,
+    terms: {
+      productLabel: 'Unavailable',
+      investor: 'Unavailable',
+      channel: 'Unavailable',
+      noteRate: 'Unavailable',
+      finalPriceBps: 'Unavailable',
+      lockPeriodDays: 0,
+      expiresAt: new Date(0).toISOString(),
+      waterfallRef: 'lock-service:unavailable',
+      adjustmentRefs: [],
+      marginRefs: [],
+      investorConfirmationRequired: true,
     },
+    disclosures: [],
+    lockDisabled: true,
+    lockDisabledReason: 'Backend lock workflow is unavailable.',
+    blockers: [lockServiceUnavailableBlocker()],
+    postLockActions: [],
+    history: [],
+    uiTraceId: 'lock-service-unavailable',
+    events: ['lock.workflow.unavailable'],
+    fallbackReason: null,
+  };
+}
+
+function markWorkflowUnavailable(workflow: LockWorkflowView): LockWorkflowView {
+  return {
+    ...workflow,
+    status: 'BLOCKED',
+    lockDisabled: true,
+    lockDisabledReason: 'Backend lock workflow is unavailable.',
+    blockers: workflow.blockers.length ? workflow.blockers : [lockServiceUnavailableBlocker()],
+    events: [...workflow.events, 'lock.workflow.unavailable'],
+    fallbackReason: null,
+  };
+}
+
+function lockServiceUnavailableBlocker() {
+  return {
+    code: 'LOCK_SERVICE_UNAVAILABLE',
+    message: 'The lock-service did not return durable lock workflow evidence.',
+    remediation: 'Keep the current quote lock status unchanged and retry after lock-service is available.',
+    sourceRef: 'lock-service:unavailable',
   };
 }
 
 export function stateForLockWorkflow(workflow: LockWorkflowView) {
-  if (!workflow.terms || workflow.disclosures.length === 0) return 'empty';
   if (workflow.lockDisabled || workflow.status === 'BLOCKED') return 'blocked';
+  if (!workflow.terms || workflow.disclosures.length === 0) return 'empty';
   if (workflow.status === 'READY') return 'ready';
   return 'needs-attention';
 }

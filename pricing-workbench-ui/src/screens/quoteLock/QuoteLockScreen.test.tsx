@@ -83,6 +83,25 @@ describe('PII-24-S12 quote lock workflow screen', () => {
     await waitFor(() => expect(JSON.parse(String(vi.mocked(fetchImpl).mock.calls.at(-1)?.[1]?.body))).toEqual(expect.objectContaining({ action: 'extend' })));
   });
 
+  it('shows blocked or unavailable when lock-service action fails without changing current status', async () => {
+    const confirmLock = vi.fn(async () => {
+      throw new Error('lock-service unavailable');
+    });
+    render(<QuoteLockScreen workflow={deterministicLockWorkflow} confirmLock={confirmLock} />);
+
+    fireEvent.scroll(screen.getByLabelText(/Disclosure text/i), { currentTarget: { scrollTop: 100, clientHeight: 100, scrollHeight: 200 } });
+    fireEvent.click(screen.getByLabelText(/I have read and accept/i));
+    fireEvent.change(screen.getByLabelText(/Digital signature/i), { target: { value: 'Ada Borrower' } });
+    fireEvent.click(screen.getByRole('button', { name: /Lock This Rate/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^Confirm Lock$/i }));
+
+    const unavailableAlert = await screen.findByText(/Lock-service lock confirmation is blocked or unavailable/i);
+    expect(unavailableAlert).toHaveTextContent(/Current lock status remains READY/i);
+    expect(screen.getByRole('status', { name: /Lock status banner/i })).toHaveTextContent(/READY/);
+    expect(screen.queryByText(/Local synthetic\/dev fixture staged/i)).not.toBeInTheDocument();
+    expect(confirmLock).toHaveBeenCalledWith(expect.objectContaining({ action: 'confirm' }));
+  });
+
   it('derives countdown warning labels from expiration timestamps', () => {
     const now = new Date('2026-06-11T18:00:00Z');
     expect(countdownWarning('2026-06-14T18:00:00Z', now).severity).toBe('info');
