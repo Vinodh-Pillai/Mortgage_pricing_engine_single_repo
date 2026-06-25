@@ -51,7 +51,7 @@ describe('Product catalog manager route', () => {
     );
 
     expect(await screen.findByRole('heading', { name: 'Product Management' }, { timeout: 5000 })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Product Management/ })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: /Product Management, 1 alert/ })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('button', { name: /Add Product/i })).toBeInTheDocument();
     expect(screen.getByRole('table', { name: 'Product catalog records' })).toBeInTheDocument();
     expect(screen.getByText('Purchase product draft')).toBeInTheDocument();

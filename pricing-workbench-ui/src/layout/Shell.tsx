@@ -16,6 +16,16 @@ import { persistNavRailCollapsed } from './state/navRailState';
 
 export type Notification = { id: string; label: string; attentionRequired?: boolean };
 
+const navRailCollapsedStorageKey = 'loanweft:layout-shell:nav-rail-collapsed';
+
+function getInitialNavRailCollapsed() {
+  try {
+    return window.localStorage.getItem(navRailCollapsedStorageKey) === 'true';
+  } catch {
+    return false;
+  }
+}
+
 export interface ShellProps {
   children: ReactNode;
   activeModuleId: string;
@@ -36,7 +46,7 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, fullS
   const currentUser = auth?.currentPersona ? { name: auth.currentPersona.name, role: roleLabels[auth.currentPersona.role], avatar: auth.currentPersona.avatar } : user;
   const mode = useNavRailMode();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [navCollapsed, setNavCollapsed] = useState(true);
+  const [navCollapsed, setNavCollapsed] = useState(getInitialNavRailCollapsed);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const notificationsRef = useRef<HTMLElement>(null);
   const navigationMode = fullScreenWorkspace ? 'drawer' : mode;

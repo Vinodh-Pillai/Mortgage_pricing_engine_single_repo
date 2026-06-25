@@ -126,7 +126,7 @@ export function Header({ breadcrumb, notificationCount, showAuthenticatedChrome 
           <nav aria-label={t('navigation:breadcrumb')} className="layout-breadcrumbs">
             <ol>
               <li><Link to="/home">{t('home')}</Link></li>
-              <li aria-current="page"><Link to={location.pathname}>{breadcrumb || t('unknownScreen')}</Link></li>
+              <li aria-current="page"><Link to={location.pathname} aria-label={`${breadcrumb || t('unknownScreen')} breadcrumb`}>{breadcrumb || t('unknownScreen')}</Link></li>
             </ol>
           </nav>
         </div>

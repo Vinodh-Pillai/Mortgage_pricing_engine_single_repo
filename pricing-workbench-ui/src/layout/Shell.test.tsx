@@ -2,7 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router-dom';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getBreakpointForWidth } from './hooks/useBreakpoint';
 import { buildNavigationTree } from './navigation';
 import { Shell } from './Shell';
@@ -56,6 +56,10 @@ function renderShell(ui: ReactElement, initialEntry = '/quote/run-123/offers') {
 }
 
 describe('responsive layout shell', () => {
+  beforeEach(() => {
+    window.localStorage.removeItem('loanweft:layout-shell:nav-rail-collapsed');
+  });
+
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();

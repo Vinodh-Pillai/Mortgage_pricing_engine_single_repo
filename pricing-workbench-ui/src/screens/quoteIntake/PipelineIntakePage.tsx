@@ -1243,8 +1243,13 @@ export function PipelineIntakePage({
       {showProgressiveCompatibility ? <ProgressiveCompatibilityNav errors={visibleErrors} /> : null}
       {showProgressiveCompatibility ? (
         <div className="quote-intake-fields quote-intake-fields--compatibility" aria-label="Pipeline identity fields">
-          <label className={`quote-intake-field${visibleErrors.quoteIntent ? ' quote-intake-field--error' : ''}`}>Quote intent<input name="quoteIntent" value={values.quoteIntent ?? ''} aria-invalid={Boolean(visibleErrors.quoteIntent)} onChange={(event) => changeField('quoteIntent', event.target.value)} type="text" /></label>
-          <InlineSelectField label="Channel" name="channel" value={values.channel ?? ''} error={visibleErrors.channel} options={fieldDropdownOptions.channel ?? []} loading={dropdownConfigState.kind === 'loading'} onChange={(value) => changeField('channel', value)} />
+          <InlineTextField label="Quote intent" name="quoteIntent" value={values.quoteIntent ?? ''} error={visibleErrors.quoteIntent} onChange={(value) => changeField('quoteIntent', value)} />
+          {dropdownConfigState.kind === 'ready' && (fieldDropdownOptions.channel ?? []).length > 0 ? (
+            <InlineSelectField label="Channel" name="channel" value={values.channel ?? ''} error={visibleErrors.channel} options={fieldDropdownOptions.channel ?? []} loading={false} onChange={(value) => changeField('channel', value)} />
+          ) : (
+            <InlineTextField label="Channel" name="channel" value={values.channel ?? ''} error={visibleErrors.channel} onChange={(value) => changeField('channel', value)} />
+          )}
+          <p className="quote-intake-status">Capture the borrower and loan facts needed to start a pricing run; pricing rules remain service-owned.</p>
         </div>
       ) : null}
       {dropdownConfigState.kind === 'loading' ? <p className="quote-intake-status" role="status">Loading tenant dropdown options...</p> : null}
@@ -1631,6 +1636,17 @@ function InlineSelectField({ label, name, value, error, options, loading, onChan
       <select name={name} value={value} aria-invalid={Boolean(error)} onChange={(event) => onChange(event.target.value)} disabled={loading}>
         {renderedOptions.map((option) => <option key={option.value || 'empty'} value={option.value}>{option.label}</option>)}
       </select>
+      {error ? <span className="quote-intake-error" role="alert">{error}</span> : null}
+    </label>
+  );
+}
+
+function InlineTextField({ label, name, value, error, onChange }: { label: string; name: keyof BorrowerIntake; value: string; error?: string; onChange: (value: string) => void }) {
+  return (
+    <label className={`quote-intake-field${error ? ' quote-intake-field--error' : ''}`}>
+      {label}
+      <input name={name} value={value} aria-invalid={Boolean(error)} onChange={(event) => onChange(event.target.value)} type="text" />
+      {error ? <span className="quote-intake-error" role="alert">{error}</span> : null}
     </label>
   );
 }

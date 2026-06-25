@@ -184,7 +184,7 @@ function RetentionPanel({ controls, onLegalHold }: { controls: RetentionControlS
 }
 
 function ConfigGapsPanel({ gaps, onNavigate }: { gaps: string[]; onNavigate?: (target: string) => void }) {
-  return <CardList title="Configuration gaps" items={gaps.map((gap) => ({ id: gap, title: displayText(gap), body: ['Affected module: compliance evidence registry', 'Severity: configured-service-ref-required', 'Remediation: governance owner review required', 'Owner: governance'], refs: [gap], actions: <button type="button" onClick={() => onNavigate?.('/admin/governance')}>View in Governance</button> }))} emptyText="No configuration gaps supplied." />;
+  return <CardList title="Configuration gaps" items={gaps.map((gap) => ({ id: gap, title: displayConfigGapText(gap), body: ['Affected module: compliance evidence registry', 'Severity: configured-service-ref-required', 'Remediation: governance owner review required', 'Owner: governance'], refs: [gap], actions: <button type="button" onClick={() => onNavigate?.('/admin/governance')}>View in Governance</button> }))} emptyText="No configuration gaps supplied." />;
 }
 
 function CardList({ title, items, emptyText }: { title: string; items: { id: string; title: string; body: string[]; refs: string[]; actions?: React.ReactNode }[]; emptyText: string }) {
@@ -222,6 +222,15 @@ function displayText(value: string) {
     .replace(/backend-owned/gi, 'service-managed')
     .replace(/backend/gi, 'service')
     .replace(/refs?/gi, 'records')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function displayConfigGapText(value: string) {
+  return value
+    .replace(/ui-preview-tenant/gi, 'Product workspace')
+    .replace(/backend-owned/gi, 'service-managed')
+    .replace(/backend/gi, 'service')
     .replace(/[_-]+/g, ' ')
     .replace(/\b\w/g, (character) => character.toUpperCase());
 }

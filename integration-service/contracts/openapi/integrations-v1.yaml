@@ -94,5 +94,7 @@ paths:
     post:
       operationId: replayDeadLetter
       responses:
-        '200': { description: replay, dry run, discard, or blocked outcome }
-        '422': { description: policy not satisfied }
+        '200':
+          description: replay, dry run, discard, or blocked outcome
+        '422':
+          description: policy not satisfied
