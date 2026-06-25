@@ -55,6 +55,13 @@ class UiShellControllerTest {
   }
 
   @Test
+  void authMeReturnsControlledUnauthorizedWhenCredentialsAreMissing() throws Exception {
+    mvc.perform(get("/api/auth/me"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.error").value("Authentication credentials are required"));
+  }
+
+  @Test
   void mlAdvisoryInsightsExposesModelVersionGovernanceWithoutAutomaticDecisions() throws Exception {
     mvc.perform(get("/api/v1/ml-advisory/insights")
             .header("X-Tenant-Context", "tenant-test")
@@ -874,7 +881,7 @@ class UiShellControllerTest {
   }
 
   @Test
-  void lockWorkflowConfirmsWithSelectedOfferAndReturnsDetails() throws Exception {
+  void lockWorkflowFailsClosedWithoutDurableLockServiceEvidence() throws Exception {
     mvc.perform(get("/api/v1/tenants/demo-tenant/quote-runs/run-test/lock")
             .param("selectedOfferId", "offer-1")
             .header("X-Ui-Trace-Id", "trace-brw-s04"))
@@ -892,12 +899,15 @@ class UiShellControllerTest {
             .header("X-Ui-Trace-Id", "trace-brw-s04")
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"selectedOfferId\":\"offer-1\",\"disclosuresAccepted\":true}"))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.status").value("CONFIRMED"))
-        .andExpect(jsonPath("$.lockId").isString())
-        .andExpect(jsonPath("$.statusRoute").value("/quote/run-test/status"))
-        .andExpect(jsonPath("$.auditGroups[0].eventId").value("lock.confirmation.offer-1"))
-        .andExpect(jsonPath("$.events[0]").value("LockSuccess"));
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.status").value("BLOCKED"))
+        .andExpect(jsonPath("$.lockId").isEmpty())
+        .andExpect(jsonPath("$.lockStatus").value("LOCK_SERVICE_EVIDENCE_REQUIRED"))
+        .andExpect(jsonPath("$.statusRoute").isEmpty())
+        .andExpect(jsonPath("$.message").value("Lock confirmation requires durable lock-service evidence; pricing-bff does not synthesize confirmed locks."))
+        .andExpect(jsonPath("$.blockers[0]").value("Durable lock-service confirmation evidence is required before returning CONFIRMED."))
+        .andExpect(jsonPath("$.auditGroups[0].eventId").value("lock.confirmation.evidence-required-offer-1"))
+        .andExpect(jsonPath("$.events[0]").value("LockBlocked"));
   }
 
   @Test

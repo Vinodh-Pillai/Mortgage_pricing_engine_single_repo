@@ -18,7 +18,6 @@ import {
   type QuoteJourneyNode,
   type WaterfallLedgerRow,
 } from './lib/api/quoteRuns';
-import { confirmLock, fetchLockWorkflow, type LockConfirmationResult, type LockWorkflowView } from './lib/api/locks';
 import {
   fetchEligibilityModule,
   type EligibilityBlockerView,
@@ -116,7 +115,6 @@ import { WorkbenchModuleRail } from './screens/workbenchShell/WorkbenchShell';
 import { DiagnosticsDetails } from './components/DiagnosticsDetails';
 import { ThemeProvider, useTheme } from './design-system';
 import { Shell } from './layout';
-import { usePageActions } from './layout/PageActionsContext';
 import { AuthProvider, useAuth } from './lib/auth/AuthContext';
 import { RouteGuard } from './routing/RouteGuard';
 import { useCurrentRoute } from './routing/hooks';
@@ -155,6 +153,7 @@ const InvestorManagementScreen = lazy(() => import('./screens/investorManagement
 const RateSheetIntakeScreen = lazy(() => import('./screens/ratesheet/RateSheetIntakeScreen').then((module) => ({ default: module.RateSheetIntakeScreen })));
 const PricingAnalysisScreen = lazy(() => import('./screens/pricing/PricingAnalysisScreen').then((module) => ({ default: module.PricingAnalysisScreen })));
 const LockManagementScreen = lazy(() => import('./screens/locks/LockManagementScreen').then((module) => ({ default: module.LockManagementScreen })));
+const QuoteLockScreen = lazy(() => import('./screens/quoteLock/LockWorkflow'));
 
 const uiTraceId = 'brw-s01-local-trace';
 const tenantBoundaryPlaceholder = 'ui-preview-tenant';
@@ -300,7 +299,10 @@ function QuoteDetailRoute() {
 
 function QuoteLockRoute() {
   const { runId } = useParams();
-  return <LockLifecycleSection runId={requiredRouteParam(runId, 'quote-run-required')} />;
+  const navigate = useNavigate();
+  const activeRunId = requiredRouteParam(runId, 'quote-run-required');
+  const selectedOfferId = sessionStorage.getItem(`${selectedOfferStoragePrefix}${activeRunId}`) ?? undefined;
+  return <QuoteLockScreen tenantId={tenantBoundaryPlaceholder} runId={activeRunId} optionId={selectedOfferId} onNavigate={(path) => navigate(path)} />;
 }
 
 function EligibilityRoute() {
@@ -352,11 +354,6 @@ function FeatureRegistryRoute() {
 function NotFoundRoute() {
   return <NotFoundScreen tenantId={tenantBoundaryPlaceholder} uiTraceId="pii-25-s01-not-found" onEvidenceCapture={() => undefined} />;
 }
-
-type LockState =
-  | { kind: 'loading' }
-  | { kind: 'loaded'; workflow: LockWorkflowView }
-  | { kind: 'unreachable'; message: string };
 
 type PartnerQuoteState =
   | { kind: 'loading' }
@@ -2727,264 +2724,6 @@ function TransportResultBanner({ result, acceptedLabel, blockedLabel }: { result
   );
 }
 
-function LockLifecycleSection({ runId }: { runId: string }) {
-  const navigate = useNavigate();
-  const { setPromotedActions } = usePageActions();
-  const selectedOfferId = sessionStorage.getItem(`${selectedOfferStoragePrefix}${runId}`);
-  const [lockState, setLockState] = useState<LockState>({ kind: 'loading' });
-  const [disclosuresAccepted, setDisclosuresAccepted] = useState(false);
-  const [confirmation, setConfirmation] = useState<LockConfirmationResult | null>(null);
-  const [confirming, setConfirming] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    fetchLockWorkflow(tenantBoundaryPlaceholder, runId, selectedOfferId)
-      .then((workflow) => {
-        if (active) setLockState({ kind: 'loaded', workflow });
-      })
-      .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'Lock workflow is unavailable.';
-        if (active) setLockState({ kind: 'unreachable', message });
-      });
-    return () => {
-      active = false;
-    };
-  }, [runId, selectedOfferId]);
-
-  async function submitLock() {
-    if (!selectedOfferId || lockState.kind !== 'loaded' || lockState.workflow.lockDisabled || !disclosuresAccepted) return;
-    setConfirming(true);
-    try {
-      const result = await confirmLock(tenantBoundaryPlaceholder, runId, selectedOfferId, disclosuresAccepted);
-      setConfirmation(result);
-      if (result.status === 'CONFIRMED' && result.statusRoute) {
-        navigate(result.statusRoute, { state: { runId, selectedOfferId, screenId: 'BRW-S05' } });
-      }
-    } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : 'Lock confirmation is unavailable.';
-      setConfirmation({
-        runId,
-        selectedOfferId,
-        status: 'BLOCKED',
-        lockId: null,
-        lockStatus: null,
-        expiresAt: null,
-        statusRoute: null,
-        message,
-        uiTraceId: 'brw-s04-local-trace',
-        events: ['LockBlocked'],
-        blockers: [message],
-      });
-    } finally {
-      setConfirming(false);
-    }
-  }
-
-  useEffect(() => {
-    if (lockState.kind !== 'loaded') {
-      setPromotedActions(null);
-      return () => setPromotedActions(null);
-    }
-    const workflow = lockState.workflow;
-    const requestDisabled = workflow.lockDisabled || disclosuresAccepted;
-    const headerConfirmDisabled = workflow.lockDisabled || !disclosuresAccepted || confirming;
-    setPromotedActions({
-      label: 'Lock workflow page actions',
-      actions: (
-        <div className="pm-actions" aria-label="Lock workflow actions">
-          <button type="button" onClick={() => setDisclosuresAccepted(true)} disabled={requestDisabled}>Request lock</button>
-          <button type="button" className="pm-primary" onClick={() => void submitLock()} disabled={headerConfirmDisabled}>{confirming ? 'Confirming lock...' : 'Confirm lock'}</button>
-        </div>
-      ),
-    });
-    return () => setPromotedActions(null);
-  }, [lockState, disclosuresAccepted, confirming, setPromotedActions]);
-
-  if (lockState.kind === 'loading') {
-    return <section className="panel" aria-labelledby="lock-heading"><h2 id="lock-heading">Lock workflow</h2><p role="status">Loading lock preconditions...</p></section>;
-  }
-
-  if (lockState.kind === 'unreachable') {
-    return (
-      <section className="panel" aria-labelledby="lock-heading">
-        <h2 id="lock-heading">Lock workflow</h2>
-        <div className="banner banner--blocked" role="alert">{lockState.message}</div>
-      </section>
-    );
-  }
-
-  const workflow = lockState.workflow;
-  const confirmDisabled = workflow.lockDisabled || !disclosuresAccepted || confirming;
-
-  return (
-    <>
-      <section className="hero" aria-labelledby="lock-title">
-        <p className="eyebrow">Borrower Â· BRW-S04</p>
-        <h2 id="lock-title">Lock terms for run {runId}</h2>
-        <p>Review lock preconditions and confirm only after an offer is selected in this workflow.</p>
-      </section>
-
-      <section className="panel" aria-labelledby="lock-heading">
-        <div className="panel-heading-row">
-          <div>
-            <p className="eyebrow">Lock workflow</p>
-            <h2 id="lock-heading">Lock workflow</h2>
-          </div>
-          <DiagnosticsDetails items={[`Support reference: ${workflow.uiTraceId}`]} />
-        </div>
-
-        {workflow.lockDisabled ? (
-          <div className="banner banner--blocked" role="alert" aria-live="assertive">
-            <strong>Lock is blocked</strong>
-            <ul>{workflow.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
-          </div>
-        ) : (
-          <div className="banner banner--info" role="status">
-            <strong>Ready to confirm</strong>
-            <span>Selected offer {workflow.selectedOfferId} is present. Final eligibility is not inferred by the UI.</span>
-          </div>
-        )}
-
-        <div className="lock-summary">
-          <dl>
-            <dt>Selected offer</dt><dd>{valueText(workflow.selectedOfferId)}</dd>
-            <dt>Precondition status</dt><dd>{workflow.status}</dd>
-            <dt>Setup status</dt><dd>{serviceReadinessText(workflow.dependencyStatus)}</dd>
-            <dt>Next action</dt><dd>{workflow.nextAction}</dd>
-          </dl>
-        </div>
-
-        <section className="lock-cockpit" aria-labelledby="lock-cockpit-heading">
-          <h3 id="lock-cockpit-heading">Lifecycle cockpit</h3>
-          <div className="lock-cockpit__grid">
-            <article>
-              <h4>Selected quote refs</h4>
-              <ChipList label="Selected quote references" values={(workflow.selectedQuoteRefs ?? []).map(businessFacingText)} />
-            </article>
-            <article>
-              <h4>Required evidence</h4>
-              <ChipList label="Lock required evidence" values={(workflow.requiredEvidence ?? []).map(businessFacingText)} />
-            </article>
-          </div>
-
-          <div className="quote-table lock-table" role="table" aria-label="Freshness checks">
-            <div role="row" className="quote-table__row quote-table__row--head">
-              <span role="columnheader">Check</span>
-              <span role="columnheader">Status</span>
-              <span role="columnheader">Source</span>
-              <span role="columnheader">Remediation</span>
-            </div>
-            {(workflow.freshnessChecks ?? []).map((check) => (
-              <div key={`${check.label}-${check.sourceRef}`} role="row" className="quote-table__row">
-                <span role="cell">{businessFacingText(check.label)}</span>
-                <span role="cell">{businessFacingText(check.status)}</span>
-                <span role="cell">{businessFacingText(check.sourceRef)}</span>
-                <span role="cell">{businessFacingText(check.remediation)}</span>
-              </div>
-            ))}
-          </div>
-
-          <div className="quote-table lock-table" role="table" aria-label="Lock state machine transitions">
-            <div role="row" className="quote-table__row quote-table__row--head">
-              <span role="columnheader">From</span>
-              <span role="columnheader">To</span>
-              <span role="columnheader">Event id</span>
-              <span role="columnheader">Status</span>
-            </div>
-            {(workflow.stateTransitions ?? []).map((transition) => (
-              <div key={transition.eventId} role="row" className="quote-table__row">
-                <span role="cell">{businessFacingText(transition.fromState)}</span>
-                <span role="cell">{businessFacingText(transition.toState)}</span>
-                <span role="cell">{transition.eventId}</span>
-                <span role="cell">{businessFacingText(transition.status)}</span>
-              </div>
-            ))}
-          </div>
-
-          {(workflow.blockerDetails ?? []).length ? (
-            <div className="quote-table lock-table" role="table" aria-label="Lock items needing attention">
-              <div role="row" className="quote-table__row quote-table__row--head">
-                <span role="columnheader">Code</span>
-                <span role="columnheader">Message</span>
-                <span role="columnheader">Remediation</span>
-              </div>
-              {(workflow.blockerDetails ?? []).map((blocker) => (
-                <div key={blocker.code} role="row" className="quote-table__row">
-                  <span role="cell">{blocker.code}</span>
-                  <span role="cell">{businessFacingText(blocker.message)}</span>
-                  <span role="cell">{businessFacingText(blocker.remediation)}</span>
-                </div>
-              ))}
-            </div>
-          ) : null}
-
-          <LockAuditGroups groups={workflow.auditGroups ?? []} />
-        </section>
-
-        <label className="check-row">
-          <input
-            type="checkbox"
-            checked={disclosuresAccepted}
-            disabled={workflow.lockDisabled}
-            onChange={(event) => setDisclosuresAccepted(event.target.checked)}
-          />
-          <span>{workflow.disclosureText}</span>
-        </label>
-
-        <button type="button" disabled={confirmDisabled} aria-disabled={confirmDisabled} onClick={() => void submitLock()}>
-          {confirming ? 'Confirming lock...' : 'Confirm lock'}
-        </button>
-
-        {confirmation ? <LockConfirmationPanel result={confirmation} /> : null}
-      </section>
-    </>
-  );
-}
-
-function LockConfirmationPanel({ result }: { result: LockConfirmationResult }) {
-  if (result.status === 'CONFIRMED') {
-    return (
-      <div className="banner banner--success" role="status" aria-live="polite">
-        <strong>Lock details returned</strong>
-        <span>{result.message}</span>
-        <span>Lock id: {result.lockId}</span>
-        <span>Status: {result.lockStatus}</span>
-        <span>Expiry: {result.expiresAt}</span>
-        <LockAuditGroups groups={result.auditGroups ?? []} />
-      </div>
-    );
-  }
-
-  return (
-    <div className="banner banner--blocked" role="alert" aria-live="assertive">
-      <strong>{result.status === 'CONFLICT' ? 'Lock conflict' : 'Lock remains blocked'}</strong>
-      <span>{result.message}</span>
-      <ul>{result.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
-      <span>Selected offer context retained: {valueText(result.selectedOfferId)}</span>
-      <LockAuditGroups groups={result.auditGroups ?? []} />
-    </div>
-  );
-}
-
-function LockAuditGroups({ groups }: { groups: NonNullable<LockWorkflowView['auditGroups']> }) {
-  if (!groups.length) return null;
-  return (
-    <div className="lock-audit-groups" aria-label="Lock review evidence grouped by backend event ids">
-      {groups.map((group) => (
-        <article key={group.eventId} className="lock-audit-groups__card">
-          <h4>{businessFacingText(group.label)}</h4>
-          <dl>
-            <dt>Event id</dt><dd>{group.eventId}</dd>
-            <dt>Processing record</dt><dd>{businessFacingText(group.replayHash)}</dd>
-            <dt>Export evidence</dt><dd>{businessFacingText(group.exportRef)}</dd>
-          </dl>
-          <ChipList label={`${group.eventId} evidence refs`} values={group.evidenceRefs.map(businessFacingText)} />
-        </article>
-      ))}
-    </div>
-  );
-}
-
 type OfferState =
   | { kind: 'loading' }
   | { kind: 'loaded'; comparison: OfferComparisonView }
@@ -3365,6 +3104,7 @@ function OfferComparisonSection({ runId }: { runId: string }) {
   const [selectedOffer, setSelectedOffer] = useState<OfferSummary | null>(null);
   const [explanation, setExplanation] = useState<OfferExplanationView | null>(null);
   const [selectionMessage, setSelectionMessage] = useState<string>('');
+  const [supportDetailsOpen, setSupportDetailsOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -3480,7 +3220,20 @@ function OfferComparisonSection({ runId }: { runId: string }) {
         </div>
 
         {visibleOffers.length === 0 ? (
-          <p role="status">No comparable offers are loaded. Selection is blocked until explanation data is available.</p>
+          <div className="banner banner--info" role="status">
+            <p>No comparable offers are loaded. Selection is blocked until explanation data is available.</p>
+            <button type="button" onClick={() => setSupportDetailsOpen((open) => !open)}>
+              View explanation details
+            </button>
+            {supportDetailsOpen ? (
+              <section aria-labelledby="offer-support-detail-heading">
+                <h3 id="offer-support-detail-heading">Explanation details</h3>
+                <ChipList label="Required quote facts" values={(comparison.requiredFacts ?? []).map(businessFacingText)} />
+                <ChipList label="Backend quote refs" values={(comparison.backendRefs ?? []).map(businessFacingText)} />
+                <p>Offer selection remains fail-closed; no pricing, eligibility, or investor values are inferred in the browser.</p>
+              </section>
+            ) : null}
+          </div>
         ) : (
           <div className="offer-grid" role="list" aria-label="Offer cards">
             {visibleOffers.map((offer) => (

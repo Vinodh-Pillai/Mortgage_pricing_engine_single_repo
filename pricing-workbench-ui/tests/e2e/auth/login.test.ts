@@ -1,9 +1,14 @@
 import { expect, test } from '@playwright/test';
 
-const email = process.env.E2E_LOGIN_EMAIL || 'admin@wcpe.demo';
-const password = process.env.E2E_LOGIN_PASSWORD || 'Password123!';
+const email = process.env.E2E_LOGIN_EMAIL || 'sarah.mitchell@wcpe.synthetic.invalid';
+const password = process.env.E2E_LOGIN_PASSWORD || 'Synthetic-Only-Password!';
 
 test.describe('BFF-backed login', () => {
+  test('uses non-production synthetic persona defaults when real credentials are not supplied', () => {
+    expect(email).toMatch(/@wcpe\.synthetic\.invalid$/);
+    expect(password).toBe('Synthetic-Only-Password!');
+  });
+
   test('submits credentials through BFF and opens the pipeline', async ({ page }) => {
     const loginRequest = page.waitForRequest((request) => {
       const url = new URL(request.url());

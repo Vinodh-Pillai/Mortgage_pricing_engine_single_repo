@@ -3,8 +3,11 @@ package com.wcpe.mladvisory;
 import java.time.Clock;
 import java.util.List;
 import javax.sql.DataSource;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -18,12 +21,34 @@ import org.springframework.web.bind.annotation.RestController;
 public final class ModelVersionGovernanceController {
   private final ModelRegistryService registryService;
 
+  @Autowired
+  public ModelVersionGovernanceController(Environment environment) {
+    this(new ModelRegistryService(Clock.systemUTC(), new JdbcModelVersionRepository(dataSource(environment))));
+  }
+
   public ModelVersionGovernanceController(DataSource dataSource) {
     this(new ModelRegistryService(Clock.systemUTC(), new JdbcModelVersionRepository(dataSource)));
   }
 
   ModelVersionGovernanceController(ModelRegistryService registryService) {
     this.registryService = registryService;
+  }
+
+  private static DriverManagerDataSource dataSource(Environment environment) {
+    DriverManagerDataSource dataSource = new DriverManagerDataSource();
+    dataSource.setDriverClassName("org.postgresql.Driver");
+    dataSource.setUrl(required(environment, "spring.datasource.url"));
+    dataSource.setUsername(required(environment, "spring.datasource.username"));
+    dataSource.setPassword(required(environment, "spring.datasource.password"));
+    return dataSource;
+  }
+
+  private static String required(Environment environment, String key) {
+    String value = environment.getProperty(key);
+    if (value == null || value.isBlank()) {
+      throw new IllegalStateException(key + " is required");
+    }
+    return value;
   }
 
   @PostMapping

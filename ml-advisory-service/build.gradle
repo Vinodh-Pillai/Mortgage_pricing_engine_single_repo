@@ -20,6 +20,8 @@ tasks.withType(JavaCompile).configureEach {
 dependencies {
   implementation 'org.springframework.boot:spring-boot-starter-web'
   implementation 'org.springframework.boot:spring-boot-starter-actuator'
+  implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+  runtimeOnly 'org.postgresql:postgresql:42.7.4'
   testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
   testImplementation 'com.h2database:h2:2.2.224'
 }

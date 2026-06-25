@@ -1011,8 +1011,8 @@ class PricingBffUiFallbackAdapter {
       return ResponseEntity.status(HttpStatus.CONFLICT)
           .body(LockConfirmationResult.conflict(runId, request.selectedOfferId(), traceId));
     }
-    return ResponseEntity.status(HttpStatus.CREATED)
-        .body(LockConfirmationResult.confirmed(runId, request.selectedOfferId(), traceId));
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+        .body(LockConfirmationResult.failClosed(runId, request.selectedOfferId(), traceId));
   }
 
   @GetMapping("/api/v1/partners/{partnerId}/quotes")
@@ -2881,12 +2881,13 @@ class PricingBffUiFallbackAdapter {
           lifecycleAuditGroups(runId, "conflict-" + selectedOfferId));
     }
 
-    static LockConfirmationResult confirmed(String runId, String selectedOfferId, String traceId) {
-      String lockId = "lock-" + Integer.toUnsignedString((runId + "|" + selectedOfferId).hashCode(), 36);
-      return new LockConfirmationResult(runId, selectedOfferId, "CONFIRMED", lockId, "LOCK_REQUEST_RECORDED",
-          "Pending configured lock-service response", "/quote/" + runId + "/status",
-          "Lock request recorded for selected offer " + selectedOfferId + ".", traceId, List.of("LockSuccess"), List.of(),
-          lifecycleAuditGroups(runId, selectedOfferId));
+    static LockConfirmationResult failClosed(String runId, String selectedOfferId, String traceId) {
+      return new LockConfirmationResult(runId, selectedOfferId, "BLOCKED", null, "LOCK_SERVICE_EVIDENCE_REQUIRED",
+          null, null,
+          "Lock confirmation requires durable lock-service evidence; pricing-bff does not synthesize confirmed locks.",
+          traceId, List.of("LockBlocked"),
+          List.of("Durable lock-service confirmation evidence is required before returning CONFIRMED."),
+          lifecycleAuditGroups(runId, "evidence-required-" + selectedOfferId));
     }
   }
 

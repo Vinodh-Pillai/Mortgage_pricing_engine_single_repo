@@ -3,7 +3,6 @@ package com.wcpe.eligibility.config;
 import com.wcpe.eligibility.client.CatalogClient;
 import com.wcpe.eligibility.domain.rules.*;
 import com.wcpe.eligibility.repository.FicoLtvMatrixRepository;
-import com.wcpe.eligibility.service.PropertyTypeRuleService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -29,11 +28,6 @@ public class CatalogClientConfig {
     @Bean
     public EligibilityRule dtiRule() {
         return new DtiRule();
-    }
-
-    @Bean
-    public EligibilityRule propertyTypeRule(PropertyTypeRuleService propertyTypeRuleService) {
-        return new PropertyTypeRule(propertyTypeRuleService);
     }
 
     @Bean

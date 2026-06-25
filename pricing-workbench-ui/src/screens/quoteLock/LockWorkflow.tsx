@@ -189,7 +189,7 @@ function createUnavailableLockWorkflow(tenantId: string, runId?: string, optionI
     history: [],
     uiTraceId: 'lock-service-unavailable',
     events: ['lock.workflow.unavailable'],
-    fallbackReason: null,
+    fallbackReason: 'Backend lock workflow is unavailable.',
   };
 }
 
@@ -201,7 +201,7 @@ function markWorkflowUnavailable(workflow: LockWorkflowView): LockWorkflowView {
     lockDisabledReason: 'Backend lock workflow is unavailable.',
     blockers: workflow.blockers.length ? workflow.blockers : [lockServiceUnavailableBlocker()],
     events: [...workflow.events, 'lock.workflow.unavailable'],
-    fallbackReason: null,
+    fallbackReason: 'Backend lock workflow is unavailable.',
   };
 }
 

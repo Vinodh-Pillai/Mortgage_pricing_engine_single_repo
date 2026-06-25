@@ -7,8 +7,11 @@ import com.wcpe.mladvisory.FairLendingAnalysisService.PricingOutcomeRecordedEven
 import java.util.List;
 import java.util.UUID;
 import javax.sql.DataSource;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -22,12 +25,34 @@ import org.springframework.web.bind.annotation.RestController;
 public final class FairLendingController {
   private final FairLendingAnalysisService service;
 
+  @Autowired
+  public FairLendingController(Environment environment) {
+    this(new FairLendingAnalysisService(dataSource(environment)));
+  }
+
   public FairLendingController(DataSource dataSource) {
     this(new FairLendingAnalysisService(dataSource));
   }
 
   FairLendingController(FairLendingAnalysisService service) {
     this.service = service;
+  }
+
+  private static DriverManagerDataSource dataSource(Environment environment) {
+    DriverManagerDataSource dataSource = new DriverManagerDataSource();
+    dataSource.setDriverClassName("org.postgresql.Driver");
+    dataSource.setUrl(required(environment, "spring.datasource.url"));
+    dataSource.setUsername(required(environment, "spring.datasource.username"));
+    dataSource.setPassword(required(environment, "spring.datasource.password"));
+    return dataSource;
+  }
+
+  private static String required(Environment environment, String key) {
+    String value = environment.getProperty(key);
+    if (value == null || value.isBlank()) {
+      throw new IllegalStateException(key + " is required");
+    }
+    return value;
   }
 
   @PostMapping("/pricing-outcomes")

@@ -10,6 +10,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -25,6 +26,7 @@ public class AuditLogService {
     private final AuditRedactionPolicy redactionPolicy;
     private final EventEnvelopeFactory envelopeFactory;
 
+    @Autowired
     public AuditLogService(AuditLogStore store, Clock clock) {
         this(store, clock, new AuditRedactionPolicy(), new EventEnvelopeFactory(clock, null));
     }

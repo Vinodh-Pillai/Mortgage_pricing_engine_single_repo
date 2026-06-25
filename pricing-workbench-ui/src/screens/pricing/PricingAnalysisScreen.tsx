@@ -48,6 +48,7 @@ const pricingConfig: FunctionalityPageConfig<PricingRow> = {
       <div className="waterfall-bars" aria-label="Read-only waterfall chart">
         {[['Base selection', '82%'], ['Adjustment evidence', '62%'], ['Margin review', '48%']].map(([label, width]) => <div className="waterfall-bar" key={label}><span>{label}</span><span style={{ width }} /></div>)}
       </div>
+      <p>No local pricing calculations are performed; values are visual readiness placeholders until connected pricing records provide evidence.</p>
     </section>
   ),
 };
