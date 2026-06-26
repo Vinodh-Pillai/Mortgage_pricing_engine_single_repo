@@ -16,16 +16,20 @@ test.describe('PII-25-S04 functionality pages', () => {
   test('admin can navigate to dedicated functionality pages', async ({ page }) => {
     await authenticateAs(page, 'persona-admin');
     const routes = [
-      ['/tenant/onboarding', 'Tenant Onboarding'],
-      ['/admin/products/new', 'Product Management'],
-      ['/pricing/rate-sheets', 'Rate Sheet Intake'],
-      ['/pricing/analysis', 'Pricing Analysis'],
-      ['/locks', 'Lock Management'],
+      ['/tenant/onboarding', 'Tenant Onboarding', 'tenant-onboarding'],
+      ['/admin/products/new', 'Product Management', 'product-management'],
+      ['/pricing/rate-sheets', 'Rate Sheet Intake', 'rate-sheet-intake'],
+      ['/pricing/analysis', 'Pricing Analysis', 'pricing-analysis'],
+      ['/locks', 'Lock Management', 'lock-management'],
     ] as const;
 
-    for (const [route, heading] of routes) {
+    for (const [route, heading, screenshotName] of routes) {
       await page.goto(route);
       await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible();
+      await page.screenshot({
+        path: `tests/results/screenshots/functionality-pages/${screenshotName}.png`,
+        fullPage: true,
+      });
     }
   });
 
@@ -34,5 +38,9 @@ test.describe('PII-25-S04 functionality pages', () => {
     await page.goto('/tenant/onboarding');
     await expect(page.getByRole('heading', { name: 'Access denied' })).toBeVisible();
     await expect(page.getByText('/tenant/onboarding')).toBeVisible();
+    await page.screenshot({
+      path: 'tests/results/screenshots/functionality-pages/access-denied.png',
+      fullPage: true,
+    });
   });
 });
