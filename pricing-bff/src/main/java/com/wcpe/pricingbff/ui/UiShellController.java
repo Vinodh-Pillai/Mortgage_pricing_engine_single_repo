@@ -1,6 +1,7 @@
 package com.wcpe.pricingbff.ui;
 
 import com.wcpe.pricingbff.los.LosApiModels.CreditApplicationField;
+import com.wcpe.pricingbff.los.LosApiModels.CreditApplicationValue;
 import com.wcpe.pricingbff.los.LosApiModels.LoanPassExecutionProductSummary;
 import com.wcpe.pricingbff.los.LosApiModels.LoanPassExecutionSummaryResponse;
 import com.wcpe.pricingbff.los.LosApiModels.LoanPassProductExecutionResult;
@@ -10,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
@@ -27,6 +29,7 @@ class PricingBffUiFallbackAdapter {
   private static final String DURABLE_UI_STORE_REQUIRED =
       "Durable UI persistence is not configured; process-local tenant and draft state is disabled.";
   private final PricingBffQuoteServiceLoanPassClient quoteServiceClient;
+  private final Map<QuoteRunContextKey, QuoteRunContext> quoteRunContexts = new ConcurrentHashMap<>();
 
   PricingBffUiFallbackAdapter(PricingBffQuoteServiceLoanPassClient quoteServiceClient) {
     this.quoteServiceClient = quoteServiceClient;
@@ -424,6 +427,8 @@ class PricingBffUiFallbackAdapter {
     }
 
     String runId = deterministicRunId(tenantId, intake);
+    quoteRunContexts.put(new QuoteRunContextKey(normalizedTenantKey(tenantId), runId),
+        new QuoteRunContext(tenantId, runId, quoteRunCreditApplicationFields(intake)));
     ScenarioIntakeMetadata metadata = scenarioIntakeMetadata(tenantId, traceId);
     return ResponseEntity.status(HttpStatus.CREATED)
         .body(new QuoteRunLaunch(runId, "CREATED", "/quote/" + runId + "/offers", validation, traceId,
@@ -792,7 +797,8 @@ class PricingBffUiFallbackAdapter {
       @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
     String traceId = normalizeTrace(uiTraceId);
     try {
-      LoanPassExecutionSummaryResponse response = quoteServiceClient.executeSummary(tenantId, runId, traceId);
+      LoanPassExecutionSummaryResponse response = quoteServiceClient.executeSummary(tenantId, runId, traceId,
+          quoteRunContextFields(tenantId, runId));
       return OfferComparisonView.fromLoanPassSummary(runId, traceId, response);
     } catch (PricingBffQuoteServiceLoanPassClient.QuoteServiceUnavailableException ex) {
       return OfferComparisonView.upstreamMissing(runId, traceId, ex.getMessage());
@@ -809,7 +815,8 @@ class PricingBffUiFallbackAdapter {
     String optionId = offerId == null || offerId.isBlank() ? "quote-option-contract-required" : offerId;
     String traceId = uiTraceId == null || uiTraceId.isBlank() ? "qd-s23-local-trace" : uiTraceId;
     try {
-      LoanPassProductExecutionResult result = quoteServiceClient.executeProduct(tenantId, runId, optionId, traceId);
+      LoanPassProductExecutionResult result = quoteServiceClient.executeProduct(tenantId, runId, optionId, traceId,
+          quoteRunContextFields(tenantId, runId));
       return QuoteDetailView.fromLoanPassProduct(tenantId, runId, optionId, traceId, result);
     } catch (PricingBffQuoteServiceLoanPassClient.QuoteServiceUnavailableException ex) {
       return QuoteDetailView.blocked(tenantId, runId, optionId, traceId, ex.getMessage());
@@ -1937,6 +1944,81 @@ class PricingBffUiFallbackAdapter {
     return missing;
   }
 
+  private List<CreditApplicationField> quoteRunCreditApplicationFields(Map<String, Object> intake) {
+    if (intake == null || intake.isEmpty()) return List.of();
+    Map<String, Object> facts = new LinkedHashMap<>();
+    flattenIntakeFacts("", intake, facts);
+    putAliasFact(facts, intake, "state", "quoteAddressDTO.state");
+    putAliasFact(facts, intake, "zip", "quoteAddressDTO.zip");
+    return facts.entrySet().stream()
+        .filter(entry -> !blankValue(entry.getValue()))
+        .map(entry -> new CreditApplicationField(loanPassFieldId(entry.getKey()), creditApplicationValue(entry.getValue())))
+        .toList();
+  }
+
+  private void flattenIntakeFacts(String prefix, Map<?, ?> source, Map<String, Object> facts) {
+    source.forEach((rawKey, value) -> {
+      if (rawKey == null) return;
+      String key = rawKey.toString().trim();
+      if (key.isBlank()) return;
+      String path = prefix.isBlank() ? canonicalFactPath(key) : prefix + "." + key;
+      if (value instanceof Map<?, ?> nested) {
+        flattenIntakeFacts(path, nested, facts);
+      } else if (!blankValue(value)) {
+        facts.putIfAbsent(path, value);
+      }
+    });
+  }
+
+  private void putAliasFact(Map<String, Object> facts, Map<String, Object> intake, String alias, String canonicalPath) {
+    if (intake != null && !blankValue(intake.get(alias)) && !facts.containsKey(canonicalPath)) {
+      facts.put(canonicalPath, intake.get(alias));
+    }
+  }
+
+  private String canonicalFactPath(String key) {
+    return switch (key) {
+      case "state" -> "quoteAddressDTO.state";
+      case "zip" -> "quoteAddressDTO.zip";
+      default -> key;
+    };
+  }
+
+  private String loanPassFieldId(String factPath) {
+    return switch (factPath) {
+      case "baseLoanAmount" -> "field@base-loan-amount";
+      case "purchasePrice" -> "field@purchase-price";
+      case "appraisedValue" -> "field@appraised-value";
+      case "quoteAddressDTO.state" -> "field@state";
+      case "quoteAddressDTO.zip" -> "field@zip";
+      case "quoteAddressDTO.countyFips" -> "field@county";
+      case "decisionCreditScore" -> "field@decision-credit-score";
+      case "documentationType" -> "field@documentation-type";
+      case "mortgageType" -> "field@desired-mortgage-type";
+      case "desiredLoanTerm" -> "field@desired-loan-term";
+      case "desiredAmortizationType" -> "field@desired-amortization-type";
+      case "numberOfUnits" -> "field@number-of-units";
+      case "totalMonthlyIncome" -> "field@total-monthly-income";
+      case "estimatedDti" -> "field@estimated-dti";
+      case "monthsOfReserves" -> "field@months-of-reserves";
+      case "lienPosition" -> "field@lien-position";
+      default -> "field@" + factPath.replaceAll("([a-z])([A-Z])", "$1-$2")
+          .replace('.', '-')
+          .replace('_', '-')
+          .toLowerCase(Locale.ROOT);
+    };
+  }
+
+  private CreditApplicationValue creditApplicationValue(Object value) {
+    String type = value instanceof Number ? "number" : value instanceof Boolean ? "boolean" : "string";
+    return new CreditApplicationValue(type, value, null, null);
+  }
+
+  private List<CreditApplicationField> quoteRunContextFields(String tenantId, String runId) {
+    QuoteRunContext context = quoteRunContexts.get(new QuoteRunContextKey(normalizedTenantKey(tenantId), runId));
+    return context == null ? List.of() : context.creditApplicationFields();
+  }
+
   private ScenarioIntakeField metadataField(String fieldId, String label, String groupId, String dataType, boolean required,
       String helpText, String sourceRef, String decisionQuality, List<String> validationMessages) {
     return new ScenarioIntakeField(fieldId, label, groupId, dataType, required, helpText, sourceRef, decisionQuality,
@@ -1944,6 +2026,11 @@ class PricingBffUiFallbackAdapter {
   }
 
   private boolean isBlankText(Map<String, Object> intake, String field) {
+    Object value = fieldValue(intake, field);
+    return blankValue(value);
+  }
+
+  private Object fieldValue(Map<String, Object> intake, String field) {
     Object value = null;
     if (intake != null) {
       value = intake.get(field);
@@ -1960,8 +2047,22 @@ class PricingBffUiFallbackAdapter {
         }
         value = current;
       }
+      if (blankValue(value) && "quoteAddressDTO.state".equals(field)) {
+        value = intake.get("state");
+      }
+      if (blankValue(value) && "quoteAddressDTO.zip".equals(field)) {
+        value = intake.get("zip");
+      }
     }
-    return value == null || value.toString().isBlank();
+    return value;
+  }
+
+  private boolean blankValue(Object value) {
+    if (value == null) return true;
+    if (value instanceof String text) return text.isBlank();
+    if (value instanceof List<?> values) return values.isEmpty();
+    if (value instanceof Map<?, ?> values) return values.isEmpty();
+    return false;
   }
 
   private String deterministicRunId(String tenantId, Map<String, Object> intake) {
@@ -2492,6 +2593,14 @@ class PricingBffUiFallbackAdapter {
     static QuoteRunLaunch blocked(String traceId, IntakeValidation validation) {
       return new QuoteRunLaunch(null, "BLOCKED", null, validation, traceId, List.of("UIFlowOpened"), true,
           "UPSTREAM_NOT_CALLED", null, null, List.of(), List.of(), List.of(), null);
+    }
+  }
+
+  record QuoteRunContextKey(String tenantKey, String runId) {}
+
+  record QuoteRunContext(String tenantId, String runId, List<CreditApplicationField> creditApplicationFields) {
+    QuoteRunContext {
+      creditApplicationFields = List.copyOf(creditApplicationFields == null ? List.of() : creditApplicationFields);
     }
   }
 

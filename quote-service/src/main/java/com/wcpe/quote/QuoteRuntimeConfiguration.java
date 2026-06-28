@@ -2,11 +2,14 @@ package com.wcpe.quote;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wcpe.quote.parallel.ParallelPricingOrchestrator;
+import java.util.Arrays;
 import java.time.Clock;
 import java.util.UUID;
 import java.util.List;
 import java.util.Optional;
 import javax.sql.DataSource;
+import org.flywaydb.core.Flyway;
+import org.flywaydb.core.api.configuration.FluentConfiguration;
 import org.postgresql.ds.PGSimpleDataSource;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -139,6 +142,36 @@ class QuoteRuntimeConfiguration {
         dataSource.setUser(username);
         dataSource.setPassword(password == null ? "" : password);
         return dataSource;
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(Flyway.class)
+    @ConditionalOnProperty(prefix = "spring.flyway", name = "enabled", havingValue = "true")
+    Flyway quoteFlyway(
+        DataSource dataSource,
+        @Value("${spring.flyway.locations:classpath:db/migration}") String locations,
+        @Value("${spring.flyway.schemas:}") String schemas,
+        @Value("${spring.flyway.default-schema:}") String defaultSchema
+    ) {
+        FluentConfiguration configuration = Flyway.configure()
+            .dataSource(dataSource)
+            .locations(csv(locations))
+            .baselineOnMigrate(true)
+            .baselineVersion("0");
+        String[] schemaList = csv(schemas);
+        if (schemaList.length > 0) configuration.schemas(schemaList);
+        if (defaultSchema != null && !defaultSchema.isBlank()) configuration.defaultSchema(defaultSchema.trim());
+        Flyway flyway = configuration.load();
+        flyway.migrate();
+        return flyway;
+    }
+
+    private static String[] csv(String value) {
+        if (value == null || value.isBlank()) return new String[0];
+        return Arrays.stream(value.split(","))
+            .map(String::trim)
+            .filter(item -> !item.isBlank())
+            .toArray(String[]::new);
     }
 
     @ConfigurationProperties(prefix = "quote.persistence")

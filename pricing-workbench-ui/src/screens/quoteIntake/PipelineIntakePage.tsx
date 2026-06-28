@@ -955,9 +955,14 @@ export function PipelineIntakePage({
     setFlowState({ kind: 'submitting' });
     try {
       const savedDraft = await saveDraft('pre-launch', launchValues);
-      const resolvedScenarioId = savedDraft?.scenarioId ?? scenarioId ?? resumeBackup?.scenarioId;
+      let resolvedScenarioId = savedDraft?.scenarioId ?? scenarioId ?? resumeBackup?.scenarioId;
+      let resolvedVersion = savedDraft?.scenarioVersion ?? (scenarioVersion || resumeBackup?.scenarioVersion || 1);
+      if (!resolvedScenarioId && mode === 'quickquote') {
+        resolvedScenarioId = localUnsyncedDraftId;
+        resolvedVersion = 1;
+        capture('quote-launch-local-draft-used', { reason: 'draft-persistence-unavailable' });
+      }
       if (!resolvedScenarioId) throw new Error('Connected scenario draft is unavailable; quote launch requires backend draft support.');
-      const resolvedVersion = savedDraft?.scenarioVersion ?? (scenarioVersion || resumeBackup?.scenarioVersion || 1);
       const launched = await launchQuoteRun(tenantId, resolvedScenarioId, resolvedVersion, launchValues);
       if (launched.kind === 'blocked') {
         setLocalErrors(launched.validation.blockers);
@@ -1144,10 +1149,9 @@ export function PipelineIntakePage({
       <section id="quickquote-workspace" className="quickquote-workspace" aria-labelledby="quickquote-heading" data-loading={quickQuoteLoading ? 'true' : 'false'}>
         <header className="quickquote-header" aria-label="QuickQuote header">
           <div className="quickquote-header__identity">
-            <nav className="quickquote-mode-toggle" aria-label="Quote mode">
-              <a href="/quote/start" aria-current="page" onClick={(event) => requestModeSwitch(event, 'quickquote')}>QuickQuote</a>
-              <a href={routeForMode('pipeline', selectedProduct)} onClick={(event) => requestModeSwitch(event, 'pipeline')}>Pipeline</a>
-            </nav>
+            <div className="quickquote-mode-toggle" role="tablist" aria-label="Quote workspace">
+              <span className="quickquote-ready-chip" role="tab" aria-selected="true" aria-current="page" tabIndex={0}>QuickQuote</span>
+            </div>
             <h1 id="quickquote-heading">QuickQuote</h1>
           </div>
           <dl className="quickquote-context" aria-label="Borrower and loan context">

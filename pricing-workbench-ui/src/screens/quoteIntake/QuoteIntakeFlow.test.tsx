@@ -318,7 +318,8 @@ describe('PipelineIntakeTest', () => {
     render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} />);
 
     expect(screen.getByRole('heading', { name: /^QuickQuote$/i })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /^QuickQuote$/i })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('tab', { name: /^QuickQuote$/i })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByRole('link', { name: /^QuickQuote$/i })).not.toBeInTheDocument();
     const statusStrip = screen.getByRole('region', { name: /QuickQuote status strip/i });
     expect(statusStrip).toBeInTheDocument();
     expect(screen.getAllByText('Prefill').length).toBeGreaterThan(0);
@@ -328,26 +329,54 @@ describe('PipelineIntakeTest', () => {
     expect(screen.getByRole('table', { name: /QuickQuote product eligibility grid/i })).toBeInTheDocument();
     expect(screen.getByText(/no QuickQuote product filter is applied/i)).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: /^Review$/i })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /^Pipeline$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /^Pipeline$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: /^Pipeline$/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/Capture the borrower and loan facts/i)).not.toBeInTheDocument();
   }, 30000);
 
-  it('promptsBeforeModeSwitchWithUnsavedQuickQuoteSelectionAndSeedsPipeline', () => {
+  it('keepsQuickQuoteAsSingleWorkspaceWithoutPipelineModeSwitch', () => {
     const onNavigate = vi.fn();
     const capture = vi.fn();
     render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} onNavigate={onNavigate} onEvidenceCapture={capture} />);
 
     fireEvent.click(screen.getByRole('row', { name: /Conventional 30-Year Preview ACTIVE/i }));
-    fireEvent.click(screen.getByRole('link', { name: /^Pipeline$/i }));
 
-    expect(screen.getByRole('dialog', { name: /Switch to Pipeline/i })).toBeInTheDocument();
-    expect(capture).toHaveBeenCalledWith(expect.objectContaining({ action: 'quote-mode-switch-confirmation-required', storyId: 'PII-77-S05', mode: 'pipeline', selectedProductCode: 'CONF_30YR_PREVIEW' }));
-
-    fireEvent.click(screen.getByRole('button', { name: /^Discard$/i }));
-
-    expect(onNavigate).toHaveBeenCalledWith('/pipeline?product=CONF_30YR_PREVIEW');
-    expect(capture).toHaveBeenCalledWith(expect.objectContaining({ action: 'quote-mode-switched', storyId: 'PII-77-S05', mode: 'pipeline', decision: 'discard' }));
+    expect(screen.getByRole('tab', { name: /^QuickQuote$/i })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByRole('link', { name: /^Pipeline$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /^Pipeline$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: /Switch to Pipeline/i })).not.toBeInTheDocument();
+    expect(onNavigate).not.toHaveBeenCalled();
+    expect(capture).not.toHaveBeenCalledWith(expect.objectContaining({ action: 'quote-mode-switch-confirmation-required', mode: 'pipeline' }));
+    expect(capture).not.toHaveBeenCalledWith(expect.objectContaining({ action: 'quote-mode-switched', mode: 'pipeline' }));
   }, 30000);
+
+  it('launchesQuickQuoteWithLocalDraftWhenDraftPersistenceIsUnavailable', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      if (url.endsWith('/scenarios') && init?.method === 'POST') return { ok: false, status: 503, json: async () => ({ status: 'BLOCKED', message: 'Draft service unavailable' }) } as Response;
+      if (url.endsWith('/quote-runs') && init?.method === 'POST') return json({ status: 'CREATED', runId: 'run-quickquote-1', nextRoute: '/quote/run-quickquote-1/offers', validationSummary: { passed: true, status: 'PASSED', message: 'ok', blockers: {} }, uiTraceId: 'trace-quickquote-launch', events: [], fallbackMode: false, dependencyStatus: '', auditPackageId: 'audit-quickquote-launch', replayHashRef: 'replay-quickquote-launch', validationIssues: [] });
+      return json({});
+    });
+    const onNavigate = vi.fn();
+    const capture = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} intake={{ ...filledIntake(), borrowerLastName: 'Alex', loanNumber: 'LP-QQ-1001', mortgageType: 'Conventional', zip: '90001', state: 'CA' }} onNavigate={onNavigate} onEvidenceCapture={capture} />);
+
+    fireEvent.click(screen.getAllByRole('button', { name: /^Use for quote$/i })[0]);
+    const launchButton = screen.getByRole('button', { name: /^Launch quote$/i });
+    await waitFor(() => expect(launchButton).not.toBeDisabled());
+    fireEvent.click(launchButton);
+
+    const launchCall = await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([input, init]) => input.toString().endsWith('/quote-runs') && init?.method === 'POST' && init.body);
+      expect(call).toBeDefined();
+      return call;
+    });
+    expect(JSON.parse(String(launchCall?.[1]?.body))).toMatchObject({ scenarioId: 'local-unsynced-pipeline-draft', scenarioVersion: 1 });
+    expect(capture).toHaveBeenCalledWith(expect.objectContaining({ action: 'quote-launch-local-draft-used', reason: 'draft-persistence-unavailable' }));
+    await waitFor(() => expect(onNavigate).toHaveBeenCalledWith('/quote/run-quickquote-1/offers'));
+  }, 60000);
 
   it('keepsAllQuickQuoteProductStatusesVisibleWithReviewTraceRefs', () => {
     const capture = vi.fn();

@@ -63,8 +63,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: pricing-bff
-          image: pricing-bff:0.1.0-k8s
-          imagePullPolicy: Never
+          image: 192.168.4.102:32061/mortgage-pricing/pricing-bff:0.1.0-quickquote-20260628-0300-amd64
+          imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8080

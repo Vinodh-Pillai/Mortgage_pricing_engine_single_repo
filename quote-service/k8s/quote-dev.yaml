@@ -14,9 +14,19 @@ metadata:
 data:
   SPRING_PROFILES_ACTIVE: dev
   SERVER_PORT: "8080"
+  SPRING_DATASOURCE_URL: jdbc:postgresql://catalog-postgres.wcpe-dev.svc.cluster.local:5432/catalog?currentSchema=quote,public
+  SPRING_DATASOURCE_USERNAME: catalog_app
+  QUOTE_FLYWAY_ENABLED: "true"
+  SPRING_FLYWAY_SCHEMAS: quote
+  SPRING_FLYWAY_DEFAULT_SCHEMA: quote
+  MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: "true"
   MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info,prometheus
   WCPE_SYNTHETIC_ONLY: "true"
   WCPE_ADJUSTMENT_SERVICE_BASE_URL: http://adjustment-service.wcpe-dev.svc.cluster.local:8080
+  QUOTE_LOANPASS_SYNTHETIC_LOADER_ENABLED: "true"
+  QUOTE_LOANPASS_SYNTHETIC_LOADER_TENANT_ID: 2aba740b-74ee-3068-a456-4df1e64b7c02
+  QUOTE_LOANPASS_SYNTHETIC_LOADER_PRODUCT_COUNT: "1536"
+  QUOTE_LOANPASS_SYNTHETIC_LOADER_SEED: ui-preview-tenant-dev
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -45,14 +55,20 @@ spec:
           type: RuntimeDefault
       containers:
         - name: quote-service
-          image: quote-service:0.1.0-local
-          imagePullPolicy: Never
+          image: 192.168.4.102:32061/mortgage-pricing/quote-service:0.1.0-quickquote-20260628-0315-amd64
+          imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8080
           envFrom:
             - configMapRef:
                 name: quote-service-config
+          env:
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: catalog-db-secret
+                  key: POSTGRES_PASSWORD
           volumeMounts:
             - name: tmp
               mountPath: /tmp
