@@ -1,10 +1,12 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type CSSProperties, type FormEvent, type MouseEvent } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Button, Input } from '../../design-system';
-import { useAuth } from '../../lib/auth/AuthContext';
+import { isLocalDevPersonaFallbackAllowed, useAuth } from '../../lib/auth/AuthContext';
+import { syntheticPersonas } from '../../lib/auth/personas';
 import { useTranslation } from '../../lib/i18n';
 import { useAppNavigate } from '../../routing/hooks';
 import type { ScreenProps } from '../contract/ScreenProps';
+import { PersonaCard } from './PersonaCard';
 import './LoginScreen.css';
 
 export type LoginEvidenceType = 'login-submit' | 'login-error' | 'route-redirect' | 'forgot-password';
@@ -28,7 +30,7 @@ function emitLoginEvidence(detail: LoginEvidenceDetail) {
 }
 
 export function LoginScreen({ initialEmail = '', loading = false, disableAutoRedirect = false }: LoginScreenProps) {
-  const { user, isAuthenticated, isLoading, login } = useAuth();
+  const { user, isAuthenticated, isLoading, authError, login, signInWithPersona } = useAuth();
   const location = useLocation();
   const navigate = useAppNavigate();
   const { t } = useTranslation('auth');
@@ -36,6 +38,8 @@ export function LoginScreen({ initialEmail = '', loading = false, disableAutoRed
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [personaSubmitting, setPersonaSubmitting] = useState(false);
+  const [selectedPersonaId, setSelectedPersonaId] = useState(() => syntheticPersonas[0]?.id ?? '');
 
   useEffect(() => {
     if (!disableAutoRedirect && isAuthenticated && location.pathname === '/login') {
@@ -61,13 +65,33 @@ export function LoginScreen({ initialEmail = '', loading = false, disableAutoRed
     }
   }
 
-  function handleForgotPassword(event: React.MouseEvent<HTMLAnchorElement>) {
+  async function handlePersonaSignIn() {
+    const selectedPersona = syntheticPersonas.find((persona) => persona.id === selectedPersonaId);
+    if (!selectedPersona) return;
+    setPersonaSubmitting(true);
+    setError(null);
+    try {
+      const signedInUser = await signInWithPersona(selectedPersona.id);
+      emitLoginEvidence({ type: 'login-submit', userId: signedInUser.id, target: selectedPersona.defaultRoute });
+      navigate(selectedPersona.defaultRoute, { replace: true });
+    } catch (exception) {
+      const message = exception instanceof Error ? exception.message : 'Unable to use local/dev persona sign in';
+      setError(message);
+      emitLoginEvidence({ type: 'login-error', value: message });
+    } finally {
+      setPersonaSubmitting(false);
+    }
+  }
+
+  function handleForgotPassword(event: MouseEvent<HTMLAnchorElement>) {
     event.preventDefault();
     emitLoginEvidence({ type: 'forgot-password', target: '/forgot-password' });
   }
 
   const authResolving = loading || isLoading;
-  const busy = authResolving || submitting;
+  const busy = authResolving || submitting || personaSubmitting;
+  const selectedPersona = syntheticPersonas.find((persona) => persona.id === selectedPersonaId) ?? syntheticPersonas[0];
+  const localDevFallbackAllowed = isLocalDevPersonaFallbackAllowed();
 
   return (
     <main className="login-page" aria-labelledby="login-title" data-testid="login-page">
@@ -117,6 +141,7 @@ export function LoginScreen({ initialEmail = '', loading = false, disableAutoRed
 
           {authResolving ? <p className="login-status" role="status">Checking your session before sign in…</p> : null}
           {error ? <p className="login-error" role="alert">{error}</p> : null}
+          {authError && !error ? <p className="login-error" role="alert">{authError}</p> : null}
 
           <div className="login-form__actions">
             <Button type="submit" variant="primary" size="lg" className="login-submit" disabled={busy}>
@@ -126,9 +151,47 @@ export function LoginScreen({ initialEmail = '', loading = false, disableAutoRed
           </div>
 
           <p className="login-search-help" aria-live="polite">
-            Use your organization account to access LoanWeft.
+            Use your organization account to access Pricing Workbench.
           </p>
         </form>
+
+        {localDevFallbackAllowed ? <section className="login-role-group login-dev-persona" aria-labelledby="login-dev-persona-title" data-testid="local-dev-persona-panel">
+          <div className="login-role-title-row">
+            <span className="login-role-icon" aria-hidden="true">🧪</span>
+            <div>
+              <p className="login-eyebrow">Local/dev fallback</p>
+              <h2 id="login-dev-persona-title">Backend auth unavailable</h2>
+            </div>
+          </div>
+          <p className="login-dev-persona__warning">
+            Use a synthetic persona only for local/dev UI validation when <code>/api/auth/login</code> or <code>/api/auth/me</code> returns 401.
+            This does not create a backend session or hide protected API failures.
+          </p>
+          <div className="login-persona-grid" aria-label="Local/dev personas">
+            {syntheticPersonas.map((persona, index) => (
+              <PersonaCard
+                key={persona.id}
+                persona={persona}
+                isSelected={persona.id === selectedPersonaId}
+                onSelect={() => setSelectedPersonaId(persona.id)}
+                showEmail={false}
+                style={{ '--stagger-index': index } as CSSProperties}
+              />
+            ))}
+          </div>
+          {selectedPersona ? (
+            <div className="login-selected" data-testid="selected-local-dev-persona">
+              <div>
+                <p className="login-selected__label">Selected local/dev persona</p>
+                <strong>{selectedPersona.name}</strong>
+                <span>Routes to {selectedPersona.defaultRoute} for QuickQuote/persona smoke testing; backend auth remains unavailable until the BFF accepts a real session.</span>
+              </div>
+              <Button type="button" variant="secondary" size="lg" className="login-submit" disabled={busy} onClick={() => void handlePersonaSignIn()}>
+                {personaSubmitting ? 'Opening persona…' : `Continue as ${selectedPersona.name}`}
+              </Button>
+            </div>
+          ) : null}
+        </section> : null}
       </section>
     </main>
   );

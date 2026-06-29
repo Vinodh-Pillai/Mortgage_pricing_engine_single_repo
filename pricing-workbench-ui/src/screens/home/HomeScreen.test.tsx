@@ -73,6 +73,9 @@ describe('HomeScreenTest', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Start Pipeline' }));
 
     expect(screen.getByText('No recent activity. Start a new pipeline.')).toBeInTheDocument();
+    expect(screen.getByText('No active pipeline items need attention.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Home screen state')).not.toHaveTextContent(/Recent\s*0/i);
+    expect(screen.getByRole('heading', { name: 'My Pipeline' }).closest('section')).not.toHaveTextContent(/Active\s*0|Pending lock\s*0|Expiring soon\s*0/i);
     expect(onNavigate).toHaveBeenCalledWith('/pipeline');
   });
 

@@ -86,10 +86,14 @@ public final class LoanPassQuoteModels {
         List<Integer> lockPeriods,
         BigDecimal noteRatePercent,
         BigDecimal priceBps,
+        List<Map<String, String>> rates,
+        Map<String, String> calculations,
         Map<String, String> sourceRefs
     ) {
         public SummaryProduct {
             lockPeriods = List.copyOf(lockPeriods == null ? List.of() : lockPeriods);
+            rates = List.copyOf(rates == null ? List.of() : rates);
+            calculations = Map.copyOf(calculations == null ? Map.of() : calculations);
             sourceRefs = Map.copyOf(sourceRefs == null ? Map.of() : sourceRefs);
         }
     }
@@ -115,6 +119,7 @@ public final class LoanPassQuoteModels {
         List<String> rejections,
         List<String> errors,
         List<String> adjustments,
+        Map<String, String> sourceRefs,
         Map<String, String> versionMetadata
     ) {
         public ExecuteProductResponse {
@@ -126,6 +131,7 @@ public final class LoanPassQuoteModels {
             rejections = List.copyOf(rejections == null ? List.of() : rejections);
             errors = List.copyOf(errors == null ? List.of() : errors);
             adjustments = List.copyOf(adjustments == null ? List.of() : adjustments);
+            sourceRefs = Map.copyOf(sourceRefs == null ? Map.of() : sourceRefs);
             versionMetadata = Map.copyOf(versionMetadata == null ? Map.of() : versionMetadata);
         }
     }

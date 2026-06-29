@@ -103,7 +103,7 @@ export function ProductManagementScreen({ fetchImpl = fetch, tenantContext = 'ui
   const [state, setState] = useState<ProductManagementState>({ kind: 'loading' });
   const [products, setProducts] = useState<ManagedProduct[]>([]);
   const [filters, setFilters] = useState<ProductFilters>(blankFilters);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [slideOver, setSlideOver] = useState<SlideOver>(null);
   const [activeTab, setActiveTab] = useState<ProductDetailTab>('General');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -282,16 +282,18 @@ export function ProductManagementScreen({ fetchImpl = fetch, tenantContext = 'ui
   return (
     <section className="pm-shell" aria-labelledby="product-management-title">
       <style>{productManagementStyles}</style>
-      <aside className={`pm-sidebar pm-glass ${sidebarCollapsed ? 'pm-sidebar--collapsed' : ''}`} aria-label="Product filters">
-        <button className="pm-icon-button" type="button" onClick={() => setSidebarCollapsed((value) => !value)} aria-label="Toggle filters">{sidebarCollapsed ? '›' : '‹'}</button>
+      {filtersOpen ? <aside className="pm-sidebar pm-glass" aria-label="Product filters">
+        <button className="pm-icon-button" type="button" onClick={() => setFiltersOpen(false)} aria-label="Hide filters" aria-expanded="true" aria-controls="product-filter-controls">‹</button>
         <div className="pm-filter-title">Filters</div>
-        <FilterSelect collapsed={sidebarCollapsed} label="Investor" value={filters.investor} options={filterOptions.investor} onChange={(value) => setFilters((current) => ({ ...current, investor: value }))} />
-        <FilterSelect collapsed={sidebarCollapsed} label="Channel" value={filters.channel} options={filterOptions.channel} onChange={(value) => setFilters((current) => ({ ...current, channel: value }))} />
-        <FilterSelect collapsed={sidebarCollapsed} label="Product Type" value={filters.productType} options={filterOptions.productType} onChange={(value) => setFilters((current) => ({ ...current, productType: value }))} />
-        <FilterSelect collapsed={sidebarCollapsed} label="Status" value={filters.status} options={filterOptions.status} onChange={(value) => setFilters((current) => ({ ...current, status: value }))} />
-        <FilterSelect collapsed={sidebarCollapsed} label="Mortgage Type" value={filters.mortgageType} options={filterOptions.mortgageType} onChange={(value) => setFilters((current) => ({ ...current, mortgageType: value }))} />
-        {!sidebarCollapsed ? <button type="button" className="pm-secondary" onClick={() => setFilters(blankFilters)}>Clear</button> : null}
-      </aside>
+        <div id="product-filter-controls" className="pm-filter-controls">
+          <FilterSelect label="Investor" value={filters.investor} options={filterOptions.investor} onChange={(value) => setFilters((current) => ({ ...current, investor: value }))} />
+          <FilterSelect label="Channel" value={filters.channel} options={filterOptions.channel} onChange={(value) => setFilters((current) => ({ ...current, channel: value }))} />
+          <FilterSelect label="Product Type" value={filters.productType} options={filterOptions.productType} onChange={(value) => setFilters((current) => ({ ...current, productType: value }))} />
+          <FilterSelect label="Status" value={filters.status} options={filterOptions.status} onChange={(value) => setFilters((current) => ({ ...current, status: value }))} />
+          <FilterSelect label="Mortgage Type" value={filters.mortgageType} options={filterOptions.mortgageType} onChange={(value) => setFilters((current) => ({ ...current, mortgageType: value }))} />
+          <button type="button" className="pm-secondary" onClick={() => setFilters(blankFilters)}>Clear</button>
+        </div>
+      </aside> : null}
 
       <main className="pm-main">
         <header className="pm-toolbar pm-glass">
@@ -301,6 +303,7 @@ export function ProductManagementScreen({ fetchImpl = fetch, tenantContext = 'ui
             {state.kind === 'blocked' ? <span className="pm-pill pm-pill--warn">Connected product catalog unavailable</span> : null}
           </div>
           <div className="pm-actions">
+            <button type="button" onClick={() => setFiltersOpen(true)} aria-label="Show filters" aria-expanded="false" aria-controls="product-filter-controls">Filters</button>
             <button type="button" className="pm-primary" onClick={() => setSlideOver({ kind: 'add' })} disabled={isLoading}>Add Product</button>
           </div>
         </header>
@@ -351,11 +354,11 @@ export function ProductManagementScreen({ fetchImpl = fetch, tenantContext = 'ui
   );
 }
 
-function FilterSelect({ collapsed, label, value, options, onChange }: { collapsed: boolean; label: string; value: string; options: string[]; onChange: (value: string) => void }) {
+function FilterSelect({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (value: string) => void }) {
   return (
     <label className="pm-filter">
-      <span>{collapsed ? label.slice(0, 1) : label}</span>
-      {!collapsed ? <select value={value} onChange={(event) => onChange(event.target.value)}>{options.map((option) => <option key={option} value={option}>{option}</option>)}</select> : null}
+      <span>{label}</span>
+      <select value={value} onChange={(event) => onChange(event.target.value)}>{options.map((option) => <option key={option} value={option}>{option}</option>)}</select>
     </label>
   );
 }
@@ -542,8 +545,7 @@ const productManagementStyles = `
 .pm-glass { background: linear-gradient(145deg, rgba(255, 255, 255, .15), rgba(255, 255, 255, .055)); border: 1px solid rgba(255, 255, 255, .18); box-shadow: 0 24px 70px rgba(0, 0, 0, .26), inset 0 1px 0 rgba(255, 255, 255, .16); backdrop-filter: blur(18px); }
 .pm-shell--loading { align-items: center; justify-content: center; }
 .pm-loader { padding: 22px 34px; border-radius: 24px; }
-.pm-sidebar { width: 286px; flex: 0 0 286px; border-radius: 28px; padding: 16px; position: sticky; top: 18px; height: calc(100vh - 36px); transition: width .18s ease, flex-basis .18s ease; overflow: hidden; }
-.pm-sidebar--collapsed { width: 72px; flex-basis: 72px; }
+.pm-sidebar { width: 286px; flex: 0 0 286px; border-radius: 28px; padding: 16px; position: sticky; top: 18px; height: calc(100vh - 36px); overflow: hidden; }
 .pm-icon-button { width: 38px; height: 38px; border-radius: 999px; float: right; }
 .pm-filter-title { clear: both; font-size: 12px; letter-spacing: .18em; text-transform: uppercase; color: #9ed8ff; margin: 48px 0 14px; }
 .pm-filter { display: grid; gap: 7px; margin: 0 0 14px; color: #cde7ff; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
@@ -602,7 +604,7 @@ const productManagementStyles = `
 .pm-chip-row > span { color: #9ed8ff; font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: .12em; }
 .pm-chip-row > div { display: flex; gap: 8px; flex-wrap: wrap; }
 .pm-chip-row b { border-radius: 999px; padding: 7px 10px; background: rgba(255,255,255,.1); color: #eef6ff; }
-@media (max-width: 880px) { .pm-shell { padding: 10px; gap: 10px; } .pm-sidebar { position: fixed; z-index: 20; left: 10px; top: 10px; height: calc(100vh - 20px); } .pm-sidebar--collapsed { position: sticky; } .pm-toolbar { margin-left: 82px; } .pm-form, .pm-detail-grid { grid-template-columns: 1fr; } }
+@media (max-width: 880px) { .pm-shell { padding: 10px; gap: 10px; } .pm-sidebar { position: fixed; z-index: 20; left: 10px; top: 10px; height: calc(100vh - 20px); } .pm-form, .pm-detail-grid { grid-template-columns: 1fr; } }
 `;
 
 export default ProductManagementScreen;

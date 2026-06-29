@@ -85,6 +85,15 @@ describe('AuthContext', () => {
     expect(rolePermissionMatrix.pricing_analyst).toEqual(expect.arrayContaining(['product:read', 'rate-feed:read', 'pricing:analysis']));
   });
 
+  it('AuthTest.normalizesHyphenatedStoredPersonaRolesWithoutCrashing', async () => {
+    window.sessionStorage.setItem('wcpe:authUser', JSON.stringify({ id: 'persona-live-lo', email: 'sarah@example.com', fullName: 'Sarah Mitchell', role: 'loan-officer' }));
+    render(<AuthProvider><AuthProbe /></AuthProvider>);
+
+    await waitFor(() => expect(screen.getByTestId('authenticated')).toHaveTextContent('true'));
+    expect(screen.getByTestId('persona')).toHaveTextContent('loan-officer');
+    expect(screen.getByTestId('user')).toHaveTextContent('Sarah Mitchell');
+  });
+
   it('AuthTest.sessionRefreshDoesNotLoopAfterAuthenticatedMe', async () => {
     sessionUser = pricingUser;
     const fetchMock = vi.mocked(fetch);

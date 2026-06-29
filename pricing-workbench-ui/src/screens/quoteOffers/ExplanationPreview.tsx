@@ -21,7 +21,7 @@ export function ExplanationPreview({ offer, onViewFull }: { offer: OfferSummary 
       <ChipList label="Scenario flags" values={offer.scenarioFlags} />
       <ChipList label="Review references" values={(offer.upstreamRefs ?? []).map(businessFacingText)} />
       <ChipList label="Snapshot references" values={(offer.snapshotRefs ?? []).map(businessFacingText)} />
-      <button type="button" onClick={() => onViewFull(offer.offerId)}>Review offer explanation</button>
+      <button type="button" aria-label={`Inspect full explanation for offer ${offer.offerId}`} onClick={() => onViewFull(offer.offerId)}>Inspect full explanation</button>
     </aside>
   );
 }

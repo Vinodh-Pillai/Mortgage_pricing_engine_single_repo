@@ -5,6 +5,7 @@ export function BlockedLock({ workflow, onReturn }: { workflow: LockWorkflowView
     <main className="quote-lock-screen" aria-labelledby="blocked-lock-heading">
       <section className="panel" role="alert" aria-labelledby="blocked-lock-heading">
         <h1 id="blocked-lock-heading">Lock workflow blocked</h1>
+        <p className="banner banner--warning">Degraded lock workflow: backend lock contract evidence is unavailable, so confirmation remains disabled and no synthetic lock success is shown.</p>
         <p>{workflow.lockDisabledReason ?? 'Backend lock workflow is unavailable.'}</p>
         <ul>
           {workflow.blockers.map((blocker) => (
@@ -15,6 +16,7 @@ export function BlockedLock({ workflow, onReturn }: { workflow: LockWorkflowView
             </li>
           ))}
         </ul>
+        <button type="button" disabled>Confirm Lock</button>
         <button type="button" onClick={onReturn}>Return to Offers</button>
       </section>
     </main>

@@ -78,7 +78,7 @@ describe('PII-24-S06 accessibility foundation', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Announce' }));
     expect(screen.getByTestId('announcer-polite')).toHaveTextContent('Route changed');
-    expect(document.title).toBe('Workbench overview | LoanWeft');
+    expect(document.title).toBe('Workbench overview | Pricing Workbench');
     unmount();
     document.title = previousTitle;
   });

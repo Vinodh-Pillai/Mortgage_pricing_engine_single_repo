@@ -42,14 +42,26 @@
   padding: var(--ds-space-4);
 }
 
+.quickquote-header {
+  position: sticky;
+  top: var(--layout-header-height, 6.1rem);
+  z-index: calc(var(--layout-z-sticky, 1000) - 1);
+}
+
 .quickquote-header__identity,
 .quickquote-prefill-rail,
 .quickquote-products,
+.quickquote-pricing-inputs,
 .quickquote-missing-facts,
 .quickquote-override-audit,
 .quickquote-empty-state {
   display: grid;
   gap: var(--ds-space-3);
+}
+
+.quickquote-header__subtitle {
+  color: var(--ds-color-muted);
+  margin: 0;
 }
 
 .quickquote-mode-toggle {
@@ -73,6 +85,14 @@
 .quickquote-ready-chip {
   background: color-mix(in srgb, var(--ds-color-primary) 16%, transparent);
   border-color: color-mix(in srgb, var(--ds-color-primary) 42%, var(--ds-color-border));
+}
+
+.quickquote-header__state {
+  color: var(--ds-color-text-muted);
+  font-size: var(--ds-font-size-sm);
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .quickquote-context,
@@ -106,7 +126,7 @@
 .quickquote-grid-shell {
   display: grid;
   gap: var(--ds-space-4);
-  grid-template-columns: minmax(15rem, 20rem) minmax(0, 1fr);
+  grid-template-columns: minmax(22rem, 34%) minmax(0, 1fr);
   min-block-size: 0;
 }
 
@@ -117,12 +137,59 @@
   padding: var(--ds-space-4);
 }
 
+.quickquote-prefill-rail {
+  align-content: start;
+}
+
 .quickquote-state-card {
   border: 1px solid var(--ds-color-border);
   border-radius: var(--ds-radius-lg);
   display: grid;
   gap: var(--ds-space-1);
   padding: var(--ds-space-3);
+}
+
+.quickquote-pricing-inputs {
+  background: color-mix(in srgb, var(--ds-color-primary) 8%, var(--ds-color-surface) 92%);
+  border: 1px solid color-mix(in srgb, var(--ds-color-primary) 34%, var(--ds-color-border));
+  border-radius: var(--ds-radius-lg);
+  padding: var(--ds-space-3);
+}
+
+.quickquote-pricing-inputs__header,
+.quickquote-pricing-inputs__controls {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2);
+  justify-content: space-between;
+}
+
+.quickquote-pricing-inputs h3,
+.quickquote-pricing-inputs p {
+  margin: 0;
+}
+
+.quickquote-pricing-inputs p {
+  color: var(--ds-color-text-muted);
+  font-size: var(--ds-font-size-sm);
+  font-weight: 700;
+}
+
+.quickquote-pricing-inputs .quote-intake-fields {
+  grid-template-columns: 1fr;
+}
+
+.quickquote-pricing-inputs__state {
+  border: 1px solid color-mix(in srgb, var(--ds-color-warning) 48%, var(--ds-color-border));
+  border-radius: var(--ds-radius-full);
+  font-size: var(--ds-font-size-sm);
+  font-weight: 900;
+  padding: 0.3rem 0.7rem;
+}
+
+.quickquote-pricing-inputs__state[data-ready='true'] {
+  border-color: color-mix(in srgb, var(--ds-color-success) 48%, var(--ds-color-border));
 }
 
 .quickquote-products__assurance {
@@ -231,7 +298,11 @@
 }
 
 .quote-product-grid--quickquote {
-  min-inline-size: 64rem;
+  min-inline-size: min(58rem, 100%);
+}
+
+.quote-product-grid--quickquote .quote-product-row {
+  min-inline-size: max(58rem, 100%);
 }
 
 .quote-product-row[data-comparison-selected='true'] {
@@ -1737,6 +1808,54 @@
   display: none;
 }
 
+.quickquote-prefill-rail .quote-filter-card,
+.quickquote-prefill-rail .quickquote-pricing-inputs,
+.quickquote-prefill-rail .quickquote-mapped-overrides,
+.quickquote-prefill-rail .quickquote-missing-facts,
+.quickquote-prefill-rail .quickquote-override-audit {
+  background: color-mix(in srgb, var(--ds-color-background-raised) 88%, var(--ds-color-surface));
+  border: 1px solid color-mix(in srgb, var(--ds-color-border) 82%, transparent);
+  border-radius: var(--ds-radius-lg);
+  box-shadow: none;
+  padding: var(--ds-space-3);
+}
+
+.quickquote-prefill-rail .quote-compact-filter-row,
+.quickquote-prefill-rail .quote-intake-field {
+  align-items: stretch;
+  display: grid;
+  gap: var(--ds-space-2);
+  grid-template-columns: 1fr;
+}
+
+.quickquote-prefill-rail .quote-intake-field-label {
+  display: flex;
+}
+
+.quickquote-prefill-rail .quote-compact-filter-row > span,
+.quickquote-prefill-rail .quote-intake-field label {
+  color: var(--ds-color-text);
+  font-size: var(--ds-font-size-sm);
+}
+
+.quickquote-prefill-rail .quote-compact-filter-row input,
+.quickquote-prefill-rail .quote-compact-filter-row select,
+.quickquote-prefill-rail .quote-intake-field input,
+.quickquote-prefill-rail .quote-intake-field textarea,
+.quickquote-prefill-rail .quote-intake-field select {
+  font-size: var(--ds-font-size-base);
+  min-block-size: 44px;
+  padding: 0.7rem 0.8rem;
+}
+
+.quickquote-prefill-rail .quote-intake-field input,
+.quickquote-prefill-rail .quote-intake-field textarea,
+.quickquote-prefill-rail .quote-intake-field select,
+.quickquote-prefill-rail .quote-intake-field .quote-intake-error,
+.quickquote-prefill-rail .quote-intake-field .quote-intake-help {
+  grid-column: auto;
+}
+
 .quote-intake-shell--pipeline-redesign .quote-intake-error {
   grid-column: 1 / -1;
   font-size: 0.72rem;
@@ -2005,6 +2124,11 @@
 .quote-pipeline-launchbar button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+.quote-pipeline-launchbar.quickquote-actions {
+  inset-inline: auto;
+  position: sticky;
 }
 
 .quote-product-detail-panel {

@@ -1,5 +1,6 @@
 import { ChipList } from '../../components/ChipList';
 import type { OfferSummary } from '../../lib/api/offers';
+import { businessFacingText } from '../../lib/utils/businessFacingText';
 import type { CSSProperties, KeyboardEvent } from 'react';
 import type { OfferSortField } from './offerComparison';
 import { valueText } from './offerComparison';
@@ -73,7 +74,12 @@ export function OffersTable({ offers, selectedOfferId, compareOfferIds, onInspec
           return (
             <div key={offer.offerId} role="row" className={selected ? 'quote-table__row quote-table__row--selected' : 'quote-table__row'} aria-selected={selected} tabIndex={0} onKeyDown={(event) => handleRowKey(event, offer, onSelect, onCompareToggle)} style={rowStyle}>
               <span role="cell">#{offer.rank}</span>
-              <span role="cell">{offer.productLabel ?? offer.offerId}</span>
+              <span role="cell">
+                <strong>{offer.productLabel ?? offer.offerId}</strong>
+                <br />Source: {valueText(offer.sourceLabel)}
+                <br />Price: {valueText(offer.price)} · Lock: {valueText(offer.lockPeriodDays)}
+                <ChipList label={`${offer.offerId} source refs`} values={(offer.sourceRefs ?? []).map(businessFacingText)} />
+              </span>
               <span role="cell">{valueText(offer.rate)}</span>
               <span role="cell">{valueText(offer.apr)}</span>
               <span role="cell">{valueText(offer.payment)}</span>
@@ -82,9 +88,9 @@ export function OffersTable({ offers, selectedOfferId, compareOfferIds, onInspec
               <span role="cell"><ChipList label={`${offer.offerId} rationale`} values={offer.rationaleChips} /></span>
               <span role="cell"><ChipList label={`${offer.offerId} flags`} values={offer.scenarioFlags} /></span>
               <span role="cell" className="quick-quote-state quote-table__actions-cell" style={actionCellStyle}>
-                <label><input type="radio" name="selected-offer" checked={selected} onChange={() => onSelect(offer)} /> Select for quote</label>
+                <label><input type="radio" name="selected-offer" checked={selected} onChange={() => onSelect(offer)} /> Select offer</label>
                 <label><input type="checkbox" checked={compareOfferIds.includes(offer.offerId)} onChange={() => onCompareToggle(offer.offerId)} /> Compare offers</label>
-                <button type="button" onMouseEnter={() => onInspect(offer)} onFocus={() => onInspect(offer)} onClick={() => onInspect(offer)}>Review explanation</button>
+                <button type="button" aria-label={`Inspect explanation for offer ${offer.offerId}`} onMouseEnter={() => onInspect(offer)} onFocus={() => onInspect(offer)} onClick={() => onInspect(offer)}>Inspect explanation</button>
               </span>
             </div>
           );

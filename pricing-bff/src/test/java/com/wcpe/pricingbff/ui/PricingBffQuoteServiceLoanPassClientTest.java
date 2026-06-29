@@ -10,11 +10,9 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 import com.wcpe.pricingbff.los.LosApiModels.CreditApplicationField;
 import com.wcpe.pricingbff.los.LosApiModels.CreditApplicationValue;
-import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
@@ -57,7 +55,7 @@ class PricingBffQuoteServiceLoanPassClientTest {
   void postsRunFactsAndStableUuidTenantToQuoteService() {
     RestClient.Builder builder = RestClient.builder();
     MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-    String serviceTenant = UUID.nameUUIDFromBytes("pricing-bff-ui-tenant:ui-preview-tenant".getBytes(StandardCharsets.UTF_8)).toString();
+    String serviceTenant = PricingBffQuoteServiceLoanPassClient.DEFAULT_LOANHOUSE_TENANT_ID;
     List<CreditApplicationField> facts = List.of(
         new CreditApplicationField("field@base-loan-amount", new CreditApplicationValue("string", "loan-amount-ref", null, null)),
         new CreditApplicationField("field@state", new CreditApplicationValue("string", "TX", null, null)));
@@ -124,28 +122,27 @@ class PricingBffQuoteServiceLoanPassClientTest {
   void adapterPersistsLaunchedQuickQuoteFactsForOffersAndDetailCalls() {
     RestClient.Builder builder = RestClient.builder();
     MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-    String serviceTenant = UUID.nameUUIDFromBytes("pricing-bff-ui-tenant:ui-preview-tenant".getBytes(StandardCharsets.UTF_8)).toString();
+    String serviceTenant = PricingBffQuoteServiceLoanPassClient.DEFAULT_LOANHOUSE_TENANT_ID;
     server.expect(requestTo("https://quote-service.test/api/v1/loanpass/execute-summary"))
         .andExpect(header("X-Tenant-ID", serviceTenant))
-        .andExpect(jsonPath("$.creditApplicationFields[4].fieldId").value("field@base-loan-amount"))
-        .andExpect(jsonPath("$.creditApplicationFields[5].fieldId").value("field@state"))
-        .andExpect(jsonPath("$.creditApplicationFields[6].fieldId").value("field@zip"))
+        .andExpect(jsonPath("$.creditApplicationFields[0].fieldId").value("field@channel"))
+        .andExpect(jsonPath("$.creditApplicationFields[2].fieldId").value("field@base-loan-amount"))
+        .andExpect(jsonPath("$.creditApplicationFields[3].fieldId").value("field@state"))
+        .andExpect(jsonPath("$.creditApplicationFields[4].fieldId").value("field@zip"))
         .andRespond(withSuccess("""
-            {"success":true,"statusCounts":{"approved":1},"products":[{"productId":"durable-product","productName":"Durable product","status":"approved","rates":[{"noteRate":"rate-ref"}],"rules":[{"ruleId":"rule-ref"}],"stipulations":[{"stipulationId":"stip-ref"}],"calculations":[{"calculationId":"calc-ref"}]}]}
+            {"success":true,"statusCounts":{"approved":1},"products":[{"productId":"100014","productName":"Expanded Prime Plus 30 Year Fixed","investorName":"OB","status":"approved","rates":[{"noteRatePercent":"7.37500","priceBps":"99.9340","lockPeriodDays":"60"}],"rules":[{"ruleId":"rule-ref"}],"stipulations":[{"stipulationId":"stip-ref"}],"calculations":{"monthlyPi":"2762.71","adjustedPrice":"99.934"},"sourceRefs":{"source_url":"https://lhposb2bbff1prod.loanhouse.us/api/v1/no-oauth/quickpricer/get-generic-quote-summary","product_id":"100014","source_index":"378","investor_name":"OB"},"versionMetadata":{"schemaVersion":"loanhouse-product-records-v1"}}],"versionMetadata":{"schemaVersion":"loanhouse-product-records-v1"}}
             """, MediaType.APPLICATION_JSON));
     server.expect(requestTo("https://quote-service.test/api/v1/loanpass/execute-product"))
         .andExpect(header("X-Tenant-ID", serviceTenant))
-        .andExpect(jsonPath("$.creditApplicationFields[4].fieldId").value("field@base-loan-amount"))
-        .andExpect(jsonPath("$.creditApplicationFields[5].fieldId").value("field@state"))
-        .andExpect(jsonPath("$.creditApplicationFields[6].fieldId").value("field@zip"))
+        .andExpect(jsonPath("$.creditApplicationFields[2].fieldId").value("field@base-loan-amount"))
+        .andExpect(jsonPath("$.creditApplicationFields[3].fieldId").value("field@state"))
+        .andExpect(jsonPath("$.creditApplicationFields[4].fieldId").value("field@zip"))
         .andRespond(withSuccess("""
-            {"success":true,"productId":"durable-product","productName":"Durable product","status":"approved","rates":[{"noteRate":"rate-ref"}],"rules":[{"ruleId":"rule-ref"}],"stipulations":[{"stipulationId":"stip-ref"}],"calculations":[{"calculationId":"calc-ref"}]}
+            {"success":true,"productId":"100014","productName":"Expanded Prime Plus 30 Year Fixed","investorName":"OB","status":"approved","rates":[{"noteRatePercent":"7.37500","priceBps":"99.9340","lockPeriodDays":"60"}],"rules":[{"ruleId":"rule-ref"}],"stipulations":[{"stipulationId":"stip-ref"}],"calculations":{"monthlyPi":"2762.71","adjustedPrice":"99.934"},"sourceRefs":{"source_url":"https://lhposb2bbff1prod.loanhouse.us/api/v1/no-oauth/quickpricer/get-generic-quote-summary","product_id":"100014","source_index":"378","investor_name":"OB"},"versionMetadata":{"schemaVersion":"loanhouse-product-records-v1"}}
             """, MediaType.APPLICATION_JSON));
     PricingBffUiFallbackAdapter adapter = new PricingBffUiFallbackAdapter(
         new PricingBffQuoteServiceLoanPassClient(builder, "https://quote-service.test", null, null));
     Map<String, Object> intake = new LinkedHashMap<>();
-    intake.put("borrowerLastName", "Rivera");
-    intake.put("loanNumber", "LN-001");
     intake.put("channel", "retail");
     intake.put("loanPurpose", "purchase");
     intake.put("baseLoanAmount", "loan-amount-ref");
@@ -160,11 +157,18 @@ class PricingBffQuoteServiceLoanPassClientTest {
 
     PricingBffUiFallbackAdapter.QuoteRunLaunch launch = adapter.launchQuoteRun("ui-preview-tenant", "trace-launch", intake).getBody();
     PricingBffUiFallbackAdapter.OfferComparisonView offers = adapter.offerComparison("ui-preview-tenant", launch.runId(), "trace-offers");
-    PricingBffUiFallbackAdapter.QuoteDetailView detail = adapter.quoteDetail("ui-preview-tenant", launch.runId(), "durable-product", "trace-detail");
+    PricingBffUiFallbackAdapter.QuoteDetailView detail = adapter.quoteDetail("ui-preview-tenant", launch.runId(), "100014", "trace-detail");
 
     assertThat(launch.missingContractBlockers()).isEmpty();
+    assertThat(launch.backendFactRefs()).doesNotContain("fact:borrowerLastName", "fact:loanNumber");
     assertThat(launch.backendFactRefs()).contains("fact:quoteAddressDTO.state", "fact:quoteAddressDTO.zip");
     assertThat(offers.offers()).hasSize(1);
+    assertThat(offers.offers().get(0).sourceLabel()).isEqualTo("LoanHouse capture");
+    assertThat(offers.offers().get(0).sourceRefs()).anyMatch(ref -> ref.contains("loanhouse"));
+    assertThat(offers.offers().get(0).rate()).isEqualTo("7.37500");
+    assertThat(offers.offers().get(0).price()).isEqualTo("99.934");
+    assertThat(offers.offers().get(0).payment()).isEqualTo("2762.71");
+    assertThat(offers.offers().get(0).lockPeriodDays()).isEqualTo("60");
     assertThat(offers.offers().get(0).rateRefs()).contains("field@quote-service-rates");
     assertThat(detail.summary().productRuleRefs()).contains("field@quote-service-rules");
     assertThat(detail.summary().stipulationRefs()).contains("field@quote-service-stipulations");

@@ -19,10 +19,14 @@ describe('PII-24-S10 offer comparison screen', () => {
 
     expect(screen.getByRole('heading', { name: /Compare Offers/i })).toBeInTheDocument();
     expect(screen.getByRole('table', { name: /Ranked quote offers/i })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /Inspect explanation/i }).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Conventional 30 year fixed')).toBeInTheDocument();
+    expect(screen.getAllByText(/LoanHouse capture/i).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/loanhouse product records v1/i).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/99\.934/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('PRICE_UNAVAILABLE')).toBeInTheDocument();
 
-    fireEvent.click(screen.getAllByLabelText(/Select/i)[1]);
+    fireEvent.click(screen.getAllByLabelText(/Select offer/i)[1]);
     expect(screen.getAllByRole('alert').some((alert) => /Commit blocked/i.test(alert.textContent ?? ''))).toBe(true);
     expect(screen.getByText('pricing-service quote price')).toBeInTheDocument();
   });
@@ -43,7 +47,7 @@ describe('PII-24-S10 offer comparison screen', () => {
   it('keeps selected row and filter count badge state stable as filters change', () => {
     render(<QuoteOffersScreen comparison={deterministicOfferComparison} />);
 
-    fireEvent.click(screen.getAllByLabelText(/Select/i)[0]);
+    fireEvent.click(screen.getAllByLabelText(/Select offer/i)[0]);
     expect(screen.getAllByRole('row')[1]).toHaveAttribute('aria-selected', 'true');
 
     const activeFilterCount = screen.getByLabelText(/Active filter count/i);
@@ -59,12 +63,24 @@ describe('PII-24-S10 offer comparison screen', () => {
     const onNavigate = vi.fn();
     render(<QuoteOffersScreen comparison={deterministicOfferComparison} onNavigate={onNavigate} />);
 
-    fireEvent.click(screen.getAllByLabelText(/Select/i)[0]);
-    fireEvent.click(screen.getByRole('button', { name: /Review comparison detail/i }));
+    fireEvent.click(screen.getAllByLabelText(/Select offer/i)[0]);
+    fireEvent.click(screen.getByRole('button', { name: /Inspect full explanation/i }));
     fireEvent.click(screen.getByRole('button', { name: /Start lock request/i }));
 
     expect(onNavigate).toHaveBeenCalledWith('/quote/run-preview-001/offers/offer-a');
     expect(onNavigate).toHaveBeenCalledWith('/quote/run-preview-001/lock');
+  });
+
+  it('renders LoanHouse source evidence on product cards', () => {
+    render(<QuoteOffersScreen comparison={deterministicOfferComparison} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cards' }));
+
+    expect(screen.getByRole('list', { name: /Offer cards/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/LoanHouse capture/i).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(/quickpricer get generic quote summary/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/99\.934/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('30').length).toBeGreaterThanOrEqual(1);
   });
 
   it('caps multi-select comparison at four offers', () => {

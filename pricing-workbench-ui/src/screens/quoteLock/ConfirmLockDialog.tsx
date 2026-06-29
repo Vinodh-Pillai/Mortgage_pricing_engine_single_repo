@@ -1,4 +1,5 @@
 import type { LockConfirmationResult, LockWorkflowView } from '../../lib/api/quoteRuns';
+import { dateTimeText } from './lockWorkflowUtils';
 
 export function ConfirmLockDialog({ open, workflow, disclosuresAccepted, confirmation, confirming, onCancel, onConfirm }: { open: boolean; workflow: LockWorkflowView; disclosuresAccepted: boolean; confirmation: LockConfirmationResult | null; confirming: boolean; onCancel: () => void; onConfirm: () => void }) {
   if (!open) return null;
@@ -9,7 +10,7 @@ export function ConfirmLockDialog({ open, workflow, disclosuresAccepted, confirm
       <dl className="status-grid">
         <dt>Note rate</dt><dd>{workflow.terms.noteRate}</dd>
         <dt>Final price</dt><dd>{workflow.terms.finalPriceBps} bps</dd>
-        <dt>Expiration</dt><dd>{new Date(workflow.terms.expiresAt).toLocaleString()}</dd>
+        <dt>Expiration</dt><dd>{dateTimeText(workflow.terms.expiresAt)}</dd>
         <dt>Lock ID preview</dt><dd><code>{workflow.lockIdPreview}</code></dd>
         <dt>Disclosures accepted</dt><dd>{disclosuresAccepted ? 'Yes' : 'No'}</dd>
       </dl>

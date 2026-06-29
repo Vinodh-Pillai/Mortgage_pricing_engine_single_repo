@@ -36,13 +36,76 @@ describe('PII-24-S12 quote lock workflow screen', () => {
     const onEvidenceCapture = vi.fn();
     render(<QuoteLockScreen workflow={deterministicLockWorkflow} onEvidenceCapture={onEvidenceCapture} />);
 
-    expect(screen.getByRole('heading', { name: /Lock Workflow/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /^Lock Workflow$/i })).toBeInTheDocument();
     expect(screen.getByText('Conventional 30 year fixed')).toBeInTheDocument();
     expect(screen.getByText('Backend Investor A')).toBeInTheDocument();
     expect(screen.getByRole('status', { name: /Lock status banner/i })).toHaveTextContent(/READY/);
     expect(screen.getByRole('button', { name: /Extend Lock/i })).toBeInTheDocument();
     expect(screen.getByText('audit:lock-created')).toBeInTheDocument();
     expect(onEvidenceCapture).toHaveBeenCalledWith(expect.objectContaining({ screenId: 'quote-lock', state: 'ready' }));
+  });
+
+  it('renders live BFF lock workflow payloads without terms.expiresAt and shows returned refs/blockers', () => {
+    const liveLikeWorkflow = {
+      runId: 'run-y8j7ms',
+      selectedOfferId: 'synthetic-product-0',
+      status: 'READY',
+      lockDisabled: false,
+      blockers: [],
+      blockerDetails: [],
+      disclosureText: 'Confirming records the selected offer for lock workflow tracking.',
+      nextAction: 'Confirm lock request',
+      uiTraceId: 'ql-s12-local-trace',
+      events: ['LockAttempted'],
+      dependencyStatus: 'UPSTREAM_LOCK_CONTRACT_NOT_CONFIGURED',
+      selectedQuoteRefs: ['quote-run:run-y8j7ms', 'selected-offer:synthetic-product-0', 'lock-eligibility:pending:synthetic-product-0'],
+      freshnessChecks: [{ label: 'Quote freshness', status: 'PENDING_CONFIGURED_SERVICE', sourceRef: 'lock-service:freshness-check', remediation: 'Lock-service must return the authoritative freshness decision before live submission.' }],
+      requiredEvidence: ['selected-offer-ref', 'lock-eligibility-ref'],
+      stateTransitions: [{ fromState: 'READY_FOR_LOCK_REQUEST', toState: 'SUBMISSION_PENDING_BACKEND', eventId: 'lock.lifecycle.submit.synthetic-product-0', status: 'PENDING_CONFIGURED_SERVICE' }],
+      auditGroups: [{ eventId: 'lock.confirmation.synthetic-product-0', label: 'Confirmation', evidenceRefs: ['audit:lock-confirmation:run-y8j7ms'], replayHash: 'replay:lock-confirmation:synthetic-product-0', exportRef: 'export:lock-confirmation:run-y8j7ms' }],
+    } as unknown as typeof deterministicLockWorkflow;
+
+    render(<QuoteLockScreen workflow={liveLikeWorkflow} />);
+
+    expect(screen.getByRole('heading', { name: /^Lock Workflow$/i })).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: /Lock status banner/i })).toHaveTextContent(/Expiration unavailable/i);
+    expect(screen.getAllByText('Not returned by backend').length).toBeGreaterThan(0);
+    expect(screen.getByText(/LOCK_EXPIRATION_NOT_RETURNED: Backend did not return lock expiration/i)).toBeInTheDocument();
+    expect(screen.getByText('lock-eligibility:pending:synthetic-product-0')).toBeInTheDocument();
+    expect(screen.getAllByText(/lock-service:freshness-check/i).length).toBeGreaterThan(0);
+  });
+
+  it('disables lock confirmation when the live BFF reports dev-degraded lock-service confirmation evidence', () => {
+    const confirmLock = vi.fn(() => deterministicLockConfirmation);
+    const liveLikeWorkflow = {
+      runId: 'run-y8j7ms',
+      selectedOfferId: 'synthetic-product-0',
+      status: 'READY',
+      lockDisabled: false,
+      blockers: [],
+      blockerDetails: [],
+      disclosureText: 'Confirming records the selected offer for lock workflow tracking.',
+      nextAction: 'Confirm lock request',
+      uiTraceId: 'ql-s12-local-trace',
+      events: ['LockAttempted'],
+      dependencyStatus: 'UPSTREAM_LOCK_CONTRACT_NOT_CONFIGURED',
+      selectedQuoteRefs: ['quote-run:run-y8j7ms', 'selected-offer:synthetic-product-0', 'lock-eligibility:pending:synthetic-product-0'],
+      freshnessChecks: [{ label: 'Quote freshness', status: 'PENDING_CONFIGURED_SERVICE', sourceRef: 'lock-service:freshness-check', remediation: 'Lock-service must return the authoritative freshness decision before live submission.' }],
+      requiredEvidence: ['selected-offer-ref', 'lock-eligibility-ref'],
+      stateTransitions: [{ fromState: 'READY_FOR_LOCK_REQUEST', toState: 'SUBMISSION_PENDING_BACKEND', eventId: 'lock.lifecycle.submit.synthetic-product-0', status: 'PENDING_CONFIGURED_SERVICE' }],
+      auditGroups: [{ eventId: 'lock.confirmation.synthetic-product-0', label: 'Confirmation', evidenceRefs: ['audit:lock-confirmation:run-y8j7ms'], replayHash: 'replay:lock-confirmation:synthetic-product-0', exportRef: 'export:lock-confirmation:run-y8j7ms' }],
+    } as unknown as typeof deterministicLockWorkflow;
+
+    render(<QuoteLockScreen workflow={liveLikeWorkflow} confirmLock={confirmLock} />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/Lock confirmation is unavailable in this environment/i);
+    fireEvent.scroll(screen.getByLabelText(/Disclosure text/i), { currentTarget: { scrollTop: 100, clientHeight: 100, scrollHeight: 200 } });
+    fireEvent.click(screen.getByLabelText(/I have read and accept/i));
+    fireEvent.change(screen.getByLabelText(/Digital signature/i), { target: { value: 'Ada Borrower' } });
+    expect(screen.getByRole('button', { name: /^Confirm Lock$/i })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /Lock This Rate/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Confirm Lock$/i }));
+    expect(confirmLock).not.toHaveBeenCalled();
   });
 
   it('requires disclosure scroll completion, checkbox, and typed signature before confirmation', async () => {
@@ -115,6 +178,8 @@ describe('PII-24-S12 quote lock workflow screen', () => {
     render(<QuoteLockScreen workflow={blockedLockWorkflow} onNavigate={onNavigate} />);
 
     expect(screen.getByRole('heading', { name: /Lock workflow blocked/i })).toBeInTheDocument();
+    expect(screen.getByText(/Degraded lock workflow/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Confirm Lock$/i })).toBeDisabled();
     expect(screen.getByText('DISCLOSURE_MISSING')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Return to Offers/i }));
     expect(onNavigate).toHaveBeenCalledWith('/quote/run-preview-001/offers');

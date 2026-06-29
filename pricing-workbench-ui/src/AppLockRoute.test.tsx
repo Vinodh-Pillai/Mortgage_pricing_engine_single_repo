@@ -63,4 +63,30 @@ describe('App quote lock route', () => {
     expect(screen.queryByRole('button', { name: /^Request lock$/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/Lock terms for run/i)).not.toBeInTheDocument();
   });
+
+  it('renders degraded lock UX instead of staying on the route loading fallback when the contract is unavailable', async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = new URL(input.toString(), window.location.origin);
+      if (url.pathname === '/api/v1/tenants/ui-preview-tenant/quote-runs/run-degraded/lock') {
+        return { ok: false, status: 503, json: async () => ({ message: 'lock-service unavailable' }) } as Response;
+      }
+      if (url.href === `${bffBaseUrl}/api/auth/me`) {
+        return { ok: true, status: 200, json: async () => ({ user: authUser }) } as Response;
+      }
+      return { ok: true, status: 200, json: async () => ({}) } as Response;
+    });
+
+    renderApp('/quote/run-degraded/lock');
+
+    expect(await screen.findByText(/Degraded lock workflow/i, {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(screen.queryByText(/Loading route/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Confirm Lock$/i })).toBeDisabled();
+  });
+
+  it('routes /lock-management directly to the Lock Management page', async () => {
+    renderApp('/lock-management');
+
+    expect(await screen.findByRole('heading', { name: /^Lock Management$/i }, { timeout: 5000 })).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: /Lock management records/i })).toBeInTheDocument();
+  });
 });

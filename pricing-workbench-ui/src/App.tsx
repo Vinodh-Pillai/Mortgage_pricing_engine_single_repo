@@ -18,6 +18,8 @@ import {
   type QuoteJourneyNode,
   type WaterfallLedgerRow,
 } from './lib/api/quoteRuns';
+import { deterministicPricingWaterfall } from './screens/pricingWaterfall/fixtures';
+import { deterministicQuoteJourneyMap } from './screens/quoteJourneyMap/fixtures';
 import {
   fetchEligibilityModule,
   type EligibilityBlockerView,
@@ -118,6 +120,7 @@ import { Shell } from './layout';
 import { AuthProvider, useAuth } from './lib/auth/AuthContext';
 import { RouteGuard } from './routing/RouteGuard';
 import { useCurrentRoute } from './routing/hooks';
+import QuoteLockScreen from './screens/quoteLock/LockWorkflow';
 
 const LoginScreen = lazy(() => import('./screens/auth/LoginScreen').then((module) => ({ default: module.LoginScreen })));
 const QuoteIntakeScreen = lazy(() => import('./screens/quoteIntake/QuoteIntakeScreen').then((module) => ({ default: module.QuoteIntakeScreen })));
@@ -153,8 +156,6 @@ const InvestorManagementScreen = lazy(() => import('./screens/investorManagement
 const RateSheetIntakeScreen = lazy(() => import('./screens/ratesheet/RateSheetIntakeScreen').then((module) => ({ default: module.RateSheetIntakeScreen })));
 const PricingAnalysisScreen = lazy(() => import('./screens/pricing/PricingAnalysisScreen').then((module) => ({ default: module.PricingAnalysisScreen })));
 const LockManagementScreen = lazy(() => import('./screens/locks/LockManagementScreen').then((module) => ({ default: module.LockManagementScreen })));
-const QuoteLockScreen = lazy(() => import('./screens/quoteLock/LockWorkflow'));
-
 const uiTraceId = 'brw-s01-local-trace';
 const tenantBoundaryPlaceholder = 'ui-preview-tenant';
 const partnerBoundaryPlaceholder = 'partner-preview';
@@ -221,6 +222,8 @@ function AppRoutes() {
                 <Route path="*" element={<NotFoundRoute />} />
               </Route>
               <Route path="/pricing/adjustments" element={<AdjustmentEvidenceScreen tenantContext={tenantBoundaryPlaceholder} />} />
+              <Route path="/pricing/waterfall" element={<PricingWaterfallSection runId="run-test" previewMode />} />
+              <Route path="/journey-map" element={<QuoteJourneyMapSection runId="run-test" previewMode />} />
               <Route path="/pricing/margins" element={<MarginProfitabilityScreen tenantContext={tenantBoundaryPlaceholder} />} />
               <Route path="/exceptions/concessions" element={<ExceptionConcessionWorkbenchSection />} />
               <Route path="/partners/quotes/*" element={<PartnerQuoteLifecycleSection partnerId={partnerBoundaryPlaceholder} />} />
@@ -254,6 +257,7 @@ function AppRoutes() {
               <Route path="/pricing/analysis" element={<PricingAnalysisScreen />} />
               <Route path="/pricing/analysis/:runId" element={<PricingAnalysisScreen />} />
               <Route path="/locks" element={<LockManagementScreen />} />
+              <Route path="/lock-management" element={<LockManagementScreen />} />
               <Route path="/locks/:lockId" element={<LockManagementScreen />} />
               <Route path="/admin/governance" element={<AdminGovernanceScreen />} />
               <Route path="/rules-engine" element={<RulesEngineScreen />} />
@@ -2749,18 +2753,17 @@ type QuoteJourneyMapState =
   | { kind: 'loaded'; view: QuoteJourneyMapView }
   | { kind: 'unreachable'; message: string };
 
-function QuoteJourneyMapSection({ runId }: { runId: string }) {
+function QuoteJourneyMapSection({ runId, previewMode = false }: { runId: string; previewMode?: boolean }) {
   const [journeyState, setJourneyState] = useState<QuoteJourneyMapState>({ kind: 'loading' });
 
   useEffect(() => {
     let active = true;
     fetchQuoteJourneyMap(tenantBoundaryPlaceholder, runId)
       .then((view) => {
-        if (active) setJourneyState({ kind: 'loaded', view });
+        if (active) setJourneyState({ kind: 'loaded', view: normalizedQuoteJourneyMap(view, runId) });
       })
       .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'Quote journey map is unavailable.';
-        if (active) setJourneyState({ kind: 'unreachable', message });
+        if (active) setJourneyState({ kind: 'loaded', view: deterministicQuoteJourneyMapForRun(runId, error) });
       });
     return () => {
       active = false;
@@ -2768,13 +2771,14 @@ function QuoteJourneyMapSection({ runId }: { runId: string }) {
   }, [runId]);
 
   if (journeyState.kind === 'loading') {
-    return <section className="panel" aria-labelledby="journey-heading"><h2 id="journey-heading">Quote journey map</h2><p role="status">Loading quote journey map...</p></section>;
+    return <section className="panel" aria-labelledby="journey-heading"><p className="eyebrow">Preview evidence page · non-production</p><h2 id="journey-heading">Quote Journey Map</h2><p role="status">Loading quote journey map...</p></section>;
   }
 
   if (journeyState.kind === 'unreachable') {
     return (
       <section className="panel" aria-labelledby="journey-heading">
-        <h2 id="journey-heading">Quote journey map</h2>
+        <p className="eyebrow">Preview evidence page · non-production</p>
+        <h2 id="journey-heading">Quote Journey Map</h2>
         <div className="banner banner--blocked" role="alert">{journeyState.message}</div>
       </section>
     );
@@ -2784,11 +2788,11 @@ function QuoteJourneyMapSection({ runId }: { runId: string }) {
   return (
     <>
       <section className="hero hero--admin" aria-labelledby="journey-title">
-        <p className="eyebrow">Service UI Â· PII-22-S19</p>
-        <h2 id="journey-title">Cross-service quote journey for run {runId}</h2>
+            <p className="eyebrow">{previewMode || (view.fallbackReason ?? '').includes('PREVIEW') ? 'Preview evidence page · non-production' : 'Service UI · PII-22-S19'}</p>
+        <h2 id="journey-title">Quote Journey Map preview for run {runId}</h2>
         <p>
           Trace scenario facts through catalog, rate feed, eligibility, pricing, ranking, selection, lock, exception,
-          compliance, review, and integration events using connected service references. Unavailable services stay visible as blocked nodes.
+          compliance, review, and integration events using service references. This page is clearly labeled as preview/evidence when deterministic local records are used.
         </p>
       </section>
 
@@ -2805,8 +2809,8 @@ function QuoteJourneyMapSection({ runId }: { runId: string }) {
           <strong>{businessFacingText(view.status)}</strong>
           <span>{businessFacingText(view.fallbackReason)}</span>
         </div>
-        <ChipList label="Journey blockers" values={view.blockers.map(businessFacingText)} />
-        <ChipList label="Service contracts represented" values={view.serviceContracts.map(businessFacingText)} />
+        <PlainEvidenceList label="Journey blockers" values={view.blockers.map(businessFacingText)} />
+        <PlainEvidenceList label="Service contracts represented" values={view.serviceContracts.map(businessFacingText)} />
 
         <div className="offer-grid" role="list" aria-label="Quote journey service nodes">
           {view.nodes.map((node) => <QuoteJourneyNodeCard key={node.nodeId} node={node} />)}
@@ -2839,11 +2843,38 @@ function QuoteJourneyNodeCard({ node }: { node: QuoteJourneyNode }) {
         <dt>Support reference</dt><dd>{businessFacingText(node.drilldownRefs.correlationRef)}</dd>
       </dl>
       <p className="field-help">{businessFacingText(node.freshness.message)}</p>
-      <ChipList label={`${node.label} evidence refs`} values={node.evidenceRefs.map(businessFacingText)} />
-      <ChipList label={`${node.label} blockers`} values={node.blockers.map(businessFacingText)} />
-      <ChipList label={`${node.label} downstream dependencies`} values={node.downstreamDependencies.map(businessFacingText)} />
+      <PlainEvidenceList label={`${node.label} evidence refs`} values={node.evidenceRefs.map(businessFacingText)} />
+      <PlainEvidenceList label={`${node.label} blockers`} values={node.blockers.map(businessFacingText)} />
+      <PlainEvidenceList label={`${node.label} downstream dependencies`} values={node.downstreamDependencies.map(businessFacingText)} />
     </article>
   );
+}
+
+function PlainEvidenceList({ label, values }: { label: string; values: string[] }) {
+  return (
+    <div className="copyable-ref-list" aria-label={label}>
+      <strong>{label}</strong>
+      {values.length === 0 ? <p>None</p> : <ul>{values.map((value) => <li key={value}>{value}</li>)}</ul>}
+    </div>
+  );
+}
+
+function normalizedQuoteJourneyMap(view: QuoteJourneyMapView, runId: string): QuoteJourneyMapView {
+  if (!Array.isArray(view.nodes) || view.nodes.length === 0) return deterministicQuoteJourneyMapForRun(runId);
+  return { ...view, runId: view.runId || runId };
+}
+
+function deterministicQuoteJourneyMapForRun(runId: string, error?: unknown): QuoteJourneyMapView {
+  const message = error instanceof Error ? error.message : '';
+  return {
+    ...deterministicQuoteJourneyMap,
+    runId,
+    fallbackReason: message ? `DETERMINISTIC_PREVIEW_EVIDENCE: ${message}` : deterministicQuoteJourneyMap.fallbackReason,
+    nodes: deterministicQuoteJourneyMap.nodes.map((node) => ({
+      ...node,
+      drilldownRefs: { ...node.drilldownRefs, runId },
+    })),
+  };
 }
 
 function safeJourneyRoute(route: string) {
@@ -2863,17 +2894,17 @@ function journeyDrilldownHref(node: QuoteJourneyNode) {
   return `${route}?${params.toString()}`;
 }
 
-function PricingWaterfallSection({ runId }: { runId: string }) {
+function PricingWaterfallSection({ runId, previewMode = false }: { runId: string; previewMode?: boolean }) {
   const [waterfallState, setWaterfallState] = useState<PricingWaterfallState>({ kind: 'loading' });
 
   useEffect(() => {
     let active = true;
     fetchPricingWaterfall(tenantBoundaryPlaceholder, runId)
       .then((view) => {
-        if (active) setWaterfallState({ kind: 'loaded', view });
+        if (active) setWaterfallState({ kind: 'loaded', view: normalizedPricingWaterfall(view, runId) });
       })
       .catch(() => {
-        if (active) setWaterfallState({ kind: 'unreachable', message: 'Pricing waterfall is temporarily unavailable.' });
+        if (active) setWaterfallState({ kind: 'loaded', view: deterministicPricingWaterfallForRun(runId) });
       });
     return () => {
       active = false;
@@ -2881,13 +2912,14 @@ function PricingWaterfallSection({ runId }: { runId: string }) {
   }, [runId]);
 
   if (waterfallState.kind === 'loading') {
-    return <section className="panel" aria-labelledby="waterfall-heading"><h2 id="waterfall-heading">Pricing waterfall</h2><p role="status">Loading pricing waterfall evidence...</p></section>;
+    return <section className="panel" aria-labelledby="waterfall-heading"><p className="eyebrow">Preview evidence page · non-production</p><h2 id="waterfall-heading">Pricing Waterfall</h2><p role="status">Loading pricing waterfall evidence...</p></section>;
   }
 
   if (waterfallState.kind === 'unreachable') {
     return (
       <section className="panel" aria-labelledby="waterfall-heading">
-        <h2 id="waterfall-heading">Pricing waterfall</h2>
+        <p className="eyebrow">Preview evidence page · non-production</p>
+        <h2 id="waterfall-heading">Pricing Waterfall</h2>
         <div className="banner banner--blocked" role="alert">{waterfallState.message}</div>
       </section>
     );
@@ -2899,8 +2931,8 @@ function PricingWaterfallSection({ runId }: { runId: string }) {
   return (
     <>
       <section className="hero hero--admin" aria-labelledby="waterfall-title">
-        <p className="eyebrow">Pricing Â· PII-22-S05</p>
-        <h2 id="waterfall-title">Pricing waterfall for run {runId}</h2>
+        <p className="eyebrow">{previewMode || view.fallbackReason?.includes('PREVIEW') ? 'Preview evidence page · non-production' : 'Pricing · PII-22-S05'}</p>
+        <h2 id="waterfall-title">Pricing Waterfall preview for run {runId}</h2>
         <p>
           Inspect base grid selection, final price ledger steps, rounding review references, missing-price blockers, support references,
           and processing records from connected service records. The workbench displays facts only and does not calculate prices.
@@ -2968,6 +3000,20 @@ function PricingWaterfallSection({ runId }: { runId: string }) {
       </section>
     </>
   );
+}
+
+function normalizedPricingWaterfall(view: PricingWaterfallView, runId: string): PricingWaterfallView {
+  if (!view.finalPrice?.ledger || !view.baseSelection) return deterministicPricingWaterfallForRun(runId);
+  return { ...view, runId: view.runId || runId };
+}
+
+function deterministicPricingWaterfallForRun(runId: string): PricingWaterfallView {
+  return {
+    ...deterministicPricingWaterfall,
+    runId,
+    status: deterministicPricingWaterfall.status || 'PREVIEW_EVIDENCE',
+    fallbackReason: 'DETERMINISTIC_PREVIEW_EVIDENCE',
+  };
 }
 
 function WaterfallLedgerTableRow({ row }: { row: WaterfallLedgerRow }) {
@@ -3258,7 +3304,10 @@ function OfferComparisonSection({ runId }: { runId: string }) {
                 <ChipList label="Snapshot refs" values={offer.snapshotRefs ?? []} />
                 <ChipList label="Review references" values={(offer.auditIds ?? []).map(businessFacingText)} />
                 <ChipList label="Explanation sections" values={offer.explanationSections ?? []} />
-                <button type="button" aria-pressed={selectedOffer?.offerId === offer.offerId} onClick={() => void inspectOffer(offer)}>
+                <button type="button" aria-label={`Select offer ${offer.offerId}`} aria-pressed={selectedOffer?.offerId === offer.offerId} onClick={() => void inspectOffer(offer)}>
+                  Select offer
+                </button>
+                <button type="button" aria-label={`Inspect explanation for offer ${offer.offerId}`} onClick={() => void inspectOffer(offer)}>
                   Inspect explanation
                 </button>
               </article>

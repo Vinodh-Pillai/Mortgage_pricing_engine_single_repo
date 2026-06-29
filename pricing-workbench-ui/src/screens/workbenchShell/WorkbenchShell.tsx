@@ -414,7 +414,7 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     dependencyStatus: 'Lock-service expiration and investor delivery refs govern blocked and attention states.',
     adapterStatus: 'Screen renders lock statuses, bulk action controls, and evidence capture without changing backend state.',
     evidenceTarget: '.local-harness/evidence/PII-25-S04/lock-management.json',
-    match: (pathname) => pathname === '/locks' || pathname.startsWith('/locks/'),
+    match: (pathname) => pathname === '/locks' || pathname === '/lock-management' || pathname.startsWith('/locks/'),
   },
   {
     id: 'admin-governance',

@@ -78,13 +78,6 @@ export function Sidebar({ activeModuleId, activeRunId, collapsed, drawerOpen, mo
       onKeyDown={handleKeyDown}
     >
       <div className="layout-sidebar__chrome" aria-hidden="true" />
-      <div className="layout-sidebar__brand">
-        <span className="layout-sidebar__brand-mark">LW</span>
-        <span className="layout-sidebar__brand-copy">
-          <strong>LoanWeft</strong>
-          <small>PPE Command Center</small>
-        </span>
-      </div>
       <div className="layout-sidebar__actions">
         {mode === 'rail' ? (
           <button

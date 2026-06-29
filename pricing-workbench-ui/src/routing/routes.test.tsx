@@ -29,11 +29,20 @@ describe('RoutingTest', () => {
       '/quote/:runId/offers',
       '/quote/:runId/offers/:optionId',
       '/quote/:runId/pricing-waterfall',
+      '/quote/:runId/journey',
       '/quote/:runId/what-if',
     ]));
     expect(matchAppRoute('/quote/run-123/offers').id).toBe('quote-offers');
     expect(matchAppRoute('/quote/run-123/offers/option-7').id).toBe('quote-detail');
+    expect(matchAppRoute('/quote/run-123/pricing-waterfall').id).toBe('pricing-waterfall');
+    expect(matchAppRoute('/quote/run-123/journey').id).toBe('quote-journey');
     expect(matchAppRoute('/quote/run-123/what-if/fico-sensitivity').id).toBe('scenario-fico-sensitivity');
+  });
+
+  it('RoutingTest.exposesPreviewEvidenceAliasesForRequestedReviewPages', () => {
+    expect(matchAppRoute('/pricing/waterfall')).toEqual(expect.objectContaining({ id: 'pricing-waterfall-preview', sourceModuleId: 'pricing-waterfall' }));
+    expect(matchAppRoute('/journey-map')).toEqual(expect.objectContaining({ id: 'quote-journey-preview', sourceModuleId: 'quote-journey' }));
+    expect(matchAppRoute('/lock-management')).toEqual(expect.objectContaining({ id: 'lock-management-alias', sourceModuleId: 'lock-management' }));
   });
 
   it('RoutingTest.handles404ForUnknownRoutes', () => {

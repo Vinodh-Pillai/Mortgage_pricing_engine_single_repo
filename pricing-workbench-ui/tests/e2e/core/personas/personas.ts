@@ -437,7 +437,7 @@ export const pii25Personas: Pii25Persona[] = [
       '/locks',
     ],
     unauthorizedRoutes: ['/tenant/onboarding', '/admin/products/new', '/compliance/evidence'],
-    expectedModules: ['Progressive Quote Intake', 'Quote Comparison', 'Lock Management', 'Scenario Analysis'],
+    expectedModules: ['QuickQuote', 'Quote Comparison', 'Lock Management', 'Scenario Analysis'],
     syntheticFixtureMetadata: {
       classification: 'synthetic-test-only',
       workflowCoverage: [
@@ -533,7 +533,7 @@ export const pii25Personas: Pii25Persona[] = [
     defaultRoute: '/quote/start',
     authorizedRoutes: ['/quote/start'],
     unauthorizedRoutes: ['/tenant/onboarding', '/admin/products/new', '/pricing/analysis', '/locks'],
-    expectedModules: ['Progressive Quote Intake'],
+    expectedModules: ['QuickQuote'],
   },
 ];
 

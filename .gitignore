@@ -32,3 +32,4 @@ rate-feed-service/evidence/pii-04-implementation-receipt.md
 **/dist/assets/
 **/.local-harness/
 **/bin/
+**/.gradle-home

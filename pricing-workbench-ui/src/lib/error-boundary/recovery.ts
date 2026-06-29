@@ -24,7 +24,7 @@ export function contactSupport(error: Error, options: { uiTraceId?: string; emai
 
 export function createSupportHref(error: Error, options: { uiTraceId?: string; email?: string } = {}) {
   const recipient = options.email ?? 'support@example.com';
-  const subject = encodeURIComponent(`LoanWeft error ${options.uiTraceId ?? ''}`.trim());
+  const subject = encodeURIComponent(`Pricing Workbench error ${options.uiTraceId ?? ''}`.trim());
   const body = encodeURIComponent(`Error: ${error.name}\nMessage: ${error.message}\nCorrelation ID: ${options.uiTraceId ?? 'unavailable'}`);
   return `mailto:${recipient}?subject=${subject}&body=${body}`;
 }

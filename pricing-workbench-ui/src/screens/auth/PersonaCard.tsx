@@ -18,6 +18,7 @@ export interface PersonaCardProps {
   isSelected: boolean;
   onSelect: () => void;
   style?: CSSProperties;
+  showEmail?: boolean;
 }
 
 export function roleIconFor(role: PersonaRole) {
@@ -30,7 +31,7 @@ export function visiblePermissionChips(persona: Persona, maxVisible = 3) {
   return { visible, overflow };
 }
 
-export function PersonaCard({ persona, isSelected, onSelect, style }: PersonaCardProps) {
+export function PersonaCard({ persona, isSelected, onSelect, style, showEmail = true }: PersonaCardProps) {
   const permissions = visiblePermissionChips(persona);
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
@@ -61,7 +62,7 @@ export function PersonaCard({ persona, isSelected, onSelect, style }: PersonaCar
       </div>
 
       <p className="persona-card__description">{persona.description}</p>
-      <p className="persona-card__email">{persona.email}</p>
+      {showEmail ? <p className="persona-card__email">{persona.email}</p> : null}
 
       <div className="persona-card__permissions" aria-label={`Key permissions for ${persona.name}`}>
         {permissions.visible.map((permission) => (

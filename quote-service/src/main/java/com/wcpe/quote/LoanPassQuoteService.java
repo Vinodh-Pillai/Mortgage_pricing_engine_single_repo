@@ -74,6 +74,12 @@ public class LoanPassQuoteService {
         Map<String, String> calculations = new LinkedHashMap<>();
         calculations.put("calculationPolicy", snapshot.synthetic() ? "synthetic-dev-only-no-production-rules" : "durable-source-derived");
         calculations.put("sourcePayloadHash", snapshot.payloadHash());
+        putSourceRef(calculations, product, "monthlyPi", "monthly_pi");
+        putSourceRef(calculations, product, "apr", "apr");
+        putSourceRef(calculations, product, "adjustedPrice", "adjusted_price");
+        putSourceRef(calculations, product, "basePrice", "base_price");
+        putSourceRef(calculations, product, "engineAdjustedPrice", "engine_adjusted_price");
+        putSourceRef(calculations, product, "losAdjustedPrice", "los_adjusted_price");
         if (!executable) {
             calculations.put("nonExecutableReason", String.join(",", errorsFor(product)));
         }
@@ -98,6 +104,7 @@ public class LoanPassQuoteService {
             product.rejections(),
             errorsFor(product),
             adjustmentsFor(product),
+            product.sourceRefs(),
             versionMetadata(snapshot)
         );
     }
@@ -112,6 +119,9 @@ public class LoanPassQuoteService {
     }
 
     private static List<Map<String, String>> executableRates(CatalogProduct product) {
+        if (product.noteRatePercent() == null || product.priceBps() == null) {
+            return List.of();
+        }
         return product.lockPeriods().stream()
             .map(lock -> Map.of(
                 "lockPeriodDays", Integer.toString(lock),
@@ -139,8 +149,26 @@ public class LoanPassQuoteService {
             product.lockPeriods(),
             product.noteRatePercent(),
             product.priceBps(),
+            executableRates(product),
+            summaryCalculations(product),
             product.sourceRefs()
         );
+    }
+
+    private static Map<String, String> summaryCalculations(CatalogProduct product) {
+        Map<String, String> calculations = new LinkedHashMap<>();
+        putSourceRef(calculations, product, "monthlyPi", "monthly_pi");
+        putSourceRef(calculations, product, "apr", "apr");
+        putSourceRef(calculations, product, "adjustedPrice", "adjusted_price");
+        putSourceRef(calculations, product, "basePrice", "base_price");
+        return Map.copyOf(calculations);
+    }
+
+    private static void putSourceRef(Map<String, String> target, CatalogProduct product, String responseKey, String sourceRefKey) {
+        String value = product.sourceRefs().get(sourceRefKey);
+        if (value != null && !value.isBlank()) {
+            target.put(responseKey, value);
+        }
     }
 
     private Map<String, Object> normalizedRequest(Map<String, Object> body, UUID headerTenantId) {

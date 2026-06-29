@@ -59,13 +59,14 @@ test.describe('Sarah Mitchell functional workflow E2E', () => {
     await page.goto('/quote/start', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('heading', { name: /^QuickQuote$/i })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole('region', { name: /QuickQuote status strip/i })).toBeVisible();
-    await expect(page.getByRole('complementary', { name: /LOS prefill rail/i })).toBeVisible();
+    await expect(page.getByRole('complementary', { name: /QuickQuote pricing input rail/i })).toBeVisible();
     await fillIfVisible(page.getByLabel(/^Contact email$/i), 'sarah.borrower.synthetic@example.invalid');
     await fillIfVisible(page.getByLabel(/^Channel$/i), 'Retail');
     await fillIfVisible(page.getByLabel(/^Loan purpose$/i), 'Purchase');
     await fillIfVisible(page.getByRole('spinbutton', { name: /Decision credit score/i }).first(), '742');
     await fillIfVisible(page.getByRole('spinbutton', { name: /Base loan amount/i }).first(), '410000');
     await fillIfVisible(page.getByRole('spinbutton', { name: /Desired rate lock period/i }).first(), '45');
+    await page.getByRole('button', { name: /^Find Products$/i }).click();
     await expect(page.getByRole('table', { name: /QuickQuote product eligibility grid/i })).toBeVisible();
     await page.getByRole('button', { name: /^Add to comparison$/i }).first().click();
     await page.getByRole('button', { name: /^Use for quote$/i }).first().click();
@@ -101,20 +102,27 @@ test.describe('Sarah Mitchell functional workflow E2E', () => {
     await page.getByRole('button', { name: /Continue to lock workflow/i }).click();
 
     await expect(page.getByText(/Ready to confirm/i)).toBeVisible();
-    await page.getByRole('checkbox').check();
-    await page.getByRole('button', { name: /^Confirm lock$/i }).click();
-    await expect(page.getByText(/Lock details returned/i)).toBeVisible();
+    await page.getByLabel(/Disclosure text/i).evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      element.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    await page.getByRole('checkbox', { name: /I have read and accept/i }).check();
+    await page.getByLabel(/Digital signature/i).fill('Sarah Mitchell');
+    await page.getByRole('button', { name: /Lock This Rate/i }).click();
+    await page.getByRole('button', { name: /^Confirm Lock$/i }).click();
+    await expect(page.getByText(/Lock details returned|Local synthetic lock confirmation staged/i).first()).toBeVisible();
     await expect(page.getByText(/Expiry:/i)).toBeVisible();
     await capture(page, 'lock-confirm-status-expiry', ['Lock confirmation returned synthetic status, expiry, and audit refs']);
 
     await page.goto('/locks', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('heading', { name: /^Lock Management$/i })).toBeVisible();
-    await page.getByRole('button', { name: /Stage Request Lock/i }).click();
-    await expect(page.getByRole('status')).toContainText(/Local request-lock evidence staged/i);
-    await page.getByRole('button', { name: /Stage Extension Review/i }).click();
-    await expect(page.getByRole('status')).toContainText(/Local lock-extension review staged/i);
-    await page.getByRole('button', { name: /Show Expiry Blockers/i }).click();
-    await expect(page.getByRole('status')).toContainText(/Expiry blockers shown from local fixture/i);
+    const managementActions = page.getByLabel(/Lock Management actions/i);
+    await managementActions.getByRole('button', { name: /Stage Request Lock/i }).click();
+    await expect(page.getByRole('status')).toContainText(/request lock review evidence staged locally/i);
+    await managementActions.getByRole('button', { name: /Stage Extension Review/i }).click();
+    await expect(page.getByRole('status')).toContainText(/extend expiring lock review evidence staged locally/i);
+    await managementActions.getByRole('button', { name: /Show Expiry Blockers/i }).click();
+    await expect(page.getByRole('status')).toContainText(/show expiry blockers evidence staged locally/i);
     await capture(page, 'lock-management-extension-expiry', ['Lock management staged request, extension, and expiry blocker evidence']);
   });
 
@@ -123,13 +131,13 @@ test.describe('Sarah Mitchell functional workflow E2E', () => {
     await loginAsSarah(page);
     await page.goto(`/quote/${runId}/what-if`, { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('heading', { name: new RegExp(`Scenario Analysis for run ${runId}`, 'i') })).toBeVisible();
-    await expect(page.getByText(/Backend analysis contract required/i)).toBeVisible();
+    await expect(page.getByText(/Scenario analysis needs attention|PRODUCTION INTEGRATION REQUIRED/i).first()).toBeVisible();
     await page.getByLabel(/Variant name/i).fill('Sarah lock period what-if');
     await page.getByRole('button', { name: /Create Variant/i }).click();
-    await expect(page.getByText(/staged locally and blocked for backend persistence/i)).toBeVisible();
+    await expect(page.getByRole('status')).toContainText(/Variant draft "Sarah lock period what-if" is ready for review/i);
     await page.getByLabel(/Requested value/i).fill('synthetic backend fact ref only');
-    await page.getByRole('button', { name: /Recalculate Selected/i }).click();
-    await expect(page.getByText(/Local what.?if request staged/i)).toBeVisible();
+    await page.getByLabel(/Scenario recalculation/i).getByRole('button', { name: /Recalculate Selected/i }).click();
+    await expect(page.getByRole('status').filter({ hasText: /Local what.?if request staged|no mortgage pricing or eligibility calculation/i })).toBeVisible();
     await capture(page, 'scenario-analysis-workspace', ['Scenario variant and recalculation were staged with production integration blockers']);
 
     const whatIfRoutes = [

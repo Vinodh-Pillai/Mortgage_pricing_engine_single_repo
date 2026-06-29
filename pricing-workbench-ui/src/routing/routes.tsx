@@ -27,7 +27,7 @@ export const routeComponentLoaders: Record<string, () => Promise<{ default: Comp
   'quote-offers': () => import('../screens/quoteOffers/QuoteOffersScreen'),
   'quote-detail': () => import('../screens/quoteDetail/QuoteDetailScreen'),
   'pricing-waterfall': () => import('../screens/pricingWaterfall/PricingWaterfallScreen'),
-  'quote-journey': () => import('../screens/NotFoundScreen'),
+  'quote-journey': () => import('../screens/quoteJourneyMap/QuoteJourneyMapScreen'),
   'scenario-analysis': () => import('../screens/scenarioAnalysis/ScenarioAnalysisWorkspace').then((module) => ({ default: module.ScenarioAnalysisWorkspaceScreen })),
   'scenario-fico-sensitivity': () => import('../screens/scenarioAnalysis/sensitivity/FicoSensitivity').then((module) => ({ default: module.FicoSensitivityScreen })),
   'scenario-ltv-sensitivity': () => import('../screens/scenarioAnalysis/sensitivity/LtvSensitivity').then((module) => ({ default: module.LtvSensitivityScreen })),
@@ -89,6 +89,8 @@ const productManagementModule = workbenchModules.find((module) => module.id === 
 const rateSheetModule = workbenchModules.find((module) => module.id === 'rate-sheet-intake');
 const rateFeedPipelineModule = workbenchModules.find((module) => module.id === 'rate-feed-pipeline');
 const pricingAnalysisModule = workbenchModules.find((module) => module.id === 'pricing-analysis');
+const pricingWaterfallModule = workbenchModules.find((module) => module.id === 'pricing-waterfall');
+const quoteJourneyModule = workbenchModules.find((module) => module.id === 'quote-journey');
 const lockManagementModule = workbenchModules.find((module) => module.id === 'lock-management');
 
 const scenarioChildRoutes: WorkbenchRouteDefinition[] = scenarioModule ? [
@@ -112,7 +114,12 @@ const functionalityChildRoutes: WorkbenchRouteDefinition[] = [
   ] : []),
   ...(rateFeedPipelineModule ? [{ ...definitionForModule(rateFeedPipelineModule), id: 'rate-feed-pipeline-admin', path: '/admin/ratefeed/pipeline', label: 'Rate feed pipeline', breadcrumb: 'Rate Feed Pipeline', lazyComponent: lazyScreen(routeComponentLoaders['rate-feed-pipeline']) }] : []),
   ...(pricingAnalysisModule ? [{ ...definitionForModule(pricingAnalysisModule), id: 'pricing-analysis-run', path: '/pricing/analysis/:runId', label: 'Pricing Analysis Run', breadcrumb: 'Pricing Analysis Run', lazyComponent: lazyScreen(routeComponentLoaders['pricing-analysis']) }] : []),
-  ...(lockManagementModule ? [{ ...definitionForModule(lockManagementModule), id: 'lock-management-detail', path: '/locks/:lockId', label: 'Lock Detail', breadcrumb: 'Lock Detail', lazyComponent: lazyScreen(routeComponentLoaders['lock-management']) }] : []),
+  ...(pricingWaterfallModule ? [{ ...definitionForModule(pricingWaterfallModule), id: 'pricing-waterfall-preview', path: '/pricing/waterfall', label: 'Pricing Waterfall Preview', breadcrumb: 'Pricing Waterfall Preview', lazyComponent: lazyScreen(routeComponentLoaders['pricing-waterfall']) }] : []),
+  ...(quoteJourneyModule ? [{ ...definitionForModule(quoteJourneyModule), id: 'quote-journey-preview', path: '/journey-map', label: 'Quote Journey Map Preview', breadcrumb: 'Quote Journey Map Preview', lazyComponent: lazyScreen(routeComponentLoaders['quote-journey']) }] : []),
+  ...(lockManagementModule ? [
+    { ...definitionForModule(lockManagementModule), id: 'lock-management-alias', path: '/lock-management', label: 'Lock Management', breadcrumb: 'Lock Management', lazyComponent: lazyScreen(routeComponentLoaders['lock-management']) },
+    { ...definitionForModule(lockManagementModule), id: 'lock-management-detail', path: '/locks/:lockId', label: 'Lock Detail', breadcrumb: 'Lock Detail', lazyComponent: lazyScreen(routeComponentLoaders['lock-management']) },
+  ] : []),
 ];
 
 export const appRouteDefinitions: WorkbenchRouteDefinition[] = [

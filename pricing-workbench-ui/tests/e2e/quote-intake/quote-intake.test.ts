@@ -9,67 +9,59 @@ test.describe('PII-25 quote intake E2E', () => {
     await loginAs(page, 'loan-officer');
   });
 
-  test('completes six-step quote intake flow with mocked draft and launch APIs', async ({ page }) => {
+  test('opens QuickQuote as the pricing entry with mocked product grid', async ({ page }) => {
     await page.goto('/quote/start', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByText('Scenario Identity').first()).toBeVisible();
-    await fillVisibleFields(page, ['quoteIntent', 'channel', 'scenarioName', 'externalLoanId']);
-    await page.getByRole('button', { name: /Create draft and continue/i }).click();
-    await expect(page.locator('#borrowerName')).toBeVisible();
-
-    await expect(page.getByText('Borrower & Credit').first()).toBeVisible();
-    await fillVisibleFields(page, ['borrowerName', 'contactEmail', 'creditScore']);
-    await page.getByRole('button', { name: /Save and continue/i }).click();
-
-    await expect(page.getByText('Loan Structure').first()).toBeVisible();
-    await fillVisibleFields(page, ['loanPurpose', 'loanAmount', 'purchasePriceOrValue']);
-    await page.getByRole('button', { name: /Save and continue/i }).click();
-
-    await expect(page.getByText('Property').first()).toBeVisible();
-    await fillVisibleFields(page, ['propertyState', 'propertyZip', 'propertyCounty']);
-    await page.getByRole('button', { name: /Save and continue/i }).click();
-
-    await expect(page.getByText('Income & Assets').first()).toBeVisible();
-    await fillVisibleFields(page, ['monthlyIncome', 'monthlyDebt', 'liquidAssets']);
-    await page.getByRole('button', { name: /Save and continue/i }).click();
-
-    await expect(page.getByText('Preferences & Filters').first()).toBeVisible();
-    await fillVisibleFields(page, ['productFamily', 'productPreference', 'effectiveDate']);
-    await page.getByRole('button', { name: /Launch quote run/i }).click();
-    await expect(page).toHaveURL(/\/quote\/e2e-run\/offers$/);
+    await expect(page.getByRole('heading', { name: /^QuickQuote$/i })).toBeVisible();
+    await expect(page.getByRole('tab', { name: /^QuickQuote$/i })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('status', { name: /QuickQuote products pending submit/i })).toBeVisible();
+    await expect(page.getByRole('table', { name: /QuickQuote product eligibility grid/i })).toHaveCount(0);
+    await fillVisibleFields(page, ['channel', 'mortgageType', 'loanPurpose', 'decisionCreditScore', 'baseLoanAmount', 'state']);
+    await page.getByRole('button', { name: /^Find Products$/i }).click();
+    await expect(page.getByRole('table', { name: /QuickQuote product eligibility grid/i })).toBeVisible();
+    await page.getByRole('button', { name: /^Use for quote$/i }).first().click();
+    await expect(page.getByText(/Conventional 30-Year Preview/i).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: /^Launch quote$/i })).toBeVisible();
   });
 
-  test('required field validation exposes ARIA errors and preserves focus', async ({ page }) => {
+  test('required QuickQuote facts keep launch unavailable before completion', async ({ page }) => {
     await page.goto('/quote/start', { waitUntil: 'domcontentloaded' });
-    await page.getByRole('button', { name: /Create draft and continue/i }).click();
-    await expect(page.getByRole('alert').first()).toBeVisible();
-    await expect(page.locator('[aria-invalid="true"]').first()).toBeFocused();
+    await expect(page.getByRole('heading', { name: /^QuickQuote$/i })).toBeVisible();
+    await page.getByRole('button', { name: /^Find Products$/i }).click();
+    await page.getByRole('button', { name: /^Use for quote$/i }).first().click();
+    await expect(page.getByRole('button', { name: /^Launch quote$/i })).toBeDisabled();
+    await expect(page.getByText(/Data required before pricing refresh|complete required fields/i)).toBeVisible();
   });
 
-  test('next, previous, progress clicks, save draft, resume, metadata panel, visual and keyboard paths are available', async ({ page }) => {
+  test('save draft, resume, metadata panel, and keyboard paths are available', async ({ page }) => {
     await page.goto('/quote/start', { waitUntil: 'domcontentloaded' });
-    await fillVisibleFields(page, ['quoteIntent', 'channel']);
-    await page.getByRole('button', { name: /Save draft/i }).click();
-    await expect(page.getByText(/Draft saved for resume/i)).toBeVisible();
-    await page.getByRole('button', { name: /Create draft and continue/i }).click();
-    await expect(page.locator('#borrowerName')).toBeVisible();
-    await expect(page.getByRole('button', { name: /Previous/i })).toBeEnabled();
-    await page.getByRole('button', { name: /Previous/i }).click();
-    await expect(page.getByText('Scenario Identity').first()).toBeVisible();
-    await expect(page.getByLabel(/Progressive quick quote setup status/i)).toContainText('Quick Quote State');
+    await expect(page.getByRole('heading', { name: /^QuickQuote$/i })).toBeVisible();
+    await page.getByRole('button', { name: /^Save QuickQuote draft$/i }).click();
+    await expect(page.getByLabel(/QuickQuote pricing input rail/i)).toBeVisible();
     await page.keyboard.press('Tab');
     await expect(page.locator(':focus')).toBeVisible();
-    await expect(page).toHaveScreenshot('quote-intake-step-1.png', { fullPage: true, maxDiffPixelRatio: 0.001 });
 
     await page.goto('/quote/start?scenarioId=scenario-e2e-pii25', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByText(/scenario-e2e-pii25|resume/i).first()).toBeVisible();
+    await expect(page.getByRole('heading', { name: /^QuickQuote$/i })).toBeVisible();
   });
 });
 
-async function fillVisibleFields(page: import('@playwright/test').Page, fieldIds: Array<keyof typeof pii25QuoteIntakeFixture>) {
+const quickQuoteFixtureValues: Record<string, string> = {
+  ...pii25QuoteIntakeFixture,
+  borrowerLastName: 'Borrower',
+  loanNumber: 'PII25-QQ-001',
+  mortgageType: 'Conventional',
+  decisionCreditScore: '780',
+  baseLoanAmount: '400000',
+  state: 'California',
+};
+
+async function fillVisibleFields(page: import('@playwright/test').Page, fieldIds: string[]) {
   for (const fieldId of fieldIds) {
-    const value = pii25QuoteIntakeFixture[fieldId];
+    const value = quickQuoteFixtureValues[fieldId];
     const field = page.locator(`[name="${fieldId}"], #${fieldId}`).first();
     await expect(field).toBeVisible();
-    await field.fill(String(value));
+    const tagName = await field.evaluate((element) => element.tagName.toLowerCase());
+    if (tagName === 'select') await field.selectOption({ label: String(value) });
+    else await field.fill(String(value));
   }
 }

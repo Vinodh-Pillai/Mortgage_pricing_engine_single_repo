@@ -77,7 +77,7 @@ describe('responsive layout shell', () => {
   it('builds navigation from registry modules and persona visibility', () => {
     const items = buildNavigationTree(modules, 'run-123', 'operations lead');
     expect(items).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Quote workspace', route: '/quote/run-123/offers', group: 'Quotes' })]));
-    expect(items).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Operations dashboard', group: 'Operations', badgeCount: 2 })]));
+    expect(items).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Operations dashboard', group: 'Operations', badgeCount: undefined })]));
     expect(items).not.toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Quick Quote', group: 'Pipeline' })]));
     expect(items).not.toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Feature Flags', group: 'Admin' })]));
   });
@@ -93,11 +93,14 @@ describe('responsive layout shell', () => {
 
     expect(screen.getByText('Skip to main content')).toHaveAttribute('href', '#main-content');
     expect(screen.getByRole('banner')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'LoanWeft' })).toBeInTheDocument();
-    expect(screen.getByRole('banner').textContent?.match(/LoanWeft/g)).toHaveLength(1);
-    expect(screen.getByRole('navigation', { name: 'Main navigation' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Pricing Workbench' })).toBeInTheDocument();
+    expect(screen.getByRole('banner')).not.toHaveTextContent(/LoanWeft|PPE Command Center/i);
+    expect(screen.queryByRole('navigation', { name: 'Main navigation' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open navigation menu' }));
+    expect(screen.getByRole('dialog', { name: 'Primary navigation drawer' })).toBeInTheDocument();
     expect(screen.getByRole('main')).toHaveTextContent('Screen content');
-    expect(screen.getByRole('contentinfo')).toHaveTextContent('Responsive shell ready');
+    expect(screen.getByRole('contentinfo')).toHaveTextContent('Pricing Workbench v0.1.0');
+    expect(screen.getByRole('contentinfo')).not.toHaveTextContent(/LoanWeft|PPE Command Center/i);
     expect(screen.getByRole('link', { name: 'Quote workspace' })).toHaveClass('layout-sidebar__link--active');
   });
 
@@ -190,7 +193,7 @@ describe('responsive layout shell', () => {
     expect(menuButton).toHaveFocus();
   });
 
-  it('toggles and persists rail collapse without changing desktop/tablet rail mode', () => {
+  it('keeps navigation floating on desktop without rendering a persistent rail', () => {
     installMatchMedia(false);
     window.localStorage.removeItem('loanweft:layout-shell:nav-rail-collapsed');
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1199 });
@@ -203,15 +206,14 @@ describe('responsive layout shell', () => {
     const shell = document.querySelector('.layout-shell');
     expect(shell).toHaveAttribute('data-breakpoint-mode', 'rail');
     expect(shell).toHaveAttribute('data-nav-collapsed', 'false');
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse' }));
-    expect(shell).toHaveClass('layout-shell--nav-collapsed');
-    expect(window.localStorage.getItem('loanweft:layout-shell:nav-rail-collapsed')).toBe('true');
-    fireEvent.click(screen.getByRole('button', { name: 'Expand' }));
-    expect(shell).not.toHaveClass('layout-shell--nav-collapsed');
-    expect(window.localStorage.getItem('loanweft:layout-shell:nav-rail-collapsed')).toBe('false');
+    expect(screen.queryByRole('navigation', { name: 'Main navigation' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Collapse' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open navigation menu' }));
+    expect(screen.getByRole('dialog', { name: 'Primary navigation drawer' })).toBeInTheDocument();
+    expect(window.localStorage.getItem('loanweft:layout-shell:nav-rail-collapsed')).toBeNull();
   });
 
-  it('uses the sidebar control to expand and collapse desktop navigation', () => {
+  it('uses the header hamburger as the only desktop navigation opener', () => {
     installMatchMedia(false);
     window.localStorage.removeItem('loanweft:layout-shell:nav-rail-collapsed');
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
@@ -222,13 +224,31 @@ describe('responsive layout shell', () => {
     );
 
     const shell = document.querySelector('.layout-shell');
-    const menuButton = screen.getByRole('button', { name: 'Collapse' });
-    expect(menuButton).toHaveAttribute('aria-expanded', 'true');
+    const menuButton = screen.getByRole('button', { name: 'Open navigation menu' });
+    expect(menuButton).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('button', { name: 'Collapse' })).not.toBeInTheDocument();
     fireEvent.click(menuButton);
-    expect(shell).toHaveClass('layout-shell--nav-collapsed');
-    fireEvent.click(screen.getByRole('button', { name: 'Expand' }));
+    expect(menuButton).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('dialog', { name: 'Primary navigation drawer' })).toBeInTheDocument();
+    fireEvent.click(document.querySelector('.layout-sidebar-backdrop') as HTMLElement);
     expect(shell).not.toHaveClass('layout-shell--nav-collapsed');
-    expect(screen.getByRole('navigation', { name: 'Main navigation' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Primary navigation drawer' })).not.toBeInTheDocument();
+  });
+
+  it('does not expose zero-count noise in header or sidebar chrome', () => {
+    installMatchMedia(false);
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
+    renderShell(
+      <Shell activeModuleId="quote" activeRunId="run-123" breadcrumb="Quote" modules={modules} notifications={[]} onThemeToggle={vi.fn()} theme="dark" user={{ name: 'Alex Rivera', role: 'Loan officer' }}>
+        <section>Screen content</section>
+      </Shell>,
+    );
+
+    const banner = screen.getByRole('banner');
+    expect(banner).not.toHaveTextContent(/\b0\b/);
+    expect(screen.getByRole('button', { name: 'Alerts' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open navigation menu' }));
+    expect(screen.getByRole('dialog', { name: 'Primary navigation drawer' })).not.toHaveTextContent(/\b0\b/);
   });
 
   it('opens user menu with role badge and persists theme toggles', () => {
@@ -242,6 +262,8 @@ describe('responsive layout shell', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'User menu for Alex Rivera' }));
+    expect(document.querySelector('.layout-user-menu-shell')).toHaveClass('layout-user-menu-shell--open');
+    expect(screen.getByRole('button', { name: 'User menu for Alex Rivera' })).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('menu', { name: 'User menu for Alex Rivera' })).toHaveTextContent('Profile');
     expect(screen.getByRole('menu', { name: 'User menu for Alex Rivera' })).toHaveTextContent('Settings');
     expect(screen.getByRole('menu', { name: 'User menu for Alex Rivera' })).toHaveTextContent('Sign Out');
@@ -280,9 +302,10 @@ describe('responsive layout shell', () => {
       </Shell>,
     );
 
+    fireEvent.click(screen.getByRole('button', { name: 'Open navigation menu' }));
     const firstLink = screen.getByRole('link', { name: /Pipeline Intake/ });
     firstLink.focus();
-    fireEvent.keyDown(screen.getByRole('navigation', { name: 'Main navigation' }), { key: 'ArrowDown' });
-    expect(screen.getByRole('link', { name: /Quick Quote/ })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole('dialog', { name: 'Primary navigation drawer' }), { key: 'ArrowDown' });
+    expect(screen.getByRole('link', { name: /New quote/ })).toHaveFocus();
   });
 });

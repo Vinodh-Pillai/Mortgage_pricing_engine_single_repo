@@ -20,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -30,20 +31,30 @@ import org.springframework.web.client.RestClientException;
 class PricingBffQuoteServiceLoanPassClient {
   private static final String DEFAULT_LOANPASS_SUMMARY_PATH = "/api/v1/loanpass/execute-summary";
   private static final String DEFAULT_LOANPASS_PRODUCT_PATH = "/api/v1/loanpass/execute-product";
+  static final String DEFAULT_LOANHOUSE_TENANT_ID = "2aba740b-74ee-3068-a456-4df1e64b7c02";
   private final RestClient restClient;
   private final String baseUrl;
   private final String executeSummaryPath;
   private final String executeProductPath;
+  private final String loanHouseTenantId;
   private final ObjectMapper objectMapper = new ObjectMapper();
 
+  @Autowired
   PricingBffQuoteServiceLoanPassClient(RestClient.Builder restClientBuilder,
       @Value("${loanweft.integrations.quote-service.base-url:}") String baseUrl,
       @Value("${loanweft.integrations.quote-service.loanpass-summary-path:" + DEFAULT_LOANPASS_SUMMARY_PATH + "}") String executeSummaryPath,
-      @Value("${loanweft.integrations.quote-service.loanpass-product-path:" + DEFAULT_LOANPASS_PRODUCT_PATH + "}") String executeProductPath) {
+      @Value("${loanweft.integrations.quote-service.loanpass-product-path:" + DEFAULT_LOANPASS_PRODUCT_PATH + "}") String executeProductPath,
+      @Value("${loanweft.integrations.quote-service.loanhouse-tenant-id:" + DEFAULT_LOANHOUSE_TENANT_ID + "}") String loanHouseTenantId) {
     this.restClient = restClientBuilder.build();
     this.baseUrl = baseUrl == null ? "" : baseUrl.trim();
     this.executeSummaryPath = normalizePath(executeSummaryPath, DEFAULT_LOANPASS_SUMMARY_PATH);
     this.executeProductPath = normalizePath(executeProductPath, DEFAULT_LOANPASS_PRODUCT_PATH);
+    this.loanHouseTenantId = loanHouseTenantId == null ? DEFAULT_LOANHOUSE_TENANT_ID : loanHouseTenantId.trim();
+  }
+
+  PricingBffQuoteServiceLoanPassClient(RestClient.Builder restClientBuilder, String baseUrl,
+      String executeSummaryPath, String executeProductPath) {
+    this(restClientBuilder, baseUrl, executeSummaryPath, executeProductPath, DEFAULT_LOANHOUSE_TENANT_ID);
   }
 
   LoanPassExecutionSummaryResponse executeSummary(String tenantId, String runId, String traceId) {
@@ -53,7 +64,7 @@ class PricingBffQuoteServiceLoanPassClient {
   LoanPassExecutionSummaryResponse executeSummary(String tenantId, String runId, String traceId,
       List<CreditApplicationField> creditApplicationFields) {
     requireConfigured("LoanPass execute-summary");
-    String serviceTenantId = stableServiceTenantId(tenantId);
+    String serviceTenantId = stableServiceTenantId(tenantId, loanHouseTenantId);
     LoanPassExecuteSummaryRequest request = new LoanPassExecuteSummaryRequest(serviceTenantId, null, Instant.now(),
         safeFields(creditApplicationFields), List.of(), outputFieldsFilter(), publishedVersionRequest(), runId);
     try {
@@ -80,7 +91,7 @@ class PricingBffQuoteServiceLoanPassClient {
   LoanPassProductExecutionResult executeProduct(String tenantId, String runId, String productId, String traceId,
       List<CreditApplicationField> creditApplicationFields) {
     requireConfigured("LoanPass execute-product");
-    String serviceTenantId = stableServiceTenantId(tenantId);
+    String serviceTenantId = stableServiceTenantId(tenantId, loanHouseTenantId);
     LoanPassExecuteProductRequest request = new LoanPassExecuteProductRequest(serviceTenantId, productId, null, Instant.now(),
         safeFields(creditApplicationFields), List.of(), outputFieldsFilter(), publishedVersionRequest(), runId);
     try {
@@ -101,11 +112,23 @@ class PricingBffQuoteServiceLoanPassClient {
   }
 
   static String stableServiceTenantId(String tenantId) {
+    return stableServiceTenantId(tenantId, DEFAULT_LOANHOUSE_TENANT_ID);
+  }
+
+  static String stableServiceTenantId(String tenantId, String configuredFallbackTenantId) {
     String normalized = tenantId == null ? "" : tenantId.trim();
-    if (normalized.isBlank()) return normalized;
+    if (normalized.isBlank()) return configuredFallbackTenantId == null ? "" : configuredFallbackTenantId.trim();
     try {
       return UUID.fromString(normalized).toString();
     } catch (IllegalArgumentException ex) {
+      String fallback = configuredFallbackTenantId == null ? "" : configuredFallbackTenantId.trim();
+      if (!fallback.isBlank()) {
+        try {
+          return UUID.fromString(fallback).toString();
+        } catch (IllegalArgumentException ignored) {
+          // Fall through to deterministic tenant id when no configured UUID is available.
+        }
+      }
       return UUID.nameUUIDFromBytes(("pricing-bff-ui-tenant:" + normalized).getBytes(StandardCharsets.UTF_8)).toString();
     }
   }
@@ -174,6 +197,7 @@ class PricingBffQuoteServiceLoanPassClient {
   private List<CreditApplicationField> productFields(JsonNode product) {
     List<CreditApplicationField> fields = new ArrayList<>(fieldsFrom(product.path("productFields")));
     addMetadataField(fields, "field@quote-service-rules", "quote-service-rules", product.path("rules"));
+    addMetadataField(fields, "field@quote-service-source-refs", "quote-service-source-refs", product.path("sourceRefs"));
     return List.copyOf(fields);
   }
 
@@ -183,7 +207,41 @@ class PricingBffQuoteServiceLoanPassClient {
     addMetadataField(fields, "field@quote-service-stipulations", "quote-service-stipulations", product.path("stipulations"));
     addMetadataField(fields, "field@quote-service-calculations", "quote-service-calculations", firstPresent(product, "calculations", "calculatedValues"));
     addMetadataField(fields, "field@quote-service-lock-periods", "quote-service-lock-periods", product.path("lockPeriods"));
+    addCapturedScalarField(fields, "field@quote-service-note-rate", "noteRatePercent", product.path("noteRatePercent"));
+    addCapturedScalarField(fields, "field@quote-service-price", "priceBps", product.path("priceBps"));
+    JsonNode calculations = firstPresent(product, "calculations", "calculatedValues");
+    addCapturedObjectScalarField(fields, "field@quote-service-payment", "monthlyPi", calculations,
+        "monthlyPi", "monthlyPayment", "payment");
+    addCapturedObjectScalarField(fields, "field@quote-service-price", "priceBps", calculations,
+        "adjustedPrice", "finalPrice", "priceBps");
+    JsonNode firstRate = firstArrayItem(firstPresent(product, "rates", "rateOptions"));
+    addCapturedObjectScalarField(fields, "field@quote-service-note-rate", "noteRatePercent", firstRate,
+        "noteRatePercent", "noteRate", "adjustedRate");
+    addCapturedObjectScalarField(fields, "field@quote-service-lock-days", "lockPeriodDays", firstRate,
+        "lockPeriodDays", "lockDays");
     return List.copyOf(fields);
+  }
+
+  private void addCapturedObjectScalarField(List<CreditApplicationField> fields, String fieldId, String metadataType,
+      JsonNode object, String... keys) {
+    if (object == null || !object.isObject()) return;
+    for (String key : keys) {
+      JsonNode value = object.path(key);
+      if (value != null && !value.isMissingNode() && !value.isNull() && !value.asText().isBlank()) {
+        addCapturedScalarField(fields, fieldId, metadataType, value);
+        return;
+      }
+    }
+  }
+
+  private JsonNode firstArrayItem(JsonNode node) {
+    return node != null && node.isArray() && !node.isEmpty() ? node.get(0) : MissingNode.getInstance();
+  }
+
+  private void addCapturedScalarField(List<CreditApplicationField> fields, String fieldId, String metadataType, JsonNode value) {
+    if (value != null && !value.isMissingNode() && !value.isNull() && !value.asText().isBlank()) {
+      fields.add(new CreditApplicationField(fieldId, new CreditApplicationValue("metadata", jsonValue(value), metadataType, null)));
+    }
   }
 
   private List<CreditApplicationField> fieldsFrom(JsonNode node) {
@@ -244,17 +302,17 @@ class PricingBffQuoteServiceLoanPassClient {
   }
 
   private String versionNumber(JsonNode root) {
-    String version = firstText(root, "versionNumber", "version");
+    String version = firstText(root, "versionNumber", "version", "schemaVersion");
     if (!version.isBlank()) return version;
     JsonNode metadata = root.path("versionMetadata");
-    return firstText(metadata, "versionNumber", "version", "catalogVersion");
+    return firstText(metadata, "versionNumber", "version", "catalogVersion", "schemaVersion");
   }
 
   private String productVersion(JsonNode product, String defaultVersionNumber) {
-    String version = firstText(product, "versionNumber", "version");
+    String version = firstText(product, "versionNumber", "version", "schemaVersion");
     if (!version.isBlank()) return version;
     JsonNode metadata = product.path("versionMetadata");
-    version = firstText(metadata, "versionNumber", "version", "catalogVersion");
+    version = firstText(metadata, "versionNumber", "version", "catalogVersion", "schemaVersion");
     return version.isBlank() ? defaultVersionNumber : version;
   }
 

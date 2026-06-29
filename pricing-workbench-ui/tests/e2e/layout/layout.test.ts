@@ -1,6 +1,11 @@
 import { expect, test } from '@playwright/test';
+import { loginAs } from '../core/helpers/auth-helper';
 
 test.describe('workbench layout shell', () => {
+  test.beforeEach(async ({ page }) => {
+    await loginAs(page, 'loan-officer');
+  });
+
   test('nav rail links navigate and active route is highlighted', async ({ page }) => {
     await page.goto('/quote/start');
     await expect(page.getByRole('banner')).toBeVisible();
@@ -32,6 +37,19 @@ test.describe('workbench layout shell', () => {
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog', { name: /primary navigation drawer/i })).toBeHidden();
     await expect(menu).toBeFocused();
+  });
+
+  test('header hamburger stays fixed while QuickQuote scrolls', async ({ page }) => {
+    await page.goto('/quote/start');
+    const menu = page.getByRole('button', { name: /open navigation menu/i });
+    await expect(menu).toBeVisible();
+    const before = await menu.boundingBox();
+    const position = await menu.evaluate((element) => window.getComputedStyle(element).position);
+    await page.mouse.wheel(0, 900);
+    const after = await menu.boundingBox();
+
+    expect(position).toBe('fixed');
+    expect(Math.round(after?.y ?? -1)).toBe(Math.round(before?.y ?? -2));
   });
 
   test('keyboard arrow navigation moves through nav rail', async ({ page }) => {

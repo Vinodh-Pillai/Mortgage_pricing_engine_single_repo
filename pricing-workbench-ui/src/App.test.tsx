@@ -90,7 +90,7 @@ describe('App routing shell', () => {
     renderApp('/pipeline');
 
     expect(await screen.findByRole('heading', { name: 'New prospect intake' }, { timeout: 5000 })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Pipeline' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toBeInTheDocument();
     expect(screen.getByText(/Capture the borrower and loan facts needed to start a pricing run/i)).toBeInTheDocument();
   });
 
@@ -98,6 +98,20 @@ describe('App routing shell', () => {
     renderApp('/quote/start');
 
     expect(await screen.findByRole('heading', { name: 'New prospect intake' }, { timeout: 5000 })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Pipeline' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'QuickQuote breadcrumb' })).toHaveAttribute('href', '/quote/start');
+  });
+
+  it('renders the requested Pricing Waterfall preview evidence direct route', async () => {
+    renderApp('/pricing/waterfall');
+
+    expect(await screen.findByRole('heading', { name: /Pricing Waterfall preview/i }, { timeout: 5000 })).toBeInTheDocument();
+    expect(screen.getAllByText(/Preview evidence page · non-production/i).length).toBeGreaterThan(0);
+  });
+
+  it('renders the requested Quote Journey Map preview evidence direct route', async () => {
+    renderApp('/journey-map');
+
+    expect(await screen.findByRole('heading', { name: /Quote Journey Map preview/i }, { timeout: 5000 })).toBeInTheDocument();
+    expect(screen.getAllByText(/Preview evidence page · non-production/i).length).toBeGreaterThan(0);
   });
 });

@@ -12,19 +12,8 @@ import { useNavRailMode } from './hooks/useNavRailMode';
 import './layout.css';
 import { Sidebar } from './Sidebar';
 import { SkipLink } from './SkipLink';
-import { persistNavRailCollapsed } from './state/navRailState';
 
 export type Notification = { id: string; label: string; attentionRequired?: boolean };
-
-const navRailCollapsedStorageKey = 'loanweft:layout-shell:nav-rail-collapsed';
-
-function getInitialNavRailCollapsed() {
-  try {
-    return window.localStorage.getItem(navRailCollapsedStorageKey) === 'true';
-  } catch {
-    return false;
-  }
-}
 
 export interface ShellProps {
   children: ReactNode;
@@ -46,11 +35,10 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, fullS
   const currentUser = auth?.currentPersona ? { name: auth.currentPersona.name, role: roleLabels[auth.currentPersona.role], avatar: auth.currentPersona.avatar } : user;
   const mode = useNavRailMode();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [navCollapsed, setNavCollapsed] = useState(getInitialNavRailCollapsed);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const notificationsRef = useRef<HTMLElement>(null);
-  const navigationMode = fullScreenWorkspace ? 'drawer' : mode;
-  const railCollapsed = mode === 'rail' && navCollapsed;
+  const navigationMode = 'drawer';
+  const railCollapsed = false;
 
   useEffect(() => {
     try {
@@ -91,17 +79,6 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, fullS
 
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
   const focusWorkspace = useCallback(() => document.getElementById('main-content'), []);
-  const toggleCollapsed = useCallback(() => {
-    setNavCollapsed((current) => {
-      const next = !current;
-      try {
-        persistNavRailCollapsed(next);
-      } catch {
-        // Storage can be disabled; keep the in-memory rail state usable.
-      }
-      return next;
-    });
-  }, []);
   return (
     <PageActionsProvider>
     <div className={`layout-shell layout-shell--${mode}${railCollapsed ? ' layout-shell--nav-collapsed' : ''}${fullScreenWorkspace ? ' layout-shell--workspace' : ''}`} data-breakpoint-mode={mode} data-nav-collapsed={railCollapsed ? 'true' : 'false'} data-full-screen-workspace={fullScreenWorkspace ? 'true' : 'false'}>
@@ -116,7 +93,7 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, fullS
         onNavigationToggle={() => setDrawerOpen((current) => !current)}
         onLogout={auth?.logout}
         onThemeToggle={onThemeToggle}
-        showNavigationToggle={showAuthenticatedChrome && navigationMode === 'drawer'}
+        showNavigationToggle={showAuthenticatedChrome}
         navigationOpen={drawerOpen}
         theme={theme}
         user={currentUser}
@@ -134,7 +111,7 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, fullS
               mode={navigationMode}
               modules={modules}
               onCloseDrawer={closeDrawer}
-              onToggleCollapsed={toggleCollapsed}
+              onToggleCollapsed={() => undefined}
               returnFocusTarget={fullScreenWorkspace ? focusWorkspace : undefined}
             />
           </>
@@ -142,7 +119,7 @@ export function Shell({ children, activeModuleId, activeRunId, breadcrumb, fullS
         <ContentArea fullScreen={fullScreenWorkspace}>{children}</ContentArea>
       </div>
       {showAuthenticatedChrome && notificationsOpen ? (
-        <aside ref={notificationsRef} className="layout-notifications" aria-label={t('notifications', { count: notifications.length })} role="status">
+        <aside ref={notificationsRef} className="layout-notifications" aria-label={notifications.length > 0 ? t('notifications', { count: notifications.length }) : t('alerts')} role="status">
           {notifications.length ? notifications.map((notification) => <p key={notification.id}>{notification.label}</p>) : <p>{t('noNotifications')}</p>}
         </aside>
       ) : null}

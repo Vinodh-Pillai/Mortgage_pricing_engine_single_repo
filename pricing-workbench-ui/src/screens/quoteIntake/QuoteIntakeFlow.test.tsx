@@ -189,6 +189,7 @@ const multiRequiredValidationBannerMetadataState: MetadataState = {
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
+  window.sessionStorage.clear();
   vi.unstubAllGlobals();
 });
 
@@ -318,16 +319,23 @@ describe('PipelineIntakeTest', () => {
     render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} />);
 
     expect(screen.getByRole('heading', { name: /^QuickQuote$/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /^QuickQuote$/i })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText(/^Current workspace$/i)).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /^QuickQuote$/i })).not.toBeInTheDocument();
     const statusStrip = screen.getByRole('region', { name: /QuickQuote status strip/i });
     expect(statusStrip).toBeInTheDocument();
-    expect(screen.getAllByText('Prefill').length).toBeGreaterThan(0);
-    expect(within(statusStrip).getByText('Missing')).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/\bPrefill\b/i);
+    expect(within(statusStrip).getByText('Pricing facts')).toBeInTheDocument();
+    expect(within(statusStrip).queryByText('Missing')).not.toBeInTheDocument();
+    expect(within(statusStrip).getByText('Readiness')).toBeInTheDocument();
+    expect(within(statusStrip).getByText('pricing facts complete')).toBeInTheDocument();
     expect(within(statusStrip).getByText('Eligible')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Save QuickQuote draft$/i })).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: /QuickQuote products pending submit/i })).toBeInTheDocument();
+    expect(screen.queryByRole('table', { name: /QuickQuote product eligibility grid/i })).not.toBeInTheDocument();
+    revealQuickQuoteProducts();
+    expect(screen.queryByRole('button', { name: /^Save QuickQuote draft$/i })).not.toBeInTheDocument();
     expect(screen.getByRole('table', { name: /QuickQuote product eligibility grid/i })).toBeInTheDocument();
-    expect(screen.getByText(/no QuickQuote product filter is applied/i)).toBeInTheDocument();
+    expect(screen.getByText(/Submit details before product options are displayed/i)).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/Missing\s*0\s*facts/i);
     expect(screen.getByRole('columnheader', { name: /^Review$/i })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /^Pipeline$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: /^Pipeline$/i })).not.toBeInTheDocument();
@@ -340,9 +348,10 @@ describe('PipelineIntakeTest', () => {
     const capture = vi.fn();
     render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} onNavigate={onNavigate} onEvidenceCapture={capture} />);
 
+    revealQuickQuoteProducts();
     fireEvent.click(screen.getByRole('row', { name: /Conventional 30-Year Preview ACTIVE/i }));
 
-    expect(screen.getByRole('tab', { name: /^QuickQuote$/i })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText(/^Current workspace$/i)).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /^Pipeline$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: /^Pipeline$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: /Switch to Pipeline/i })).not.toBeInTheDocument();
@@ -363,6 +372,7 @@ describe('PipelineIntakeTest', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} intake={{ ...filledIntake(), borrowerLastName: 'Alex', loanNumber: 'LP-QQ-1001', mortgageType: 'Conventional', zip: '90001', state: 'CA' }} onNavigate={onNavigate} onEvidenceCapture={capture} />);
 
+    revealQuickQuoteProducts();
     fireEvent.click(screen.getAllByRole('button', { name: /^Use for quote$/i })[0]);
     const launchButton = screen.getByRole('button', { name: /^Launch quote$/i });
     await waitFor(() => expect(launchButton).not.toBeDisabled());
@@ -378,10 +388,162 @@ describe('PipelineIntakeTest', () => {
     await waitFor(() => expect(onNavigate).toHaveBeenCalledWith('/quote/run-quickquote-1/offers'));
   }, 60000);
 
+  it('launchesQuickQuoteWithoutCatalogProductSelectionWhenRequiredIntakeIsValid', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      if (url.endsWith('/application-forms/active')) return { ok: false, status: 404, json: async () => ({}) } as Response;
+      if (url.includes('/products') || url.includes('/product-catalog/')) return { ok: false, status: 404, json: async () => ({}) } as Response;
+      if (url.endsWith('/scenarios') && init?.method === 'POST') return { ok: false, status: 503, json: async () => ({ status: 'BLOCKED', message: 'Draft service unavailable' }) } as Response;
+      if (url.endsWith('/quote-runs') && init?.method === 'POST') return json({ status: 'CREATED', runId: 'run-quickquote-live-1', nextRoute: '/quote/run-quickquote-live-1/offers', validationSummary: { passed: true, status: 'PASSED', message: 'ok', blockers: {} }, uiTraceId: 'trace-quickquote-live-launch', events: [], fallbackMode: false, dependencyStatus: '', auditPackageId: 'audit-quickquote-live-launch', replayHashRef: 'replay-quickquote-live-launch', validationIssues: [] });
+      return json({});
+    });
+    const onNavigate = vi.fn();
+    const capture = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} intake={{ ...filledIntake(), borrowerLastName: 'Alex', loanNumber: 'LP-QQ-LIVE-1001', mortgageType: 'Conventional' }} onNavigate={onNavigate} onEvidenceCapture={capture} />);
+
+    revealQuickQuoteProducts();
+    const launchButton = screen.getByRole('button', { name: /^Launch quote$/i });
+    await waitFor(() => expect(launchButton).not.toBeDisabled());
+    expect(screen.getByText(/Ready to launch quote with unsynced product context/i)).toBeInTheDocument();
+    fireEvent.click(launchButton);
+
+    const launchCall = await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([input, init]) => input.toString().endsWith('/quote-runs') && init?.method === 'POST' && init.body);
+      expect(call).toBeDefined();
+      return call;
+    });
+    expect(JSON.parse(String(launchCall?.[1]?.body))).toMatchObject({ scenarioId: 'local-unsynced-pipeline-draft', scenarioVersion: 1, channelCode: 'RETAIL', mortgageType: 'CONVENTIONAL' });
+    expect(capture).toHaveBeenCalledWith(expect.objectContaining({ action: 'quote-launch-local-draft-used', reason: 'draft-persistence-unavailable' }));
+    await waitFor(() => expect(onNavigate).toHaveBeenCalledWith('/quote/run-quickquote-live-1/offers'));
+  }, 60000);
+
+  it('launchesQuickQuoteFromPricingInputsWithoutBorrowerIdentifiers', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      if (url.endsWith('/application-forms/active')) return { ok: false, status: 404, json: async () => ({}) } as Response;
+      if (url.endsWith('/scenarios') && init?.method === 'POST') return { ok: false, status: 503, json: async () => ({ status: 'BLOCKED', message: 'Draft service unavailable' }) } as Response;
+      if (url.endsWith('/quote-runs') && init?.method === 'POST') return json({ status: 'CREATED', runId: 'run-sarah-pricing-inputs', nextRoute: '', validationSummary: { passed: true, status: 'PASSED', message: 'ok', blockers: {} }, uiTraceId: 'trace-sarah-pricing-inputs', events: [], fallbackMode: false, dependencyStatus: 'READY', auditPackageId: 'audit-sarah-pricing-inputs', replayHashRef: 'replay-sarah-pricing-inputs', validationIssues: [] });
+      if (url.endsWith('/quote-runs/run-sarah-pricing-inputs/offers')) return json({ runId: 'run-sarah-pricing-inputs', status: 'QUOTE_SERVICE_LOANPASS_SUMMARY_VISIBLE', offers: [{ offerId: '100014', rank: 1, productLabel: 'Expanded Prime Plus 30 Year Fixed', productFamily: 'LoanHouse Fixed', investor: 'OB', approvalStatus: 'approved', rate: '6.875', price: '99.856', payment: '2627.72', upstreamRefs: ['quote-service.execute-summary:product:100014'] }], commitBlocked: false });
+      return json({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} intake={{ ...initialQuoteIntake, mortgageType: 'Conventional' }} />);
+
+    const pricingInputs = screen.getByRole('region', { name: /Channel and loan purpose/i });
+    expect(pricingInputs).not.toHaveTextContent(/Borrower last name and loan number are only used by Save\/Retrieve/i);
+    fireEvent.change(within(pricingInputs).getByLabelText(/^Channel/i), { target: { value: 'RETAIL' } });
+    fireEvent.change(within(pricingInputs).getByLabelText(/^Loan purpose/i), { target: { value: 'Purchase' } });
+    const launchButton = screen.getByRole('button', { name: /^Launch quote$/i });
+    await waitFor(() => expect(launchButton).not.toBeDisabled());
+    fireEvent.click(launchButton);
+
+    const launchCall = await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([input, init]) => input.toString().endsWith('/quote-runs') && init?.method === 'POST' && init.body);
+      expect(call).toBeDefined();
+      return call;
+    });
+    expect(JSON.parse(String(launchCall?.[1]?.body))).toMatchObject({ borrowerLastName: '', loanNumber: '', channel: 'RETAIL', loanPurpose: 'Purchase' });
+    const liveGrid = await screen.findByRole('table', { name: /LoanHouse-backed BFF offers/i });
+    expect(liveGrid).toHaveTextContent(/Expanded Prime Plus 30 Year Fixed/i);
+    expect(screen.queryByRole('table', { name: /QuickQuote product eligibility grid/i })).not.toBeInTheDocument();
+  }, 60000);
+
+  it('rendersLoanHouseBackedOffersAfterQuickQuoteLaunchAndNavigatesDeterministically', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      if (url.endsWith('/application-forms/active')) return { ok: false, status: 404, json: async () => ({}) } as Response;
+      if (url.includes('/products') || url.includes('/product-catalog/')) return { ok: false, status: 404, json: async () => ({}) } as Response;
+      if (url.endsWith('/scenarios') && init?.method === 'POST') return { ok: false, status: 503, json: async () => ({ status: 'BLOCKED', message: 'Draft service unavailable' }) } as Response;
+      if (url.endsWith('/quote-runs') && init?.method === 'POST') return json({ status: 'CREATED', runId: 'run-loanhouse-live-1', nextRoute: '', validationSummary: { passed: true, status: 'PASSED', message: 'ok', blockers: {} }, uiTraceId: 'trace-loanhouse-launch', events: [], fallbackMode: false, dependencyStatus: 'READY', auditPackageId: 'audit-loanhouse-launch', replayHashRef: 'replay-loanhouse-launch', validationIssues: [] });
+      if (url.endsWith('/quote-runs/run-loanhouse-live-1/offers')) return json({
+        runId: 'run-loanhouse-live-1',
+        status: 'QUOTE_SERVICE_LOANPASS_SUMMARY_VISIBLE',
+        commitBlocked: false,
+        backendRefs: ['quote-service.execute-summary'],
+        offers: [{
+          offerId: '100014',
+          productLabel: 'Expanded Prime Plus 30 Year Fixed',
+          investorName: 'OB',
+          approvalStatus: 'approved',
+          rate: '6.875',
+          price: '99.856',
+          payment: '2627.72',
+          lockPeriodOptions: ['60'],
+          upstreamRefs: ['quote-service.execute-summary:product:100014'],
+          snapshotRefs: ['snapshot:quote-service:run:run-loanhouse-live-1'],
+          auditIds: ['audit:quote-service-summary:100014'],
+        }],
+      });
+      return json({});
+    });
+    const onNavigate = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} intake={{ ...filledIntake(), mortgageType: 'Conventional' }} onNavigate={onNavigate} />);
+
+    revealQuickQuoteProducts();
+    const launchButton = screen.getByRole('button', { name: /^Launch quote$/i });
+    await waitFor(() => expect(launchButton).not.toBeDisabled());
+    fireEvent.click(launchButton);
+
+    const liveGrid = await screen.findByRole('table', { name: /LoanHouse-backed BFF offers/i });
+    expect(liveGrid).toHaveTextContent(/Expanded Prime Plus 30 Year Fixed/i);
+    expect(liveGrid).toHaveTextContent(/OB/i);
+    expect(liveGrid).toHaveTextContent(/approved/i);
+    expect(liveGrid).toHaveTextContent(/6.875/i);
+    expect(liveGrid).toHaveTextContent(/99.856/i);
+    expect(liveGrid).toHaveTextContent(/2627.72/i);
+    expect(liveGrid).toHaveTextContent(/LoanHouse\/LoanPass via pricing-bff/i);
+
+    fireEvent.click(screen.getByRole('button', { name: /Select offer 100014/i }));
+    expect(window.sessionStorage.getItem('loanweft:selectedOfferId:run-loanhouse-live-1')).toBe('100014');
+    fireEvent.click(screen.getByRole('button', { name: /Continue to offer detail 100014/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Start lock request for offer 100014/i }));
+    expect(onNavigate).toHaveBeenCalledWith('/quote/run-loanhouse-live-1/offers/100014');
+    expect(onNavigate).toHaveBeenCalledWith('/quote/run-loanhouse-live-1/lock');
+  }, 60000);
+
+  it('usesCachedLoanHouseOffersForPipelineFilteringWhenAvailable', async () => {
+    window.sessionStorage.setItem('loanweft:lastLiveQuoteRunId:ui-preview-tenant', 'run-loanhouse-pipeline');
+    window.sessionStorage.setItem('loanweft:liveQuoteOffers:ui-preview-tenant', JSON.stringify({
+      runId: 'run-loanhouse-pipeline',
+      comparison: {
+        runId: 'run-loanhouse-pipeline',
+        status: 'QUOTE_SERVICE_LOANPASS_SUMMARY_VISIBLE',
+        offers: [
+          { offerId: '100014', rank: 1, productLabel: 'Expanded Prime Plus 30 Year Fixed', productFamily: 'LoanHouse Fixed', investor: 'OB', rate: '6.875', payment: '2627.72', apr: null, confidence: 'approved', rankScore: 'rank:1', lockPeriodDays: '60', eligibilityStatus: 'approved', rationaleChips: [], scenarioFlags: ['APPROVED'], explanationStatus: 'approved', upstreamRefs: ['quote-service.execute-summary:product:100014'], lockEligibilityRefs: ['lock-period:60'], snapshotRefs: [], auditIds: [], explanationSections: [], productRuleRefs: [], stipulationRefs: [], rateRefs: [], lockPeriodOptions: ['60'], price: '99.856' },
+          { offerId: '100001', rank: 2, productLabel: 'DSCR Plus 5/6 ARM 30 Year IO', productFamily: 'LoanHouse ARM', investor: 'OB', rate: null, payment: null, apr: null, confidence: 'rejected', rankScore: 'rank:2', lockPeriodDays: null, eligibilityStatus: 'rejected', rationaleChips: [], scenarioFlags: ['REJECTED'], explanationStatus: 'rejected', upstreamRefs: ['quote-service.execute-summary:product:100001'], lockEligibilityRefs: [], snapshotRefs: [], auditIds: [], explanationSections: [], productRuleRefs: [], stipulationRefs: [], rateRefs: [], lockPeriodOptions: [], price: null },
+        ],
+        sortOptions: ['rank'],
+        selectedOfferId: null,
+        commitBlocked: false,
+        fallbackReason: null,
+        requiredFacts: [],
+        backendRefs: ['quote-service.execute-summary'],
+        uiTraceId: 'trace',
+        events: [],
+      },
+    }));
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url.endsWith('/quote-runs/run-loanhouse-pipeline/offers')) return json(JSON.parse(window.sessionStorage.getItem('loanweft:liveQuoteOffers:ui-preview-tenant') || '{}').comparison);
+      return json({});
+    }));
+    render(<QuoteIntakeFlow metadataState={metadataState} />);
+
+    expect(await screen.findByRole('table', { name: /LoanHouse-backed BFF offers/i })).toHaveTextContent(/Expanded Prime Plus 30 Year Fixed/i);
+    expect(screen.queryByRole('table', { name: /Filtered mortgage products/i })).not.toBeInTheDocument();
+    const filterPanel = screen.getByRole('region', { name: /Filters/i });
+    fireEvent.change(within(filterPanel).getByLabelText(/Mortgage type/i), { target: { value: 'LoanHouse ARM' } });
+    expect(screen.getByRole('table', { name: /LoanHouse-backed BFF offers/i })).toHaveTextContent(/DSCR Plus 5\/6 ARM/i);
+    expect(screen.getByRole('table', { name: /LoanHouse-backed BFF offers/i })).not.toHaveTextContent(/Expanded Prime Plus/i);
+  });
+
   it('keepsAllQuickQuoteProductStatusesVisibleWithReviewTraceRefs', () => {
     const capture = vi.fn();
     render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} onEvidenceCapture={capture} />);
 
+    revealQuickQuoteProducts();
     expect(within(screen.getByRole('table', { name: /QuickQuote product eligibility grid/i })).getAllByRole('row')).toHaveLength(6);
     const referableRow = screen.getByRole('row', { name: /FHA 30-Year Preview PENDING/i });
     const ineligibleRow = screen.getByRole('row', { name: /Jumbo Preview Product INACTIVE/i });
@@ -423,7 +585,9 @@ describe('PipelineIntakeTest', () => {
     const { container, unmount } = render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} />);
 
     const header = container.querySelector('.quickquote-header');
-    const prefillRail = screen.getByLabelText(/LOS prefill rail/i);
+    const prefillRail = screen.getByLabelText(/QuickQuote pricing input rail/i);
+    expect(screen.queryByRole('table', { name: /QuickQuote product eligibility grid/i })).not.toBeInTheDocument();
+    revealQuickQuoteProducts();
     const grid = screen.getByRole('table', { name: /QuickQuote product eligibility grid/i });
     const actions = screen.getByLabelText(/QuickQuote actions/i);
 
@@ -434,9 +598,9 @@ describe('PipelineIntakeTest', () => {
     expect(screen.getByLabelText(/Missing fact reason categories/i)).toBeInTheDocument();
     expect(prefillRail).not.toHaveTextContent(/Source LoanPASS/i);
     expect(prefillRail).not.toHaveTextContent(/WCPE borrowerLastName/i);
-    expect(prefillRail).toHaveTextContent(/Required to price: 1/i);
-    expect(prefillRail).toHaveTextContent(/Improves pricing: 1/i);
-    expect(prefillRail).toHaveTextContent(/Before lock: 1/i);
+    expect(prefillRail).toHaveTextContent(/Required to price: 0/i);
+    expect(prefillRail).toHaveTextContent(/Improves pricing: 0/i);
+    expect(prefillRail).toHaveTextContent(/Before lock: 0/i);
     expect(screen.getByRole('heading', { name: /Recent edits/i })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /Borrower details/i })).toBeInTheDocument();
 
@@ -452,42 +616,37 @@ describe('PipelineIntakeTest', () => {
     expect(overrideAudit).toHaveTextContent(/Edited value: 735/i);
     expect(overrideAudit).toHaveTextContent(/Edited by: loan-officer-1 at/i);
     expect(overrideAudit).toHaveTextContent(/Pricing impact is rechecked/i);
+    expect(screen.getByLabelText(/QuickQuote pricing input rail/i)).not.toHaveTextContent(/\bPrefill\b/i);
 
+    revealQuickQuoteProducts();
     fireEvent.click(screen.getByRole('row', { name: /Conventional 30-Year Preview ACTIVE/i }));
-    fireEvent.click(screen.getByRole('button', { name: /^Save QuickQuote draft$/i }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/tenants/ui-preview-tenant/scenarios', expect.objectContaining({ method: 'POST' })));
-    const persistCall = fetchMock.mock.calls.find(([input, init]) => input.toString().endsWith('/scenarios') && init?.method === 'POST');
-    const persistedBody = JSON.parse(String(persistCall?.[1]?.body));
-    expect(persistedBody).toMatchObject({ data: { borrowerLastName: 'Rivera', loanNumber: 'LN-2001', decisionCreditScore: '735' } });
-    const persistedContext = JSON.parse(String(persistedBody.data.clientContext));
-    expect(persistedContext.quickQuoteDraft).toMatchObject({
-      storyId: 'PII-77-S07',
-      sourceMode: 'quickquote',
-      selectedProduct: { productCode: 'CONF_30YR_PREVIEW' },
-    });
-    expect(persistedContext.quickQuoteDraft.comparedProducts.length).toBeGreaterThan(1);
-    expect(persistedContext.quickQuoteDraft.quoteOutputs).toEqual(expect.arrayContaining([expect.objectContaining({ productCode: 'CONF_30YR_PREVIEW', metric: 'rate' })]));
-    expect(persistedContext.quickQuoteDraft.visibleAssumptions.length).toBeGreaterThan(0);
-    expect(persistedContext.quickQuoteDraft.traceReferences).toEqual(expect.arrayContaining([expect.objectContaining({ value: expect.stringContaining('CONF_30YR_PREVIEW') })]));
-    expect(persistedContext.losOverrides).toEqual([
-      expect.objectContaining({
-        fieldId: 'decisionCreditScore',
-        label: 'decisionCreditScore',
-        originalValue: '720',
-        overrideValue: '735',
-        actor: 'loan-officer-1',
-        affectedOutputTraces: ['quote-fact:decisionCreditScore'],
-      }),
-    ]);
+    expect(screen.queryByRole('button', { name: /^Save QuickQuote draft$/i })).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/v1/tenants/ui-preview-tenant/scenarios', expect.objectContaining({ method: 'POST' }));
 
     overrideRender.unmount();
-    render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} intake={{ ...losPrefilledIntake, decisionCreditScore: '735', clientContext: persistedBody.data.clientContext }} />);
-    const restoredAudit = screen.getByRole('heading', { name: /Recent edits/i }).closest('section') as HTMLElement;
-    expect(restoredAudit).toHaveTextContent(/Original value: 720/i);
-    expect(restoredAudit).toHaveTextContent(/Edited value: 735/i);
-    expect(restoredAudit).toHaveTextContent(/Pricing impact is rechecked/i);
+    render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} intake={{ ...losPrefilledIntake, decisionCreditScore: '735' }} />);
+    expect(screen.getByRole('heading', { name: /Recent edits/i })).toBeInTheDocument();
+    revealQuickQuoteProducts();
     expect(screen.getAllByRole('row').length).toBeGreaterThan(1);
   }, 30000);
+
+  it('prefillsQuickQuotePricingAndFilterFieldsFromSafeLoanHouseFixtureOnly', async () => {
+    render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} />);
+
+    const prefillRail = screen.getByLabelText(/QuickQuote pricing input rail/i);
+    const pricingInputs = screen.getByRole('region', { name: /Channel and loan purpose/i });
+    expect(within(pricingInputs).getByLabelText(/^Channel/i)).toHaveValue('RETAIL');
+    expect(within(pricingInputs).getByLabelText(/^Loan purpose/i)).toHaveValue('Purchase');
+    expect(within(pricingInputs).getByLabelText(/^Mortgage type/i)).toHaveValue('Conventional');
+    expect(within(prefillRail).getByLabelText(/FICO minimum/i)).toHaveValue('720');
+    expect(within(prefillRail).getByLabelText(/Loan amount minimum/i)).toHaveValue('350000');
+    expect(within(prefillRail).getByLabelText(/Property type/i)).toHaveValue('Single Family');
+    expect(within(prefillRail).getByLabelText(/Occupancy/i)).toHaveValue('Primary Residence');
+    expect(screen.queryByDisplayValue('Rivera')).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue('LN-2001')).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/Borrower and loan context/i)).toHaveTextContent(/Borrower pending/i);
+    expect(screen.getByLabelText(/Borrower and loan context/i)).toHaveTextContent(/Loan pending/i);
+  });
 
   it('rendersResponsiveQuickQuoteComparisonAndSavesSelectedComparisonProducts', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -498,6 +657,7 @@ describe('PipelineIntakeTest', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<QuoteIntakeFlow mode="quickquote" metadataState={traceConfiguredMetadataState} intake={{ ...initialQuoteIntake, borrowerLastName: 'Rivera', loanNumber: 'LN-2001', mortgageType: 'Conventional' }} />);
 
+    revealQuickQuoteProducts();
     const comparison = screen.getByRole('table', { name: /QuickQuote product comparison/i });
     expect(within(comparison).getByRole('row', { name: /Rate comparison/i })).toBeInTheDocument();
     expect(within(comparison).getByRole('row', { name: /Price comparison/i })).toBeInTheDocument();
@@ -505,24 +665,16 @@ describe('PipelineIntakeTest', () => {
     expect(within(comparison).getByRole('row', { name: /DSCR comparison/i })).toBeInTheDocument();
     expect(within(comparison).getByRole('row', { name: /Fees comparison/i })).toBeInTheDocument();
     expect(within(comparison).getByRole('row', { name: /LLPA comparison/i })).toBeInTheDocument();
-    expect(within(comparison).getByRole('row', { name: /Assumptions comparison/i })).toHaveTextContent(/No visible assumptions|Referable or missing-data/i);
+    expect(within(comparison).getByRole('row', { name: /Assumptions comparison/i })).not.toHaveTextContent(/Channel missing/i);
+    expect(within(comparison).getByRole('row', { name: /Assumptions comparison/i })).toHaveTextContent(/Loan purpose missing/i);
     expect(within(comparison).getByRole('row', { name: /Trace availability comparison/i })).toHaveTextContent(/trace|pricing-service/i);
     expect(screen.getByLabelText(/Swipe QuickQuote comparison products/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('row', { name: /Conventional 30-Year Preview ACTIVE/i }));
     const jumboRow = screen.getByRole('row', { name: /Jumbo Preview Product INACTIVE/i });
     fireEvent.click(within(jumboRow).getByRole('button', { name: /^Add to comparison$/i }));
-    fireEvent.click(screen.getByRole('button', { name: /^Save QuickQuote draft from comparison$/i }));
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/tenants/ui-preview-tenant/scenarios', expect.objectContaining({ method: 'POST' })));
-    const persistCall = fetchMock.mock.calls.find(([input, init]) => input.toString().endsWith('/scenarios') && init?.method === 'POST');
-    const persistedBody = JSON.parse(String(persistCall?.[1]?.body));
-    const persistedContext = JSON.parse(String(persistedBody.data.clientContext));
-    const comparedCodes = persistedContext.quickQuoteDraft.comparedProducts.map((product: { productCode: string }) => product.productCode);
-    expect(persistedContext.quickQuoteDraft.selectedProduct).toMatchObject({ productCode: 'CONF_30YR_PREVIEW' });
-    expect(comparedCodes).toEqual(expect.arrayContaining(['CONF_30YR_PREVIEW', 'JUMBO_PREVIEW']));
-    expect(comparedCodes.length).toBeGreaterThanOrEqual(2);
-    expect(persistedContext.quickQuoteDraft.visibleAssumptions.length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: /^Save QuickQuote draft from comparison$/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('table', { name: /QuickQuote product comparison/i })).toHaveTextContent(/Jumbo Preview Product/i);
   }, 30000);
 
   it('showsDataRequiredStateFromConfiguredRequiredFieldsAndMovesToNextField', async () => {
@@ -634,17 +786,19 @@ describe('PipelineIntakeTest', () => {
     const [mortgageTypeFilter, , , statusFilter] = Array.from(filters.querySelectorAll('select')) as HTMLSelectElement[];
 
     expect(container.querySelector('.quote-intake-data-required')).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/Filters\s*0\s*active|Profile\s*0%\s*complete/i);
     expect(screen.getByText(/5 filtered of 5 total · 3 active · 1 pending · 1 inactive/i)).toBeInTheDocument();
     expect(container.querySelector('.quote-product-row[aria-label="VA 30-Year Preview ACTIVE"]')).toBeInTheDocument();
     fireEvent.change(mortgageTypeFilter, { target: { value: 'FHA' } });
-    expect(screen.getByText(/1 filtered of 5 total · 0 active · 1 pending · 0 inactive/i)).toBeInTheDocument();
+    expect(document.body).toHaveTextContent(/Filters\s*1\s*active/i);
+    expect(screen.getByText(/1 filtered of 5 total · 1 pending/i)).toBeInTheDocument();
     expect(container.querySelector('.quote-product-row[aria-label="VA 30-Year Preview ACTIVE"]')).not.toBeInTheDocument();
     expect(container.querySelector('.quote-product-row[aria-label="FHA 30-Year Preview PENDING"]')).toBeInTheDocument();
     fireEvent.change(statusFilter, { target: { value: 'ACTIVE' } });
-    expect(screen.getByText(/0 filtered of 5 total · 0 active · 0 pending · 0 inactive/i)).toBeInTheDocument();
+    expect(screen.getByText(/No matching products of 5 total/i)).toBeInTheDocument();
     expect(screen.getByText(/No matches/i)).toBeInTheDocument();
     fireEvent.change(statusFilter, { target: { value: 'PENDING' } });
-    expect(screen.getByText(/1 filtered of 5 total · 0 active · 1 pending · 0 inactive/i)).toBeInTheDocument();
+    expect(screen.getByText(/1 filtered of 5 total · 1 pending/i)).toBeInTheDocument();
     expect(container.querySelector('.quote-product-row[aria-label="FHA 30-Year Preview PENDING"]')).toBeInTheDocument();
   }, 30000);
 
@@ -680,6 +834,7 @@ describe('PipelineIntakeTest', () => {
   it('rendersReusableQuoteEconomicsMetricsWithConfiguredOutputsAndTraceLinks', () => {
     const { container } = render(<QuoteIntakeFlow mode="quickquote" metadataState={traceConfiguredMetadataState} intake={{ ...filledIntake(), secondaryAdjustment: '101.250', totalLiabilityMonthlyPayment: '$2,450', estimatedDSCR: '1.23x', 'calc@fees': '$1,100 fees', 'calc@llpa': '0.250 LLPA' } as BorrowerIntake & Record<string, string>} />);
 
+    revealQuickQuoteProducts();
     const row = screen.getByRole('row', { name: /Conventional 30-Year Preview ACTIVE/i });
     expect(within(row).getByText('101.250')).toBeInTheDocument();
     expect(within(row).getByText('$2,450')).toBeInTheDocument();
@@ -700,12 +855,13 @@ describe('PipelineIntakeTest', () => {
   });
 
   it('showsExplicitMissingQuoteEconomicsStatesTiedToMissingFacts', () => {
-    render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} />);
+    render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} intake={{ ...initialQuoteIntake, mortgageType: 'Conventional' }} />);
 
+    revealQuickQuoteProducts();
     const row = screen.getByRole('row', { name: /Conventional 30-Year Preview ACTIVE/i });
     expect(row.querySelector('[aria-label="Payment: Missing data"]')).toBeInTheDocument();
     expect(row.querySelector('[aria-label="DSCR: Missing data"]')).toBeInTheDocument();
-    expect(within(row).getAllByText(/Needs Mortgage Type/i).length).toBeGreaterThan(0);
+    expect(within(row).getAllByText(/Needs Loan purpose/i).length).toBeGreaterThan(0);
     expect(within(row).queryByRole('link', { name: /trace/i })).not.toBeInTheDocument();
   });
 
@@ -890,6 +1046,10 @@ function headerField(fieldId: string, label: string, displayOrder: number): Scen
 
 function filledIntake(): BorrowerIntake {
   return Object.fromEntries(Object.keys(initialQuoteIntake).map((key) => [key, key === 'contactEmail' ? 'alex@example.test' : '1'])) as BorrowerIntake;
+}
+
+function revealQuickQuoteProducts() {
+  fireEvent.click(screen.getByRole('button', { name: /^Find Products$/i }));
 }
 
 function activeRuntimeForm() {

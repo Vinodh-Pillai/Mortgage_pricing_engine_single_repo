@@ -18,6 +18,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.io.Resource;
 
 @Configuration
 @EnableConfigurationProperties(QuoteRuntimeConfiguration.QuotePersistenceProperties.class)
@@ -85,6 +86,18 @@ class QuoteRuntimeConfiguration {
         @Value("${quote.loanpass.synthetic-loader.seed:lpq-02-dev}") String seed
     ) {
         return new LoanPassSyntheticCatalogLoader(repository, clock, tenantId, productCount, seed);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "quote.loanhouse.capture-loader", name = "enabled", havingValue = "true", matchIfMissing = true)
+    LoanHouseCapturedCatalogLoader loanHouseCapturedCatalogLoader(
+        LoanPassQuoteCatalogRepository repository,
+        ObjectMapper objectMapper,
+        Clock clock,
+        @Value("${quote.loanhouse.capture-loader.tenant-id:2aba740b-74ee-3068-a456-4df1e64b7c02}") UUID tenantId,
+        @Value("${quote.loanhouse.capture-loader.resource:classpath:loanhouse/product-records.json}") Resource productRecords
+    ) {
+        return new LoanHouseCapturedCatalogLoader(repository, objectMapper, clock, tenantId, productRecords);
     }
 
     @Bean

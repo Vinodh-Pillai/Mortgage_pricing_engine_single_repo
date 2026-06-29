@@ -1,7 +1,7 @@
 import type { LockWorkflowView } from '../../lib/api/quoteRuns';
-import { valueText } from './lockWorkflowUtils';
+import { dateTimeText, valueText } from './lockWorkflowUtils';
 
-export function LockTermsPanel({ workflow, disabled, onLock }: { workflow: LockWorkflowView; disabled: boolean; onLock: () => void }) {
+export function LockTermsPanel({ workflow, disabled, lockActionLabel = 'Lock This Rate', onLock }: { workflow: LockWorkflowView; disabled: boolean; lockActionLabel?: string; onLock: () => void }) {
   const { terms } = workflow;
   return (
     <section className="panel" aria-labelledby="lock-terms-heading">
@@ -14,13 +14,14 @@ export function LockTermsPanel({ workflow, disabled, onLock }: { workflow: LockW
         <dt>Note rate</dt><dd>{terms.noteRate}</dd>
         <dt>Final price</dt><dd>{terms.finalPriceBps} bps</dd>
         <dt>Lock period</dt><dd>{terms.lockPeriodDays} days</dd>
-        <dt>Expiration</dt><dd>{new Date(terms.expiresAt).toLocaleString()}</dd>
+        <dt>Expiration</dt><dd>{dateTimeText(terms.expiresAt)}</dd>
         <dt>Investor confirmation</dt><dd>{terms.investorConfirmationRequired ? 'Required by backend' : 'Not required by backend'}</dd>
         <dt>Waterfall ref</dt><dd><code>{terms.waterfallRef}</code></dd>
       </dl>
       <RefList label="Adjustment refs" values={terms.adjustmentRefs} />
       <RefList label="Margin refs" values={terms.marginRefs} />
-      <button type="button" disabled={disabled} onClick={onLock}>Lock This Rate</button>
+      {workflow.blockers.length ? <RefList label="Backend lock blockers" values={workflow.blockers.map((blocker) => `${blocker.code}: ${blocker.message}`)} /> : null}
+      <button type="button" disabled={disabled} onClick={onLock}>{lockActionLabel}</button>
     </section>
   );
 }

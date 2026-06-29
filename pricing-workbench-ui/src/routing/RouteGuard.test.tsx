@@ -2,7 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
-import { AuthProvider, useAuth } from '../lib/auth/AuthContext';
+import { ACTIVE_PERSONA_STORAGE_KEY, AuthProvider, useAuth } from '../lib/auth/AuthContext';
 import type { User } from '../lib/api/auth';
 import { RouteGuard } from './RouteGuard';
 
@@ -43,6 +43,7 @@ function renderGuard(initialEntry: string) {
         <Routes>
           <Route path="/login" element={<LoginProbe />} />
           <Route path="/ops/dashboard" element={<RouteGuard><p>ops allowed</p></RouteGuard>} />
+          <Route path="/quote/start" element={<RouteGuard><p>quickquote allowed</p></RouteGuard>} />
           <Route path="/admin/governance" element={<RouteGuard><p>admin allowed</p></RouteGuard>} />
         </Routes>
       </MemoryRouter>
@@ -88,6 +89,12 @@ describe('RouteGuard', () => {
     sessionUser = opsUser;
     renderGuard('/ops/dashboard');
     expect(await screen.findByText('ops allowed')).toBeInTheDocument();
+  });
+
+  it('RouteGuardTest.allowsQuickQuoteForStoredLocalDevPersonaAfterBackendMe401', async () => {
+    window.localStorage.setItem(ACTIVE_PERSONA_STORAGE_KEY, 'persona-loan-officer');
+    renderGuard('/quote/start');
+    expect(await screen.findByText('quickquote allowed')).toBeInTheDocument();
   });
 
   it('RouteGuardTest.loginCanAuthorizePreservedDestination', async () => {

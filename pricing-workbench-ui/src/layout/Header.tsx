@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
 import { Avatar, roleColorKeyForLabel, roleColors, themeStorageKey } from '../design-system';
 import { useTranslation } from '../lib/i18n';
@@ -22,22 +23,31 @@ export function Header({ breadcrumb, notificationCount, showAuthenticatedChrome 
   const { t } = useTranslation('common');
   const location = useLocation();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [compactHeader, setCompactHeader] = useState(false);
+  const compactHeader = false;
   const menuRef = useRef<HTMLDivElement>(null);
   const userMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const userMenuDropdownRef = useRef<HTMLDivElement>(null);
   const { promotedActions } = usePageActions();
+  const homeLabel = t('home');
+  const normalizedBreadcrumb = (breadcrumb || t('unknownScreen')).trim();
+  const showCurrentBreadcrumb = normalizedBreadcrumb.toLocaleLowerCase() !== homeLabel.toLocaleLowerCase();
   const roleColorKey = roleColorKeyForLabel(user.role);
   const roleColor = roleColors[roleColorKey];
   const displayName = user.name?.trim() || t('pricingWorkbench');
   const initials = user.avatar ?? displayName.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
-
-  useEffect(() => {
-    const updateCompactHeader = () => setCompactHeader(window.scrollY > 24);
-    updateCompactHeader();
-    window.addEventListener('scroll', updateCompactHeader, { passive: true });
-    return () => window.removeEventListener('scroll', updateCompactHeader);
-  }, []);
+  const notificationsLabel = notificationCount > 0 ? t('notifications', { count: notificationCount }) : t('alerts');
+  const navigationToggle = showNavigationToggle ? (
+    <button
+      className="layout-nav-toggle"
+      type="button"
+      aria-label={navigationOpen ? t('closeNavigationMenu') : t('openNavigationMenu')}
+      aria-controls="primary-navigation"
+      aria-expanded={navigationOpen}
+      onClick={onNavigationToggle}
+    >
+      <span className="layout-nav-toggle__glyph" aria-hidden="true"><span /><span /><span /></span>
+    </button>
+  ) : null;
 
   useEffect(() => {
     if (!showAuthenticatedChrome) {
@@ -99,6 +109,7 @@ export function Header({ breadcrumb, notificationCount, showAuthenticatedChrome 
     const nextTheme = theme === 'dark' ? 'light' : 'dark';
     try {
       window.localStorage.setItem(themeStorageKey, nextTheme);
+      window.localStorage.setItem('wcpe:theme', nextTheme);
     } catch {
       // Theme still toggles for the current render path when storage is unavailable.
     }
@@ -106,27 +117,17 @@ export function Header({ breadcrumb, notificationCount, showAuthenticatedChrome 
   };
 
   return (
+    <>
+    {navigationToggle && typeof document !== 'undefined' ? createPortal(navigationToggle, document.body) : navigationToggle}
     <header className={`layout-header${compactHeader ? ' layout-header--compact' : ''}`} role="banner">
-      <div className="layout-header__brand">
-        {showNavigationToggle ? (
-          <button
-            className="layout-nav-toggle"
-            type="button"
-            aria-label={navigationOpen ? t('closeNavigationMenu') : t('openNavigationMenu')}
-            aria-controls="primary-navigation"
-            aria-expanded={navigationOpen}
-            onClick={onNavigationToggle}
-          >
-            <span className="layout-nav-toggle__glyph" aria-hidden="true"><span /><span /><span /></span>
-          </button>
-        ) : null}
-        <div className="layout-header__brand-mark" aria-hidden="true">LW</div>
+      <div className={`layout-header__brand${showNavigationToggle ? ' layout-header__brand--with-nav-toggle' : ''}`}>
+        <div className="layout-header__brand-mark" aria-hidden="true">PW</div>
         <div className="layout-header__title">
-          <h1>{t('appTitle')}</h1>
+          <h1>{t('pricingWorkbench')}</h1>
           <nav aria-label={t('navigation:breadcrumb')} className="layout-breadcrumbs">
             <ol>
-              <li><Link to="/home">{t('home')}</Link></li>
-              <li aria-current="page"><Link to={location.pathname} aria-label={`${breadcrumb || t('unknownScreen')} breadcrumb`}>{breadcrumb || t('unknownScreen')}</Link></li>
+              <li aria-current={showCurrentBreadcrumb ? undefined : 'page'}><Link to="/home">{homeLabel}</Link></li>
+              {showCurrentBreadcrumb ? <li aria-current="page"><Link to={location.pathname} aria-label={`${normalizedBreadcrumb} breadcrumb`}>{normalizedBreadcrumb}</Link></li> : null}
             </ol>
           </nav>
         </div>
@@ -139,14 +140,10 @@ export function Header({ breadcrumb, notificationCount, showAuthenticatedChrome 
           </div>
         ) : null}
         {showAuthenticatedChrome ? (
-          <button className="layout-icon-button" type="button" data-layout-notifications-trigger="true" onClick={handleNotificationsToggle} aria-label={t('notifications', { count: notificationCount })}>
+          <button className="layout-icon-button" type="button" data-layout-notifications-trigger="true" onClick={handleNotificationsToggle} aria-label={notificationsLabel}>
             <span aria-hidden="true">🔔</span><span className="layout-header__action-label">{t('alerts')}</span>{notificationCount > 0 ? <span className="layout-badge">{notificationCount}</span> : null}
           </button>
         ) : null}
-        <details className="layout-header__help">
-          <summary aria-label="Page help">?</summary>
-          <span>Use page actions for the primary workflow. Additional details stay in expandable page sections.</span>
-        </details>
         <button
           className="layout-theme-toggle"
           type="button"
@@ -163,7 +160,7 @@ export function Header({ breadcrumb, notificationCount, showAuthenticatedChrome 
           </span>
         </button>
         {showAuthenticatedChrome ? (
-          <div className="layout-user-menu-shell" ref={menuRef}>
+          <div className={`layout-user-menu-shell${userMenuOpen ? ' layout-user-menu-shell--open' : ''}`} ref={menuRef}>
             <button ref={userMenuTriggerRef} className="layout-user-menu" type="button" aria-haspopup="menu" aria-expanded={userMenuOpen} aria-controls="layout-user-menu-dropdown" aria-label={t('userMenuFor', { name: displayName })} onClick={() => setUserMenuOpen((open) => !open)}>
               <Avatar initials={initials} roleColor={roleColor} roleLabel={user.role} aria-hidden="true" />
               <span>{displayName}</span>
@@ -188,5 +185,6 @@ export function Header({ breadcrumb, notificationCount, showAuthenticatedChrome 
         ) : null}
       </div>
     </header>
+    </>
   );
 }

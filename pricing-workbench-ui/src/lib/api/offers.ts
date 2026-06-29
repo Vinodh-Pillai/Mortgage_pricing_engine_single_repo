@@ -7,6 +7,7 @@ export type OfferSummary = {
   productFamily?: string | null;
   investor?: string | null;
   rate?: string | number | null;
+  price?: string | number | null;
   payment?: string | number | null;
   apr?: string | number | null;
   confidence?: string | number | null;
@@ -29,6 +30,8 @@ export type OfferSummary = {
   stipulationRefs?: string[];
   rateRefs?: string[];
   lockPeriodOptions?: string[];
+  sourceLabel?: string | null;
+  sourceRefs?: string[];
 };
 
 export type OfferComparisonView = {
@@ -169,6 +172,7 @@ function normalizeOffer(raw: unknown, index: number): OfferSummary | null {
     productFamily: nullableString(value.productFamily),
     investor: nullableString(value.investor) ?? nullableString(value.investorLabel) ?? nullableString(value.investorId),
     rate: nullablePrimitive(value.rate) ?? nullablePrimitive(value.noteRate),
+    price: nullablePrimitive(value.price) ?? nullablePrimitive(value.priceBps),
     payment: nullablePrimitive(value.payment),
     apr: nullablePrimitive(value.apr),
     confidence: nullablePrimitive(value.confidence) ?? nullablePrimitive(value.eligibilityStatus),
@@ -191,6 +195,8 @@ function normalizeOffer(raw: unknown, index: number): OfferSummary | null {
     stipulationRefs: stringArray(value.stipulationRefs),
     rateRefs: stringArray(value.rateRefs),
     lockPeriodOptions: stringArray(value.lockPeriodOptions),
+    sourceLabel: nullableString(value.sourceLabel) ?? nullableString(value.source),
+    sourceRefs: stringArray(value.sourceRefs),
   };
 }
 

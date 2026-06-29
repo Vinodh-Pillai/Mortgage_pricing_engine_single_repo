@@ -12,7 +12,7 @@ const lockConfig: FunctionalityPageConfig<LockRow> = {
   breadcrumb: 'Locks / Management',
   eyebrow: 'Lock service',
   title: 'Lock Management',
-  summary: 'Manages active locks, requests, expiring work, history, bulk actions, and investor delivery status.',
+  summary: 'Tracks lock requests, confirmed locks, expiring work, history, bulk operations, and investor delivery status. Connected service actions stay disabled unless required lock evidence is available.',
   dataBoundary: 'lock-service: GET/POST /api/v1/locks',
   sections: [
     { id: 'active-locks', eyebrow: 'Active', title: 'Active Locks', summary: 'Confirmed and requested lock records.', status: 'ready', items: ['Confirmed locks', 'Requested locks', 'Owner refs'] },
@@ -40,8 +40,8 @@ const lockConfig: FunctionalityPageConfig<LockRow> = {
     { key: 'status', header: 'Status', render: (row) => <span className={`functionality-badge functionality-badge--${row.status}`}>{row.status}</span> },
   ],
   tableCaption: 'Lock management records',
-  primaryActions: [{ id: 'request-lock-review', label: 'Stage Request Lock', variant: 'primary' }],
-  secondaryActions: [{ id: 'extend-expiring-lock-review', label: 'Stage Extension Review' }, { id: 'extend-locks', label: 'Bulk extend' }, { id: 'cancel-locks', label: 'Bulk cancel', variant: 'danger' }, { id: 'deliver-locks', label: 'Bulk deliver' }],
+  primaryActions: [{ id: 'request-lock-review', label: 'Start Lock Review (local evidence only)', variant: 'primary' }],
+  secondaryActions: [{ id: 'extend-expiring-lock-review', label: 'Stage Extension Review' }, { id: 'show-expiry-blockers', label: 'Show Expiry Blockers' }, { id: 'extend-locks', label: 'Bulk extend' }, { id: 'cancel-locks', label: 'Bulk cancel', variant: 'danger' }, { id: 'deliver-locks', label: 'Bulk deliver' }],
   emptyMessage: 'No lock records are available for this workspace.',
   blockedMessage: 'Lock management is blocked until lock-service expiration and delivery references are available.',
   attentionMessage: 'Requested and expiring locks need operations review.',
@@ -72,7 +72,7 @@ function LockOperationsSpotlight({ onEvidence }: { onEvidence: (actionId: string
       </div>
       <details className="field-help"><summary aria-label="Lock operation details">?</summary><span>Additional investor delivery and cutoff details are shown only when connected records are available.</span></details>
       <div className="offer-toolbar" aria-label="Local lock lifecycle actions">
-        <button type="button" onClick={() => stageAction('request-lock-review', 'Lock request review started. Complete required investor and disclosure checks before submitting.')}>Stage Request Lock</button>
+        <button type="button" onClick={() => stageAction('request-lock-review', 'Local-only lock review evidence is ready. Connected lock submission remains unavailable until investor and disclosure checks pass.')}>Start Lock Review (local evidence only)</button>
         <button type="button" onClick={() => stageAction('extend-expiring-lock-review', 'Extension review started. Confirm investor cutoff and fee details before continuing.')}>Stage Extension Review</button>
         <button type="button" onClick={() => stageAction('show-expiry-items', 'Expiry items are ready for operations review.')}>Review Expiry Items</button>
       </div>

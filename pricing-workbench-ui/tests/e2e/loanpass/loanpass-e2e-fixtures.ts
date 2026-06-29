@@ -34,8 +34,6 @@ async function fulfillQuoteRun(route: Route, capture?: { quoteRunBodies: unknown
 }
 
 export async function fillMinimumLoanPassFields(page: Page) {
-  await page.getByRole('textbox', { name: /^Borrower last name/i }).fill('Borrower');
-  await page.getByRole('textbox', { name: /^Loan number/i }).fill('LP-1001');
   await page.getByRole('combobox', { name: /^Mortgage type/i }).selectOption('Conventional');
 }
 

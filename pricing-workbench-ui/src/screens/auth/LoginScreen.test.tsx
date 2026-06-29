@@ -3,7 +3,7 @@ import type { ComponentProps } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
-import { AuthProvider } from '../../lib/auth/AuthContext';
+import { ACTIVE_PERSONA_STORAGE_KEY, AuthProvider } from '../../lib/auth/AuthContext';
 import type { User } from '../../lib/api/auth';
 import { syntheticPersonas } from '../../lib/auth/personas';
 import { LocaleProvider } from '../../lib/i18n';
@@ -57,6 +57,8 @@ function renderLogin(initialEntries = ['/login'], props: Partial<ComponentProps<
 beforeEach(() => {
   sessionUser = null;
   rejectLogin = false;
+  window.localStorage.clear();
+  window.sessionStorage.clear();
   installFetchMock();
 });
 
@@ -72,6 +74,14 @@ describe('LoginScreenTest', () => {
     expect(await screen.findByLabelText('Email')).toBeInTheDocument();
     expect(screen.getByLabelText('Password')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /forgot password/i })).toBeInTheDocument();
+  });
+
+  it('LoginScreenTest.showsExplicitLocalDevPersonaFallbackWhenBackendAuthIs401', async () => {
+    renderLogin();
+    expect(await screen.findByTestId('local-dev-persona-panel')).toHaveTextContent('Backend auth unavailable');
+    expect(screen.getByTestId('local-dev-persona-panel')).toHaveTextContent('/api/auth/login');
+    expect(screen.getByTestId('local-dev-persona-panel')).toHaveTextContent('does not create a backend session');
+    expect(screen.getAllByText('Sarah Mitchell').length).toBeGreaterThan(0);
   });
 
   it('LoginScreenTest.removesMisleadingPasswordPrefix', async () => {
@@ -94,14 +104,17 @@ describe('LoginScreenTest', () => {
     expect(screen.queryByRole('contentinfo')).not.toBeInTheDocument();
   });
 
-  it('LoginScreenTest.showsLoanWeftBranding', async () => {
+  it('LoginScreenTest.showsNeutralPricingWorkbenchBranding', async () => {
     renderLogin();
-    expect(await screen.findByRole('heading', { name: 'LoanWeft' })).toBeInTheDocument();
-    expect(screen.getByText('Mortgage Pricing Engine')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Pricing Workbench' })).toBeInTheDocument();
+    expect(screen.getByText('Secure mortgage pricing workspace')).toBeInTheDocument();
+    expect(screen.getByText('Use your organization account to access Pricing Workbench.')).toBeInTheDocument();
     const legacyBrandPattern = new RegExp(
       [
+        'Loan' + 'Weft',
+        'PPE',
+        'L' + 'W',
         'World Class Pric' + 'ing Engine',
-        'Pric' + 'ing Workbench',
         'W' + 'CPE',
       ].join('|'),
       'i',
@@ -117,6 +130,16 @@ describe('LoginScreenTest', () => {
 
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/home'));
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/auth/login'), expect.objectContaining({ credentials: 'include' }));
+  });
+
+  it('LoginScreenTest.localDevPersonaSignInStoresPersonaAndRedirectsToQuickQuote', async () => {
+    renderLogin();
+    expect(await screen.findByTestId('local-dev-persona-panel')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /continue as sarah mitchell/i }));
+
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/quote/start'));
+    expect(window.localStorage.getItem(ACTIVE_PERSONA_STORAGE_KEY)).toBe(syntheticPersonas[0].id);
+    expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining('/api/auth/login'), expect.anything());
   });
 
   it('LoginScreenTest.showsInvalidCredentialsError', async () => {

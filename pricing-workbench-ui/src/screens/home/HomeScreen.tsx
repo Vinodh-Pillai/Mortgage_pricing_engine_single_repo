@@ -39,7 +39,7 @@ export function HomeScreen({ userId = defaultUserId, role = 'pricing_analyst', i
           <h1 id="home-screen-title">Today&apos;s work</h1>
         </div>
         <dl className="home-summary" aria-label="Home screen state">
-          <dt>Recent</dt><dd>{recentActivity.length}</dd>
+          {recentActivity.length > 0 ? <><dt>Recent</dt><dd>{recentActivity.length}</dd></> : null}
           <dt>Role</dt><dd>{formatRole(role)}</dd>
         </dl>
       </header>
@@ -59,15 +59,20 @@ export function HomeScreen({ userId = defaultUserId, role = 'pricing_analyst', i
           <RecentActivity records={recentActivity} onNavigate={navigateTo} onStartPipeline={() => navigateTo('/pipeline')} />
         </div>
         <aside className="home-widget-column" aria-label="Role widgets">
-          {widgets.map((widget) => (
+          {widgets.map((widget) => {
+            const visibleItems = widget.items.filter((item) => item.value !== '0');
+            return (
             <section className="home-card home-widget" key={widget.title} aria-labelledby={`${widget.id}-heading`}>
               <p className="eyebrow">{widget.kicker}</p>
               <h2 id={`${widget.id}-heading`}>{widget.title}</h2>
-              <ul>
-                {widget.items.map((item) => <li key={item.label}><span>{item.label}</span><strong>{item.value}</strong></li>)}
-              </ul>
+              {visibleItems.length > 0 ? (
+                <ul>
+                  {visibleItems.map((item) => <li key={item.label}><span>{item.label}</span><strong>{item.value}</strong></li>)}
+                </ul>
+              ) : <p className="home-widget__empty">{widget.emptyText}</p>}
             </section>
-          ))}
+            );
+          })}
         </aside>
       </section>
     </main>
@@ -119,25 +124,25 @@ function OperationsJobStatePanel({ role, onNavigate }: { role: HomeRole | string
 
 function widgetsForRole(role: HomeRole | string) {
   if (!personaForRole(role)) {
-    return [{ id: 'role-metadata-unavailable', kicker: 'Access control', title: 'Recover session', items: [{ label: 'Restricted actions', value: 'Hidden' }, { label: 'Next step', value: 'Refresh session' }] }];
+    return [{ id: 'role-metadata-unavailable', kicker: 'Access control', title: 'Recover session', emptyText: 'Refresh the session to restore role-specific actions.', items: [{ label: 'Restricted actions', value: 'Hidden' }, { label: 'Next step', value: 'Refresh session' }] }];
   }
   const normalized = normalizeHomeRole(role);
   if (normalized === 'loan_officer' || normalized === 'borrower') {
-    return [{ id: 'my-pipeline', kicker: 'Pipeline', title: 'My Pipeline', items: [{ label: 'Active', value: '0' }, { label: 'Pending lock', value: '0' }, { label: 'Expiring soon', value: '0' }] }];
+    return [{ id: 'my-pipeline', kicker: 'Pipeline', title: 'My Pipeline', emptyText: 'No active pipeline items need attention.', items: [{ label: 'Active', value: '0' }, { label: 'Pending lock', value: '0' }, { label: 'Expiring soon', value: '0' }] }];
   }
   if (normalized === 'ops' || normalized === 'operations_lead') {
-    return [{ id: 'operations', kicker: 'Operations', title: 'Queues', items: [{ label: 'Lock queue', value: '0' }, { label: 'Exception queue', value: '0' }, { label: 'Partner alerts', value: '0' }] }];
+    return [{ id: 'operations', kicker: 'Operations', title: 'Queues', emptyText: 'No operations queues need attention.', items: [{ label: 'Lock queue', value: '0' }, { label: 'Exception queue', value: '0' }, { label: 'Partner alerts', value: '0' }] }];
   }
   if (normalized === 'compliance' || normalized === 'governance' || normalized === 'governance_reviewer') {
-    return [{ id: 'governance', kicker: 'Governance', title: 'Reviews', items: [{ label: 'Pending reviews', value: '0' }, { label: 'Audit flags', value: '0' }] }];
+    return [{ id: 'governance', kicker: 'Governance', title: 'Reviews', emptyText: 'No governance reviews need attention.', items: [{ label: 'Pending reviews', value: '0' }, { label: 'Audit flags', value: '0' }] }];
   }
   if (normalized === 'admin') {
-    return [{ id: 'admin', kicker: 'Admin', title: 'System', items: [{ label: 'System health', value: 'Ready' }, { label: 'User activity', value: '0' }, { label: 'Tenant status', value: 'Ready' }] }];
+    return [{ id: 'admin', kicker: 'Admin', title: 'System', emptyText: 'System status is available after tenant context loads.', items: [{ label: 'System health', value: 'Ready' }, { label: 'User activity', value: '0' }, { label: 'Tenant status', value: 'Ready' }] }];
   }
   if (normalized === 'partner_manager') {
-    return [{ id: 'partners', kicker: 'Partners', title: 'Partner Work', items: [{ label: 'Quote queue', value: '0' }, { label: 'Integration health', value: 'Ready' }] }];
+    return [{ id: 'partners', kicker: 'Partners', title: 'Partner Work', emptyText: 'No partner work needs attention.', items: [{ label: 'Quote queue', value: '0' }, { label: 'Integration health', value: 'Ready' }] }];
   }
-  return [{ id: 'pricing', kicker: 'Pricing', title: 'Pricing Desk', items: [{ label: 'Margin alerts', value: '0' }, { label: 'Rate notifications', value: '0' }] }];
+  return [{ id: 'pricing', kicker: 'Pricing', title: 'Pricing Desk', emptyText: 'No pricing alerts need attention.', items: [{ label: 'Margin alerts', value: '0' }, { label: 'Rate notifications', value: '0' }] }];
 }
 
 function normalizeHomeRole(role: HomeRole | string) {

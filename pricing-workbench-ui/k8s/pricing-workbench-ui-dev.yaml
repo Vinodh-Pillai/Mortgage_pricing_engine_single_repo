@@ -13,6 +13,11 @@ metadata:
   namespace: wcpe-dev
 data:
   default.conf: |
+    upstream pricing_bff {
+      server pricing-bff.wcpe-dev.svc.cluster.local:8080;
+      keepalive 32;
+    }
+
     server {
       listen 8080;
       server_name _;
@@ -20,8 +25,15 @@ data:
       index index.html;
 
       location /api/ {
-        proxy_pass http://pricing-bff.wcpe-dev.svc.cluster.local:8080;
-        proxy_set_header Host $host;
+        proxy_pass http://pricing_bff;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $http_host;
+        proxy_set_header Origin "";
+        proxy_set_header Access-Control-Request-Method "";
+        proxy_set_header Access-Control-Request-Headers "";
+        proxy_set_header X-Forwarded-Host $http_host;
+        proxy_set_header X-Forwarded-Port $server_port;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
       }
@@ -60,12 +72,16 @@ spec:
           type: RuntimeDefault
       containers:
         - name: pricing-workbench-ui
-          image: pricing-workbench-ui:0.1.0-local
-          imagePullPolicy: Never
+          image: 192.168.4.102:32061/mortgage-pricing/pricing-workbench-ui:0.1.0-nextinput-1-zero-fix-20260629T132700Z-amd64
+          imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8080
           volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+              readOnly: true
             - name: nginx-cache
               mountPath: /var/cache/nginx
             - name: nginx-run
@@ -95,6 +111,9 @@ spec:
             capabilities:
               drop: ["ALL"]
       volumes:
+        - name: nginx-config
+          configMap:
+            name: pricing-workbench-ui-nginx
         - name: nginx-cache
           emptyDir: {}
         - name: nginx-run
@@ -106,10 +125,11 @@ metadata:
   name: pricing-workbench-ui
   namespace: wcpe-dev
 spec:
-  type: ClusterIP
+  type: NodePort
   selector:
     app: pricing-workbench-ui
   ports:
     - name: http
       port: 8080
       targetPort: http
+      nodePort: 32080

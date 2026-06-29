@@ -12,7 +12,7 @@ export function ScreenErrorFallback(props: ErrorFallbackProps & { screenId?: str
   return (
     <main role="alert" aria-live="assertive" data-boundary-level="screen" style={panelStyle}>
       <div aria-hidden="true" style={iconStyle}>!</div>
-      <p style={eyebrowStyle}>LoanWeft</p>
+      <p style={eyebrowStyle}>Pricing Workbench</p>
       <h1>{screenId} is temporarily unavailable</h1>
       <p>{message}</p>
       <dl>

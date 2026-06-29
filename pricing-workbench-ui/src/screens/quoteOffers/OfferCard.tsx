@@ -1,5 +1,6 @@
 import { ChipList } from '../../components/ChipList';
 import type { OfferSummary } from '../../lib/api/offers';
+import { businessFacingText } from '../../lib/utils/businessFacingText';
 import { valueText } from './offerComparison';
 
 export function OfferCard({ offer, selected, compared, onInspect, onSelect, onCompareToggle }: { offer: OfferSummary; selected: boolean; compared: boolean; onInspect: (offer: OfferSummary) => void; onSelect: (offer: OfferSummary) => void; onCompareToggle: (offerId: string) => void }) {
@@ -14,18 +15,22 @@ export function OfferCard({ offer, selected, compared, onInspect, onSelect, onCo
       </div>
       <dl className="status-grid">
         <dt>Rate</dt><dd>{valueText(offer.rate)}</dd>
+        <dt>Price</dt><dd>{valueText(offer.price)}</dd>
         <dt>APR</dt><dd>{valueText(offer.apr)}</dd>
         <dt>Payment</dt><dd>{valueText(offer.payment)}</dd>
+        <dt>Lock</dt><dd>{valueText(offer.lockPeriodDays)}</dd>
         <dt>Rank score</dt><dd>{valueText(offer.rankScore)}</dd>
         <dt>Investor</dt><dd>{valueText(offer.investor)}</dd>
+        <dt>Source</dt><dd>{valueText(offer.sourceLabel)}</dd>
         <dt>Eligibility</dt><dd>{valueText(offer.eligibilityStatus)}</dd>
       </dl>
+      <ChipList label={`${offer.offerId} source refs`} values={(offer.sourceRefs ?? []).map(businessFacingText)} />
       <ChipList label={`${offer.offerId} rationale`} values={offer.rationaleChips} />
       <ChipList label={`${offer.offerId} flags`} values={offer.scenarioFlags} />
       <div className="quick-quote-state">
-        <button type="button" aria-pressed={selected} onClick={() => onSelect(offer)}>Select for quote</button>
+        <button type="button" aria-label={`Select offer ${offer.offerId}`} aria-pressed={selected} onClick={() => onSelect(offer)}>Select offer</button>
         <button type="button" aria-pressed={compared} onClick={() => onCompareToggle(offer.offerId)}>{compared ? 'Remove from comparison' : 'Add to comparison'}</button>
-        <button type="button" onClick={() => onInspect(offer)}>Review explanation</button>
+        <button type="button" aria-label={`Inspect explanation for offer ${offer.offerId}`} onClick={() => onInspect(offer)}>Inspect explanation</button>
       </div>
     </article>
   );

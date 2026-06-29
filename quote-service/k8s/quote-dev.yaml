@@ -21,9 +21,12 @@ data:
   SPRING_FLYWAY_DEFAULT_SCHEMA: quote
   MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: "true"
   MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info,prometheus
-  WCPE_SYNTHETIC_ONLY: "true"
+  WCPE_SYNTHETIC_ONLY: "false"
   WCPE_ADJUSTMENT_SERVICE_BASE_URL: http://adjustment-service.wcpe-dev.svc.cluster.local:8080
-  QUOTE_LOANPASS_SYNTHETIC_LOADER_ENABLED: "true"
+  QUOTE_LOANHOUSE_CAPTURE_LOADER_ENABLED: "true"
+  QUOTE_LOANHOUSE_CAPTURE_LOADER_TENANT_ID: 2aba740b-74ee-3068-a456-4df1e64b7c02
+  QUOTE_LOANHOUSE_CAPTURE_LOADER_RESOURCE: classpath:loanhouse/product-records.json
+  QUOTE_LOANPASS_SYNTHETIC_LOADER_ENABLED: "false"
   QUOTE_LOANPASS_SYNTHETIC_LOADER_TENANT_ID: 2aba740b-74ee-3068-a456-4df1e64b7c02
   QUOTE_LOANPASS_SYNTHETIC_LOADER_PRODUCT_COUNT: "1536"
   QUOTE_LOANPASS_SYNTHETIC_LOADER_SEED: ui-preview-tenant-dev
@@ -55,7 +58,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: quote-service
-          image: 192.168.4.102:32061/mortgage-pricing/quote-service:0.1.0-quickquote-20260628-0315-amd64
+          image: 192.168.4.102:32061/mortgage-pricing/quote-service:0.1.0-loanhouse-20260628T213954Z-amd64
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

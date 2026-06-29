@@ -55,4 +55,21 @@ describe('ProductManagementScreen', () => {
     fireEvent.keyDown(window, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('dialog', { name: /LoanPass setup product/i })).not.toBeInTheDocument());
   });
+
+  it('keeps product filters collapsed by default and opens them from an explicit control', async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error('offline preview');
+    }) as unknown as typeof fetch;
+
+    render(<ProductManagementScreen fetchImpl={fetchImpl} />);
+
+    await screen.findByRole('heading', { name: /Product Management/i });
+    const showFiltersButton = screen.getByRole('button', { name: /Show filters/i });
+    expect(showFiltersButton).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('combobox', { name: /^Investor$/i })).not.toBeInTheDocument();
+
+    fireEvent.click(showFiltersButton);
+    expect(screen.getByRole('button', { name: /Hide filters/i })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('combobox', { name: /^Investor$/i })).toBeVisible();
+  });
 });

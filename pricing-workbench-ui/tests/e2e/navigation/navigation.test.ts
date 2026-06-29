@@ -13,6 +13,7 @@ test.describe('PII-25 role-aware navigation', () => {
       await loginAs(page, persona);
       await page.goto(persona.authorizedRoutes[0] ?? persona.defaultRoute, { waitUntil: 'domcontentloaded' });
       await expect(page.locator('main').first()).toBeVisible();
+      await openNavigationIfNeeded(page);
 
       for (const label of persona.expectedModules.slice(0, 3)) {
         await expect(page.getByText(label).first()).toBeVisible();
@@ -59,3 +60,12 @@ test.describe('PII-25 role-aware navigation', () => {
     }
   });
 });
+
+async function openNavigationIfNeeded(page: import('@playwright/test').Page) {
+  const navigation = page.getByRole('navigation', { name: /main navigation/i }).first();
+  if (await navigation.isVisible().catch(() => false)) return;
+  const drawer = page.getByRole('dialog', { name: /primary navigation drawer/i }).first();
+  if (await drawer.isVisible().catch(() => false)) return;
+  const menu = page.getByRole('button', { name: /^Open navigation menu$/i }).first();
+  await menu.click({ force: true, timeout: 2_000 }).catch(() => undefined);
+}

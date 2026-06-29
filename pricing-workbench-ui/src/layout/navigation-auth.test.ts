@@ -39,10 +39,10 @@ describe('navigation RBAC filtering', () => {
     expect(getVisibleModules(opsLead, modules).map((module) => module.id)).toEqual(['ops-dashboard']);
   });
 
-  it('NavigationTest.buildsVisibleTreeWithPersonaBadges', () => {
+  it('NavigationTest.buildsVisibleTreeWithoutNoisyPersonaBadges', () => {
     const opsLead = getPersonaById('persona-operations-lead')!;
     const items = buildNavigationTree(modules, 'run-123', opsLead);
-    expect(items).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Ops dashboard', route: '/ops/dashboard', group: 'Operations', badgeCount: 2 })]));
+    expect(items).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Ops dashboard', route: '/ops/dashboard', group: 'Operations', badgeCount: undefined })]));
     expect(items).not.toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Quick Quote', group: 'Pipeline' })]));
   });
 
@@ -53,8 +53,14 @@ describe('navigation RBAC filtering', () => {
 
   it('NavigationTest.filtersLoanOfficerNavigationToQuoteActions', () => {
     const loanOfficer = getPersonaById('persona-loan-officer')!;
-    const labels = buildNavigationTree(workbenchModules, 'run-123', loanOfficer).map((item) => item.label);
-    expect(labels).toEqual(expect.arrayContaining(['Pipeline Intake', 'Quick Quote', 'Draft Scenarios', 'Lock Workflow']));
+    const items = buildNavigationTree(workbenchModules, 'run-123', loanOfficer);
+    const labels = items.map((item) => item.label);
+    expect(labels).toEqual(expect.arrayContaining(['Pipeline Intake', 'New quote', 'Draft Scenarios', 'Lock Workflow']));
+    expect(labels).not.toEqual(expect.arrayContaining(['QuickQuote']));
+    expect(items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'Pricing Waterfall', route: '/pricing/waterfall' }),
+      expect.objectContaining({ label: 'Quote Journey Map', route: '/journey-map' }),
+    ]));
     expect(labels).not.toEqual(expect.arrayContaining(['Product Catalog', 'Rate Sheet Intake', 'Tenant Management', 'User Management']));
   });
 

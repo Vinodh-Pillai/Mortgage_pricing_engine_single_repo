@@ -42,6 +42,7 @@ export interface MajorFunctionalityPageProps<T extends object> {
 
 export function MajorFunctionalityPage<T extends object>({ config, visualState = 'ready', onEvidenceCapture }: MajorFunctionalityPageProps<T>) {
   const [state, setState] = useState<ScreenVisualState>(visualState);
+  const [actionMessage, setActionMessage] = useState('');
   const refs = useMemo(() => [config.evidenceTarget, config.dataBoundary, ...config.sections.map((section) => section.id)], [config]);
 
   useEffect(() => setState(visualState), [visualState]);
@@ -51,6 +52,7 @@ export function MajorFunctionalityPage<T extends object>({ config, visualState =
 
   function recordAction(action: string) {
     onEvidenceCapture?.({ screenId: config.screenId, timestamp: new Date().toISOString(), state, dataRefs: refs, blockers: state === 'blocked' ? [config.blockedMessage] : [], evidenceTarget: config.evidenceTarget, refs, action });
+    setActionMessage(`${action.replace(/-/g, ' ')} captured for local-only review. Connected service submission remains unavailable until required setup is complete.`);
     if (action.includes('review') || action.includes('validate')) setState('needs-attention');
   }
 
@@ -64,6 +66,7 @@ export function MajorFunctionalityPage<T extends object>({ config, visualState =
         meta={config.metrics.length ? <details className="page-header__help"><summary aria-label={`${config.title} details`}>?</summary><span>Readiness details are available in the cards below.</span></details> : undefined}
         actions={<ActionToolbar label={`${config.title} actions`} primaryActions={config.primaryActions} secondaryActions={config.secondaryActions} onAction={recordAction} />}
       />
+      {actionMessage ? <p className="banner banner--info" role="status">{actionMessage}</p> : null}
       <PageStateWrapper state={state} title={config.title} emptyMessage={config.emptyMessage} blockedMessage={config.blockedMessage} attentionMessage={config.attentionMessage}>
         <section className="page-metrics" aria-label={`${config.title} readiness metrics`}>
           {config.metrics.map((metric) => <div className="page-metric" key={metric.label}><span>{metric.label}</span><strong>{metric.value}</strong><details><summary aria-label={`${metric.label} help`}>?</summary><small>{metric.help}</small></details></div>)}
