@@ -20,9 +20,9 @@ export function GovernanceLayout({ view }: { view: AdminGovernanceView }) {
         <p className="eyebrow">Admin · PII-24-S24</p>
         <h2 id="admin-title">Admin governance and readiness controls</h2>
         <p>
-          Review descriptors, policy versions, feature flags, market-rule completeness, change requests, release gates,
-          drift alerts, incidents, override ledger entries, pending review state, and dynamic rule evidence from configured service records.
-          The workbench displays governance metadata only; it does not implement approval, deployment, rollback, or pricing rules.
+          Manage the governance lifecycle from service-provided descriptors, policy versions, feature flags, market-rule completeness,
+          change requests, release gates, drift alerts, incidents, override ledger entries, pending review state, and dynamic rule evidence.
+          Actions stay enabled or disabled from the governance response, not from local browser rules.
         </p>
       </section>
 

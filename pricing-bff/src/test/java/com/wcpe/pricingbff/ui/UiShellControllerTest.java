@@ -206,6 +206,50 @@ class UiShellControllerTest {
   }
 
   @Test
+  void tenantCatalogDropdownEndpointsReturnSafeNonPricingRefsInsteadOf404s() throws Exception {
+    mvc.perform(get("/api/v1/tenants/ui-preview-tenant/products")
+            .param("page", "1")
+            .param("pageSize", "500")
+            .header("X-Ui-Trace-Id", "trace-tenant-products"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.tenantContext").value("ui-preview-tenant"))
+        .andExpect(jsonPath("$.page").value(1))
+        .andExpect(jsonPath("$.pageSize").value(500))
+        .andExpect(jsonPath("$.products", hasSize(3)))
+        .andExpect(jsonPath("$.products[0].productCode").value("catalog-ref-conventional"))
+        .andExpect(jsonPath("$.availableFilters.productTypes", hasSize(3)))
+        .andExpect(jsonPath("$.dependencyStatus").value("CATALOG_SERVICE_DROPDOWN_CONTRACT_NOT_CONFIGURED"))
+        .andExpect(jsonPath("$.uiTraceId").value("trace-tenant-products"));
+
+    mvc.perform(get("/api/v1/tenants/ui-preview-tenant/product-catalog/products")
+            .header("X-Ui-Trace-Id", "trace-catalog-products"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.tenantContext").value("ui-preview-tenant"))
+        .andExpect(jsonPath("$.products", hasSize(3)))
+        .andExpect(jsonPath("$.products[0].status").value("CONFIG_REQUIRED"))
+        .andExpect(jsonPath("$.dependencyStatus").value("CATALOG_SERVICE_PRODUCTS_CONTRACT_NOT_CONFIGURED"))
+        .andExpect(jsonPath("$.uiTraceId").value("trace-catalog-products"));
+
+    mvc.perform(get("/api/v1/tenants/ui-preview-tenant/product-catalog/investors")
+            .header("X-Ui-Trace-Id", "trace-catalog-investors"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.tenantContext").value("ui-preview-tenant"))
+        .andExpect(jsonPath("$.investors", hasSize(3)))
+        .andExpect(jsonPath("$.investors[0].investorCode").value("FNMA"))
+        .andExpect(jsonPath("$.dependencyStatus").value("CATALOG_SERVICE_INVESTORS_CONTRACT_NOT_CONFIGURED"))
+        .andExpect(jsonPath("$.uiTraceId").value("trace-catalog-investors"));
+
+    mvc.perform(get("/api/v1/tenants/ui-preview-tenant/product-catalog/channels")
+            .header("X-Ui-Trace-Id", "trace-catalog-channels"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.tenantContext").value("ui-preview-tenant"))
+        .andExpect(jsonPath("$.channels", hasSize(3)))
+        .andExpect(jsonPath("$.channels[0].channelCode").value("RETAIL"))
+        .andExpect(jsonPath("$.dependencyStatus").value("CATALOG_SERVICE_CHANNELS_CONTRACT_NOT_CONFIGURED"))
+        .andExpect(jsonPath("$.uiTraceId").value("trace-catalog-channels"));
+  }
+
+  @Test
   void pipelineSettingsFieldsFailClosedWithoutDurablePersistence() throws Exception {
     mvc.perform(get("/api/v1/tenants/demo-tenant/pipeline/settings")
             .header("X-Ui-Trace-Id", "trace-pipeline-settings-before"))

@@ -151,7 +151,7 @@ export function LoginScreen({ initialEmail = '', loading = false, disableAutoRed
           </div>
 
           <p className="login-search-help" aria-live="polite">
-            Use your organization account to access Pricing Workbench.
+            Use your organization account to access LoanWeft.
           </p>
         </form>
 

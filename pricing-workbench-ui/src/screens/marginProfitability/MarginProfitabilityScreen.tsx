@@ -87,8 +87,8 @@ export default function MarginProfitabilityScreen({
         <p className="eyebrow">Margin service - PII-24-S16</p>
         <h2 id="margin-title">Margin Profitability</h2>
         <p>
-          Inspect company, branch, LO, investor, secondary market, floor evidence, approval, and replay references from backend-shaped margin data.
-          The browser renders supplied refs only and does not calculate margins, floors, prices, or compensation.
+          Review company, branch, LO, investor, secondary market, floor evidence, approval, and replay records from the margin profitability service.
+          Compensation visibility, approval actions, exception routes, and redactions are controlled by the backend response.
         </p>
       </section>
 

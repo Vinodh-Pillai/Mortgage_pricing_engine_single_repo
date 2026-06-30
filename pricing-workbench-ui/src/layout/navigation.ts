@@ -78,7 +78,7 @@ const capabilityDefinitions: CapabilityDefinition[] = [
   { id: 'partner-integrations', label: 'Partner Integrations', group: 'Operations', icon: '⟲', moduleId: 'partner-transport', badgeTone: 'alert' },
 
   { id: 'tenant-home', label: 'Tenant Home', group: 'Tenants', icon: '⌂', moduleId: 'home', route: '/home' },
-  { id: 'tenant-onboarding', label: 'Tenant Onboarding', group: 'Tenants', icon: '⧉', moduleId: 'tenant-onboarding', badgeTone: 'alert' },
+  { id: 'tenant-onboarding', label: 'Tenant Onboarding', group: 'Tenants', icon: '⧉', moduleId: 'tenant-onboarding' },
   { id: 'tenant-management', label: 'Tenant Management', group: 'Tenants', icon: '◧', moduleId: 'tenant-admin', badgeTone: 'alert' },
 
   { id: 'user-management', label: 'User Management', group: 'Admin', icon: '☻', moduleId: 'user-management', route: '/admin/users' },

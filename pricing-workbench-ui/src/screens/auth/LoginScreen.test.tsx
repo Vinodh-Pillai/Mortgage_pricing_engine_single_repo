@@ -104,16 +104,15 @@ describe('LoginScreenTest', () => {
     expect(screen.queryByRole('contentinfo')).not.toBeInTheDocument();
   });
 
-  it('LoginScreenTest.showsNeutralPricingWorkbenchBranding', async () => {
+  it('LoginScreenTest.showsLoanWeftBranding', async () => {
     renderLogin();
-    expect(await screen.findByRole('heading', { name: 'Pricing Workbench' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'LoanWeft' })).toBeInTheDocument();
     expect(screen.getByText('Secure mortgage pricing workspace')).toBeInTheDocument();
-    expect(screen.getByText('Use your organization account to access Pricing Workbench.')).toBeInTheDocument();
+    expect(screen.getByText('Use your organization account to access LoanWeft.')).toBeInTheDocument();
     const legacyBrandPattern = new RegExp(
       [
-        'Loan' + 'Weft',
+        'Pricing Workbench',
         'PPE',
-        'L' + 'W',
         'World Class Pric' + 'ing Engine',
         'W' + 'CPE',
       ].join('|'),

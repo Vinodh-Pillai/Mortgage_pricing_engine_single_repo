@@ -321,20 +321,15 @@ describe('PipelineIntakeTest', () => {
     expect(screen.getByRole('heading', { name: /^QuickQuote$/i })).toBeInTheDocument();
     expect(screen.getByText(/^Current workspace$/i)).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /^QuickQuote$/i })).not.toBeInTheDocument();
-    const statusStrip = screen.getByRole('region', { name: /QuickQuote status strip/i });
-    expect(statusStrip).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: /QuickQuote status strip/i })).not.toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(/\bPrefill\b/i);
-    expect(within(statusStrip).getByText('Pricing facts')).toBeInTheDocument();
-    expect(within(statusStrip).queryByText('Missing')).not.toBeInTheDocument();
-    expect(within(statusStrip).getByText('Readiness')).toBeInTheDocument();
-    expect(within(statusStrip).getByText('pricing facts complete')).toBeInTheDocument();
-    expect(within(statusStrip).getByText('Eligible')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Find Products$/i })).toBeInTheDocument();
     expect(screen.getByRole('status', { name: /QuickQuote products pending submit/i })).toBeInTheDocument();
     expect(screen.queryByRole('table', { name: /QuickQuote product eligibility grid/i })).not.toBeInTheDocument();
     revealQuickQuoteProducts();
     expect(screen.queryByRole('button', { name: /^Save QuickQuote draft$/i })).not.toBeInTheDocument();
     expect(screen.getByRole('table', { name: /QuickQuote product eligibility grid/i })).toBeInTheDocument();
-    expect(screen.getByText(/Submit details before product options are displayed/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Submit details before product options are displayed/i)).not.toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(/Missing\s*0\s*facts/i);
     expect(screen.getByRole('columnheader', { name: /^Review$/i })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /^Pipeline$/i })).not.toBeInTheDocument();
@@ -594,15 +589,12 @@ describe('PipelineIntakeTest', () => {
     expect(header).toBeInTheDocument();
     expect(prefillRail.compareDocumentPosition(grid) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(grid.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByLabelText(/Borrower and loan context/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Missing fact reason categories/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Borrower and loan context/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Missing fact reason categories/i)).not.toBeInTheDocument();
     expect(prefillRail).not.toHaveTextContent(/Source LoanPASS/i);
     expect(prefillRail).not.toHaveTextContent(/WCPE borrowerLastName/i);
-    expect(prefillRail).toHaveTextContent(/Required to price: 0/i);
-    expect(prefillRail).toHaveTextContent(/Improves pricing: 0/i);
-    expect(prefillRail).toHaveTextContent(/Before lock: 0/i);
-    expect(screen.getByRole('heading', { name: /Recent edits/i })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: /Borrower details/i })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /Recent edits/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /Borrower details/i })).not.toBeInTheDocument();
 
     unmount();
     const overrideRender = render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} intake={losPrefilledIntake} />);
@@ -610,12 +602,7 @@ describe('PipelineIntakeTest', () => {
     const decisionCreditScore = screen.getByRole('spinbutton', { name: /Decision credit score/i });
     fireEvent.change(decisionCreditScore, { target: { value: '735' } });
     await waitFor(() => expect(decisionCreditScore).toHaveValue(735));
-    const overrideAudit = screen.getByRole('heading', { name: /Recent edits/i }).closest('section') as HTMLElement;
-    expect(overrideAudit).toHaveTextContent(/decisionCreditScore/i);
-    expect(overrideAudit).toHaveTextContent(/Original value: 720/i);
-    expect(overrideAudit).toHaveTextContent(/Edited value: 735/i);
-    expect(overrideAudit).toHaveTextContent(/Edited by: loan-officer-1 at/i);
-    expect(overrideAudit).toHaveTextContent(/Pricing impact is rechecked/i);
+    expect(screen.queryByRole('heading', { name: /Recent edits/i })).not.toBeInTheDocument();
     expect(screen.getByLabelText(/QuickQuote pricing input rail/i)).not.toHaveTextContent(/\bPrefill\b/i);
 
     revealQuickQuoteProducts();
@@ -625,7 +612,7 @@ describe('PipelineIntakeTest', () => {
 
     overrideRender.unmount();
     render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} intake={{ ...losPrefilledIntake, decisionCreditScore: '735' }} />);
-    expect(screen.getByRole('heading', { name: /Recent edits/i })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /Recent edits/i })).not.toBeInTheDocument();
     revealQuickQuoteProducts();
     expect(screen.getAllByRole('row').length).toBeGreaterThan(1);
   }, 30000);
@@ -638,14 +625,15 @@ describe('PipelineIntakeTest', () => {
     expect(within(pricingInputs).getByLabelText(/^Channel/i)).toHaveValue('RETAIL');
     expect(within(pricingInputs).getByLabelText(/^Loan purpose/i)).toHaveValue('Purchase');
     expect(within(pricingInputs).getByLabelText(/^Mortgage type/i)).toHaveValue('Conventional');
-    expect(within(prefillRail).getByLabelText(/FICO minimum/i)).toHaveValue('720');
-    expect(within(prefillRail).getByLabelText(/Loan amount minimum/i)).toHaveValue('350000');
+    expect(within(pricingInputs).getByLabelText(/Decision credit score/i)).toHaveValue(720);
+    expect(within(pricingInputs).getByLabelText(/Base loan amount/i)).toHaveValue(425000);
+    expect(within(prefillRail).queryByLabelText(/FICO minimum/i)).not.toBeInTheDocument();
+    expect(within(prefillRail).queryByLabelText(/Loan amount minimum/i)).not.toBeInTheDocument();
     expect(within(prefillRail).getByLabelText(/Property type/i)).toHaveValue('Single Family');
     expect(within(prefillRail).getByLabelText(/Occupancy/i)).toHaveValue('Primary Residence');
     expect(screen.queryByDisplayValue('Rivera')).not.toBeInTheDocument();
     expect(screen.queryByDisplayValue('LN-2001')).not.toBeInTheDocument();
-    expect(screen.getByLabelText(/Borrower and loan context/i)).toHaveTextContent(/Borrower pending/i);
-    expect(screen.getByLabelText(/Borrower and loan context/i)).toHaveTextContent(/Loan pending/i);
+    expect(screen.queryByLabelText(/Borrower and loan context/i)).not.toBeInTheDocument();
   });
 
   it('rendersResponsiveQuickQuoteComparisonAndSavesSelectedComparisonProducts', async () => {

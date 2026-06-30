@@ -109,16 +109,8 @@
   min-height: 42px;
   min-width: 42px;
   padding: 0.45rem 0.8rem;
-  position: fixed;
-  left: clamp(1rem, 3vw, 2rem);
-  top: max(0.75rem, env(safe-area-inset-top));
+  position: static;
   transition: border-color var(--ds-motion-normal) var(--ds-ease-standard), box-shadow var(--ds-motion-normal) var(--ds-ease-standard), transform var(--ds-motion-fast) var(--ds-ease-standard);
-  z-index: calc(var(--layout-z-sticky) + 2);
-}
-
-.layout-header__brand--with-nav-toggle,
-.layout-header__brand:has(.layout-nav-toggle) {
-  padding-left: clamp(3.75rem, 3vw + 2.75rem, 4.75rem);
 }
 
 .layout-nav-toggle:hover,

@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { createPortal } from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
 import { Avatar, roleColorKeyForLabel, roleColors, themeStorageKey } from '../design-system';
 import { useTranslation } from '../lib/i18n';
@@ -117,11 +116,10 @@ export function Header({ breadcrumb, notificationCount, showAuthenticatedChrome 
   };
 
   return (
-    <>
-    {navigationToggle && typeof document !== 'undefined' ? createPortal(navigationToggle, document.body) : navigationToggle}
     <header className={`layout-header${compactHeader ? ' layout-header--compact' : ''}`} role="banner">
       <div className={`layout-header__brand${showNavigationToggle ? ' layout-header__brand--with-nav-toggle' : ''}`}>
-        <div className="layout-header__brand-mark" aria-hidden="true">PW</div>
+        {navigationToggle}
+        <div className="layout-header__brand-mark" aria-hidden="true">LW</div>
         <div className="layout-header__title">
           <h1>{t('pricingWorkbench')}</h1>
           <nav aria-label={t('navigation:breadcrumb')} className="layout-breadcrumbs">
@@ -183,6 +181,5 @@ export function Header({ breadcrumb, notificationCount, showAuthenticatedChrome 
         ) : null}
       </div>
     </header>
-    </>
   );
 }

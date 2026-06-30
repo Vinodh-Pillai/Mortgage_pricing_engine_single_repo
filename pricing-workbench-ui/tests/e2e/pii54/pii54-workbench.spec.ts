@@ -10,9 +10,9 @@ test.describe('PII-54 UI validation critical route coverage', () => {
   for (const target of pii54Routes) {
     test(`${target.route} is registered and safely gated by local auth`, async ({ page }) => {
       await page.goto(target.route, { waitUntil: 'domcontentloaded' });
-      await expect(page.getByRole('heading', { name: 'Pricing Workbench' }).first()).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'LoanWeft' }).first()).toBeVisible();
       await expect(page.getByRole('link', { name: new RegExp(target.navLabel, 'i') }).first()).toBeVisible();
-      await expect(page.getByText(/Use your workbench account/i)).toBeVisible();
+      await expect(page.getByText(/Use your organization account to access LoanWeft/i)).toBeVisible();
       expect(target.blockedReason).toBe('authentication service gate');
     });
   }

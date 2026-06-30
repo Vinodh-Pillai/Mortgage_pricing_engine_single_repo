@@ -226,12 +226,6 @@ const quickQuoteSafeScenarioDefaults: Partial<Record<keyof BorrowerIntake, strin
 
 const quickQuoteSafeProductFilters: ProductFilterState = {
   ...emptyProductFilters,
-  ltvMin: '75',
-  ltvMax: '95',
-  ficoMin: '720',
-  ficoMax: '760',
-  loanAmountMin: '350000',
-  loanAmountMax: '625000',
   term: '360',
   propertyType: 'Single Family',
   occupancy: 'Primary Residence',
@@ -459,6 +453,7 @@ export function PipelineIntakePage({
   const savePromiseRef = useRef<Promise<DraftScenario | null> | null>(null);
   const autosaveSnapshotRef = useRef<AutosaveSnapshot | null>(null);
   const firstEntryDraftRef = useRef(false);
+  const draftPersistenceUnavailableRef = useRef(false);
   const validationBannerSignatureRef = useRef('');
   const validationBannerFocusKeyRef = useRef('');
   const values = useMemo(() => normalizeDisplayedIntake(localIntake), [localIntake]);
@@ -535,15 +530,11 @@ export function PipelineIntakePage({
   const quickQuoteGridStyle = { '--quote-product-grid-template': priceScenarioGridTemplate(quickQuoteColumns) } as CSSProperties;
   const quickQuoteProductsVisible = mode !== 'quickquote' || submitAttempted || flowState.kind === 'created';
   const quickQuoteVisibleProducts = liveOffers.length > 0 ? tenantHomePreviewProducts : filteredProducts;
-  const quickQuoteStatusCounts = useMemo(() => liveOffers.length > 0 ? offerStatusCounts(liveOffers) : productStatusCounts(filteredProducts), [filteredProducts, liveOffers]);
   const quickQuoteComparisonProducts = useMemo(() => tenantHomePreviewProducts.filter((product) => comparisonProductCodes.includes(product.productCode)), [comparisonProductCodes]);
   const losPrefillMappings = useMemo(() => quickQuotePrefillMappingsForMetadata(runtimeMetadata, runtimeSections), [runtimeMetadata, runtimeSections]);
   const losOverrideRows = useMemo(() => Object.values(losOverrideAudit).sort((left, right) => left.label.localeCompare(right.label)), [losOverrideAudit]);
-  const losPrefillEditableFields = useMemo(() => fieldsById(Array.from(new Set(losPrefillMappings.map((mapping) => mapping.fieldId)))), [losPrefillMappings, runtimeSections]);
   const quickQuoteLoading = metadataState.kind === 'loading' || applicationFormRuntimeState.kind === 'loading' || dropdownConfigState.kind === 'loading' || flowState.kind === 'submitting';
   const quickQuoteLaunchLoading = metadataState.kind === 'loading' || applicationFormRuntimeState.kind === 'loading' || flowState.kind === 'submitting';
-  const quickQuoteBorrower = borrowerContextLabel(values);
-  const quickQuoteLoan = loanContextLabel(values);
   const startReady = true;
   const quoteReady = launchMissingRequiredFields.length === 0 && (mode === 'quickquote' || Boolean(selectedProduct));
   const launchDisabled = flowState.kind === 'submitting' || !quoteReady;
@@ -1027,7 +1018,6 @@ export function PipelineIntakePage({
 
   async function saveDraft(reason = 'manual-save', valueOverride?: BorrowerIntake): Promise<DraftScenario | null> {
     if (savingRef.current) return savePromiseRef.current;
-    savingRef.current = true;
     const draftValues = withQuickQuoteDraftContext(withLosOverrideContext(valueOverride ?? values, losOverrideRows), {
       sourceMode: mode,
       selectedProduct,
@@ -1037,6 +1027,11 @@ export function PipelineIntakePage({
       metadata: runtimeMetadata,
       losPrefillMappings,
     });
+    if (draftPersistenceUnavailableRef.current && shouldSkipDraftPersistence(reason)) {
+      saveDraftBackup(scenarioId ?? resumeBackup?.scenarioId ?? localUnsyncedDraftId, scenarioVersion || resumeBackup?.scenarioVersion || 0, 1, draftValues);
+      return null;
+    }
+    savingRef.current = true;
     const operation = persistDraft(reason, draftValues);
     savePromiseRef.current = operation;
     try {
@@ -1051,8 +1046,10 @@ export function PipelineIntakePage({
     setFlowState({ kind: 'submitting' });
     try {
       const loanBasics = sectionForStep(1);
-      if (!scenarioId && !resumeBackup?.scenarioId) {
+      const durableScenarioId = durableDraftScenarioId(scenarioId ?? resumeBackup?.scenarioId);
+      if (!durableScenarioId) {
         const draft = await createDraftScenario(tenantId, backendDraftPayload(draftValues, loanBasics?.fields ?? []));
+        draftPersistenceUnavailableRef.current = false;
         setScenarioId(draft.scenarioId);
         setScenarioVersion(draft.scenarioVersion);
         saveDraftBackup(draft.scenarioId, draft.scenarioVersion, 1, draftValues);
@@ -1062,7 +1059,8 @@ export function PipelineIntakePage({
         capture('draft-created', { scenarioId: draft.scenarioId, scenarioVersion: draft.scenarioVersion, reason });
         return draft;
       } else {
-        const saved = await updateDraftScenario(tenantId, scenarioId ?? resumeBackup?.scenarioId ?? localUnsyncedDraftId, scenarioVersion || resumeBackup?.scenarioVersion || 1, 'scenario-identity', backendDraftPayload(draftValues, loanBasics?.fields ?? []));
+        const saved = await updateDraftScenario(tenantId, durableScenarioId, scenarioVersion || resumeBackup?.scenarioVersion || 1, 'scenario-identity', backendDraftPayload(draftValues, loanBasics?.fields ?? []));
+        draftPersistenceUnavailableRef.current = false;
         setScenarioId(saved.scenarioId);
         setScenarioVersion(saved.scenarioVersion);
         saveDraftBackup(saved.scenarioId, saved.scenarioVersion, 1, draftValues);
@@ -1073,6 +1071,7 @@ export function PipelineIntakePage({
         return saved;
       }
     } catch (error: unknown) {
+      draftPersistenceUnavailableRef.current = true;
       saveDraftBackup(scenarioId ?? resumeBackup?.scenarioId ?? localUnsyncedDraftId, scenarioVersion || resumeBackup?.scenarioVersion || 0, 1, draftValues);
       const message = error instanceof Error ? error.message : 'Draft service is unavailable; local draft backup was stored.';
       setFlowState({ kind: 'outage', message });
@@ -1080,6 +1079,15 @@ export function PipelineIntakePage({
       capture('draft-local-backup', { reason, message });
       return null;
     }
+  }
+
+  function shouldSkipDraftPersistence(reason: string) {
+    return ['autosave-interval', 'field-blur', 'first-field-entry', 'pre-launch'].includes(reason);
+  }
+
+  function durableDraftScenarioId(candidate?: string | null) {
+    if (!candidate || candidate === localUnsyncedDraftId) return '';
+    return candidate;
   }
 
   async function launch(event?: FormEvent<HTMLFormElement>, product?: AuthorizedProduct) {
@@ -1300,21 +1308,7 @@ export function PipelineIntakePage({
             <span className="quickquote-header__state" aria-current="page">Current workspace</span>
             <h1 id="quickquote-heading">QuickQuote</h1>
           </div>
-          <dl className="quickquote-context" aria-label="Borrower and loan context">
-            <div><dt>Borrower</dt><dd>{quickQuoteBorrower}</dd></div>
-            <div><dt>Loan</dt><dd>{quickQuoteLoan}</dd></div>
-            <div><dt>Updated</dt><dd>{statusMessage ? 'Now' : 'Awaiting changes'}</dd></div>
-          </dl>
         </header>
-
-        <section className="quickquote-status-strip" aria-label="QuickQuote status strip">
-          <MetricCard label="Pricing facts" value={`${Math.max(requiredPricingFields.length - missingRequiredFields.length, 0)}/${requiredPricingFields.length}`} detail="ready" tone={missingRequiredFields.length === 0 ? 'ready' : 'attention'} />
-          {missingRequiredFields.length > 0 ? <MetricCard label="Missing" value={String(missingRequiredFields.length)} detail="facts" tone="attention" /> : <MetricCard label="Readiness" value="Ready" detail="pricing facts complete" tone="ready" />}
-          <MetricCard label="Eligible" value={String(quickQuoteStatusCounts.eligible)} detail="products" tone="ready" />
-          <MetricCard label="Refer" value={String(quickQuoteStatusCounts.refer)} detail="review" tone={quickQuoteStatusCounts.refer > 0 ? 'attention' : undefined} />
-          <MetricCard label="Ineligible" value={String(quickQuoteStatusCounts.ineligible)} detail="products" />
-          <button type="button" className="quote-intake-primary" onClick={revealQuickQuoteProducts} aria-controls="quickquote-products-panel" aria-expanded={quickQuoteProductsVisible}>Find Products</button>
-        </section>
 
         <div className="quickquote-grid-shell">
           <aside className="quickquote-prefill-rail" aria-label="QuickQuote pricing input rail">
@@ -1323,20 +1317,11 @@ export function PipelineIntakePage({
               <SelectFilter label="Investor" value={productFilters.investor} values={availableFilters.investors} onChange={(value) => setFilter('investor', value)} />
               <SelectFilter label="Channel" value={productFilters.channel} values={availableFilters.channels} onChange={(value) => setFilter('channel', value)} formatter={channelLabel} />
               <SelectFilter label="Status" value={productFilters.status} values={['ACTIVE', 'PENDING', 'INACTIVE']} onChange={(value) => setFilter('status', value)} />
-              <RangeFilter label="Rate" min={productFilters.rateMin} max={productFilters.rateMax} onMin={(value) => setFilter('rateMin', value)} onMax={(value) => setFilter('rateMax', value)} suffix="%" />
-              <RangeFilter label="LTV" min={productFilters.ltvMin} max={productFilters.ltvMax} onMin={(value) => setFilter('ltvMin', value)} onMax={(value) => setFilter('ltvMax', value)} suffix="%" />
-              <RangeFilter label="FICO" min={productFilters.ficoMin} max={productFilters.ficoMax} onMin={(value) => setFilter('ficoMin', value)} onMax={(value) => setFilter('ficoMax', value)} />
-              <RangeFilter label="Loan amount" min={productFilters.loanAmountMin} max={productFilters.loanAmountMax} onMin={(value) => setFilter('loanAmountMin', value)} onMax={(value) => setFilter('loanAmountMax', value)} prefix="$" />
               <CompactField label="Term" value={productFilters.term} onChange={(value) => setFilter('term', value)} placeholder="Months" inputMode="numeric" />
               <SelectFilter label="Property type" value={productFilters.propertyType} values={optionValues(fieldDropdownOptions.propertyType)} onChange={(value) => setFilter('propertyType', value)} formatter={friendlyLabel} />
               <SelectFilter label="Occupancy" value={productFilters.occupancy} values={optionValues(fieldDropdownOptions.occupancyType)} onChange={(value) => setFilter('occupancy', value)} formatter={friendlyLabel} />
-              <button type="button" className="quote-filter-clear" onClick={clearFilters}>Clear</button>
             </FilterCard>
-            <QuickQuotePricingInputs fields={quickQuotePricingInputFields} values={quickQuoteDisplayValues} errors={visibleErrors} dropdownOptions={fieldDropdownOptions} dropdownLoading={dropdownConfigState.kind === 'loading'} selectedProduct={quickQuoteDisplayProduct} missingFields={missingRequiredFields} onChange={changeField} onFocusField={focusPipelineField} />
-            <QuickQuotePrefillGroups sections={runtimeSections} values={quickQuoteDisplayValues} mappings={losPrefillMappings} overrides={losOverrideAudit} />
-            <QuickQuoteMappedFieldOverrides fields={losPrefillEditableFields} values={quickQuoteDisplayValues} errors={visibleErrors} dropdownOptions={fieldDropdownOptions} dropdownLoading={dropdownConfigState.kind === 'loading'} onChange={changeField} />
-            <QuickQuoteMissingFacts fields={missingRequiredFields} mappings={losPrefillMappings} values={quickQuoteDisplayValues} />
-            <QuickQuoteOverrideAudit overrides={losOverrideRows} />
+            <QuickQuotePricingInputs fields={quickQuotePricingInputFields} values={quickQuoteDisplayValues} errors={visibleErrors} dropdownOptions={fieldDropdownOptions} dropdownLoading={dropdownConfigState.kind === 'loading'} missingFields={missingRequiredFields} onChange={changeField} />
           </aside>
 
           <section id="quickquote-products-panel" className="quickquote-products" aria-labelledby="quickquote-products-heading" aria-busy={quickQuoteLoading ? 'true' : 'false'}>
@@ -1344,9 +1329,11 @@ export function PipelineIntakePage({
               <div>
                 <span className="eyebrow">Grid</span>
                 <h2 id="quickquote-products-heading">Product eligibility</h2>
-                <p className="quickquote-products__assurance">Submit details before product options are displayed. Pricing remains service-owned.</p>
               </div>
-              <QuickQuoteStateCard title="Pricing" state={quickQuoteLoading ? 'loading' : liveOffers.length > 0 || tenantHomePreviewProducts.length > 0 ? 'ready' : 'empty'} detail={liveOffers.length > 0 ? `${liveOffers.length} LoanHouse BFF offers` : `${tenantHomePreviewProducts.length} preview candidates`} />
+              <div className="quickquote-products__toolbar-actions">
+                <QuickQuoteStateCard title="Pricing" state={quickQuoteLoading ? 'loading' : liveOffers.length > 0 || tenantHomePreviewProducts.length > 0 ? 'ready' : 'empty'} detail={liveOffers.length > 0 ? `${liveOffers.length} LoanHouse BFF offers` : `${tenantHomePreviewProducts.length} preview candidates`} />
+                <button type="button" className="quote-intake-primary" onClick={revealQuickQuoteProducts} aria-controls="quickquote-products-panel" aria-expanded={quickQuoteProductsVisible}>Find Products</button>
+              </div>
             </div>
 
             {quickQuoteLoading ? <QuickQuoteSkeleton /> : null}
@@ -2190,10 +2177,7 @@ function QuickQuoteStateCard({ title, state, detail }: { title: string; state: '
   return <div className="quickquote-state-card" data-state={state} role="status" aria-label={`${title} ${state}`}><span>{title}</span><strong>{state === 'loading' ? 'Loading' : state === 'empty' ? 'Empty' : 'Ready'}</strong><small>{detail}</small></div>;
 }
 
-function QuickQuotePricingInputs({ fields, values, errors, dropdownOptions, dropdownLoading, selectedProduct, missingFields, onChange, onFocusField }: { fields: ScenarioIntakeField[]; values: BorrowerIntake; errors: IntakeFieldErrors; dropdownOptions: DropdownOptionsByField; dropdownLoading: boolean; selectedProduct: AuthorizedProduct | null; missingFields: PipelineRequiredField[]; onChange: (field: keyof BorrowerIntake, value: string, options?: { autoSave?: boolean }) => void; onFocusField: (fieldId: keyof BorrowerIntake) => void }) {
-  const missingIds = new Set(missingFields.map((field) => String(field.fieldId)));
-  const productChannel = selectedProduct?.channelCode ?? '';
-  const firstMissingField = missingFields[0];
+function QuickQuotePricingInputs({ fields, values, errors, dropdownOptions, dropdownLoading, missingFields, onChange }: { fields: ScenarioIntakeField[]; values: BorrowerIntake; errors: IntakeFieldErrors; dropdownOptions: DropdownOptionsByField; dropdownLoading: boolean; missingFields: PipelineRequiredField[]; onChange: (field: keyof BorrowerIntake, value: string, options?: { autoSave?: boolean }) => void }) {
   return (
     <section className="quickquote-pricing-inputs" aria-labelledby="quickquote-pricing-inputs-heading">
       <div className="quickquote-pricing-inputs__header">
@@ -2204,87 +2188,6 @@ function QuickQuotePricingInputs({ fields, values, errors, dropdownOptions, drop
         <span className="quickquote-pricing-inputs__state" data-ready={missingFields.length === 0}>{missingFields.length === 0 ? 'Ready' : `${missingFields.length} missing`}</span>
       </div>
       <StepFields fields={fields} intake={values} errors={errors} onChange={onChange} dropdownOptions={dropdownOptions} dropdownLoading={dropdownLoading} />
-      <div className="quickquote-pricing-inputs__controls" aria-label="QuickQuote pricing fill controls">
-        <button type="button" className="quote-filter-clear" onClick={() => productChannel && onChange('channel', productChannel, { autoSave: false })} disabled={!productChannel || !missingIds.has('channel')}>Use selected product channel</button>
-        <button type="button" className="quote-filter-clear" onClick={() => firstMissingField && onFocusField(firstMissingField.fieldId)} disabled={!firstMissingField}>Review first missing input</button>
-      </div>
-    </section>
-  );
-}
-
-function QuickQuotePrefillGroups({ sections, values, mappings, overrides }: { sections: Array<{ step: QuoteIntakeStepDefinition; fields: ScenarioIntakeField[] }>; values: BorrowerIntake; mappings: QuickQuoteLosPrefillMapping[]; overrides: Record<string, LosOverrideAudit> }) {
-  const visible = sections.map(({ step, fields }) => ({ step, fields: fields.filter((field) => !isSaveRetrieveIdentifierField(String(field.fieldId))) })).filter(({ fields }) => fields.length > 0).slice(0, 6);
-  if (visible.length === 0) return <div className="quickquote-prefill-empty" role="status">No mapped borrower detail groups.</div>;
-  return (
-    <ol className="quickquote-prefill-groups" aria-label="Mapped borrower detail groups">
-      {visible.map(({ step, fields }) => {
-        const mapped = fields.filter((field) => (values[field.fieldId] ?? '').trim()).length;
-        return (
-          <li key={step.section}>
-            <div className="quickquote-prefill-group__summary"><span>{step.label}</span><strong>{mapped}/{fields.length}</strong></div>
-            <ul className="quickquote-prefill-metadata" aria-label={`${step.label} borrower detail status`}>
-              {fields.slice(0, 4).map((field, index) => {
-                const mapping = mappingForField(mappings, field);
-                const override = overrides[String(field.fieldId)];
-                return (
-                  <li key={`${String(field.fieldId)}-${index}`} data-value-state={override ? 'overridden' : (values[field.fieldId] ?? '').trim() ? 'supplied' : 'missing'}>
-                    <span>{field.label}</span>
-                    <small>{prefillValueState(field, values, override)} · {missingCategoryLabel(mapping.missingCategory)}</small>
-                  </li>
-                );
-              })}
-            </ul>
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
-
-function QuickQuoteMissingFacts({ fields, mappings, values }: { fields: PipelineRequiredField[]; mappings: QuickQuoteLosPrefillMapping[]; values: BorrowerIntake }) {
-  const missingMapped = mappings.filter((mapping) => !(values[mapping.fieldId] ?? '').trim());
-  const grouped = missingPrefillGroups(fields, missingMapped);
-  return (
-    <section className="quickquote-missing-facts" aria-labelledby="quickquote-missing-heading">
-      <h3 id="quickquote-missing-heading">Missing facts</h3>
-      <div className="quickquote-reason-chips" aria-label="Missing fact reason categories">
-        <span>Required to price: {grouped.requiredToPrice.length}</span>
-        <span>Improves pricing: {grouped.improvesPricing.length}</span>
-        <span>Before lock: {grouped.requiredBeforeLock.length}</span>
-      </div>
-      {missingMapped.length > 0 ? <ul>{missingMapped.slice(0, 8).map((mapping, index) => <li key={`${String(mapping.fieldId)}-${index}`}>{mapping.wcpeField} <small>{missingCategoryLabel(mapping.missingCategory)}</small></li>)}</ul> : fields.length > 0 ? <ul>{fields.slice(0, 6).map((field, index) => <li key={`${String(field.fieldId)}-${index}`}>{field.label}</li>)}</ul> : <span className="quickquote-ready-chip">No required pricing facts missing</span>}
-    </section>
-  );
-}
-
-function QuickQuoteMappedFieldOverrides({ fields, values, errors, dropdownOptions, dropdownLoading, onChange }: { fields: ScenarioIntakeField[]; values: BorrowerIntake; errors: IntakeFieldErrors; dropdownOptions: DropdownOptionsByField; dropdownLoading: boolean; onChange: (field: keyof BorrowerIntake, value: string) => void }) {
-  if (fields.length === 0) return null;
-  return (
-    <section className="quickquote-mapped-overrides" aria-labelledby="quickquote-mapped-overrides-heading">
-      <h3 id="quickquote-mapped-overrides-heading">Borrower details</h3>
-      <p>Edit borrower details before saving the draft or launching pricing.</p>
-      <StepFields fields={fields} intake={values} errors={errors} onChange={onChange} dropdownOptions={dropdownOptions} dropdownLoading={dropdownLoading} />
-    </section>
-  );
-}
-
-function QuickQuoteOverrideAudit({ overrides }: { overrides: LosOverrideAudit[] }) {
-  return (
-    <section className="quickquote-override-audit" aria-labelledby="quickquote-override-heading">
-      <h3 id="quickquote-override-heading">Recent edits</h3>
-      {overrides.length === 0 ? <p>No imported values were edited in this draft.</p> : (
-        <ul>
-          {overrides.map((override) => (
-            <li key={String(override.fieldId)}>
-              <strong>{override.label}</strong>
-              <span>Original value: {override.originalValue}</span>
-              <span>Edited value: {override.overrideValue}</span>
-              <span>Edited by: {override.actor} at {override.changedAt}</span>
-              <small>Pricing impact is rechecked when the quote is launched.</small>
-            </li>
-          ))}
-        </ul>
-      )}
     </section>
   );
 }
@@ -2312,29 +2215,6 @@ function deriveLosPrefillMapping(field: ScenarioIntakeField, requiredFacts: Set<
     authorizationState: 'uses tenant quote-runs metadata endpoint',
     affectedOutputTraces: [`quote-fact:${String(field.fieldId)}`, `prefill-source:${source}`],
   };
-}
-
-function mappingForField(mappings: QuickQuoteLosPrefillMapping[], field: ScenarioIntakeField) {
-  return mappings.find((mapping) => mapping.fieldId === field.fieldId) ?? deriveLosPrefillMapping(field, new Set());
-}
-
-function prefillValueState(field: ScenarioIntakeField, values: BorrowerIntake, override?: LosOverrideAudit) {
-  if (override) return 'Overridden';
-  return (values[field.fieldId] ?? '').trim() ? 'Supplied' : 'Missing';
-}
-
-function missingPrefillGroups(_fields: PipelineRequiredField[], mappings: QuickQuoteLosPrefillMapping[]) {
-  return {
-    requiredToPrice: mappings.filter((mapping) => mapping.missingCategory === 'required_to_price'),
-    improvesPricing: mappings.filter((mapping) => mapping.missingCategory === 'improves_pricing'),
-    requiredBeforeLock: mappings.filter((mapping) => mapping.missingCategory === 'required_before_lock'),
-  };
-}
-
-function missingCategoryLabel(category: QuickQuoteLosPrefillMapping['missingCategory']) {
-  if (category === 'required_to_price') return 'required to price';
-  if (category === 'required_before_lock') return 'required before lock';
-  return 'improves pricing';
 }
 
 function isLockRelatedField(field: ScenarioIntakeField) {
@@ -2494,11 +2374,7 @@ function QuickQuoteSubmitGate({ missingFacts }: { missingFacts: number }) {
   return (
     <section className="quickquote-empty-state" role="status" aria-label="QuickQuote products pending submit">
       <h3>Submit details to view products</h3>
-      <p>Sarah can enter pricing facts on the left, then use Find Products to reveal mortgage options. Borrower last name and loan number stay in save/retrieve dialogs.</p>
-      <div className="quickquote-reason-chips" aria-label="QuickQuote submit status">
-        <span>{missingFacts > 0 ? `Missing facts: ${missingFacts}` : 'Pricing facts ready'}</span>
-        <span>Products hidden until submit</span>
-      </div>
+      {missingFacts > 0 ? <span className="quickquote-ready-chip">{missingFacts} required input{missingFacts === 1 ? '' : 's'} remaining</span> : null}
     </section>
   );
 }
@@ -2507,35 +2383,9 @@ function QuickQuoteEmptyState({ missingFacts }: { missingFacts: number }) {
   return (
     <section className="quickquote-empty-state" role="status" aria-label="QuickQuote empty state">
       <h3>No products displayed</h3>
-      <div className="quickquote-reason-chips" aria-label="Empty state reason categories">
-        <span>Products: none</span>
-        <span>{missingFacts > 0 ? `Missing facts: ${missingFacts}` : 'Pricing facts ready'}</span>
-        <span>Pricing outputs: unavailable</span>
-      </div>
-      <div className="quickquote-empty-state__actions" aria-label="Empty state next actions">
-        <span className="quote-status-pill quote-status-pill--pending">Complete borrower facts</span>
-        <span className="quote-status-pill quote-status-pill--pending">Save draft from the action bar</span>
-      </div>
+      {missingFacts > 0 ? <span className="quickquote-ready-chip">{missingFacts} required input{missingFacts === 1 ? '' : 's'} remaining</span> : null}
     </section>
   );
-}
-
-function productStatusCounts(products: AuthorizedProduct[]) {
-  return products.reduce((acc, product) => {
-    if (product.status === 'ACTIVE') acc.eligible += 1;
-    else if (product.status === 'PENDING') acc.refer += 1;
-    else acc.ineligible += 1;
-    return acc;
-  }, { eligible: 0, refer: 0, ineligible: 0 });
-}
-
-function borrowerContextLabel(values: BorrowerIntake) {
-  const joined = [values.borrowerFirstName, values.borrowerLastName].filter((value) => value.trim()).join(' ').trim();
-  return joined || values.borrowerName || 'Borrower pending';
-}
-
-function loanContextLabel(values: BorrowerIntake) {
-  return values.loanNumber || values.externalLoanId || values.scenarioName || 'Loan pending';
 }
 
 function pickFields(values: BorrowerIntake, fields: ScenarioIntakeField[]) {
@@ -2960,16 +2810,6 @@ function filterLiveOffers(offers: OfferSummary[], filters: ProductFilterState) {
     const maxRateMatches = maxRate == null || rate == null || rate <= maxRate;
     return typeMatches && investorMatches && channelMatches && statusMatches && minRateMatches && maxRateMatches;
   });
-}
-
-function offerStatusCounts(offers: OfferSummary[]) {
-  return offers.reduce((acc, offer) => {
-    const status = normalized(offerStatusText(offer));
-    if (status.includes('approved') || status.includes('eligible') || status.includes('available')) acc.eligible += 1;
-    else if (status.includes('reject') || status.includes('ineligible') || status.includes('blocked')) acc.ineligible += 1;
-    else acc.refer += 1;
-    return acc;
-  }, { eligible: 0, refer: 0, ineligible: 0 });
 }
 
 function offerStatusText(offer: OfferSummary) {

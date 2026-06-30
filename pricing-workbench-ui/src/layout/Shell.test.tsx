@@ -93,14 +93,14 @@ describe('responsive layout shell', () => {
 
     expect(screen.getByText('Skip to main content')).toHaveAttribute('href', '#main-content');
     expect(screen.getByRole('banner')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Pricing Workbench' })).toBeInTheDocument();
-    expect(screen.getByRole('banner')).not.toHaveTextContent(/LoanWeft|PPE Command Center/i);
+    expect(screen.getByRole('heading', { name: 'LoanWeft' })).toBeInTheDocument();
+    expect(screen.getByRole('banner')).not.toHaveTextContent(/Pricing Workbench|PPE Command Center/i);
     expect(screen.queryByRole('navigation', { name: 'Main navigation' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Open navigation menu' }));
     expect(screen.getByRole('dialog', { name: 'Primary navigation drawer' })).toBeInTheDocument();
     expect(screen.getByRole('main')).toHaveTextContent('Screen content');
-    expect(screen.getByRole('contentinfo')).toHaveTextContent('Pricing Workbench v0.1.0');
-    expect(screen.getByRole('contentinfo')).not.toHaveTextContent(/LoanWeft|PPE Command Center/i);
+    expect(screen.getByRole('contentinfo')).toHaveTextContent('LoanWeft v0.1.0');
+    expect(screen.getByRole('contentinfo')).not.toHaveTextContent(/Pricing Workbench|PPE Command Center/i);
     expect(screen.getByRole('link', { name: 'Quote workspace' })).toHaveClass('layout-sidebar__link--active');
   });
 

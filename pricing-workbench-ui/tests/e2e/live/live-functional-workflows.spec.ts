@@ -9,7 +9,7 @@ const jsonlPath = process.env.TARGETED_FUNCTIONAL_RESULTS_PATH ? resolve(rootDir
 
 const sarah = {
   id: 'synthetic-sarah-mitchell',
-  email: 'sarah.mitchell@wcpe.demo',
+  email: 'sarah.mitchell@loanweft.demo',
   fullName: 'Sarah Mitchell',
   role: 'loan_officer',
 };

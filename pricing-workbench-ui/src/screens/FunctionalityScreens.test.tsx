@@ -33,7 +33,7 @@ describe('PII-25-S04 functionality page modules', () => {
 describe('PII-25-S04 page behavior', () => {
   it('TenantOnboardingTest.rendersAllSections', async () => {
     const onEvidenceCapture = vi.fn();
-    render(<TenantOnboardingScreen onEvidenceCapture={onEvidenceCapture} />);
+    render(<TenantOnboardingScreen visualState="ready" onEvidenceCapture={onEvidenceCapture} />);
     expect(screen.getByRole('heading', { name: 'Tenant Onboarding' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Workspace Setup' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Identity Configuration' })).toBeInTheDocument();

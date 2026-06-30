@@ -417,6 +417,77 @@ class PricingBffUiFallbackAdapter {
         traceId);
   }
 
+  Map<String, Object> tenantProducts(String tenantId, Integer page, Integer pageSize, String uiTraceId) {
+    String tenant = normalizedTenantKey(tenantId);
+    List<Map<String, Object>> products = catalogProductRefs();
+    return Map.of(
+        "tenantContext", tenant,
+        "page", page == null ? 1 : page,
+        "pageSize", pageSize == null ? products.size() : pageSize,
+        "totalElements", products.size(),
+        "products", products,
+        "availableFilters", catalogAvailableFilters(products),
+        "dependencyStatus", "CATALOG_SERVICE_DROPDOWN_CONTRACT_NOT_CONFIGURED",
+        "uiTraceId", normalizeTrace(uiTraceId),
+        "fallbackReason", "Configured catalog-service product dropdowns are unavailable; pricing-bff returns safe non-pricing option refs so the browser does not probe missing endpoints.");
+  }
+
+  Map<String, Object> productCatalogProducts(String tenantId, String uiTraceId) {
+    return Map.of(
+        "tenantContext", normalizedTenantKey(tenantId),
+        "products", catalogProductRefs(),
+        "dependencyStatus", "CATALOG_SERVICE_PRODUCTS_CONTRACT_NOT_CONFIGURED",
+        "uiTraceId", normalizeTrace(uiTraceId));
+  }
+
+  Map<String, Object> productCatalogInvestors(String tenantId, String uiTraceId) {
+    return Map.of(
+        "tenantContext", normalizedTenantKey(tenantId),
+        "investors", catalogInvestorRefs(),
+        "dependencyStatus", "CATALOG_SERVICE_INVESTORS_CONTRACT_NOT_CONFIGURED",
+        "uiTraceId", normalizeTrace(uiTraceId));
+  }
+
+  Map<String, Object> productCatalogChannels(String tenantId, String uiTraceId) {
+    return Map.of(
+        "tenantContext", normalizedTenantKey(tenantId),
+        "channels", catalogChannelRefs(),
+        "dependencyStatus", "CATALOG_SERVICE_CHANNELS_CONTRACT_NOT_CONFIGURED",
+        "uiTraceId", normalizeTrace(uiTraceId));
+  }
+
+  private List<Map<String, Object>> catalogProductRefs() {
+    return List.of(
+        Map.of("productCode", "catalog-ref-conventional", "productName", "Conventional catalog reference", "productType", "Conventional", "investorCode", "FNMA", "channelCode", "RETAIL", "status", "CONFIG_REQUIRED"),
+        Map.of("productCode", "catalog-ref-fha", "productName", "FHA catalog reference", "productType", "FHA", "investorCode", "GNMA", "channelCode", "RETAIL", "status", "CONFIG_REQUIRED"),
+        Map.of("productCode", "catalog-ref-jumbo", "productName", "Jumbo catalog reference", "productType", "Jumbo", "investorCode", "OB", "channelCode", "WHOLESALE", "status", "CONFIG_REQUIRED"));
+  }
+
+  private List<Map<String, Object>> catalogInvestorRefs() {
+    return List.of(
+        Map.of("investorCode", "FNMA", "name", "FNMA catalog reference", "status", "CONFIG_REQUIRED"),
+        Map.of("investorCode", "GNMA", "name", "GNMA catalog reference", "status", "CONFIG_REQUIRED"),
+        Map.of("investorCode", "OB", "name", "OB catalog reference", "status", "CONFIG_REQUIRED"));
+  }
+
+  private List<Map<String, Object>> catalogChannelRefs() {
+    return List.of(
+        Map.of("channelCode", "RETAIL", "name", "Retail catalog reference", "status", "CONFIG_REQUIRED"),
+        Map.of("channelCode", "WHOLESALE", "name", "Wholesale catalog reference", "status", "CONFIG_REQUIRED"),
+        Map.of("channelCode", "CORRESPONDENT", "name", "Correspondent catalog reference", "status", "CONFIG_REQUIRED"));
+  }
+
+  private Map<String, List<String>> catalogAvailableFilters(List<Map<String, Object>> products) {
+    return Map.of(
+        "productTypes", uniqueStringValues(products, "productType"),
+        "investors", uniqueStringValues(products, "investorCode"),
+        "channels", uniqueStringValues(products, "channelCode"));
+  }
+
+  private List<String> uniqueStringValues(List<Map<String, Object>> records, String key) {
+    return records.stream().map(record -> normalizedRaw(record.get(key))).filter(value -> !value.isBlank()).distinct().toList();
+  }
+
   @PostMapping("/api/v1/tenants/{tenantId}/quote-runs")
   ResponseEntity<QuoteRunLaunch> launchQuoteRun(@PathVariable String tenantId,
       @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId,

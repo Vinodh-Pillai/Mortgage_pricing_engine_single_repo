@@ -284,7 +284,7 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     screenPackage: 'screens/tenant',
     dataBoundary: 'tenant-service tenant onboarding APIs',
     stateCoverage: ['loading', 'empty', 'blocked', 'needs-attention', 'ready'],
-    personaVisibility: ['admin', 'operations-lead'],
+    personaVisibility: ['admin', 'operations-lead', 'pricing-analyst', 'governance-reviewer'],
     dependencyStatus: 'Tenant-service metadata is required for full launch. The screen shows blocked and attention states when refs are unavailable.',
     adapterStatus: 'Local UI renders progressive sections and evidence refs without inventing tenant values.',
     evidenceTarget: '.local-harness/evidence/PII-25-S04/tenant-onboarding.json',
