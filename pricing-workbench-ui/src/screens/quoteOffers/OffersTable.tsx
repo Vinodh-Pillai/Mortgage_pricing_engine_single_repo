@@ -1,9 +1,8 @@
-import { ChipList } from '../../components/ChipList';
 import type { OfferSummary } from '../../lib/api/offers';
-import { businessFacingText } from '../../lib/utils/businessFacingText';
 import type { CSSProperties, KeyboardEvent } from 'react';
 import type { OfferSortField } from './offerComparison';
-import { valueText } from './offerComparison';
+import { offerDisplayName, valueText, visibleOfferEvidenceValues } from './offerComparison';
+import { ChipList } from '../../components/ChipList';
 
 type OffersTableProps = {
   offers: OfferSummary[];
@@ -31,7 +30,7 @@ const tableGridStyle: CSSProperties = {
 
 const rowStyle: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: 'minmax(4rem, 0.45fr) minmax(14rem, 2fr) repeat(5, minmax(7rem, 0.85fr)) minmax(16rem, 1.6fr) minmax(12rem, 1.15fr) minmax(16rem, 1.5fr)',
+  gridTemplateColumns: 'minmax(16rem, 2fr) repeat(4, minmax(7rem, 0.85fr)) minmax(16rem, 1.6fr) minmax(12rem, 1.15fr) minmax(16rem, 1.5fr)',
 };
 
 const headerRowStyle: CSSProperties = {
@@ -56,41 +55,36 @@ export function OffersTable({ offers, selectedOfferId, compareOfferIds, onInspec
   const visible = offers.slice(0, boundedRenderCount);
   return (
     <div className="quote-table-shell" style={tableShellStyle} aria-label="Responsive quote offer table region">
-      <div className="quote-table" role="table" aria-label="Ranked quote offers" aria-rowcount={offers.length} style={tableGridStyle}>
+      <div className="quote-table" role="table" aria-label="Quote offer comparison" aria-rowcount={offers.length} style={tableGridStyle}>
         <div role="row" className="quote-table__row quote-table__row--head" style={headerRowStyle}>
-          <SortableHeader label="Rank" field="rank" onSortField={onSortField} />
           <span role="columnheader">Product</span>
           <SortableHeader label="Rate" field="rate" onSortField={onSortField} />
           <SortableHeader label="APR" field="apr" onSortField={onSortField} />
           <SortableHeader label="Payment" field="payment" onSortField={onSortField} />
-          <SortableHeader label="Confidence" field="confidence" onSortField={onSortField} />
-          <SortableHeader label="Rank score" field="rankScore" onSortField={onSortField} />
+          <span role="columnheader">Lock</span>
           <span role="columnheader">Rationale</span>
           <span role="columnheader">Flags</span>
           <span role="columnheader" className="quote-table__actions-cell" style={actionHeaderStyle}>Actions</span>
         </div>
         {visible.map((offer) => {
           const selected = selectedOfferId === offer.offerId;
+          const displayName = offerDisplayName(offer);
           return (
             <div key={offer.offerId} role="row" className={selected ? 'quote-table__row quote-table__row--selected' : 'quote-table__row'} aria-selected={selected} tabIndex={0} onKeyDown={(event) => handleRowKey(event, offer, onSelect, onCompareToggle)} style={rowStyle}>
-              <span role="cell">#{offer.rank}</span>
               <span role="cell">
-                <strong>{offer.productLabel ?? offer.offerId}</strong>
-                <br />Source: {valueText(offer.sourceLabel)}
-                <br />Price: {valueText(offer.price)} · Lock: {valueText(offer.lockPeriodDays)}
-                <ChipList label={`${offer.offerId} source refs`} values={(offer.sourceRefs ?? []).map(businessFacingText)} />
+                <strong>{displayName}</strong>
+                <br />Price: {valueText(offer.price)} · Investor: {valueText(offer.investor)}
               </span>
               <span role="cell">{valueText(offer.rate)}</span>
               <span role="cell">{valueText(offer.apr)}</span>
               <span role="cell">{valueText(offer.payment)}</span>
-              <span role="cell">{valueText(offer.confidence)}</span>
-              <span role="cell">{valueText(offer.rankScore)}</span>
-              <span role="cell"><ChipList label={`${offer.offerId} rationale`} values={offer.rationaleChips} /></span>
-              <span role="cell"><ChipList label={`${offer.offerId} flags`} values={offer.scenarioFlags} /></span>
+              <span role="cell">{valueText(offer.lockPeriodDays)}</span>
+              <span role="cell"><ChipList label={`${displayName} rationale`} values={visibleOfferEvidenceValues(offer.rationaleChips)} /></span>
+              <span role="cell"><ChipList label={`${displayName} flags`} values={visibleOfferEvidenceValues(offer.scenarioFlags)} /></span>
               <span role="cell" className="quick-quote-state quote-table__actions-cell" style={actionCellStyle}>
-                <label><input type="radio" name="selected-offer" checked={selected} onChange={() => onSelect(offer)} /> Select offer</label>
-                <label><input type="checkbox" checked={compareOfferIds.includes(offer.offerId)} onChange={() => onCompareToggle(offer.offerId)} /> Compare offers</label>
-                <button type="button" aria-label={`Inspect explanation for offer ${offer.offerId}`} onMouseEnter={() => onInspect(offer)} onFocus={() => onInspect(offer)} onClick={() => onInspect(offer)}>Inspect explanation</button>
+                <label><input type="radio" name="selected-offer" aria-label={`Select offer ${displayName}`} checked={selected} onChange={() => onSelect(offer)} /> Select offer</label>
+                <label><input type="checkbox" aria-label={`Compare offer ${displayName}`} checked={compareOfferIds.includes(offer.offerId)} onChange={() => onCompareToggle(offer.offerId)} /> Compare offers</label>
+                <button type="button" aria-label={`Inspect explanation for offer ${displayName}`} onMouseEnter={() => onInspect(offer)} onFocus={() => onInspect(offer)} onClick={() => onInspect(offer)}>Inspect explanation</button>
               </span>
             </div>
           );
@@ -106,6 +100,7 @@ function SortableHeader({ label, field, onSortField }: { label: string; field: O
 }
 
 function handleRowKey(event: KeyboardEvent, offer: OfferSummary, onSelect: (offer: OfferSummary) => void, onCompareToggle: (offerId: string) => void) {
+  if (isNestedInteractiveTarget(event.target)) return;
   if (event.key === 'Enter') {
     event.preventDefault();
     onSelect(offer);
@@ -114,4 +109,8 @@ function handleRowKey(event: KeyboardEvent, offer: OfferSummary, onSelect: (offe
     event.preventDefault();
     onCompareToggle(offer.offerId);
   }
+}
+
+function isNestedInteractiveTarget(target: EventTarget | null) {
+  return target instanceof Element && Boolean(target.closest('button, input, select, textarea, a, label, [role="button"], [role="menuitem"], [role="checkbox"], [role="radio"]'));
 }

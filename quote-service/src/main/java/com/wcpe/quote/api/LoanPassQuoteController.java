@@ -4,10 +4,13 @@ import com.wcpe.quote.LoanPassQuoteModels.ExecuteProductResponse;
 import com.wcpe.quote.LoanPassQuoteModels.ExecuteSummaryResponse;
 import com.wcpe.quote.LoanPassQuoteService;
 import com.wcpe.quote.QuoteCreateException;
+import jakarta.servlet.http.HttpServletRequest;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -43,8 +46,31 @@ public class LoanPassQuoteController {
     }
 
     @ExceptionHandler(QuoteCreateException.class)
-    public ResponseEntity<Map<String, String>> quoteError(QuoteCreateException ex) {
+    public ResponseEntity<Map<String, String>> quoteError(QuoteCreateException ex, HttpServletRequest request) {
         HttpStatus status = "LOANPASS_PRODUCT_NOT_FOUND".equals(ex.code()) ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
-        return ResponseEntity.status(status).body(Map.of("code", ex.code(), "message", ex.getMessage()));
+        return ResponseEntity.status(status).body(errorBody(ex.code(), ex.getMessage(), request));
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<Map<String, String>> invalidHeader(MethodArgumentTypeMismatchException ex, HttpServletRequest request) {
+        if (UUID.class.equals(ex.getRequiredType())) {
+            return ResponseEntity.badRequest().body(errorBody(
+                "LOANPASS_TENANT_INVALID",
+                "X-Tenant-ID header must be a UUID when supplied",
+                request
+            ));
+        }
+        return ResponseEntity.badRequest().body(errorBody("LOANPASS_REQUEST_INVALID", ex.getMessage(), request));
+    }
+
+    private Map<String, String> errorBody(String code, String message, HttpServletRequest request) {
+        Map<String, String> body = new LinkedHashMap<>();
+        body.put("code", code);
+        body.put("message", message);
+        String correlationId = request.getHeader("X-Correlation-ID");
+        if (correlationId != null && !correlationId.isBlank()) {
+            body.put("correlationId", correlationId);
+        }
+        return body;
     }
 }

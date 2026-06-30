@@ -72,7 +72,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: pricing-workbench-ui
-          image: 192.168.4.102:32061/mortgage-pricing/pricing-workbench-ui:0.1.0-nextinput-1-zero-fix-20260629T132700Z-amd64
+          image: 192.168.4.102:32061/mortgage-pricing/pricing-workbench-ui:0.1.0-nextinput-2-sanitized3-20260629T1632Z-amd64
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

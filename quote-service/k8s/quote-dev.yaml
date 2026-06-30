@@ -58,7 +58,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: quote-service
-          image: 192.168.4.102:32061/mortgage-pricing/quote-service:0.1.0-loanhouse-20260628T213954Z-amd64
+          image: 192.168.4.102:32061/mortgage-pricing/quote-service:0.1.0-nextinput-2-final-20260629T153510Z-amd64
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

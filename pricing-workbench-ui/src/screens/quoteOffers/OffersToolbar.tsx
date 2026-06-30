@@ -15,7 +15,13 @@ type OffersToolbarProps = {
   onReset: () => void;
 };
 
-const sortFields: OfferSortField[] = ['rank', 'rate', 'apr', 'payment', 'confidence', 'rankScore'];
+const sortFields: OfferSortField[] = ['rank', 'rate', 'apr', 'payment'];
+
+function sortLabel(field: OfferSortField) {
+  if (field === 'rank') return 'Recommended order';
+  if (field === 'apr') return 'APR';
+  return field === 'rate' ? 'Rate' : 'Payment';
+}
 
 export function OffersToolbar({ sort, filters, productFamilies, investors, lockPeriods, eligibilityStates, viewMode, activeFilterCount, onSortChange, onFiltersChange, onViewModeChange, onReset }: OffersToolbarProps) {
   return (
@@ -23,7 +29,7 @@ export function OffersToolbar({ sort, filters, productFamilies, investors, lockP
       <label>
         Sort
         <select value={sort.field} onChange={(event) => onSortChange({ ...sort, field: event.target.value as OfferSortField })}>
-          {sortFields.map((field) => <option key={field} value={field}>{field}</option>)}
+          {sortFields.map((field) => <option key={field} value={field}>{sortLabel(field)}</option>)}
         </select>
       </label>
       <label>
@@ -50,10 +56,6 @@ export function OffersToolbar({ sort, filters, productFamilies, investors, lockP
       <label>
         Max rate
         <input inputMode="decimal" value={filters.rateMax} onChange={(event) => onFiltersChange({ ...filters, rateMax: event.target.value })} placeholder="No max" />
-      </label>
-      <label>
-        Min confidence
-        <input inputMode="numeric" value={filters.confidenceMin} onChange={(event) => onFiltersChange({ ...filters, confidenceMin: event.target.value })} placeholder="No min" />
       </label>
       <label>
         Lock period

@@ -176,8 +176,6 @@ export function Header({ breadcrumb, notificationCount, showAuthenticatedChrome 
                     <span className="layout-role-badge" style={{ '--layout-role-color': roleColor } as CSSProperties}>{user.role}</span>
                   </div>
                 </div>
-                <button type="button" role="menuitem" className="layout-user-menu__item" onClick={closeUserMenu}>{t('profile')}</button>
-                <button type="button" role="menuitem" className="layout-user-menu__item" onClick={closeUserMenu}>{t('settings')}</button>
                 <button type="button" role="menuitem" className="layout-user-menu__item" onClick={() => { onLogout?.(); closeUserMenu(); }}>Sign Out</button>
               </div>
             ) : null}

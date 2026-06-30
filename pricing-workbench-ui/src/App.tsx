@@ -118,6 +118,7 @@ import { DiagnosticsDetails } from './components/DiagnosticsDetails';
 import { ThemeProvider, useTheme } from './design-system';
 import { Shell } from './layout';
 import { AuthProvider, useAuth } from './lib/auth/AuthContext';
+import { visibleOfferEvidenceValues } from './screens/quoteOffers/offerComparison';
 import { RouteGuard } from './routing/RouteGuard';
 import { useCurrentRoute } from './routing/hooks';
 import QuoteLockScreen from './screens/quoteLock/LockWorkflow';
@@ -3146,7 +3147,6 @@ function OfferComparisonSection({ runId }: { runId: string }) {
   const navigate = useNavigate();
   const [offerState, setOfferState] = useState<OfferState>({ kind: 'loading' });
   const [sortKey, setSortKey] = useState('payment');
-  const [confidenceFilter, setConfidenceFilter] = useState('');
   const [selectedOffer, setSelectedOffer] = useState<OfferSummary | null>(null);
   const [explanation, setExplanation] = useState<OfferExplanationView | null>(null);
   const [selectionMessage, setSelectionMessage] = useState<string>('');
@@ -3217,9 +3217,7 @@ function OfferComparisonSection({ runId }: { runId: string }) {
   }
 
   const comparison = offerState.comparison;
-  const visibleOffers = stableSortedOffers(comparison.offers, sortKey).filter((offer) =>
-    confidenceFilter ? valueText(offer.confidence).toLowerCase().includes(confidenceFilter.toLowerCase()) : true,
-  );
+  const visibleOffers = stableSortedOffers(comparison.offers, sortKey);
   const commitBlocked = comparison.commitBlocked || !selectedOffer || explanation?.commitBlocked !== false;
 
   return (
@@ -3245,24 +3243,17 @@ function OfferComparisonSection({ runId }: { runId: string }) {
         {comparison.fallbackReason ? (
           <div className="banner banner--blocked" role="alert">
             <strong>Explanation data required</strong>
-            <span>{businessFacingText(comparison.fallbackReason)}</span>
+            <span>{safeOfferMessage(comparison.fallbackReason, 'Explanation data needs connected pricing review.')}</span>
           </div>
         ) : null}
         <ChipList label="Required quote facts" values={(comparison.requiredFacts ?? []).map(businessFacingText)} />
-        <ChipList label="Backend quote refs" values={(comparison.backendRefs ?? []).map(businessFacingText)} />
+        <ChipList label="Pricing evidence" values={pricingEvidenceAvailability(comparison.backendRefs)} />
 
         <div className="offer-toolbar" aria-label="Offer comparison controls">
           <label htmlFor="offer-sort">Sort by</label>
           <select id="offer-sort" value={sortKey} onChange={(event) => setSortKey(event.target.value)}>
-            {(comparison.sortOptions.length > 0 ? comparison.sortOptions : ['rank']).map((option) => <option key={option} value={option}>{option}</option>)}
+            {['payment', 'apr', 'rate', 'rank'].map((option) => <option key={option} value={option}>{option === 'rank' ? 'Recommended order' : businessFacingText(option)}</option>)}
           </select>
-          <label htmlFor="confidence-filter">Filter confidence</label>
-          <input
-            id="confidence-filter"
-            value={confidenceFilter}
-            onChange={(event) => setConfidenceFilter(event.target.value)}
-            placeholder="Confidence text"
-          />
         </div>
 
         {visibleOffers.length === 0 ? (
@@ -3275,7 +3266,7 @@ function OfferComparisonSection({ runId }: { runId: string }) {
               <section aria-labelledby="offer-support-detail-heading">
                 <h3 id="offer-support-detail-heading">Explanation details</h3>
                 <ChipList label="Required quote facts" values={(comparison.requiredFacts ?? []).map(businessFacingText)} />
-                <ChipList label="Backend quote refs" values={(comparison.backendRefs ?? []).map(businessFacingText)} />
+                <ChipList label="Pricing evidence" values={pricingEvidenceAvailability(comparison.backendRefs)} />
                 <p>Offer selection remains fail-closed; no pricing, eligibility, or investor values are inferred in the browser.</p>
               </section>
             ) : null}
@@ -3287,19 +3278,16 @@ function OfferComparisonSection({ runId }: { runId: string }) {
                 key={offer.offerId}
                 className={selectedOffer?.offerId === offer.offerId ? 'offer-card offer-card--selected' : 'offer-card'}
                 role="listitem"
-                aria-label={`Offer ${offer.offerId} rank ${offer.rank} confidence ${valueText(offer.confidence)}`}
+                aria-label={`Offer ${offer.productLabel || offer.offerId}`}
               >
                 <h3>{offer.productLabel || offer.offerId}</h3>
                 <dl>
                   <dt>Payment</dt><dd>{valueText(offer.payment)}</dd>
                   <dt>APR</dt><dd>{valueText(offer.apr)}</dd>
-                  <dt>Confidence</dt><dd>{valueText(offer.confidence)}</dd>
-                  <dt>Rank score</dt><dd>{valueText(offer.rankScore)}</dd>
-                  <dt>Scenario version</dt><dd>{valueText(offer.scenarioVersion)}</dd>
                 </dl>
-                <ChipList label="Rationale" values={offer.rationaleChips} />
-                <ChipList label="Scenario flags" values={offer.scenarioFlags} />
-                <ChipList label="Service setup details" values={(offer.upstreamRefs ?? []).map(businessFacingText)} />
+                <ChipList label="Rationale" values={visibleOfferEvidenceValues(offer.rationaleChips)} />
+                <ChipList label="Scenario flags" values={visibleOfferEvidenceValues(offer.scenarioFlags)} />
+                <ChipList label="Pricing evidence" values={pricingEvidenceAvailability(offer.upstreamRefs)} />
                 <ChipList label="Lock eligibility refs" values={offer.lockEligibilityRefs ?? []} />
                 <ChipList label="Snapshot refs" values={offer.snapshotRefs ?? []} />
                 <ChipList label="Review references" values={(offer.auditIds ?? []).map(businessFacingText)} />
@@ -3321,16 +3309,16 @@ function OfferComparisonSection({ runId }: { runId: string }) {
         {explanation ? (
           explanation.status === 'AVAILABLE' ? (
             <>
-              <ul>{explanation.rationaleLines.map((line) => <li key={line}>{line}</li>)}</ul>
+              <ChipList label="Rationale lines" values={visibleOfferEvidenceValues(explanation.rationaleLines)} />
               <ChipList label="Explanation sections" values={(explanation.explanationSections ?? []).map(businessFacingText)} />
-              <ChipList label="Explanation configured service refs" values={(explanation.upstreamRefs ?? []).map(businessFacingText)} />
+              <ChipList label="Pricing explanation evidence" values={pricingEvidenceAvailability(explanation.upstreamRefs)} />
               <ChipList label="Explanation snapshot refs" values={(explanation.snapshotRefs ?? []).map(businessFacingText)} />
               <ChipList label="Explanation review references" values={(explanation.auditIds ?? []).map(businessFacingText)} />
             </>
           ) : (
             <div className="banner banner--blocked" role="alert">
               <strong>Explanation missing</strong>
-              <span>{explanation.message}</span>
+              <span>{safeOfferMessage(explanation.message, 'Explanation details are not ready for borrower review.')}</span>
             </div>
           )
         ) : (
@@ -3386,7 +3374,7 @@ function QuoteDetailSection({ runId, offerId }: { runId: string; offerId: string
         <p className="eyebrow">Quote detail Â· PII-22-S23</p>
         <h2 id="quote-detail-title">Quote detail for {businessFacingText(detail.offerId)}</h2>
         <p>
-          Review card summary, ranking, pricing waterfall references, redactions, compliance flags, and review/processing evidence from
+          Review card summary, pricing waterfall references, redactions, compliance flags, and review/processing evidence from
           configured service facts. The workbench does not calculate note rate, final price, margin, or adjustments.
         </p>
       </section>
@@ -3405,9 +3393,6 @@ function QuoteDetailSection({ runId, offerId }: { runId: string; offerId: string
         </div>
         <dl className="status-grid">
           <dt>Product</dt><dd>{valueText(summary.productLabel)}</dd>
-          <dt>Rank</dt><dd>{valueText(summary.rank)}</dd>
-          <dt>Rank score</dt><dd>{valueText(summary.rankScore)}</dd>
-          <dt>Scenario version</dt><dd>{valueText(summary.scenarioVersion)}</dd>
           <dt>Processing record</dt><dd>{businessFacingText(detail.replayHash)}</dd>
           <dt>Waterfall record</dt><dd>{businessFacingText(detailWaterfall.evidenceHash)}</dd>
         </dl>
@@ -3482,6 +3467,15 @@ function QuoteDetailSection({ runId, offerId }: { runId: string; offerId: string
 function ChipList({ label, values }: { label: string; values: string[] }) {
   if (!values.length) return <p className="field-help">No {label.toLowerCase()} provided.</p>;
   return <ul className="chip-list" aria-label={label}>{values.map((value, index) => <li key={`${value}-${index}`}>{value}</li>)}</ul>;
+}
+
+function pricingEvidenceAvailability(values: string[] | null | undefined) {
+  return (values ?? []).some((value) => value.trim()) ? ['Pricing service evidence available'] : [];
+}
+
+function safeOfferMessage(value: string | number | null | undefined, fallback: string) {
+  const text = businessFacingText(value);
+  return visibleOfferEvidenceValues([text]).length > 0 ? text : fallback;
 }
 
 function stableSortedOffers(offers: OfferSummary[], sortKey: string) {

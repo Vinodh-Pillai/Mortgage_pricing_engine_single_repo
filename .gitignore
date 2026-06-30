@@ -33,3 +33,6 @@ rate-feed-service/evidence/pii-04-implementation-receipt.md
 **/.local-harness/
 **/bin/
 **/.gradle-home
+**/.storybook
+**/storybook-static
+**/coverage

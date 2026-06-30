@@ -12,7 +12,7 @@ const lockConfig: FunctionalityPageConfig<LockRow> = {
   breadcrumb: 'Locks / Management',
   eyebrow: 'Lock service',
   title: 'Lock Management',
-  summary: 'Tracks lock requests, confirmed locks, expiring work, history, bulk operations, and investor delivery status. Connected service actions stay disabled unless required lock evidence is available.',
+  summary: 'Tracks lock requests, confirmed locks, expiring work, history, and investor delivery status using local preview data. Connected service actions are disabled until real lock records are available.',
   dataBoundary: 'lock-service: GET/POST /api/v1/locks',
   sections: [
     { id: 'active-locks', eyebrow: 'Active', title: 'Active Locks', summary: 'Confirmed and requested lock records.', status: 'ready', items: ['Confirmed locks', 'Requested locks', 'Owner refs'] },
@@ -25,14 +25,14 @@ const lockConfig: FunctionalityPageConfig<LockRow> = {
   metrics: [
     { label: 'Statuses', value: '5', help: 'requested, confirmed, expired, cancelled, delivered' },
     { label: 'Bulk ops', value: '3', help: 'extend, cancel, deliver' },
-    { label: 'Evidence', value: 'Enabled', help: 'Interactions captured' },
+    { label: 'Data source', value: 'Local preview', help: 'Connected lock-service actions are disabled in this UI preview.' },
   ],
   rows: [
-    { id: 'lock-requested', borrowerRef: 'Borrower ref A', delivery: 'Not ready', status: 'requested' },
-    { id: 'lock-confirmed', borrowerRef: 'Borrower ref B', delivery: 'Pending investor package', status: 'confirmed' },
-    { id: 'lock-expired', borrowerRef: 'Borrower ref C', delivery: 'Needs review', status: 'expired' },
-    { id: 'lock-cancelled', borrowerRef: 'Borrower ref D', delivery: 'Closed', status: 'cancelled' },
-    { id: 'lock-delivered', borrowerRef: 'Borrower ref E', delivery: 'Acknowledged', status: 'delivered' },
+    { id: 'lock-requested', borrowerRef: 'Preview borrower ref A', delivery: 'Not ready', status: 'requested' },
+    { id: 'lock-confirmed', borrowerRef: 'Preview borrower ref B', delivery: 'Pending investor package', status: 'confirmed' },
+    { id: 'lock-expired', borrowerRef: 'Preview borrower ref C', delivery: 'Needs review', status: 'expired' },
+    { id: 'lock-cancelled', borrowerRef: 'Preview borrower ref D', delivery: 'Closed', status: 'cancelled' },
+    { id: 'lock-delivered', borrowerRef: 'Preview borrower ref E', delivery: 'Acknowledged', status: 'delivered' },
   ],
   columns: [
     { key: 'borrowerRef', header: 'Borrower ref' },
@@ -40,8 +40,8 @@ const lockConfig: FunctionalityPageConfig<LockRow> = {
     { key: 'status', header: 'Status', render: (row) => <span className={`functionality-badge functionality-badge--${row.status}`}>{row.status}</span> },
   ],
   tableCaption: 'Lock management records',
-  primaryActions: [{ id: 'request-lock-review', label: 'Start Lock Review (local evidence only)', variant: 'primary' }],
-  secondaryActions: [{ id: 'extend-expiring-lock-review', label: 'Stage Extension Review' }, { id: 'show-expiry-blockers', label: 'Show Expiry Blockers' }, { id: 'extend-locks', label: 'Bulk extend' }, { id: 'cancel-locks', label: 'Bulk cancel', variant: 'danger' }, { id: 'deliver-locks', label: 'Bulk deliver' }],
+  primaryActions: [{ id: 'request-lock-review', label: 'Start Lock Review (preview disabled)', variant: 'primary', disabled: true }],
+  secondaryActions: [{ id: 'extend-expiring-lock-review', label: 'Stage Extension Review (preview disabled)', disabled: true }, { id: 'show-expiry-blockers', label: 'Show Expiry Blockers (preview only)' }, { id: 'extend-locks', label: 'Bulk extend (preview disabled)', disabled: true }, { id: 'cancel-locks', label: 'Bulk cancel (preview disabled)', variant: 'danger', disabled: true }, { id: 'deliver-locks', label: 'Bulk deliver (preview disabled)', disabled: true }],
   emptyMessage: 'No lock records are available for this workspace.',
   blockedMessage: 'Lock management is blocked until lock-service expiration and delivery references are available.',
   attentionMessage: 'Requested and expiring locks need operations review.',
@@ -70,10 +70,11 @@ function LockOperationsSpotlight({ onEvidence }: { onEvidence: (actionId: string
           <h2 id="lock-ops-spotlight-heading">Lock lifecycle actions</h2>
         </div>
       </div>
+      <p className="quote-intake-status">Preview data is visible for workflow review. Submission, extension, cancellation, and delivery actions are disabled until connected lock records are available.</p>
       <details className="field-help"><summary aria-label="Lock operation details">?</summary><span>Additional investor delivery and cutoff details are shown only when connected records are available.</span></details>
       <div className="offer-toolbar" aria-label="Local lock lifecycle actions">
-        <button type="button" onClick={() => stageAction('request-lock-review', 'Local-only lock review evidence is ready. Connected lock submission remains unavailable until investor and disclosure checks pass.')}>Start Lock Review (local evidence only)</button>
-        <button type="button" onClick={() => stageAction('extend-expiring-lock-review', 'Extension review started. Confirm investor cutoff and fee details before continuing.')}>Stage Extension Review</button>
+        <button type="button" disabled onClick={() => stageAction('request-lock-review', 'Connected lock review is disabled until real lock records are available.')}>Start Lock Review (preview disabled)</button>
+        <button type="button" disabled onClick={() => stageAction('extend-expiring-lock-review', 'Connected extension review is disabled until real lock records are available.')}>Stage Extension Review (preview disabled)</button>
         <button type="button" onClick={() => stageAction('show-expiry-items', 'Expiry items are ready for operations review.')}>Review Expiry Items</button>
       </div>
       {notice ? <div className="banner banner--info" role="status">{notice}</div> : null}

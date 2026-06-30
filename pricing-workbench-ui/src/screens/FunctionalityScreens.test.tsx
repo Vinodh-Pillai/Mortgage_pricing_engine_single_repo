@@ -50,13 +50,20 @@ describe('PII-25-S04 page behavior', () => {
     expect(within(table).queryByText('Purchase product draft')).not.toBeInTheDocument();
   });
 
-  it('RateSheetIntakeTest.handlesFileUpload', () => {
+  it('RateSheetIntakeTest.inspectsSelectedSourceAndKeepsPublishParserGated', async () => {
     const onEvidenceCapture = vi.fn();
     render(<RateSheetIntakeScreen onEvidenceCapture={onEvidenceCapture} />);
-    const file = new File(['preview'], 'ratesheet.csv', { type: 'text/csv' });
-    fireEvent.change(screen.getByLabelText(/Rate sheet file/i), { target: { files: [file] } });
-    expect(screen.getByText(/ratesheet.csv uploaded 100%/i)).toBeInTheDocument();
-    expect(onEvidenceCapture).toHaveBeenCalledWith(expect.objectContaining({ action: 'rate-sheet-file-selected' }));
+    const file = new File(['workbook-bytes'], 'tenant-rates.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    fireEvent.change(screen.getByLabelText(/Rate sheet source file/i), { target: { files: [file] } });
+    expect(await screen.findByText(/tenant-rates.xlsx · XLSX/i)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/fnv1a-32:/i)).toBeInTheDocument());
+    expect(screen.getByText(/Tenant must be selected by the service workflow/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Validate rows/i }));
+    expect(screen.getByText(/XLSX file inspection succeeded/i)).toBeInTheDocument();
+    expect(screen.getByText(/No rate rows were invented or staged/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Publish/i })).toBeDisabled();
+    expect(onEvidenceCapture).toHaveBeenCalledWith(expect.objectContaining({ action: 'rate-sheet-file-inspected' }));
+    expect(onEvidenceCapture).toHaveBeenCalledWith(expect.objectContaining({ action: 'rate-sheet-validate-rows' }));
   });
 
   it('PricingAnalysisTest.rendersWaterfall', () => {
@@ -72,5 +79,8 @@ describe('PII-25-S04 page behavior', () => {
     for (const status of ['requested', 'confirmed', 'expired', 'cancelled', 'delivered']) {
       expect(screen.getByText(status)).toBeInTheDocument();
     }
+    expect(screen.getAllByText(/Local preview/i).length).toBeGreaterThanOrEqual(1);
+    for (const button of screen.getAllByRole('button', { name: /Start Lock Review \(preview disabled\)/i })) expect(button).toBeDisabled();
+    for (const button of screen.getAllByRole('button', { name: /Bulk extend \(preview disabled\)/i })) expect(button).toBeDisabled();
   });
 });

@@ -1373,7 +1373,7 @@ export function PipelineIntakePage({
 
         <div className="quote-pipeline-launchbar quickquote-actions" aria-label="QuickQuote actions">
           <div>
-            <strong>{selectedProduct?.productName ?? quickQuoteDisplayProduct?.productName ?? 'No product selected'}</strong>
+            <strong>{selectedProduct?.productName ?? quickQuoteDisplayProduct?.productName ?? 'Quote launch'}</strong>
             <span id="quickquote-action-state">{quickQuoteLaunchLoading ? 'Loading quote state' : launchStatus}</span>
           </div>
           <button type="button" className="quote-intake-primary" disabled={launchDisabled || quickQuoteLaunchLoading} aria-describedby="quickquote-action-state" onClick={() => void launch()}>{flowState.kind === 'submitting' ? 'Launching...' : 'Launch quote'}</button>
@@ -1501,7 +1501,7 @@ export function PipelineIntakePage({
 
         <div className="quote-pipeline-launchbar">
           <div>
-            <strong>{selectedProduct?.productName ?? 'No product selected'}</strong>
+            <strong>{selectedProduct?.productName ?? 'Product selection pending'}</strong>
             <span id="quote-launch-state">{launchStatus}</span>
           </div>
           <button type="submit" className="quote-intake-primary" disabled={launchDisabled} aria-describedby="quote-launch-state">{flowState.kind === 'submitting' ? 'Launching...' : 'Launch Quote'}</button>
@@ -2484,7 +2484,7 @@ function QuickQuoteSkeleton() {
   return (
     <div className="quickquote-skeleton" role="status" aria-label="QuickQuote loading state">
       <span>Data mapping</span>
-      <span>Pricing progress</span>
+      <span>Pricing readiness</span>
       <span>Product grid</span>
     </div>
   );

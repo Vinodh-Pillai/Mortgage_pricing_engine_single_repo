@@ -44,14 +44,14 @@ test.describe('BFF-backed login', () => {
     } else {
       expect([0, 401]).toContain(response.status);
       await expect(page).toHaveURL(/\/login$/);
-      await expect(page.getByTestId('local-dev-persona-panel')).toContainText('Backend auth unavailable');
-      await expect(page.getByTestId('local-dev-persona-panel')).toContainText('does not create a backend session');
+      await expect(page.getByTestId('local-dev-persona-panel')).toContainText('Continue with a local/dev persona');
+      await expect(page.getByTestId('local-dev-persona-panel')).toContainText('browser-local persona');
     }
   });
 
   test('local/dev persona fallback opens QuickQuote when backend auth is unavailable', async ({ page }) => {
     await page.goto('/login', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByTestId('local-dev-persona-panel')).toContainText('Backend auth unavailable');
+    await expect(page.getByTestId('local-dev-persona-panel')).toContainText('Continue with a local/dev persona');
     await page.getByRole('button', { name: /continue as sarah mitchell/i }).click();
 
     await expect(page).toHaveURL(/\/quote\/start$/);

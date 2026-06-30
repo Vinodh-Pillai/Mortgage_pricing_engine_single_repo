@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
@@ -71,6 +71,64 @@ describe('App routing shell', () => {
         if (url.pathname === '/api/v1/tenants/ui-preview-tenant/products') {
           return { ok: true, status: 200, json: async () => ({ products: [], totalCount: 0, availableFilters: { productTypes: [], investors: [], channels: [], statuses: [] } }) };
         }
+        if (url.pathname === '/api/v1/tenants/ui-preview-tenant/quote-runs/run-internal-ref-cleanup/offers') {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              runId: 'run-internal-ref-cleanup',
+              status: 'READY',
+              fallbackReason: 'Quote service LoanPass execute summary response was normalized by pricing workbench service; browser did not call quote service directly',
+              backendRefs: ['LoanPass', 'LoanHouse', 'source_url:https://example.invalid/quickpricer/get-generic-quote-summary'],
+              requiredFacts: ['pricing-service quote price'],
+              commitBlocked: false,
+              uiTraceId: 'trace-internal-ref-cleanup',
+              offers: [
+                {
+                  offerId: 'offer-clean',
+                  rank: 1,
+                  productLabel: 'Expanded Prime Plus 30 Year Fixed',
+                  payment: '2627.72',
+                  apr: '6.99',
+                  rationaleChips: [
+                    'Approved',
+                    'Quote service LoanPass execute summary response was normalized by pricing workbench service; browser did not call quote service directly',
+                  ],
+                  scenarioFlags: ['APPROVED'],
+                  explanationStatus: 'AVAILABLE',
+                  upstreamRefs: ['LoanHouse/LoanPass source url quickpricer get generic quote summary'],
+                  lockEligibilityRefs: ['lock-period:60'],
+                  snapshotRefs: ['snapshot:offer-clean'],
+                  auditIds: ['review:offer-clean'],
+                  explanationSections: ['summary'],
+                },
+              ],
+            }),
+          };
+        }
+        if (url.pathname === '/api/v1/tenants/ui-preview-tenant/quote-runs/run-internal-ref-cleanup/offers/offer-clean/explain') {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              runId: 'run-internal-ref-cleanup',
+              offerId: 'offer-clean',
+              status: 'AVAILABLE',
+              rationaleLines: [
+                'Explanation ready for borrower review.',
+                'Quote service LoanPass execute summary response was normalized by pricing workbench service; browser did not call quote service directly',
+              ],
+              scenarioFlags: [],
+              upstreamRefs: ['LoanPass LoanHouse source url quickpricer get generic quote summary'],
+              snapshotRefs: [],
+              auditIds: [],
+              explanationSections: ['summary'],
+              commitBlocked: false,
+              message: '',
+              uiTraceId: 'trace-internal-ref-cleanup-explain',
+            }),
+          };
+        }
         if (url.href === `${bffBaseUrl}/api/auth/me`) {
           return { ok: true, status: 200, json: async () => ({ user: authUser }) };
         }
@@ -113,5 +171,21 @@ describe('App routing shell', () => {
 
     expect(await screen.findByRole('heading', { name: /Quote Journey Map preview/i }, { timeout: 5000 })).toBeInTheDocument();
     expect(screen.getAllByText(/Preview evidence page · non-production/i).length).toBeGreaterThan(0);
+  });
+
+  it('sanitizes internal provider and source references on the live Compare Offers route', async () => {
+    renderApp('/quote/run-internal-ref-cleanup/offers');
+
+    expect(await screen.findByRole('heading', { name: /Compare offers for run run-internal-ref-cleanup/i }, { timeout: 5000 })).toBeInTheDocument();
+    expect(screen.getAllByText('Pricing service evidence available').length).toBeGreaterThanOrEqual(2);
+
+    const visibleTextBeforeInspect = document.body.textContent ?? '';
+    expect(visibleTextBeforeInspect).not.toMatch(/LoanPass|LoanHouse|source url|source_url|quickpricer|get generic quote summary/i);
+
+    fireEvent.click(screen.getByRole('button', { name: /Inspect explanation for offer offer-clean/i }));
+    expect(await screen.findByText('Explanation ready for borrower review.')).toBeInTheDocument();
+
+    const visibleTextAfterInspect = document.body.textContent ?? '';
+    expect(visibleTextAfterInspect).not.toMatch(/LoanPass|LoanHouse|source url|source_url|quickpricer|get generic quote summary/i);
   });
 });

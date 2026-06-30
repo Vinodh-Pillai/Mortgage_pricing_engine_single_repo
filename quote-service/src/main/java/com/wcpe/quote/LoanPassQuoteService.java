@@ -173,7 +173,11 @@ public class LoanPassQuoteService {
 
     private Map<String, Object> normalizedRequest(Map<String, Object> body, UUID headerTenantId) {
         Map<String, Object> safeBody = body == null ? Map.of() : body;
-        UUID tenantId = headerTenantId != null ? headerTenantId : UUID.fromString(stringValue(safeBody, "tenantId", ""));
+        UUID bodyTenantId = parseOptionalTenantId(stringValue(safeBody, "tenantId", ""));
+        if (headerTenantId != null && bodyTenantId != null && !headerTenantId.equals(bodyTenantId)) {
+            throw new QuoteCreateException("LOANPASS_TENANT_MISMATCH", "X-Tenant-ID header must match request tenantId");
+        }
+        UUID tenantId = headerTenantId != null ? headerTenantId : bodyTenantId;
         if (tenantId == null) {
             throw new QuoteCreateException("LOANPASS_TENANT_REQUIRED", "tenantId is required in X-Tenant-ID header or request body");
         }
@@ -183,6 +187,17 @@ public class LoanPassQuoteService {
         normalized.put("loan", safeBody.getOrDefault("loan", Map.of()));
         normalized.put("rawFieldPolicy", "concept-aligned-only-public-evidence-no-unverified-fields");
         return normalized;
+    }
+
+    private UUID parseOptionalTenantId(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return UUID.fromString(value.trim());
+        } catch (IllegalArgumentException ex) {
+            throw new QuoteCreateException("LOANPASS_TENANT_INVALID", "tenantId must be a UUID when supplied in the request body");
+        }
     }
 
     @SuppressWarnings("unchecked")

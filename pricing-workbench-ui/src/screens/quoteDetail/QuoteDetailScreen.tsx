@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { fetchQuoteDetail, type QuoteDetailRedaction, type QuoteDetailView } from '../../lib/api/offers';
 import type { PricingWaterfallView, RedactedWaterfallValue } from '../../lib/api/quoteRuns';
 import type { ScreenProps } from '../contract/ScreenProps';
+import { visibleOfferEvidenceValues } from '../quoteOffers/offerComparison';
 
 export type QuoteDetailScreenProps = Partial<ScreenProps> & {
   detail?: QuoteDetailView | null;
@@ -147,16 +148,13 @@ function SummaryPanel({ detail, onNavigate }: { detail: QuoteDetailView; onNavig
         <dt>APR</dt><dd>{valueText(summary.apr)}</dd>
         <dt>Payment</dt><dd>{valueText(summary.payment)}</dd>
         <dt>Final price</dt><dd>{redactedValue(detail.waterfall.finalPrice.roundedFinalPrice, redactionFor(detail.redactions, 'waterfall.finalPrice.roundedFinalPrice'), onNavigate)}</dd>
-        <dt>Confidence</dt><dd>{valueText(summary.confidence)}</dd>
-        <dt>Rank / score</dt><dd>{summary.rank} / {valueText(summary.rankScore)}</dd>
-        <dt>Source scenario</dt><dd>{valueText(summary.sourceScenarioId)} v{valueText(summary.scenarioVersion)}</dd>
       </dl>
       <ChipList label="Scenario flags" values={summary.scenarioFlags} />
       <ChipList label="Backend adjustment and margin summaries" values={summary.explanationSections ?? []} />
-      <ChipList label="LoanPass product rules" values={summary.productRuleRefs ?? []} />
-      <ChipList label="LoanPass stipulations" values={summary.stipulationRefs ?? []} />
-      <ChipList label="LoanPass rates" values={summary.rateRefs ?? []} />
-      <ChipList label="LoanPass lock periods" values={summary.lockPeriodOptions ?? []} />
+      <ChipList label="Product rule references" values={summary.productRuleRefs ?? []} />
+      <ChipList label="Required documentation" values={summary.stipulationRefs ?? []} />
+      <ChipList label="Rate references" values={summary.rateRefs ?? []} />
+      <ChipList label="Lock period options" values={summary.lockPeriodOptions ?? []} />
     </section>
   );
 }
@@ -165,11 +163,9 @@ function ExplanationPanel({ detail }: { detail: QuoteDetailView }) {
   return (
     <section className="panel" aria-labelledby="explanation-heading">
       <h2 id="explanation-heading">Explanation</h2>
-      <p>{detail.explanation.message}</p>
-      <ul>
-        {detail.explanation.rationaleLines.map((line) => <li key={line}>{line}</li>)}
-      </ul>
-      <ChipList label="Upstream refs" values={detail.explanation.upstreamRefs ?? []} />
+      <p>{safeDetailMessage(detail.explanation.message, 'Explanation details are not ready for borrower review.')}</p>
+      <ChipList label="Rationale lines" values={visibleOfferEvidenceValues(detail.explanation.rationaleLines)} />
+      <ChipList label="Pricing evidence" values={pricingEvidenceAvailability(detail.explanation.upstreamRefs)} />
       <ChipList label="Snapshot refs" values={detail.explanation.snapshotRefs ?? []} />
       <ChipList label="Audit IDs" values={detail.explanation.auditIds ?? []} />
       <button type="button" onClick={() => void navigator.clipboard?.writeText(detail.explanation.rationaleLines.join('\n'))}>Copy Explanation</button>
@@ -279,6 +275,15 @@ function ChipList({ label, values }: { label: string; values: string[] }) {
       {values.length === 0 ? <p>N/A</p> : <ul>{values.map((value) => <li key={value}><code>{value}</code></li>)}</ul>}
     </div>
   );
+}
+
+function pricingEvidenceAvailability(values: string[] | null | undefined) {
+  return (values ?? []).some((value) => value.trim()) ? ['Pricing service evidence available'] : [];
+}
+
+function safeDetailMessage(value: string | number | null | undefined, fallback: string) {
+  const text = valueText(value);
+  return visibleOfferEvidenceValues([text]).length > 0 ? text : fallback;
 }
 
 function redactedValue(value: RedactedWaterfallValue, redaction: QuoteDetailRedaction | undefined, onNavigate: (path: string) => void) {

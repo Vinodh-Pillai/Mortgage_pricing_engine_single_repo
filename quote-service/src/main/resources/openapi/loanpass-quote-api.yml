@@ -1,0 +1,532 @@
+openapi: 3.0.3
+info:
+  title: Quote Service LoanPass Execution API
+  version: 0.1.0
+  description: >-
+    Static quote-service contract for synchronous LoanPass-compatible execution requests.
+    The quote service accepts the required LoanPass request fields already mapped
+    by the LOS intake adapter, allows tenantId from the request body when the
+    X-Tenant-ID header is omitted, and validates X-Tenant-ID against the request
+    body tenantId when both are supplied.
+servers:
+  - url: /api/v1
+paths:
+  /loanpass/execute-summary:
+    post:
+      operationId: executeLoanPassSummary
+      summary: Execute a LoanPass-compatible summary quote request
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/RequestHeader'
+        - $ref: '#/components/parameters/CorrelationHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoanPassQuoteRequest'
+      responses:
+        '200':
+          description: Summary quote request executed synchronously against the active durable catalog snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoanPassSummaryResponse'
+        '400':
+          description: Invalid request, including X-Tenant-ID/body tenant mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoanPassExecutionError'
+  /loanpass/executeSummary:
+    post:
+      operationId: executeLoanPassSummaryAlias
+      summary: Compatibility alias for executeLoanPassSummary
+      description: Backward-compatible camelCase alias for `/loanpass/execute-summary`.
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/RequestHeader'
+        - $ref: '#/components/parameters/CorrelationHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoanPassQuoteRequest'
+      responses:
+        '200':
+          description: Summary quote request executed synchronously against the active durable catalog snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoanPassSummaryResponse'
+        '400':
+          description: Invalid request, including X-Tenant-ID/body tenant mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoanPassExecutionError'
+  /loanpass/execute-product:
+    post:
+      operationId: executeLoanPassProduct
+      summary: Execute a LoanPass-compatible product quote request
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/RequestHeader'
+        - $ref: '#/components/parameters/CorrelationHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoanPassQuoteRequest'
+      responses:
+        '200':
+          description: Product quote request executed synchronously against the active durable catalog snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoanPassProductResponse'
+        '400':
+          description: Invalid request, including X-Tenant-ID/body tenant mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoanPassExecutionError'
+        '404':
+          description: Requested product is not present in the active durable catalog snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoanPassExecutionError'
+  /loanpass/executeProduct:
+    post:
+      operationId: executeLoanPassProductAlias
+      summary: Compatibility alias for executeLoanPassProduct
+      description: Backward-compatible camelCase alias for `/loanpass/execute-product`.
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/RequestHeader'
+        - $ref: '#/components/parameters/CorrelationHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoanPassQuoteRequest'
+      responses:
+        '200':
+          description: Product quote request executed synchronously against the active durable catalog snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoanPassProductResponse'
+        '400':
+          description: Invalid request, including X-Tenant-ID/body tenant mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoanPassExecutionError'
+        '404':
+          description: Requested product is not present in the active durable catalog snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoanPassExecutionError'
+components:
+  parameters:
+    TenantHeader:
+      name: X-Tenant-ID
+      in: header
+      required: false
+      schema:
+        type: string
+        format: uuid
+      description: Optional tenant identifier. When supplied, it must exactly match request body tenantId after trimming whitespace; when omitted, request body tenantId is used.
+    RequestHeader:
+      name: X-Request-ID
+      in: header
+      required: false
+      schema:
+        type: string
+      description: Idempotency key override for request replay protection.
+    CorrelationHeader:
+      name: X-Correlation-ID
+      in: header
+      required: false
+      schema:
+        type: string
+      description: Correlation id returned on validation errors and successful responses when supplied.
+  schemas:
+    LoanPassQuoteRequest:
+      type: object
+      additionalProperties: true
+      required:
+        - tenantId
+        - requestId
+        - quoteBorrowerInfo
+        - quoteAddressDTO
+        - requestedLoanAmount
+        - transactionType
+        - propertyInformationType
+        - occupancyType
+        - incomeDocumentationType
+        - creditScore
+        - mortgageType
+        - amortizationType
+        - loanTermType
+        - desiredRateLockPeriod
+        - lockPeriodType
+        - creditApplicationFields
+      properties:
+        tenantId:
+          type: string
+          format: uuid
+        requestId:
+          type: string
+        scenarioId:
+          type: string
+        scenarioVersion:
+          type: integer
+          format: int32
+        requestedLockPeriods:
+          type: array
+          items:
+            type: integer
+        clientContext:
+          type: object
+          additionalProperties:
+            type: string
+          description: Tenant mapping, catalog, authorization metadata, and request snapshot references.
+        actorId:
+          type: string
+        idempotencyKey:
+          type: string
+        correlationId:
+          type: string
+        preferAsync:
+          type: boolean
+        productId:
+          type: string
+        selectedProgramId:
+          type: string
+        priceGroupId:
+          type: string
+        quoteBorrowerInfo:
+          $ref: '#/components/schemas/LoanPassBorrowerInfo'
+        quoteAddressDTO:
+          $ref: '#/components/schemas/LoanPassAddress'
+        requestedLoanAmount:
+          type: number
+        purchasePrice:
+          type: number
+        propertyValue:
+          type: number
+        transactionType:
+          type: string
+        propertyInformationType:
+          type: string
+        occupancyType:
+          type: string
+        numberOfUnits:
+          type: integer
+        incomeDocumentationType:
+          type: string
+        totalMonthlyIncome:
+          type: number
+        totalLiabilityMonthlyPayment:
+          type: number
+        debtToIncomeRatio:
+          type: number
+        monthsOfReserves:
+          type: integer
+        creditScore:
+          type: integer
+        mortgageType:
+          type: string
+        amortizationType:
+          type: string
+        loanTermType:
+          type: string
+        desiredRateLockPeriod:
+          type: integer
+        lockPeriodType:
+          type: string
+        channelType:
+          type: string
+        creditApplicationFields:
+          type: array
+          items:
+            $ref: '#/components/schemas/CreditApplicationField'
+    LoanPassBorrowerInfo:
+      type: object
+      required:
+        - borrowerLastName
+        - loanNumber
+      properties:
+        borrowerLastName:
+          type: string
+        loanNumber:
+          type: string
+        numberOfBorrowers:
+          type: integer
+    LoanPassAddress:
+      type: object
+      required:
+        - state
+        - zip
+      properties:
+        street:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        zip:
+          type: string
+        countyFips:
+          type: string
+        countyCode:
+          type: string
+        countyName:
+          type: string
+        searchString:
+          type: string
+    CreditApplicationField:
+      type: object
+      required:
+        - fieldId
+        - value
+      properties:
+        fieldId:
+          type: string
+        value:
+          $ref: '#/components/schemas/CreditApplicationValue'
+    CreditApplicationValue:
+      type: object
+      properties:
+        type:
+          type: string
+        value: {}
+        enumTypeId:
+          type: string
+        variantId:
+          type: string
+    LoanPassSummaryResponse:
+      type: object
+      required:
+        - success
+        - operation
+        - tenantId
+        - snapshotId
+        - sourceSystem
+        - synthetic
+        - productTypes
+        - investors
+        - productCount
+        - statusCounts
+        - lockPeriods
+        - products
+        - benchmark
+        - versionMetadata
+      properties:
+        success:
+          type: boolean
+        operation:
+          type: string
+          enum: [execute-summary]
+        tenantId:
+          type: string
+          format: uuid
+        correlationId:
+          type: string
+        snapshotId:
+          type: string
+        sourceSystem:
+          type: string
+        synthetic:
+          type: boolean
+        productTypes:
+          type: integer
+        investors:
+          type: integer
+        productCount:
+          type: integer
+        statusCounts:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+        lockPeriods:
+          type: array
+          items:
+            type: integer
+        products:
+          type: array
+          items:
+            $ref: '#/components/schemas/LoanPassSummaryProduct'
+        benchmark:
+          $ref: '#/components/schemas/LoanPassWarmBenchmark'
+        versionMetadata:
+          type: object
+          additionalProperties:
+            type: string
+    LoanPassProductResponse:
+      type: object
+      required:
+        - success
+        - operation
+        - tenantId
+        - snapshotId
+        - sourceSystem
+        - synthetic
+        - productId
+        - productName
+        - investorName
+        - productType
+        - status
+        - lockPeriods
+        - rates
+        - calculations
+        - rules
+        - stipulations
+        - rejections
+        - errors
+        - adjustments
+        - sourceRefs
+        - versionMetadata
+      properties:
+        success:
+          type: boolean
+        operation:
+          type: string
+          enum: [execute-product]
+        tenantId:
+          type: string
+          format: uuid
+        correlationId:
+          type: string
+        snapshotId:
+          type: string
+        sourceSystem:
+          type: string
+        synthetic:
+          type: boolean
+        productId:
+          type: string
+        productName:
+          type: string
+        investorName:
+          type: string
+        productType:
+          type: string
+        status:
+          type: string
+        lockPeriods:
+          type: array
+          items:
+            type: integer
+        rates:
+          type: array
+          items:
+            type: object
+            additionalProperties:
+              type: string
+        calculations:
+          type: object
+          additionalProperties:
+            type: string
+        rules:
+          type: object
+          additionalProperties:
+            type: string
+        stipulations:
+          type: array
+          items:
+            type: string
+        rejections:
+          type: array
+          items:
+            type: string
+        errors:
+          type: array
+          items:
+            type: string
+        adjustments:
+          type: array
+          items:
+            type: string
+        sourceRefs:
+          type: object
+          additionalProperties:
+            type: string
+        versionMetadata:
+          type: object
+          additionalProperties:
+            type: string
+    LoanPassSummaryProduct:
+      type: object
+      properties:
+        productId:
+          type: string
+        productName:
+          type: string
+        investorName:
+          type: string
+        productType:
+          type: string
+        status:
+          type: string
+        lockPeriods:
+          type: array
+          items:
+            type: integer
+        noteRatePercent:
+          type: number
+        priceBps:
+          type: number
+        rates:
+          type: array
+          items:
+            type: object
+            additionalProperties:
+              type: string
+        calculations:
+          type: object
+          additionalProperties:
+            type: string
+        sourceRefs:
+          type: object
+          additionalProperties:
+            type: string
+    LoanPassWarmBenchmark:
+      type: object
+      required:
+        - p50Micros
+        - p99Micros
+        - evaluatedProducts
+        - sampleSize
+      properties:
+        p50Micros:
+          type: integer
+          format: int64
+        p99Micros:
+          type: integer
+          format: int64
+        evaluatedProducts:
+          type: integer
+        sampleSize:
+          type: integer
+    LoanPassExecutionError:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          example: LOANPASS_TENANT_MISMATCH
+        message:
+          type: string
+        correlationId:
+          type: string

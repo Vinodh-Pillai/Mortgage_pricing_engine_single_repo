@@ -74,6 +74,23 @@ export function valueText(value: string | number | null | undefined) {
   return String(value);
 }
 
+export function offerDisplayName(offer: OfferSummary) {
+  return valueText(offer.productLabel ?? offer.offerId);
+}
+
+export function visibleOfferEvidenceValues(values: string[] | null | undefined): string[] {
+  return (values ?? [])
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .filter((value) => !isInternalOfferEvidence(value));
+}
+
+export function visibleOfferReferenceValues(values: string[] | null | undefined): string[] {
+  return visibleOfferEvidenceValues(values)
+    .filter((value) => !/^https?:\/\//i.test(value))
+    .filter((value) => !/^source[_\s:-]/i.test(value));
+}
+
 function compareOfferValues(left: OfferSummary, right: OfferSummary, field: OfferSortField) {
   const leftValue = offerValue(left, field);
   const rightValue = offerValue(right, field);
@@ -98,6 +115,10 @@ function numericValue(value: string | number | null | undefined) {
   if (typeof value !== 'string') return null;
   const parsed = Number(value.replace(/[%,$]/g, ''));
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isInternalOfferEvidence(value: string) {
+  return /loan\s*pass|loan\s*house|quick\s*pricer|quickpricer|source\s*url|source_url|rank\b|ranked|rank\s*score|confidence|schema\s*version|schemaVersion|https?:\/\//i.test(value);
 }
 
 function normalized(value: string | number | null | undefined) {

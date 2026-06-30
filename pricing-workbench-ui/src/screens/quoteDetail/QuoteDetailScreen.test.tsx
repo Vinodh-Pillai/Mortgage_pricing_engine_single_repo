@@ -20,7 +20,8 @@ describe('PII-24-S11 quote detail waterfall screen', () => {
 
     expect(screen.getByRole('heading', { name: /Quote Detail Waterfall/i })).toBeInTheDocument();
     expect(screen.getAllByText('Conventional 30 year fixed').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('Selected by backend rank service.')).toBeInTheDocument();
+    expect(screen.queryByText('Selected by backend rank service.')).not.toBeInTheDocument();
+    expect(screen.getByText('Pricing evidence is rendered from the returned waterfall ledger.')).toBeInTheDocument();
     expect(screen.getByText('rule:loanpass:max-ltv-config-ref')).toBeInTheDocument();
     expect(screen.getByText('stipulation:income-documentation-required')).toBeInTheDocument();
     expect(screen.getByText('rate:note-rate:6.500')).toBeInTheDocument();

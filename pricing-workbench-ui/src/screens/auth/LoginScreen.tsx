@@ -159,13 +159,13 @@ export function LoginScreen({ initialEmail = '', loading = false, disableAutoRed
           <div className="login-role-title-row">
             <span className="login-role-icon" aria-hidden="true">🧪</span>
             <div>
-              <p className="login-eyebrow">Local/dev fallback</p>
-              <h2 id="login-dev-persona-title">Backend auth unavailable</h2>
+              <p className="login-eyebrow">Local/dev persona access</p>
+              <h2 id="login-dev-persona-title">Continue with a local/dev persona</h2>
             </div>
           </div>
           <p className="login-dev-persona__warning">
-            Use a synthetic persona only for local/dev UI validation when <code>/api/auth/login</code> or <code>/api/auth/me</code> returns 401.
-            This does not create a backend session or hide protected API failures.
+            Use a synthetic persona only for local/dev UI validation when real session services are not connected.
+            This creates a browser-local persona only and does not hide protected API failures.
           </p>
           <div className="login-persona-grid" aria-label="Local/dev personas">
             {syntheticPersonas.map((persona, index) => (
@@ -184,7 +184,7 @@ export function LoginScreen({ initialEmail = '', loading = false, disableAutoRed
               <div>
                 <p className="login-selected__label">Selected local/dev persona</p>
                 <strong>{selectedPersona.name}</strong>
-                <span>Routes to {selectedPersona.defaultRoute} for QuickQuote/persona smoke testing; backend auth remains unavailable until the BFF accepts a real session.</span>
+                <span>Routes to {selectedPersona.defaultRoute} for QuickQuote/persona smoke testing; protected APIs still require a real BFF session.</span>
               </div>
               <Button type="button" variant="secondary" size="lg" className="login-submit" disabled={busy} onClick={() => void handlePersonaSignIn()}>
                 {personaSubmitting ? 'Opening persona…' : `Continue as ${selectedPersona.name}`}

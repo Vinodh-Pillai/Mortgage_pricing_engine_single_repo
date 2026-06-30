@@ -78,9 +78,9 @@ describe('LoginScreenTest', () => {
 
   it('LoginScreenTest.showsExplicitLocalDevPersonaFallbackWhenBackendAuthIs401', async () => {
     renderLogin();
-    expect(await screen.findByTestId('local-dev-persona-panel')).toHaveTextContent('Backend auth unavailable');
-    expect(screen.getByTestId('local-dev-persona-panel')).toHaveTextContent('/api/auth/login');
-    expect(screen.getByTestId('local-dev-persona-panel')).toHaveTextContent('does not create a backend session');
+    expect(await screen.findByTestId('local-dev-persona-panel')).toHaveTextContent('Continue with a local/dev persona');
+    expect(screen.getByTestId('local-dev-persona-panel')).not.toHaveTextContent('Backend auth unavailable');
+    expect(screen.getByTestId('local-dev-persona-panel')).toHaveTextContent('browser-local persona');
     expect(screen.getAllByText('Sarah Mitchell').length).toBeGreaterThan(0);
   });
 
