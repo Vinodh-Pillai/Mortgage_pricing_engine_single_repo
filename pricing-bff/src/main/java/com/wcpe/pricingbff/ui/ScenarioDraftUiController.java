@@ -44,6 +44,15 @@ class ScenarioDraftUiController {
     return adapter.getDraftScenario(tenantId, scenarioId, tenantContext, uiTraceId);
   }
 
+  @PatchMapping("/api/v1/tenants/{tenantId}/scenarios/{scenarioId}")
+  ResponseEntity<?> updateDraftScenarioRoot(@PathVariable String tenantId,
+      @PathVariable String scenarioId,
+      @RequestHeader(value = "X-Tenant-Context", required = false) String tenantContext,
+      @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId,
+      @RequestBody(required = false) PricingBffUiFallbackAdapter.DraftScenarioRequest request) {
+    return adapter.updateDraftScenario(tenantId, scenarioId, "draft", tenantContext, uiTraceId, request);
+  }
+
   @PatchMapping("/api/v1/tenants/{tenantId}/scenarios/{scenarioId}/{section}")
   ResponseEntity<?> updateDraftScenario(@PathVariable String tenantId,
       @PathVariable String scenarioId,

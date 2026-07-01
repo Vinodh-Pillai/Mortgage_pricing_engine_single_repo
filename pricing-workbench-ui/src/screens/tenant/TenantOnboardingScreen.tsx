@@ -111,12 +111,11 @@ export function TenantOnboardingScreen({ visualState, fetchImpl, onEvidenceCaptu
   }
 
   async function changeTenantStatus(tenant: TenantAdminRecord, action: 'activate' | 'suspend' | 'deactivate') {
-    const nextStatus: TenantStatus = action === 'activate' ? 'ACTIVE' : action === 'suspend' ? 'SUSPENDED' : 'DEACTIVATED';
     try {
       const updated = await updateTenantStatus(tenant.tenantId, action, fetchImpl);
       setState((current) => ({ ...current, tenants: current.tenants.map((item) => item.tenantId === tenant.tenantId ? updated : item), message: `${tenant.displayName} ${action} request completed.` }));
     } catch {
-      setState((current) => ({ ...current, tenants: current.tenants.map((item) => item.tenantId === tenant.tenantId ? { ...item, status: nextStatus } : item), message: `${tenant.displayName} ${action} captured locally until tenant-context-service accepts writes.` }));
+      setState((current) => ({ ...current, kind: 'blocked', message: `${tenant.displayName} ${action} was not applied. Tenant-context-service must accept the lifecycle write before the row changes.` }));
     }
   }
 

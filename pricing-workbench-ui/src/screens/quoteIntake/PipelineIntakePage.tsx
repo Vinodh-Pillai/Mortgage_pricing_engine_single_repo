@@ -1,7 +1,7 @@
 import { type CSSProperties, type FocusEvent, type FormEvent, type MouseEvent, type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { OfferComparisonView, OfferSummary } from '../../lib/api/offers';
 import { fetchActiveApplicationFormVersion, fetchTenantDropdownOptions, loanPassQuoteIntakeFields, type ApplicationFormRuntimeState, type BorrowerIntake, type DropdownOption, type LaunchState, type MetadataState, type QuickQuoteLosPrefillMapping, type QuoteLaunchSelectedProduct, type ScenarioIntakeField, type ScenarioIntakeMetadata, type TenantDropdownOptions } from '../../lib/api/quoteRuns';
-import { availableFiltersFor, tenantHomePreviewProducts, type AuthorizedProduct, type TenantProductsResponse, type TenantProductStatus } from '../../lib/api/tenantHome';
+import { availableFiltersFor, fetchTenantProducts, filterTenantProductsLocally, tenantHomePreviewProducts, type AuthorizedProduct, type TenantProductFilter, type TenantProductsResponse, type TenantProductStatus } from '../../lib/api/tenantHome';
 import { createDraftScenario, getDraftScenario, loadDraftBackup, saveDraftBackup, updateDraftScenario, type DraftBackup, type DraftScenario } from './draft';
 import { emptyFieldEditorDraft, fieldEditorDataTypeLabel, fieldEditorDataTypes, serializeFieldEditorDraft, validateFieldEditorDraft, type FieldEditorDraft, type FieldEditorSerializedDraft } from './fieldEditorDataTypes';
 import { launchQuoteRun } from './launch';
@@ -50,6 +50,11 @@ type DropdownConfigState =
   | { kind: 'loading'; options: TenantDropdownOptions | null; message: string }
   | { kind: 'ready'; options: TenantDropdownOptions; message: string }
   | { kind: 'fallback'; options: TenantDropdownOptions; message: string };
+
+type TenantProductLoadState =
+  | { kind: 'loading'; response: TenantProductsResponse; message: string }
+  | { kind: 'ready'; response: TenantProductsResponse; message: string }
+  | { kind: 'fallback'; response: TenantProductsResponse; message: string };
 
 type LiveOfferState =
   | { kind: 'idle' }
@@ -203,8 +208,8 @@ const emptyProductFilters: ProductFilterState = {
   occupancy: '',
 };
 
-// Safe local QuickQuote fixture values are taken from existing LoanHouse/LoanPASS
-// validation fixtures and UI tests. Borrower last name and loan number remain
+// Safe local QuickQuote fixture values are taken from existing UI validation
+// fixtures and tests. Borrower last name and loan number remain
 // empty because they are Save/Retrieve keys, not pricing requirements.
 const quickQuoteSafeScenarioDefaults: Partial<Record<keyof BorrowerIntake, string>> = {
   channel: 'RETAIL',
@@ -230,6 +235,8 @@ const quickQuoteSafeProductFilters: ProductFilterState = {
   propertyType: 'Single Family',
   occupancy: 'Primary Residence',
 };
+
+const productPageSize = 10;
 
 const initialQuoteIntakeDefaults: Partial<Record<keyof BorrowerIntake, string>> = {
   channel: '',
@@ -423,6 +430,13 @@ export function PipelineIntakePage({
   const [statusMessage, setStatusMessage] = useState('');
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [productFilters, setProductFilters] = useState<ProductFilterState>(() => mode === 'quickquote' ? quickQuoteSafeProductFilters : emptyProductFilters);
+  const [productPage, setProductPage] = useState(1);
+  const [tenantProductsState, setTenantProductsState] = useState<TenantProductLoadState>(() => ({
+    kind: 'fallback',
+    response: filterTenantProductsLocally(tenantHomePreviewProducts, { tenantId, status: 'ALL', page: 1, pageSize: productPageSize }),
+    message: 'Using bundled products until tenant products load.',
+  }));
+  const [originalProductTotalCount, setOriginalProductTotalCount] = useState(() => filterTenantProductsLocally(tenantHomePreviewProducts, { tenantId, status: 'ALL', page: 1, pageSize: productPageSize }).totalCount);
   const [liveOfferState, setLiveOfferState] = useState<LiveOfferState>(() => loadCachedLiveOfferState(tenantId));
   const [selectedLiveOfferId, setSelectedLiveOfferId] = useState<string>('');
   const [selectedProduct, setSelectedProduct] = useState<AuthorizedProduct | null>(null);
@@ -467,32 +481,46 @@ export function PipelineIntakePage({
   const runtimeSections = useMemo(() => applyRuntimeFieldVisibility(sections, values, {}), [sections, values]);
   const draftId = draftIdFromLocation();
   const fieldDropdownOptions = useMemo(() => dropdownOptionsForFields(dropdownConfigState.options), [dropdownConfigState.options]);
+  const productRequestFilter = useMemo<TenantProductFilter>(() => ({
+    tenantId,
+    productTypes: productFilters.productType ? [productFilters.productType] : undefined,
+    investors: productFilters.investor ? [productFilters.investor] : undefined,
+    channels: productFilters.channel ? [productFilters.channel] : undefined,
+    status: productFilters.status ? (productFilters.status as TenantProductStatus) : 'ALL',
+    page: productPage,
+    pageSize: productPageSize,
+  }), [productFilters.channel, productFilters.ficoMax, productFilters.ficoMin, productFilters.investor, productFilters.loanAmountMax, productFilters.loanAmountMin, productFilters.ltvMax, productFilters.ltvMin, productFilters.occupancy, productFilters.productType, productFilters.propertyType, productFilters.rateMax, productFilters.rateMin, productFilters.status, productFilters.term, productPage, tenantId]);
   const liveOffers = liveOfferState.kind === 'loaded' ? liveOfferState.comparison.offers : [];
   const liveFilteredOffers = useMemo(() => filterLiveOffers(liveOffers, productFilters), [liveOffers, productFilters]);
   const liveFilterOptions = useMemo(() => availableFiltersForOffers(liveOffers), [liveOffers]);
-  const availableFilters = useMemo(() => liveOffers.length > 0 ? liveFilterOptions : availableFiltersForDropdownConfig(dropdownConfigState.options), [dropdownConfigState.options, liveFilterOptions, liveOffers.length]);
+  const productRows = tenantProductsState.response.products;
+  const totalProductCount = tenantProductsState.response.totalCount;
+  const availableFilters = useMemo(() => liveOffers.length > 0 ? liveFilterOptions : tenantProductsState.response.availableFilters, [liveFilterOptions, liveOffers.length, tenantProductsState.response.availableFilters]);
   const activeFilterCount = Object.values(productFilters).filter((value) => value.trim()).length;
-  const filteredProducts = useMemo(() => filterProducts(tenantHomePreviewProducts, productFilters), [productFilters]);
+  useEffect(() => {
+    if (activeFilterCount === 0 && totalProductCount !== originalProductTotalCount) setOriginalProductTotalCount(totalProductCount);
+  }, [activeFilterCount, originalProductTotalCount, totalProductCount]);
+  const productGridOriginalTotalCount = activeFilterCount > 0 ? Math.max(originalProductTotalCount, totalProductCount) : totalProductCount;
   const productGridStatusCounts = useMemo(() => {
     const counts: Record<TenantProductStatus, number> = { ACTIVE: 0, PENDING: 0, INACTIVE: 0 };
-    filteredProducts.forEach((product) => { counts[product.status] += 1; });
+    productRows.forEach((product) => { counts[product.status] += 1; });
     return counts;
-  }, [filteredProducts]);
+  }, [productRows]);
   const productGridStatusSummary = [
     productGridStatusCounts.ACTIVE > 0 ? `${productGridStatusCounts.ACTIVE} active` : '',
     productGridStatusCounts.PENDING > 0 ? `${productGridStatusCounts.PENDING} pending` : '',
     productGridStatusCounts.INACTIVE > 0 ? `${productGridStatusCounts.INACTIVE} inactive` : '',
   ].filter(Boolean).join(' · ');
   const productGridCountSummary = liveOffers.length > 0
-    ? liveFilteredOffers.length > 0 ? `${liveFilteredOffers.length} filtered of ${liveOffers.length} LoanHouse-backed offers` : `No matching LoanHouse offers of ${liveOffers.length} total`
-    : `${filteredProducts.length > 0 ? `${filteredProducts.length} filtered` : 'No matching products'} of ${tenantHomePreviewProducts.length} total${productGridStatusSummary ? ` · ${productGridStatusSummary}` : ''}`;
+    ? liveFilteredOffers.length > 0 ? `${liveFilteredOffers.length} filtered of ${liveOffers.length} backend offers` : `No matching backend offers of ${liveOffers.length} total`
+    : `${totalProductCount > 0 ? `${totalProductCount} filtered` : 'No matching products'} of ${productGridOriginalTotalCount} total${productGridStatusSummary ? ` · ${productGridStatusSummary}` : ''}`;
   const priceScenarioColumns = useMemo(() => priceScenarioColumnsForMetadata(runtimeMetadata), [runtimeMetadata]);
   const lockFieldBindings = useMemo(() => lockFieldBindingsForMetadata(runtimeMetadata, values), [runtimeMetadata, values]);
   const autoConfirmationApproval = useMemo(() => autoConfirmationApprovalForMetadata(runtimeMetadata), [runtimeMetadata]);
   const configuredRequiredPricingFields = useMemo(() => visibleConfiguredRequiredFields(runtimeSections), [runtimeSections]);
   const quickQuotePricingInputFields = useMemo(() => quickQuotePricingFields(runtimeSections), [runtimeSections]);
   const requiredPricingFields = useMemo(() => mode === 'quickquote' ? mergeRequiredPricingFields(configuredRequiredPricingFields, quickQuotePricingInputFields) : configuredRequiredPricingFields, [configuredRequiredPricingFields, mode, quickQuotePricingInputFields]);
-  const quickQuoteDisplayProduct = mode === 'quickquote' ? selectedProduct ?? tenantHomePreviewProducts.find(isProductEligible) ?? null : selectedProduct;
+  const quickQuoteDisplayProduct = mode === 'quickquote' ? selectedProduct ?? productRows.find(isProductEligible) ?? tenantHomePreviewProducts.find(isProductEligible) ?? null : selectedProduct;
   const launchReadinessValues = useMemo(() => {
     if (mode !== 'quickquote' || !quickQuoteDisplayProduct) return values;
     return {
@@ -524,13 +552,11 @@ export function PipelineIntakePage({
     { key: 'dscr', label: 'DSCR' },
     { key: 'fees', label: 'Fees' },
     { key: 'llpa', label: 'LLPA' },
-    { key: 'audit', label: 'Review' },
     { key: 'actions', label: 'Actions' },
   ], []);
   const quickQuoteGridStyle = { '--quote-product-grid-template': priceScenarioGridTemplate(quickQuoteColumns) } as CSSProperties;
   const quickQuoteProductsVisible = mode !== 'quickquote' || submitAttempted || flowState.kind === 'created';
-  const quickQuoteVisibleProducts = liveOffers.length > 0 ? tenantHomePreviewProducts : filteredProducts;
-  const quickQuoteComparisonProducts = useMemo(() => tenantHomePreviewProducts.filter((product) => comparisonProductCodes.includes(product.productCode)), [comparisonProductCodes]);
+  const quickQuoteVisibleProducts = productRows;
   const losPrefillMappings = useMemo(() => quickQuotePrefillMappingsForMetadata(runtimeMetadata, runtimeSections), [runtimeMetadata, runtimeSections]);
   const losOverrideRows = useMemo(() => Object.values(losOverrideAudit).sort((left, right) => left.label.localeCompare(right.label)), [losOverrideAudit]);
   const quickQuoteLoading = metadataState.kind === 'loading' || applicationFormRuntimeState.kind === 'loading' || dropdownConfigState.kind === 'loading' || flowState.kind === 'submitting';
@@ -603,6 +629,16 @@ export function PipelineIntakePage({
   }, [actionableMissingRequiredFields, dropdownConfigState.kind, validationBannerSignature, validationBannerVisible]);
 
   useEffect(() => {
+    if (mode === 'quickquote') {
+      const state: ApplicationFormRuntimeState = {
+        kind: 'missing',
+        message: 'QuickQuote uses configured intake metadata and local product context until a published tenant application form is available.',
+      };
+      setApplicationFormRuntimeState(state);
+      capture('application-form-active-version-blocked', { tenantId, reason: state.message, mode });
+      return;
+    }
+
     let cancelled = false;
     setApplicationFormRuntimeState({ kind: 'loading', message: 'Loading application fields...' });
     fetchActiveApplicationFormVersion(tenantId)
@@ -619,9 +655,16 @@ export function PipelineIntakePage({
         capture('application-form-active-version-unreachable', { tenantId, reason: message });
       });
     return () => { cancelled = true; };
-  }, [tenantId]);
+  }, [mode, tenantId]);
 
   useEffect(() => {
+    if (mode === 'quickquote') {
+      const fallbackState = fallbackDropdownConfigState('QuickQuote uses bundled product choices until tenant product configuration is available.');
+      tenantDropdownConfigCache.set(tenantId, fallbackState);
+      setDropdownConfigState(fallbackState);
+      return;
+    }
+
     const cached = tenantDropdownConfigCache.get(tenantId);
     if (cached && cached.kind !== 'loading') {
       setDropdownConfigState(cached);
@@ -642,7 +685,33 @@ export function PipelineIntakePage({
         if (!cancelled) setDropdownConfigState(fallbackState);
       });
     return () => { cancelled = true; };
-  }, [tenantId]);
+  }, [mode, tenantId]);
+
+  useEffect(() => {
+    if (mode === 'quickquote') {
+      const fallbackResponse = filterTenantProductsLocally(tenantHomePreviewProducts, productRequestFilter);
+      setTenantProductsState({
+        kind: 'fallback',
+        response: fallbackResponse,
+        message: 'QuickQuote is using bundled local/dev products until tenant product service data is available.',
+      });
+      return;
+    }
+
+    let cancelled = false;
+    const fallbackResponse = filterTenantProductsLocally(tenantHomePreviewProducts, productRequestFilter);
+    setTenantProductsState({ kind: 'loading', response: fallbackResponse, message: 'Loading tenant products...' });
+    fetchTenantProducts(productRequestFilter)
+      .then((response) => {
+        if (cancelled) return;
+        setTenantProductsState({ kind: 'ready', response: normalizeTenantProductsResponse(response, fallbackResponse), message: 'Tenant products loaded.' });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setTenantProductsState({ kind: 'fallback', response: fallbackResponse, message: 'Product service is unavailable; showing bundled tenant products.' });
+      });
+    return () => { cancelled = true; };
+  }, [mode, productRequestFilter]);
 
   useEffect(() => {
     if (!draftId || resumeBackup || resumeDismissed) return;
@@ -660,12 +729,13 @@ export function PipelineIntakePage({
   });
 
   useEffect(() => {
+    if (mode === 'quickquote') return undefined;
     const timer = window.setInterval(() => {
       const snapshot = autosaveSnapshotRef.current;
       if (snapshot && hasAnyValue(snapshot.values)) void snapshot.saveDraft('autosave-interval', snapshot.values);
     }, 30_000);
     return () => window.clearInterval(timer);
-  }, [scenarioId, scenarioVersion]);
+  }, [mode, scenarioId, scenarioVersion]);
 
   function changeField(field: keyof BorrowerIntake, value: string, options: { autoSave?: boolean } = {}) {
     trackLosOverride(field, value);
@@ -674,7 +744,7 @@ export function PipelineIntakePage({
     setHasUnsavedModeChanges(true);
     setLocalErrors((current) => ({ ...current, [field]: undefined }));
     onChange?.(field, value);
-    if (options.autoSave !== false && !firstEntryDraftRef.current && isLoanBasicsField(field) && value.trim()) {
+    if (mode !== 'quickquote' && options.autoSave !== false && !firstEntryDraftRef.current && isLoanBasicsField(field) && value.trim()) {
       firstEntryDraftRef.current = true;
       void saveDraft('first-field-entry', nextValues);
     }
@@ -751,6 +821,7 @@ export function PipelineIntakePage({
 
   function setFilter(key: keyof ProductFilterState, value: string) {
     setHasUnsavedModeChanges(true);
+    setProductPage(1);
     setProductFilters((current) => ({ ...current, [key]: value }));
     if (key === 'productType') changeField('mortgageType', value);
     if (key === 'investor') changeField('investorCode', value);
@@ -838,6 +909,7 @@ export function PipelineIntakePage({
 
   function clearFilters() {
     setHasUnsavedModeChanges(true);
+    setProductPage(1);
     setProductFilters({ ...emptyProductFilters, status: '' });
     setStatusMessage('Filters cleared.');
   }
@@ -845,7 +917,7 @@ export function PipelineIntakePage({
   function revealQuickQuoteProducts() {
     setSubmitAttempted(true);
     setStatusMessage('QuickQuote product options are ready for review.');
-    capture('quickquote-products-revealed', { missingFields: missingRequiredFields.length, candidates: tenantHomePreviewProducts.length });
+    capture('quickquote-products-revealed', { missingFields: missingRequiredFields.length, candidates: totalProductCount });
     const cachedRunId = loadCachedLiveRunId(tenantId);
     if (cachedRunId && liveOfferState.kind !== 'loaded' && liveOfferState.kind !== 'loading') void loadLiveOffers(cachedRunId);
   }
@@ -858,7 +930,7 @@ export function PipelineIntakePage({
       setLiveOfferState(nextState);
       cacheLiveOfferState(tenantId, nextState);
       setSelectedLiveOfferId(comparison.selectedOfferId ?? '');
-      if (!options.silent) setStatusMessage(`${comparison.offers.length} LoanHouse-backed offers loaded from the BFF.`);
+      if (!options.silent) setStatusMessage(`${comparison.offers.length} backend offers loaded from the BFF.`);
       capture('live-bff-offers-loaded', { runId: comparison.runId || runId, offerCount: comparison.offers.length, status: comparison.status });
       return comparison;
     } catch (error: unknown) {
@@ -877,7 +949,7 @@ export function PipelineIntakePage({
     } catch {
       // Session storage can be unavailable; visible selection remains in component state.
     }
-    setStatusMessage(`${offer.productLabel ?? offer.offerId} selected for LoanHouse-backed offer workflow.`);
+    setStatusMessage(`${offer.productLabel ?? offer.offerId} selected for backend offer workflow.`);
     capture('live-bff-offer-selected', { runId, offerId: offer.offerId, sourceRefs: sourceRefsForOffer(offer) });
   }
 
@@ -1017,11 +1089,15 @@ export function PipelineIntakePage({
   }
 
   async function saveDraft(reason = 'manual-save', valueOverride?: BorrowerIntake): Promise<DraftScenario | null> {
+    if (mode === 'quickquote') {
+      setHasUnsavedModeChanges(true);
+      return null;
+    }
     if (savingRef.current) return savePromiseRef.current;
     const draftValues = withQuickQuoteDraftContext(withLosOverrideContext(valueOverride ?? values, losOverrideRows), {
       sourceMode: mode,
       selectedProduct,
-      comparedProducts: mode === 'quickquote' ? quickQuoteComparisonProducts : filteredProducts,
+      comparedProducts: productRows,
       productFilters,
       missingFields: missingRequiredFields,
       metadata: runtimeMetadata,
@@ -1164,12 +1240,13 @@ export function PipelineIntakePage({
     if (!context) return;
     setProductFilters(context.productFilters ?? emptyProductFilters);
     const productCode = context.selectedProduct?.productCode;
-    const restoredProduct = productCode ? tenantHomePreviewProducts.find((product) => product.productCode === productCode) ?? null : null;
+    const restoredProduct = productCode ? [...productRows, ...tenantHomePreviewProducts].find((product) => product.productCode === productCode) ?? null : null;
     setSelectedProduct(restoredProduct);
     setRowActionState(null);
   }
 
   function handleBlur(event: FocusEvent<HTMLFormElement>) {
+    if (mode === 'quickquote') return;
     const target = event.target as unknown as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
     if (target.name && target.value.trim()) void saveDraft('field-blur');
   }
@@ -1305,7 +1382,6 @@ export function PipelineIntakePage({
       <section id="quickquote-workspace" className="quickquote-workspace" aria-labelledby="quickquote-heading" data-loading={quickQuoteLoading ? 'true' : 'false'}>
         <header className="quickquote-header" aria-label="QuickQuote header">
           <div className="quickquote-header__identity">
-            <span className="quickquote-header__state" aria-current="page">Current workspace</span>
             <h1 id="quickquote-heading">QuickQuote</h1>
           </div>
         </header>
@@ -1331,13 +1407,16 @@ export function PipelineIntakePage({
                 <h2 id="quickquote-products-heading">Product eligibility</h2>
               </div>
               <div className="quickquote-products__toolbar-actions">
-                <QuickQuoteStateCard title="Pricing" state={quickQuoteLoading ? 'loading' : liveOffers.length > 0 || tenantHomePreviewProducts.length > 0 ? 'ready' : 'empty'} detail={liveOffers.length > 0 ? `${liveOffers.length} LoanHouse BFF offers` : `${tenantHomePreviewProducts.length} preview candidates`} />
                 <button type="button" className="quote-intake-primary" onClick={revealQuickQuoteProducts} aria-controls="quickquote-products-panel" aria-expanded={quickQuoteProductsVisible}>Find Products</button>
+                <div className="quickquote-toolbar-launch" aria-label="QuickQuote actions">
+                  <span id="quickquote-action-state">{quickQuoteLaunchLoading ? 'Loading quote state' : launchStatus}</span>
+                  <button type="button" className="quote-intake-primary" disabled={launchDisabled || quickQuoteLaunchLoading} aria-describedby="quickquote-action-state" onClick={() => void launch()}>{flowState.kind === 'submitting' ? 'Launching...' : 'Launch quote'}</button>
+                </div>
               </div>
             </div>
 
             {quickQuoteLoading ? <QuickQuoteSkeleton /> : null}
-            {!quickQuoteLoading && tenantHomePreviewProducts.length === 0 ? <QuickQuoteEmptyState missingFacts={missingRequiredFields.length} /> : null}
+            {!quickQuoteLoading && productRows.length === 0 ? <QuickQuoteEmptyState missingFacts={missingRequiredFields.length} /> : null}
 
             {!quickQuoteProductsVisible ? <QuickQuoteSubmitGate missingFacts={missingRequiredFields.length} /> : liveOfferState.kind === 'loaded' ? (
               <LiveOfferGrid runId={liveOfferState.runId} offers={liveFilteredOffers} selectedOfferId={selectedLiveOfferId} onSelect={selectLiveOffer} onDetail={navigateLiveOfferDetail} onLock={navigateLiveOfferLock} />
@@ -1347,23 +1426,15 @@ export function PipelineIntakePage({
                   {quickQuoteColumns.map((column) => <div key={column.key} role="columnheader">{column.label}</div>)}
                 </div>
                 {quickQuoteVisibleProducts.map((product) => (
-                  <ProductResultRow key={product.productCode} product={product} values={values} columns={quickQuoteColumns} missingFields={missingRequiredFields} metadata={runtimeMetadata} selected={selectedProduct?.productCode === product.productCode} comparisonSelected={comparisonProductCodes.includes(product.productCode)} actionState={rowActionState?.productCode === product.productCode ? rowActionState : null} onSelect={selectProduct} onApply={applyProduct} onAction={requestRowAction} onCompare={toggleComparisonProduct} />
+                  <ProductResultRow key={product.productCode} product={product} values={values} columns={quickQuoteColumns} missingFields={missingRequiredFields} metadata={runtimeMetadata} selected={selectedProduct?.productCode === product.productCode} actionState={rowActionState?.productCode === product.productCode ? rowActionState : null} onSelect={selectProduct} onApply={applyProduct} onAction={requestRowAction} launchOnly />
                 ))}
               </div>
             )}
-            {quickQuoteProductsVisible && liveOfferState.kind === 'loading' ? <p className="quote-intake-status" role="status">Loading LoanHouse-backed BFF offers...</p> : null}
+            {quickQuoteProductsVisible && liveOfferState.kind === 'loading' ? <p className="quote-intake-status" role="status">Loading backend offers...</p> : null}
             {quickQuoteProductsVisible && liveOfferState.kind === 'unavailable' ? <p className="quote-intake-status" role="alert">{liveOfferState.message}</p> : null}
 
-            {quickQuoteProductsVisible && liveOfferState.kind !== 'loaded' ? <QuickQuoteComparisonPanel products={quickQuoteComparisonProducts} selectedProductCode={selectedProduct?.productCode ?? ''} values={values} missingFields={missingRequiredFields} metadata={runtimeMetadata} onSelectProduct={selectProduct} onUseProduct={applyProduct} /> : null}
+            {quickQuoteProductsVisible && liveOfferState.kind !== 'loaded' ? <ProductPagination page={tenantProductsState.response.page} pageSize={tenantProductsState.response.pageSize} totalCount={tenantProductsState.response.totalCount} onPageChange={setProductPage} /> : null}
           </section>
-        </div>
-
-        <div className="quote-pipeline-launchbar quickquote-actions" aria-label="QuickQuote actions">
-          <div>
-            <strong>{selectedProduct?.productName ?? quickQuoteDisplayProduct?.productName ?? 'Quote launch'}</strong>
-            <span id="quickquote-action-state">{quickQuoteLaunchLoading ? 'Loading quote state' : launchStatus}</span>
-          </div>
-          <button type="button" className="quote-intake-primary" disabled={launchDisabled || quickQuoteLaunchLoading} aria-describedby="quickquote-action-state" onClick={() => void launch()}>{flowState.kind === 'submitting' ? 'Launching...' : 'Launch quote'}</button>
         </div>
 
         {selectedProduct && productDetailOpen ? <ProductDetailPanel product={selectedProduct} values={values} metadata={runtimeMetadata} onBack={() => setProductDetailOpen(false)} onUse={applyProduct} /> : null}
@@ -1389,7 +1460,7 @@ export function PipelineIntakePage({
           </nav>
         </div>
         <div className="quote-pipeline-topbar__stats" aria-label="Pipeline status">
-          <MetricCard label="Products" value={String(liveOffers.length > 0 ? liveFilteredOffers.length : filteredProducts.length)} detail={liveOffers.length > 0 ? `${liveOffers.length} LoanHouse offers` : `${tenantHomePreviewProducts.length} total`} />
+          <MetricCard label="Products" value={String(liveOffers.length > 0 ? liveFilteredOffers.length : productRows.length)} detail={liveOffers.length > 0 ? `${liveOffers.length} backend offers` : `${totalProductCount} total`} />
           {activeFilterCount > 0 ? <MetricCard label="Filters" value={String(activeFilterCount)} detail="active" /> : null}
           {completionPercent > 0 ? <MetricCard label="Profile" value={`${completionPercent}%`} detail="complete" tone={quoteReady ? 'ready' : startReady ? 'attention' : undefined} /> : null}
         </div>
@@ -1464,7 +1535,7 @@ export function PipelineIntakePage({
             </div>
           </div>
 
-          {(liveOfferState.kind === 'loaded' ? liveFilteredOffers.length === 0 : filteredProducts.length === 0) ? (
+          {(liveOfferState.kind === 'loaded' ? liveFilteredOffers.length === 0 : productRows.length === 0) ? (
             <div className="quote-product-empty" role="status">
               <strong>No matches.</strong>
             </div>
@@ -1477,12 +1548,13 @@ export function PipelineIntakePage({
               <div className="quote-product-row quote-product-row--header" role="row">
                 {priceScenarioColumns.map((column) => <div key={column.key} role="columnheader">{column.label}</div>)}
               </div>
-              {filteredProducts.map((product) => (
+              {productRows.map((product) => (
                 <ProductResultRow key={product.productCode} product={product} values={values} columns={priceScenarioColumns} missingFields={missingRequiredFields} metadata={runtimeMetadata} selected={selectedProduct?.productCode === product.productCode} actionState={rowActionState?.productCode === product.productCode ? rowActionState : null} onSelect={selectProduct} onApply={applyProduct} onAction={requestRowAction} />
               ))}
             </div>
           )}
-          {liveOfferState.kind === 'loading' ? <p className="quote-intake-status" role="status">Loading LoanHouse-backed BFF offers...</p> : null}
+          {liveOfferState.kind !== 'loaded' ? <ProductPagination page={tenantProductsState.response.page} pageSize={tenantProductsState.response.pageSize} totalCount={tenantProductsState.response.totalCount} onPageChange={setProductPage} /> : null}
+          {liveOfferState.kind === 'loading' ? <p className="quote-intake-status" role="status">Loading backend offers...</p> : null}
           {liveOfferState.kind === 'unavailable' ? <p className="quote-intake-status" role="alert">{liveOfferState.message}</p> : null}
         </section>
 
@@ -1546,13 +1618,13 @@ function LiveOfferGrid({ runId, offers, selectedOfferId, onSelect, onDetail, onL
   if (offers.length === 0) {
     return (
       <div className="quote-product-empty" role="status">
-        <strong>No LoanHouse-backed offers match the active filters.</strong>
+        <strong>No backend offers match the active filters.</strong>
       </div>
     );
   }
 
   return (
-    <div className="quote-product-grid quote-product-grid--rows" role="table" aria-label="LoanHouse-backed BFF offers">
+    <div className="quote-product-grid quote-product-grid--rows" role="table" aria-label="Backend offers">
       <div className="quote-product-row quote-product-row--header" role="row">
         <div role="columnheader">Product</div>
         <div role="columnheader">Investor</div>
@@ -1568,7 +1640,7 @@ function LiveOfferGrid({ runId, offers, selectedOfferId, onSelect, onDetail, onL
         const selected = selectedOfferId === offer.offerId;
         return (
           <div key={offer.offerId} className="quote-product-row" role="row" aria-label={`${offer.productLabel ?? offer.offerId} ${offerStatusText(offer)}`} aria-selected={selected} data-selected={selected} data-product-status={offerStatusText(offer).toLowerCase()}>
-            <div className="quote-product-cell quote-product-cell--product" role="cell" data-column="Product"><div className="quote-product-cell__product"><strong>{offer.productLabel ?? offer.offerId}</strong><span>{offer.offerId}</span><small>LoanHouse/LoanPass product · rank #{offer.rank}</small></div></div>
+            <div className="quote-product-cell quote-product-cell--product" role="cell" data-column="Product"><div className="quote-product-cell__product"><strong>{offer.productLabel ?? offer.offerId}</strong><span>{offer.offerId}</span><small>Backend product · rank #{offer.rank}</small></div></div>
             <div className="quote-product-cell" role="cell" data-column="Investor">{valueOrNa(offer.investor)}</div>
             <div className="quote-product-cell" role="cell" data-column="Approval status"><span className={`quote-status-pill quote-status-pill--${offerStatusClass(offer)}`}>{offerStatusText(offer)}</span></div>
             <div className="quote-product-cell" role="cell" data-column="Rate">{valueOrNa(offer.rate)}</div>
@@ -1586,7 +1658,7 @@ function LiveOfferGrid({ runId, offers, selectedOfferId, onSelect, onDetail, onL
           </div>
         );
       })}
-      {offers.length > 100 ? <p role="status">Showing first 100 offers from {offers.length} LoanHouse-backed BFF offers.</p> : null}
+      {offers.length > 100 ? <p role="status">Showing first 100 offers from {offers.length} backend offers.</p> : null}
     </div>
   );
 }
@@ -1892,6 +1964,18 @@ function CompactField({ id, label, value, onChange, placeholder, required, input
   );
 }
 
+function ProductPagination({ page, pageSize, totalCount, onPageChange }: { page: number; pageSize: number; totalCount: number; onPageChange: (page: number) => void }) {
+  const pageCount = Math.max(1, Math.ceil(totalCount / Math.max(1, pageSize)));
+  if (pageCount <= 1) return null;
+  return (
+    <nav className="quote-product-pagination" aria-label="Product pagination">
+      <button type="button" onClick={() => onPageChange(Math.max(1, page - 1))} disabled={page <= 1}>Previous products</button>
+      <span>Page {page} of {pageCount}</span>
+      <button type="button" onClick={() => onPageChange(Math.min(pageCount, page + 1))} disabled={page >= pageCount}>Next products</button>
+    </nav>
+  );
+}
+
 function RangeFilter({ label, min, max, onMin, onMax, prefix = '', suffix = '' }: { label: string; min: string; max: string; onMin: (value: string) => void; onMax: (value: string) => void; prefix?: string; suffix?: string }) {
   return (
     <div className="quote-compact-filter-row quote-compact-filter-row--range">
@@ -1904,15 +1988,15 @@ function RangeFilter({ label, min, max, onMin, onMax, prefix = '', suffix = '' }
   );
 }
 
-function ProductResultRow({ product, values, columns, missingFields, metadata, selected, comparisonSelected = false, actionState, onSelect, onApply, onAction, onCompare }: { product: AuthorizedProduct; values: BorrowerIntake; columns: PriceScenarioColumn[]; missingFields: PipelineRequiredField[]; metadata: ScenarioIntakeMetadata | null; selected: boolean; comparisonSelected?: boolean; actionState: ProductRowActionState | null; onSelect: (product: AuthorizedProduct) => void; onApply: (product: AuthorizedProduct) => void; onAction: (product: AuthorizedProduct, action: ProductRowAction) => void; onCompare?: (product: AuthorizedProduct) => void }) {
+function ProductResultRow({ product, values, columns, missingFields, metadata, selected, actionState, onSelect, onApply, onAction, launchOnly = false }: { product: AuthorizedProduct; values: BorrowerIntake; columns: PriceScenarioColumn[]; missingFields: PipelineRequiredField[]; metadata: ScenarioIntakeMetadata | null; selected: boolean; actionState: ProductRowActionState | null; onSelect: (product: AuthorizedProduct) => void; onApply: (product: AuthorizedProduct) => void; onAction: (product: AuthorizedProduct, action: ProductRowAction) => void; launchOnly?: boolean }) {
   return (
-    <div className="quote-product-row" role="row" aria-label={`${product.productName} ${product.status}`} aria-selected={selected} data-selected={selected} data-comparison-selected={comparisonSelected} data-product-status={product.status.toLowerCase()} onClick={() => onSelect(product)} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(product); } }}>
-      {columns.map((column) => <div key={column.key} className={`quote-product-cell quote-product-cell--${column.key}`} role="cell" data-column={column.label}>{renderProductColumn(column.key, product, values, missingFields, metadata, onApply, onAction, actionState, column, comparisonSelected, onCompare)}</div>)}
+    <div className="quote-product-row" role="row" aria-label={`${product.productName} ${product.status}`} aria-selected={selected} data-selected={selected} data-product-status={product.status.toLowerCase()} onClick={() => onSelect(product)} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(product); } }}>
+      {columns.map((column) => <div key={column.key} className={`quote-product-cell quote-product-cell--${column.key}`} role="cell" data-column={column.label}>{renderProductColumn(column.key, product, values, missingFields, metadata, onApply, onAction, actionState, column, launchOnly)}</div>)}
     </div>
   );
 }
 
-function renderProductColumn(key: PriceScenarioColumnKey, product: AuthorizedProduct, values: BorrowerIntake, missingFields: PipelineRequiredField[], metadata: ScenarioIntakeMetadata | null, onApply: (product: AuthorizedProduct) => void, onAction: (product: AuthorizedProduct, action: ProductRowAction) => void, actionState: ProductRowActionState | null, column?: PriceScenarioColumn, comparisonSelected = false, onCompare?: (product: AuthorizedProduct) => void) {
+function renderProductColumn(key: PriceScenarioColumnKey, product: AuthorizedProduct, values: BorrowerIntake, missingFields: PipelineRequiredField[], metadata: ScenarioIntakeMetadata | null, onApply: (product: AuthorizedProduct) => void, onAction: (product: AuthorizedProduct, action: ProductRowAction) => void, actionState: ProductRowActionState | null, column?: PriceScenarioColumn, launchOnly = false) {
   if (key === 'product') return <div className="quote-product-cell__product"><strong>{product.productName}</strong><span>{product.productCode}</span><small>{productTypeLabel(product.productType)} · {channelLabel(product.channelCode)} · {product.investorCode}</small><small>{termFromProductName(product.productName)} lock/pricing context · {productAvailabilityLabel(product)}</small></div>;
   if (key === 'investor') return product.investorCode;
   if (key === 'status') return <span className={`quote-status-pill quote-status-pill--${statusClass(product.status)}`}>{product.status}</span>;
@@ -1933,13 +2017,19 @@ function renderProductColumn(key: PriceScenarioColumnKey, product: AuthorizedPro
   if (key === 'ltv') return values.loanToValue || '—';
   if (key === 'fico') return values.decisionCreditScore || '—';
   if (column?.fieldId || isCalculationFieldId(key)) return renderCalculationOutput(column ?? { key, label: friendlyLabel(key), fieldId: key }, values);
+  if (launchOnly) {
+    return (
+      <div className="quote-product-row-actions" aria-label={`${product.productName} row actions`}>
+        <button type="button" onClick={(event) => { event.stopPropagation(); onApply(product); }} disabled={!isProductEligible(product)}>Use for quote</button>
+      </div>
+    );
+  }
   return (
     <div className="quote-product-row-actions" aria-label={`${product.productName} row actions`}>
-      {onCompare ? <button type="button" onClick={(event) => { event.stopPropagation(); onCompare(product); }}>{comparisonSelected ? 'Remove from comparison' : 'Add to comparison'}</button> : null}
       <button type="button" onClick={(event) => { event.stopPropagation(); onApply(product); }} disabled={!isProductEligible(product)}>Use for quote</button>
       <button type="button" onClick={(event) => { event.stopPropagation(); onAction(product, 'refresh'); }} disabled={!isProductEligible(product)}>Queue pricing refresh</button>
       <button type="button" onClick={(event) => { event.stopPropagation(); onAction(product, 'lock'); }} disabled={!isProductEligible(product)}>Request lock</button>
-      {!onCompare ? <button type="button" onClick={(event) => { event.stopPropagation(); onAction(product, 'status'); }}>Review status</button> : null}
+      <button type="button" onClick={(event) => { event.stopPropagation(); onAction(product, 'status'); }}>Review status</button>
       {actionState ? (
         <div className={`quote-product-row-action-status quote-product-row-action-status--${actionState.tone}`} role="status" onClick={(event) => event.stopPropagation()}>
           <strong>{actionState.message}</strong>
@@ -1948,81 +2038,6 @@ function renderProductColumn(key: PriceScenarioColumnKey, product: AuthorizedPro
       ) : null}
     </div>
   );
-}
-
-function QuickQuoteComparisonPanel({ products, selectedProductCode, values, missingFields, metadata, onSelectProduct, onUseProduct }: { products: AuthorizedProduct[]; selectedProductCode: string; values: BorrowerIntake; missingFields: PipelineRequiredField[]; metadata: ScenarioIntakeMetadata | null; onSelectProduct: (product: AuthorizedProduct) => void; onUseProduct: (product: AuthorizedProduct) => void }) {
-  const metricRows: Array<{ key: string; label: string }> = [
-    { key: 'product', label: 'Product' },
-    { key: 'eligibility', label: 'Eligibility' },
-    { key: 'rate', label: 'Rate' },
-    { key: 'price', label: 'Price' },
-    { key: 'payment', label: 'Payment' },
-    { key: 'dscr', label: 'DSCR' },
-    { key: 'fees', label: 'Fees' },
-    { key: 'llpa', label: 'LLPA' },
-    { key: 'assumptions', label: 'Assumptions' },
-    { key: 'trace', label: 'Trace availability' },
-    { key: 'actions', label: 'Actions' },
-  ];
-  const comparisonGridStyle = { '--quickquote-comparison-columns': `minmax(9rem, 12rem) repeat(${Math.max(products.length, 1)}, minmax(13rem, 1fr))` } as CSSProperties;
-
-  return (
-    <section className="quickquote-comparison" aria-labelledby="quickquote-comparison-heading">
-      <div className="quickquote-comparison__header">
-        <div>
-          <span className="eyebrow">Comparison</span>
-          <h3 id="quickquote-comparison-heading">Responsive quote comparison</h3>
-          <p>Selected products stay aligned by metric; missing, not-applicable, assumption, and trace states remain visible.</p>
-        </div>
-      </div>
-      {products.length < 2 ? <p className="quickquote-comparison__notice" role="status">Select at least two products to compare side by side.</p> : null}
-      <div className="quickquote-comparison__viewport" aria-label="Swipe QuickQuote comparison products">
-        <div className="quickquote-comparison__grid" role="table" aria-label="QuickQuote product comparison" style={comparisonGridStyle}>
-          <div className="quickquote-comparison__row quickquote-comparison__row--header" role="row">
-            <div className="quickquote-comparison__metric-label" role="columnheader">Metric</div>
-            {products.map((product) => <div key={product.productCode} role="columnheader" data-selected={selectedProductCode === product.productCode}>{product.productName}</div>)}
-          </div>
-          {metricRows.map((metric) => (
-            <div key={metric.key} className="quickquote-comparison__row" role="row" aria-label={`${metric.label} comparison`}>
-              <div className="quickquote-comparison__metric-label" role="rowheader">{metric.label}</div>
-              {products.map((product) => <div key={`${product.productCode}-${metric.key}`} className="quickquote-comparison__cell" role="cell">{renderComparisonCell(metric.key, product, values, missingFields, metadata, onSelectProduct, onUseProduct)}</div>)}
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function renderComparisonCell(metric: string, product: AuthorizedProduct, values: BorrowerIntake, missingFields: PipelineRequiredField[], metadata: ScenarioIntakeMetadata | null, onSelectProduct: (product: AuthorizedProduct) => void, onUseProduct: (product: AuthorizedProduct) => void) {
-  if (metric === 'product') return <div className="quote-product-cell__product"><strong>{product.productName}</strong><span>{product.productCode}</span></div>;
-  if (metric === 'eligibility') return <div className="quickquote-comparison__state"><span className={`quote-status-pill quote-status-pill--${statusClass(product.status)}`}>{product.status}</span><small>{productEligibilityReviewLabel(product)} · {productUnavailableReason(product)}</small></div>;
-  if (metric === 'rate') return <QuoteEconomicsMetric label="Rate" value={rateOutputValue(product, values)} missingLabel="Rate output pending" missingFields={missingFields} traceRef={metricTraceRef(product, 'rate', metadata)} />;
-  if (metric === 'price') return <QuoteEconomicsMetric label="Price" value={firstConfiguredOutput(values, ['calc@adjusted-price', 'adjustedPrice', 'secondaryAdjustment'])} missingLabel="Price output pending" missingFields={missingFields} traceRef={metricTraceRef(product, 'price', metadata)} />;
-  if (metric === 'payment') return <QuoteEconomicsMetric label="Payment" value={firstConfiguredOutput(values, ['calc@payment', 'monthlyPayment', 'totalLiabilityMonthlyPayment'])} missingLabel="Payment output pending" missingFields={missingFields} traceRef={metricTraceRef(product, 'payment', metadata)} />;
-  if (metric === 'dscr') return <QuoteEconomicsMetric label="DSCR" value={firstConfiguredOutput(values, ['calc@dscr', 'estimatedDSCR'])} missingLabel="DSCR output pending" missingFields={missingFields} traceRef={metricTraceRef(product, 'dscr', metadata)} />;
-  if (metric === 'fees') return <QuoteEconomicsMetric label="Fees" value={firstConfiguredOutput(values, ['calc@fees', 'calc@fee-summary', 'feeSummary', 'feesSummary', 'pricingFeeSummary'])} missingLabel="Fee output pending" missingFields={missingFields} traceRef={metricTraceRef(product, 'fees', metadata)} />;
-  if (metric === 'llpa') return <QuoteEconomicsMetric label="LLPA" value={firstConfiguredOutput(values, ['calc@llpa', 'calc@llpa-summary', 'llpaSummary', 'pricingLlpaSummary'])} missingLabel="LLPA output pending" missingFields={missingFields} traceRef={metricTraceRef(product, 'llpa', metadata)} />;
-  if (metric === 'assumptions') return <QuickQuoteComparisonAssumptions product={product} fields={missingFields} metadata={metadata} />;
-  if (metric === 'trace') return <QuickQuoteComparisonTrace product={product} metadata={metadata} />;
-  return <div className="quickquote-comparison__actions"><button type="button" onClick={() => onSelectProduct(product)}>Select for quote</button><button type="button" onClick={() => onUseProduct(product)} disabled={!isProductEligible(product)}>Use for quote</button></div>;
-}
-
-function QuickQuoteComparisonAssumptions({ product, fields, metadata }: { product: AuthorizedProduct; fields: PipelineRequiredField[]; metadata: ScenarioIntakeMetadata | null }) {
-  const assumptions = [
-    ...fields.slice(0, 3).map((field) => `${field.label} missing`),
-    ...(metadata?.validationIssues?.slice(0, 2).map((issue) => `${issue.code}: ${issue.message}`) ?? []),
-    ...(metadata?.dependencyStatus && metadata.dependencyStatus !== 'READY' ? [`Dependency status: ${metadata.dependencyStatus}`] : []),
-    ...(isProductEligible(product) ? [] : [productUnavailableReason(product)]),
-  ];
-  if (assumptions.length === 0) return <span className="quickquote-comparison__empty-state">No visible assumptions from current intake state.</span>;
-  return <ul className="quickquote-comparison__assumptions">{assumptions.map((assumption) => <li key={assumption}>{assumption}</li>)}</ul>;
-}
-
-function QuickQuoteComparisonTrace({ product, metadata }: { product: AuthorizedProduct; metadata: ScenarioIntakeMetadata | null }) {
-  const refs = productAuditTraceRefs(product, metadata);
-  if (refs.length === 0) return <span className="quickquote-comparison__empty-state">Trace unavailable</span>;
-  return <ul className="quickquote-comparison__traces">{refs.slice(0, 4).map((ref) => <li key={`${ref.label}-${ref.value}`}><a href={traceHref(ref)}>{ref.label}: {ref.value}</a></li>)}</ul>;
 }
 
 function QuoteEconomicsMetric({ label, value, missingLabel, missingFields, traceRef }: { label: string; value: string; missingLabel: string; missingFields: PipelineRequiredField[]; traceRef: ProductMetricTraceRef | null }) {
@@ -2734,11 +2749,25 @@ function availableFiltersForDropdownConfig(options: TenantDropdownOptions | null
   };
 }
 
+function normalizeTenantProductsResponse(response: TenantProductsResponse, fallback: TenantProductsResponse): TenantProductsResponse {
+  const products = Array.isArray(response.products) ? response.products : fallback.products;
+  const availableFilters = response.availableFilters && Array.isArray(response.availableFilters.productTypes) && Array.isArray(response.availableFilters.investors) && Array.isArray(response.availableFilters.channels)
+    ? response.availableFilters
+    : availableFiltersFor(products);
+  return {
+    products,
+    totalCount: Number.isFinite(response.totalCount) ? response.totalCount : products.length,
+    page: Number.isFinite(response.page) && response.page > 0 ? response.page : fallback.page,
+    pageSize: Number.isFinite(response.pageSize) && response.pageSize > 0 ? response.pageSize : fallback.pageSize,
+    availableFilters,
+  };
+}
+
 function availableFiltersForOffers(offers: OfferSummary[]): TenantProductsResponse['availableFilters'] {
   return {
     productTypes: uniqueSorted(offers.map((offer) => valueOrNa(offer.productFamily ?? offer.productLabel)).filter((value) => value !== 'N/A')),
     investors: uniqueSorted(offers.map((offer) => valueOrNa(offer.investor)).filter((value) => value !== 'N/A')),
-    channels: uniqueSorted(['LoanHouse/LoanPass']),
+    channels: uniqueSorted(['Backend offers']),
   };
 }
 
@@ -2804,7 +2833,7 @@ function filterLiveOffers(offers: OfferSummary[], filters: ProductFilterState) {
     const rate = numericOfferValue(offer.rate);
     const typeMatches = !filters.productType || normalized(productFamily) === normalized(filters.productType);
     const investorMatches = !filters.investor || normalized(investor) === normalized(filters.investor);
-    const channelMatches = !filters.channel || normalized(filters.channel) === normalized('LoanHouse/LoanPass');
+    const channelMatches = !filters.channel || normalized(filters.channel) === normalized('Backend offers');
     const statusMatches = !filters.status || normalized(status).includes(normalized(filters.status));
     const minRateMatches = minRate == null || rate == null || rate >= minRate;
     const maxRateMatches = maxRate == null || rate == null || rate <= maxRate;
@@ -2830,7 +2859,7 @@ function lockTextForOffer(offer: OfferSummary) {
 
 function sourceRefsForOffer(offer: OfferSummary) {
   return uniqueStrings([
-    'LoanHouse/LoanPass via pricing-bff',
+    'pricing-bff evidence',
     ...(offer.upstreamRefs ?? []),
     ...(offer.snapshotRefs ?? []),
     ...(offer.auditIds ?? []),

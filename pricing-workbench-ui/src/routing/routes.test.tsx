@@ -45,6 +45,16 @@ describe('RoutingTest', () => {
     expect(matchAppRoute('/lock-management')).toEqual(expect.objectContaining({ id: 'lock-management-alias', sourceModuleId: 'lock-management' }));
   });
 
+  it('RoutingTest.exposesPostDeployRequiredRouteAliases', () => {
+    expect(matchAppRoute('/scenario-analysis')).toEqual(expect.objectContaining({ id: 'scenario-analysis-review-alias', sourceModuleId: 'quote-offers' }));
+    expect(matchAppRoute('/rate-sheet-intake')).toEqual(expect.objectContaining({ id: 'rate-sheet-intake-direct-alias', sourceModuleId: 'rate-sheet-intake' }));
+    expect(matchAppRoute('/rate-feed-pipeline')).toEqual(expect.objectContaining({ id: 'rate-feed-pipeline-direct-alias', sourceModuleId: 'rate-feed-pipeline' }));
+    expect(matchAppRoute('/tenant-admin')).toEqual(expect.objectContaining({ id: 'tenant-admin-direct-alias', sourceModuleId: 'tenant-admin' }));
+    expect(matchAppRoute('/governance')).toEqual(expect.objectContaining({ id: 'governance-lifecycle-direct-alias', sourceModuleId: 'admin-governance' }));
+    expect(matchAppRoute('/margin-profitability')).toEqual(expect.objectContaining({ id: 'margin-profitability-direct-alias', sourceModuleId: 'margin-profitability' }));
+    expect(matchAppRoute('/quickquote')).toEqual(expect.objectContaining({ id: 'quickquote-direct-alias', sourceModuleId: 'quickquote' }));
+  });
+
   it('RoutingTest.handles404ForUnknownRoutes', () => {
     expect(matchAppRoute('/unknown/workbench/path').id).toBe('not-found');
   });

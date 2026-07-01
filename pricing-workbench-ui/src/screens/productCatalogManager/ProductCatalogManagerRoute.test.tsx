@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../App';
@@ -51,6 +51,7 @@ describe('Product catalog manager route', () => {
     );
 
     expect(await screen.findByRole('heading', { name: 'Product Management' }, { timeout: 5000 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Open navigation menu/i }));
     expect(screen.getByRole('link', { name: /Product Management, 1 alert/ })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('button', { name: /Add Product/i })).toBeInTheDocument();
     expect(screen.getByRole('table', { name: 'Product catalog records' })).toBeInTheDocument();

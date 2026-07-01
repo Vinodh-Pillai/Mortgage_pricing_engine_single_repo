@@ -17,7 +17,7 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
-@SpringBootTest
+@SpringBootTest(properties = "loanweft.integrations.margin-service.base-url=")
 @AutoConfigureMockMvc
 class UiShellControllerTest {
   @Autowired MockMvc mvc;
@@ -28,6 +28,7 @@ class UiShellControllerTest {
     assertThat(context.getBean(AuthUiController.class)).isNotNull();
     assertThat(context.getBean(ShellUiController.class)).isNotNull();
     assertThat(context.getBean(ProductCatalogUiController.class)).isNotNull();
+    assertThat(context.getBean(ApplicationFormsUiController.class)).isNotNull();
     assertThat(context.getBean(QuoteRunUiController.class)).isNotNull();
     assertThat(context.getBean(ScenarioDraftUiController.class)).isNotNull();
     assertThat(context.getBean(OfferUiController.class)).isNotNull();
@@ -146,14 +147,13 @@ class UiShellControllerTest {
   }
 
   @Test
-  void tenantWorkspacePlaceholderRecordsLocalSetupWithoutCredentialsOrUpstreams() throws Exception {
+  void tenantWorkspaceSetupFailsClosedWithoutTenantContextPersistence() throws Exception {
     mvc.perform(post("/api/v1/tenants/workspaces")
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"tenantName\":\"Retail workspace\",\"operationsContact\":\"ops@example.test\",\"launchGoal\":\"Prepare guided pricing workflow\"}"))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.tenantId").value(org.hamcrest.Matchers.startsWith("tenant-")))
-        .andExpect(jsonPath("$.status").value("RECORDED"))
-        .andExpect(jsonPath("$.message").value("Tenant workspace setup was recorded in local preview mode."))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.status").value("BLOCKED"))
+        .andExpect(jsonPath("$.message").value("Tenant workspace setup requires configured tenant-context-service admin persistence."))
         .andExpect(jsonPath("$.placeholders", hasSize(2)));
 
     mvc.perform(post("/api/v1/tenants/workspaces")
@@ -162,6 +162,72 @@ class UiShellControllerTest {
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.status").value("BLOCKED"))
         .andExpect(jsonPath("$.placeholders", hasSize(3)));
+  }
+
+  @Test
+  void tenantAdminReadRoutesReturnBlockedReadModelsWhenTenantContextAdminRoutingIsMissing() throws Exception {
+    mvc.perform(get("/api/v1/admin/tenants")
+            .param("page", "0")
+            .param("size", "20")
+            .header("X-Ui-Trace-Id", "trace-tenant-admin-list"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("TENANT_CONTEXT_ADMIN_CONTRACT_REQUIRED"))
+        .andExpect(jsonPath("$.status").value("BLOCKED"))
+        .andExpect(jsonPath("$.operation").value("list-tenants"))
+        .andExpect(jsonPath("$.content", empty()))
+        .andExpect(jsonPath("$.readModel.configured").value(false))
+        .andExpect(jsonPath("$.writeDisabled").value(true))
+        .andExpect(jsonPath("$.fakePersistence").value(false))
+        .andExpect(jsonPath("$.blocker.service").value("tenant-context-service"))
+        .andExpect(jsonPath("$.dependencyStatus").value("TENANT_CONTEXT_ADMIN_CONTRACT_NOT_CONFIGURED"))
+        .andExpect(jsonPath("$.uiTraceId").value("trace-tenant-admin-list"));
+
+    mvc.perform(get("/api/v1/admin/tenants/tenant-preview-001")
+            .header("X-Ui-Trace-Id", "trace-tenant-admin-read"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.operation").value("read-tenant"))
+        .andExpect(jsonPath("$.tenantId").value("tenant-preview-001"))
+        .andExpect(jsonPath("$.tenant").doesNotExist())
+        .andExpect(jsonPath("$.readModel.configured").value(false))
+        .andExpect(jsonPath("$.writeDisabled").value(true));
+
+    mvc.perform(get("/api/v1/admin/tenants/tenant-preview-001/feature-flags"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.operation").value("read-feature-flags"))
+        .andExpect(jsonPath("$.flags").isMap())
+        .andExpect(jsonPath("$.writeDisabled").value(true));
+  }
+
+  @Test
+  void tenantAdminWriteRoutesStillFailClosedWhenTenantContextAdminRoutingIsMissing() throws Exception {
+    mvc.perform(post("/api/v1/admin/tenants")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"tenantName\":\"Retail workspace\",\"displayName\":\"Retail workspace\"}"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.code").value("TENANT_CONTEXT_ADMIN_CONTRACT_REQUIRED"))
+        .andExpect(jsonPath("$.operation").value("create-tenant"))
+        .andExpect(jsonPath("$.writeDisabled").value(true))
+        .andExpect(jsonPath("$.receivedFields", hasSize(2)));
+
+    mvc.perform(patch("/api/v1/admin/tenants/tenant-preview-001")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"displayName\":\"Retail workspace\"}"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.operation").value("update-tenant"))
+        .andExpect(jsonPath("$.writeDisabled").value(true));
+
+    mvc.perform(post("/api/v1/admin/tenants/tenant-preview-001/activate"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.operation").value("tenant-status-activate"))
+        .andExpect(jsonPath("$.writeDisabled").value(true))
+        .andExpect(jsonPath("$.requestedAction").value("activate"));
+
+    mvc.perform(patch("/api/v1/admin/tenants/tenant-preview-001/feature-flags")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"flags\":{\"quick_pricer\":true}}"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.operation").value("update-feature-flags"))
+        .andExpect(jsonPath("$.writeDisabled").value(true));
   }
 
   @Test
@@ -247,6 +313,106 @@ class UiShellControllerTest {
         .andExpect(jsonPath("$.channels[0].channelCode").value("RETAIL"))
         .andExpect(jsonPath("$.dependencyStatus").value("CATALOG_SERVICE_CHANNELS_CONTRACT_NOT_CONFIGURED"))
         .andExpect(jsonPath("$.uiTraceId").value("trace-catalog-channels"));
+
+    mvc.perform(get("/api/v1/product-catalog/products")
+            .header("X-Ui-Trace-Id", "trace-root-catalog-products"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.tenantContext").value("tenant-context-required"))
+        .andExpect(jsonPath("$.products", hasSize(3)))
+        .andExpect(jsonPath("$.dependencyStatus").value("CATALOG_SERVICE_PRODUCTS_CONTRACT_NOT_CONFIGURED"))
+        .andExpect(jsonPath("$.uiTraceId").value("trace-root-catalog-products"));
+
+    mvc.perform(get("/product-catalog/investors")
+            .header("X-Ui-Trace-Id", "trace-root-catalog-investors"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.tenantContext").value("tenant-context-required"))
+        .andExpect(jsonPath("$.investors", hasSize(3)))
+        .andExpect(jsonPath("$.dependencyStatus").value("CATALOG_SERVICE_INVESTORS_CONTRACT_NOT_CONFIGURED"));
+
+    mvc.perform(get("/product-catalog/channels")
+            .header("X-Ui-Trace-Id", "trace-root-catalog-channels"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.tenantContext").value("tenant-context-required"))
+        .andExpect(jsonPath("$.channels", hasSize(3)))
+        .andExpect(jsonPath("$.dependencyStatus").value("CATALOG_SERVICE_CHANNELS_CONTRACT_NOT_CONFIGURED"));
+
+    mvc.perform(get("/api/v1/tenants/ui-preview-tenant/investors")
+            .header("X-Ui-Trace-Id", "trace-tenant-investors-alias"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.tenantContext").value("ui-preview-tenant"))
+        .andExpect(jsonPath("$.investors", hasSize(3)))
+        .andExpect(jsonPath("$.dependencyStatus").value("CATALOG_SERVICE_INVESTORS_CONTRACT_NOT_CONFIGURED"));
+
+    mvc.perform(get("/investors")
+            .header("X-Ui-Trace-Id", "trace-root-investors-alias"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.tenantContext").value("tenant-context-required"))
+        .andExpect(jsonPath("$.investors", hasSize(3)))
+        .andExpect(jsonPath("$.dependencyStatus").value("CATALOG_SERVICE_INVESTORS_CONTRACT_NOT_CONFIGURED"));
+
+    mvc.perform(get("/api/v1/tenants/ui-preview-tenant/channels")
+            .header("X-Ui-Trace-Id", "trace-tenant-channels-alias"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.tenantContext").value("ui-preview-tenant"))
+        .andExpect(jsonPath("$.channels", hasSize(3)))
+        .andExpect(jsonPath("$.dependencyStatus").value("CATALOG_SERVICE_CHANNELS_CONTRACT_NOT_CONFIGURED"));
+
+    mvc.perform(get("/channels")
+            .header("X-Ui-Trace-Id", "trace-root-channels-alias"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.tenantContext").value("tenant-context-required"))
+        .andExpect(jsonPath("$.channels", hasSize(3)))
+        .andExpect(jsonPath("$.dependencyStatus").value("CATALOG_SERVICE_CHANNELS_CONTRACT_NOT_CONFIGURED"));
+  }
+
+  @Test
+  void activeApplicationFormReturnsBlockedReadModelWhenSchemaContractMissing() throws Exception {
+    mvc.perform(get("/api/v1/tenants/ui-preview-tenant/application-forms/active")
+            .header("X-Ui-Trace-Id", "trace-active-application-form"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("BLOCKED"))
+        .andExpect(jsonPath("$.readModelType").value("ACTIVE_APPLICATION_FORM_BLOCKED_READ_MODEL"))
+        .andExpect(jsonPath("$.blocked").value(true))
+        .andExpect(jsonPath("$.writeDisabled").value(true))
+        .andExpect(jsonPath("$.fakePersistence").value(false))
+        .andExpect(jsonPath("$.schemaAvailable").value(false))
+        .andExpect(jsonPath("$.code").value("APPLICATION_FORM_SCHEMA_CONTRACT_REQUIRED"))
+        .andExpect(jsonPath("$.dependencyStatus").value("APPLICATION_FORM_SCHEMA_NOT_CONFIGURED"))
+        .andExpect(jsonPath("$.tenantContext").value("ui-preview-tenant"))
+        .andExpect(jsonPath("$.retryable").value(false))
+        .andExpect(jsonPath("$.clientAction").value("SHOW_APPLICATION_FORM_CONTRACT_BLOCKER"))
+        .andExpect(jsonPath("$.blockers[0].code").value("APPLICATION_FORM_SCHEMA_CONTRACT_REQUIRED"))
+        .andExpect(jsonPath("$.allowedActions", hasSize(0)))
+        .andExpect(jsonPath("$.formSchema").doesNotExist())
+        .andExpect(jsonPath("$.formData").doesNotExist())
+        .andExpect(jsonPath("$.uiTraceId").value("trace-active-application-form"));
+  }
+
+  @Test
+  void marginProfitabilityAliasesFailClosedWithContractBlockerInsteadOf404() throws Exception {
+    String[] aliases = {
+        "/api/v1/tenants/ui-preview-tenant/margin/profitability",
+        "/api/v1/tenants/ui-preview-tenant/margins/profitability",
+        "/api/v1/tenants/ui-preview-tenant/margin-profitability",
+        "/api/v1/margin/profitability",
+        "/api/v1/margins/profitability",
+        "/api/v1/margin-profitability",
+        "/margin/profitability",
+        "/margins/profitability",
+        "/margin-profitability"
+    };
+    for (String alias : aliases) {
+      mvc.perform(get(alias)
+              .header("X-Tenant-Context", "ui-preview-tenant")
+              .header("X-Ui-Trace-Id", "trace-margin-alias"))
+          .andExpect(status().isServiceUnavailable())
+          .andExpect(jsonPath("$.status").value("BLOCKED"))
+          .andExpect(jsonPath("$.code").value("MARGIN_SERVICE_BASE_URL_NOT_CONFIGURED"))
+          .andExpect(jsonPath("$.dependencyStatus").value("MARGIN_SERVICE_PROFITABILITY_CONTRACT_BLOCKED"))
+          .andExpect(jsonPath("$.tenantContext").value("ui-preview-tenant"))
+          .andExpect(jsonPath("$.retryable").value(false))
+          .andExpect(jsonPath("$.clientAction").value("SHOW_MARGIN_PROFITABILITY_CONTRACT_BLOCKER"));
+    }
   }
 
   @Test
@@ -820,6 +986,46 @@ class UiShellControllerTest {
         .andExpect(jsonPath("$.message").value("Draft scenario access denied."))
         .andExpect(jsonPath("$.records").doesNotExist())
         .andExpect(jsonPath("$.intake").doesNotExist());
+  }
+
+  @Test
+  void localUnsyncedPipelineDraftPatchFailsClosedWithStableNonRetryablePayload() throws Exception {
+    mvc.perform(patch("/api/v1/tenants/ui-preview-tenant/scenarios/local-unsynced-pipeline-draft")
+            .header("X-Tenant-Context", "ui-preview-tenant")
+            .header("X-Ui-Trace-Id", "trace-local-unsynced-draft-root")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{}"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.status").value("BLOCKED"))
+        .andExpect(jsonPath("$.code").value("DRAFT_SCENARIO_PERSISTENCE_REQUIRED"))
+        .andExpect(jsonPath("$.scenarioId").value("local-unsynced-pipeline-draft"))
+        .andExpect(jsonPath("$.section").value("draft"))
+        .andExpect(jsonPath("$.dependencyStatus").value("DRAFT_SCENARIO_PERSISTENCE_NOT_CONFIGURED"))
+        .andExpect(jsonPath("$.retryable").value(false))
+        .andExpect(jsonPath("$.nonRetryable").value(true))
+        .andExpect(jsonPath("$.stableFailureId").value("local-unsynced-pipeline-draft:persistence-required"))
+        .andExpect(jsonPath("$.blockedDraftId").value("local-unsynced-pipeline-draft"))
+        .andExpect(jsonPath("$.clientAction").value("STOP_AUTOSAVE_AND_SHOW_PERSISTENCE_BLOCKER"))
+        .andExpect(jsonPath("$.uiTraceId").value("trace-local-unsynced-draft-root"));
+
+    mvc.perform(patch("/api/v1/tenants/ui-preview-tenant/scenarios/local-unsynced-pipeline-draft/scenario-identity")
+            .header("X-Tenant-Context", "ui-preview-tenant")
+            .header("X-Ui-Trace-Id", "trace-local-unsynced-draft")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{}"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.status").value("BLOCKED"))
+        .andExpect(jsonPath("$.code").value("DRAFT_SCENARIO_PERSISTENCE_REQUIRED"))
+        .andExpect(jsonPath("$.scenarioId").value("local-unsynced-pipeline-draft"))
+        .andExpect(jsonPath("$.section").value("scenario-identity"))
+        .andExpect(jsonPath("$.dependencyStatus").value("DRAFT_SCENARIO_PERSISTENCE_NOT_CONFIGURED"))
+        .andExpect(jsonPath("$.retryable").value(false))
+        .andExpect(jsonPath("$.nonRetryable").value(true))
+        .andExpect(jsonPath("$.retryAfterSeconds").value(0))
+        .andExpect(jsonPath("$.clientAction").value("STOP_AUTOSAVE_AND_SHOW_PERSISTENCE_BLOCKER"))
+        .andExpect(jsonPath("$.stableFailureId").value("local-unsynced-pipeline-draft:persistence-required"))
+        .andExpect(jsonPath("$.blockedDraftId").value("local-unsynced-pipeline-draft"))
+        .andExpect(jsonPath("$.uiTraceId").value("trace-local-unsynced-draft"));
   }
 
   @Test

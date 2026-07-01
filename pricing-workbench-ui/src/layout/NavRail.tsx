@@ -97,14 +97,14 @@ export function NavRail({ activeModuleId, activeRunId, collapsed, drawerOpen, mo
                 key={item.id}
                 className={({ isActive }) => `layout-nav__link${isActive || item.id === activeModuleId ? ' layout-nav__link--active' : ''}`}
                 to={item.route}
-                title={item.label}
-                aria-label={item.label}
+                title={`${item.label}${item.badgeLabel ? ` · ${item.badgeLabel}` : ''}`}
+                aria-label={item.badgeLabel ? `${item.label}, ${item.badgeLabel}` : item.label}
                 onClick={() => {
                   if (mode === 'drawer') onCloseDrawer();
                 }}
               >
                 <span className="layout-nav__link-label" aria-hidden={isRailCollapsed ? true : undefined}>{isRailCollapsed ? item.label.slice(0, 1) : item.label}</span>
-                {item.badgeCount ? <span className="layout-badge" aria-label={t('attentionItem', { count: item.badgeCount })}>{item.badgeCount}</span> : null}
+                {item.badgeCount ? <span className="layout-badge" aria-label={item.badgeLabel ?? t('attentionItem', { count: item.badgeCount })}>{item.badgeCount}</span> : null}
               </NavLink>
             ))}
           </section>

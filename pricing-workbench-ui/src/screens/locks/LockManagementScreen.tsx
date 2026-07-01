@@ -49,7 +49,26 @@ const lockConfig: FunctionalityPageConfig<LockRow> = {
 };
 
 export function LockManagementScreen({ visualState, onEvidenceCapture }: { visualState?: ScreenVisualState; onEvidenceCapture?: EvidenceCapture }) {
-  return <MajorFunctionalityPage config={lockConfig} visualState={visualState} onEvidenceCapture={onEvidenceCapture} />;
+  return (
+    <>
+      <style>{`
+        #lock-management-heading {
+          position: static !important;
+          display: block !important;
+          width: auto !important;
+          height: auto !important;
+          margin: 0 0 0.5rem !important;
+          overflow: visible !important;
+          clip: auto !important;
+          clip-path: none !important;
+          white-space: normal !important;
+          visibility: visible !important;
+          opacity: 1 !important;
+        }
+      `}</style>
+      <MajorFunctionalityPage config={lockConfig} visualState={visualState} onEvidenceCapture={onEvidenceCapture} />
+    </>
+  );
 }
 
 export default LockManagementScreen;

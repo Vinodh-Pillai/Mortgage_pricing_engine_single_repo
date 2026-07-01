@@ -84,10 +84,15 @@ function definitionForModule(module: WorkbenchScreenModule): WorkbenchRouteDefin
 }
 
 const scenarioModule = workbenchModules.find((module) => module.id === 'scenario-analysis');
+const quoteOffersModule = workbenchModules.find((module) => module.id === 'quote-offers');
+const quickQuoteModule = workbenchModules.find((module) => module.id === 'quickquote');
 const tenantOnboardingModule = workbenchModules.find((module) => module.id === 'tenant-onboarding');
+const tenantAdminModule = workbenchModules.find((module) => module.id === 'tenant-admin');
 const productManagementModule = workbenchModules.find((module) => module.id === 'product-management');
 const rateSheetModule = workbenchModules.find((module) => module.id === 'rate-sheet-intake');
 const rateFeedPipelineModule = workbenchModules.find((module) => module.id === 'rate-feed-pipeline');
+const marginProfitabilityModule = workbenchModules.find((module) => module.id === 'margin-profitability');
+const adminGovernanceModule = workbenchModules.find((module) => module.id === 'admin-governance');
 const pricingAnalysisModule = workbenchModules.find((module) => module.id === 'pricing-analysis');
 const pricingWaterfallModule = workbenchModules.find((module) => module.id === 'pricing-waterfall');
 const quoteJourneyModule = workbenchModules.find((module) => module.id === 'quote-journey');
@@ -101,7 +106,14 @@ const scenarioChildRoutes: WorkbenchRouteDefinition[] = scenarioModule ? [
 ] : [];
 
 const functionalityChildRoutes: WorkbenchRouteDefinition[] = [
+  ...(quoteOffersModule ? [
+    { ...definitionForModule(quoteOffersModule), id: 'compare-offers-review-alias', path: '/compare-offers', label: 'Compare Offers', breadcrumb: 'Compare Offers', lazyComponent: lazyScreen(routeComponentLoaders['quote-offers']) },
+    { ...definitionForModule(quoteOffersModule), id: 'scenario-analysis-review-alias', path: '/scenario-analysis', label: 'Compare Offers', breadcrumb: 'Compare Offers', lazyComponent: lazyScreen(routeComponentLoaders['quote-offers']) },
+  ] : []),
+  ...(quickQuoteModule ? [{ ...definitionForModule(quickQuoteModule), id: 'quickquote-direct-alias', path: '/quickquote', label: 'QuickQuote', breadcrumb: 'QuickQuote', lazyComponent: lazyScreen(routeComponentLoaders.quickquote) }] : []),
   ...(tenantOnboardingModule ? [{ ...definitionForModule(tenantOnboardingModule), id: 'tenant-onboarding-admin-new', path: '/admin/tenants/new', label: 'New Tenant', breadcrumb: 'New Tenant', lazyComponent: lazyScreen(routeComponentLoaders['tenant-onboarding']) }] : []),
+  ...(tenantOnboardingModule ? [{ ...definitionForModule(tenantOnboardingModule), id: 'tenant-onboarding-direct-alias', path: '/tenant-onboarding', label: 'Tenant Onboarding', breadcrumb: 'Tenant Onboarding', lazyComponent: lazyScreen(routeComponentLoaders['tenant-onboarding']) }] : []),
+  ...(tenantAdminModule ? [{ ...definitionForModule(tenantAdminModule), id: 'tenant-admin-direct-alias', path: '/tenant-admin', label: 'Tenant Management', breadcrumb: 'Tenant Management', lazyComponent: lazyScreen(routeComponentLoaders['tenant-admin']) }] : []),
   ...(productManagementModule ? [
     { ...definitionForModule(productManagementModule), id: 'product-management-alias', path: '/admin/products/management', label: 'Product Management', breadcrumb: 'Product Management', lazyComponent: lazyScreen(routeComponentLoaders['product-management']) },
     { ...definitionForModule(productManagementModule), id: 'product-management-detail', path: '/admin/products/management/:productCode', label: 'Product Detail', breadcrumb: 'Product Detail', lazyComponent: lazyScreen(routeComponentLoaders['product-management']) },
@@ -109,10 +121,16 @@ const functionalityChildRoutes: WorkbenchRouteDefinition[] = [
     { ...definitionForModule(productManagementModule), id: 'product-management-new', path: '/admin/products/new', label: 'New Product', breadcrumb: 'New Product', lazyComponent: lazyScreen(routeComponentLoaders['product-management']) },
   ] : []),
   ...(rateSheetModule ? [
+    { ...definitionForModule(rateSheetModule), id: 'rate-sheet-intake-direct-alias', path: '/rate-sheet-intake', label: 'Rate Sheet Intake', breadcrumb: 'Rate Sheet Intake', lazyComponent: lazyScreen(routeComponentLoaders['rate-sheet-intake']) },
     { ...definitionForModule(rateSheetModule), id: 'rate-sheet-intake-new', path: '/pricing/rate-sheets/new', label: 'New Rate Sheet', breadcrumb: 'New Rate Sheet', lazyComponent: lazyScreen(routeComponentLoaders['rate-sheet-intake']) },
     { ...definitionForModule(rateSheetModule), id: 'rate-sheet-intake-detail', path: '/pricing/rate-sheets/:id', label: 'Rate Sheet Detail', breadcrumb: 'Rate Sheet Detail', lazyComponent: lazyScreen(routeComponentLoaders['rate-sheet-intake']) },
   ] : []),
-  ...(rateFeedPipelineModule ? [{ ...definitionForModule(rateFeedPipelineModule), id: 'rate-feed-pipeline-admin', path: '/admin/ratefeed/pipeline', label: 'Rate feed pipeline', breadcrumb: 'Rate Feed Pipeline', lazyComponent: lazyScreen(routeComponentLoaders['rate-feed-pipeline']) }] : []),
+  ...(rateFeedPipelineModule ? [
+    { ...definitionForModule(rateFeedPipelineModule), id: 'rate-feed-pipeline-direct-alias', path: '/rate-feed-pipeline', label: 'Rate feed pipeline', breadcrumb: 'Rate Feed Pipeline', lazyComponent: lazyScreen(routeComponentLoaders['rate-feed-pipeline']) },
+    { ...definitionForModule(rateFeedPipelineModule), id: 'rate-feed-pipeline-admin', path: '/admin/ratefeed/pipeline', label: 'Rate feed pipeline', breadcrumb: 'Rate Feed Pipeline', lazyComponent: lazyScreen(routeComponentLoaders['rate-feed-pipeline']) },
+  ] : []),
+  ...(marginProfitabilityModule ? [{ ...definitionForModule(marginProfitabilityModule), id: 'margin-profitability-direct-alias', path: '/margin-profitability', label: 'Margin Profitability', breadcrumb: 'Margin Profitability', lazyComponent: lazyScreen(routeComponentLoaders['margin-profitability']) }] : []),
+  ...(adminGovernanceModule ? [{ ...definitionForModule(adminGovernanceModule), id: 'governance-lifecycle-direct-alias', path: '/governance', label: 'Governance Lifecycle', breadcrumb: 'Governance Lifecycle', lazyComponent: lazyScreen(routeComponentLoaders['admin-governance']) }] : []),
   ...(pricingAnalysisModule ? [{ ...definitionForModule(pricingAnalysisModule), id: 'pricing-analysis-run', path: '/pricing/analysis/:runId', label: 'Pricing Analysis Run', breadcrumb: 'Pricing Analysis Run', lazyComponent: lazyScreen(routeComponentLoaders['pricing-analysis']) }] : []),
   ...(pricingWaterfallModule ? [{ ...definitionForModule(pricingWaterfallModule), id: 'pricing-waterfall-preview', path: '/pricing/waterfall', label: 'Pricing Waterfall Preview', breadcrumb: 'Pricing Waterfall Preview', lazyComponent: lazyScreen(routeComponentLoaders['pricing-waterfall']) }] : []),
   ...(quoteJourneyModule ? [{ ...definitionForModule(quoteJourneyModule), id: 'quote-journey-preview', path: '/journey-map', label: 'Quote Journey Map Preview', breadcrumb: 'Quote Journey Map Preview', lazyComponent: lazyScreen(routeComponentLoaders['quote-journey']) }] : []),

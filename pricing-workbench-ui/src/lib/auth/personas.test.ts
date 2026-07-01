@@ -69,9 +69,18 @@ describe('synthetic persona RBAC model', () => {
   it('AuthTest.canAccessRouteRespectsPermissions', () => {
     const borrower = getPersonaById('persona-borrower')!;
     const operationsLead = getPersonaById('persona-operations-lead')!;
+    const pricingAnalyst = getPersonaById('persona-pricing-analyst')!;
+    const governanceReviewer = getPersonaById('persona-governance-reviewer')!;
     expect(permissionsForRoute('/quote/run-123/offers')?.permissions).toContain('quote:read');
     expect(canAccessRoute(borrower, '/quote/start')).toBe(true);
+    expect(canAccessRoute(borrower, '/quickquote')).toBe(true);
     expect(canAccessRoute(borrower, '/ops/dashboard')).toBe(false);
     expect(canAccessRoute(operationsLead, '/ops/dashboard')).toBe(true);
+    expect(canAccessRoute(pricingAnalyst, '/scenario-analysis')).toBe(true);
+    expect(canAccessRoute(pricingAnalyst, '/rate-sheet-intake')).toBe(true);
+    expect(canAccessRoute(operationsLead, '/rate-feed-pipeline')).toBe(true);
+    expect(canAccessRoute(pricingAnalyst, '/margin-profitability')).toBe(true);
+    expect(canAccessRoute(governanceReviewer, '/governance')).toBe(true);
+    expect(canAccessRoute(pricingAnalyst, '/tenant-admin')).toBe(true);
   });
 });

@@ -22,15 +22,18 @@ export default function QuickQuoteIntake({
 }) {
   const navigate = useNavigate();
   return (
-    <QuoteIntakeFlow
-      intake={intake}
-      errors={errors}
-      launchState={launchState}
-      metadataState={metadataState}
-      onChange={onChange}
-      onRetry={onRetry}
-      onSubmit={onSubmit}
-      onNavigate={(route) => navigate(route)}
-    />
+    <>
+      <h1>New prospect intake</h1>
+      <QuoteIntakeFlow
+        intake={intake}
+        errors={errors}
+        launchState={launchState}
+        metadataState={metadataState}
+        onChange={onChange}
+        onRetry={onRetry}
+        onSubmit={onSubmit}
+        onNavigate={(route) => navigate(route)}
+      />
+    </>
   );
 }

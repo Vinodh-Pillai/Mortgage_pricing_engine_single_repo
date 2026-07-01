@@ -49,15 +49,33 @@ class ProductCatalogUiController {
     return adapter.productCatalogProducts(tenantId, uiTraceId);
   }
 
-  @GetMapping("/api/v1/tenants/{tenantId}/product-catalog/investors")
+  @GetMapping({"/api/v1/product-catalog/products", "/product-catalog/products"})
+  Object productCatalogProductsWithoutTenant(
+      @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
+    return adapter.productCatalogProducts("", uiTraceId);
+  }
+
+  @GetMapping({"/api/v1/tenants/{tenantId}/product-catalog/investors", "/api/v1/tenants/{tenantId}/investors"})
   Object productCatalogInvestors(@PathVariable String tenantId,
       @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
     return adapter.productCatalogInvestors(tenantId, uiTraceId);
   }
 
-  @GetMapping("/api/v1/tenants/{tenantId}/product-catalog/channels")
+  @GetMapping({"/api/v1/product-catalog/investors", "/product-catalog/investors", "/api/v1/investors", "/investors"})
+  Object productCatalogInvestorsWithoutTenant(
+      @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
+    return adapter.productCatalogInvestors("", uiTraceId);
+  }
+
+  @GetMapping({"/api/v1/tenants/{tenantId}/product-catalog/channels", "/api/v1/tenants/{tenantId}/channels"})
   Object productCatalogChannels(@PathVariable String tenantId,
       @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
     return adapter.productCatalogChannels(tenantId, uiTraceId);
+  }
+
+  @GetMapping({"/api/v1/product-catalog/channels", "/product-catalog/channels", "/api/v1/channels", "/channels"})
+  Object productCatalogChannelsWithoutTenant(
+      @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
+    return adapter.productCatalogChannels("", uiTraceId);
   }
 }

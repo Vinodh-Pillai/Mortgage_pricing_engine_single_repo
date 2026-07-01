@@ -115,7 +115,7 @@ export async function fetchTenantProducts(
   params.set('page', String(filter.page));
   params.set('pageSize', String(filter.pageSize));
 
-  const response = await fetchImpl(`/api/v1/tenant/${encodeURIComponent(filter.tenantId)}/products?${params.toString()}`, {
+  const response = await fetchImpl(`/api/v1/tenants/${encodeURIComponent(filter.tenantId)}/products?${params.toString()}`, {
     headers: {
       Accept: 'application/json',
       'X-Ui-Trace-Id': 'tenant-home-local-trace',
@@ -129,7 +129,7 @@ export async function fetchTenantProductFilters(
   tenantId: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<TenantProductsResponse['availableFilters']> {
-  const response = await fetchImpl(`/api/v1/tenant/${encodeURIComponent(tenantId)}/products/filters`, {
+  const response = await fetchImpl(`/api/v1/tenants/${encodeURIComponent(tenantId)}/products/filters`, {
     headers: {
       Accept: 'application/json',
       'X-Ui-Trace-Id': 'tenant-home-local-trace',

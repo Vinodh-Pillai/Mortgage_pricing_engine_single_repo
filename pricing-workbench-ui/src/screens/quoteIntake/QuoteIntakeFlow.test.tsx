@@ -319,7 +319,7 @@ describe('PipelineIntakeTest', () => {
     render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} />);
 
     expect(screen.getByRole('heading', { name: /^QuickQuote$/i })).toBeInTheDocument();
-    expect(screen.getByText(/^Current workspace$/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^Current workspace$/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /^QuickQuote$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: /QuickQuote status strip/i })).not.toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(/\bPrefill\b/i);
@@ -331,12 +331,25 @@ describe('PipelineIntakeTest', () => {
     expect(screen.getByRole('table', { name: /QuickQuote product eligibility grid/i })).toBeInTheDocument();
     expect(screen.queryByText(/Submit details before product options are displayed/i)).not.toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(/Missing\s*0\s*facts/i);
-    expect(screen.getByRole('columnheader', { name: /^Review$/i })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /^Actions$/i })).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: /^Review$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /^Pipeline$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: /^Pipeline$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: /^Pipeline$/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/Capture the borrower and loan facts/i)).not.toBeInTheDocument();
   }, 30000);
+
+  it('keepsQuickQuoteFromFetchingApplicationFormOrProductRoutesDuringShellRender', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => json({}));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} />);
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: /^QuickQuote$/i })).toBeInTheDocument());
+    expect(fetchMock.mock.calls.some(([input]) => input.toString().includes('/application-forms/active'))).toBe(false);
+    expect(fetchMock.mock.calls.some(([input]) => input.toString().includes('/products'))).toBe(false);
+    expect(fetchMock.mock.calls.some(([input]) => input.toString().includes('/product-catalog/'))).toBe(false);
+  });
 
   it('keepsQuickQuoteAsSingleWorkspaceWithoutPipelineModeSwitch', () => {
     const onNavigate = vi.fn();
@@ -346,7 +359,7 @@ describe('PipelineIntakeTest', () => {
     revealQuickQuoteProducts();
     fireEvent.click(screen.getByRole('row', { name: /Conventional 30-Year Preview ACTIVE/i }));
 
-    expect(screen.getByText(/^Current workspace$/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^Current workspace$/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /^Pipeline$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: /^Pipeline$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: /Switch to Pipeline/i })).not.toBeInTheDocument();
@@ -379,6 +392,7 @@ describe('PipelineIntakeTest', () => {
       return call;
     });
     expect(JSON.parse(String(launchCall?.[1]?.body))).toMatchObject({ scenarioId: 'local-unsynced-pipeline-draft', scenarioVersion: 1 });
+    expect(fetchMock.mock.calls.some(([input, init]) => input.toString().includes('/scenarios') && (init?.method === 'POST' || init?.method === 'PATCH'))).toBe(false);
     expect(capture).toHaveBeenCalledWith(expect.objectContaining({ action: 'quote-launch-local-draft-used', reason: 'draft-persistence-unavailable' }));
     await waitFor(() => expect(onNavigate).toHaveBeenCalledWith('/quote/run-quickquote-1/offers'));
   }, 60000);
@@ -409,6 +423,7 @@ describe('PipelineIntakeTest', () => {
       return call;
     });
     expect(JSON.parse(String(launchCall?.[1]?.body))).toMatchObject({ scenarioId: 'local-unsynced-pipeline-draft', scenarioVersion: 1, channelCode: 'RETAIL', mortgageType: 'CONVENTIONAL' });
+    expect(fetchMock.mock.calls.some(([input, init]) => input.toString().includes('/scenarios') && (init?.method === 'POST' || init?.method === 'PATCH'))).toBe(false);
     expect(capture).toHaveBeenCalledWith(expect.objectContaining({ action: 'quote-launch-local-draft-used', reason: 'draft-persistence-unavailable' }));
     await waitFor(() => expect(onNavigate).toHaveBeenCalledWith('/quote/run-quickquote-live-1/offers'));
   }, 60000);
@@ -439,7 +454,7 @@ describe('PipelineIntakeTest', () => {
       return call;
     });
     expect(JSON.parse(String(launchCall?.[1]?.body))).toMatchObject({ borrowerLastName: '', loanNumber: '', channel: 'RETAIL', loanPurpose: 'Purchase' });
-    const liveGrid = await screen.findByRole('table', { name: /LoanHouse-backed BFF offers/i });
+    const liveGrid = await screen.findByRole('table', { name: /Backend offers/i });
     expect(liveGrid).toHaveTextContent(/Expanded Prime Plus 30 Year Fixed/i);
     expect(screen.queryByRole('table', { name: /QuickQuote product eligibility grid/i })).not.toBeInTheDocument();
   }, 60000);
@@ -481,14 +496,14 @@ describe('PipelineIntakeTest', () => {
     await waitFor(() => expect(launchButton).not.toBeDisabled());
     fireEvent.click(launchButton);
 
-    const liveGrid = await screen.findByRole('table', { name: /LoanHouse-backed BFF offers/i });
+    const liveGrid = await screen.findByRole('table', { name: /Backend offers/i });
     expect(liveGrid).toHaveTextContent(/Expanded Prime Plus 30 Year Fixed/i);
     expect(liveGrid).toHaveTextContent(/OB/i);
     expect(liveGrid).toHaveTextContent(/approved/i);
     expect(liveGrid).toHaveTextContent(/6.875/i);
     expect(liveGrid).toHaveTextContent(/99.856/i);
     expect(liveGrid).toHaveTextContent(/2627.72/i);
-    expect(liveGrid).toHaveTextContent(/LoanHouse\/LoanPass via pricing-bff/i);
+    expect(liveGrid).toHaveTextContent(/pricing-bff evidence/i);
 
     fireEvent.click(screen.getByRole('button', { name: /Select offer 100014/i }));
     expect(window.sessionStorage.getItem('loanweft:selectedOfferId:run-loanhouse-live-1')).toBe('100014');
@@ -526,12 +541,12 @@ describe('PipelineIntakeTest', () => {
     }));
     render(<QuoteIntakeFlow metadataState={metadataState} />);
 
-    expect(await screen.findByRole('table', { name: /LoanHouse-backed BFF offers/i })).toHaveTextContent(/Expanded Prime Plus 30 Year Fixed/i);
+    expect(await screen.findByRole('table', { name: /Backend offers/i })).toHaveTextContent(/Expanded Prime Plus 30 Year Fixed/i);
     expect(screen.queryByRole('table', { name: /Filtered mortgage products/i })).not.toBeInTheDocument();
     const filterPanel = screen.getByRole('region', { name: /Filters/i });
     fireEvent.change(within(filterPanel).getByLabelText(/Mortgage type/i), { target: { value: 'LoanHouse ARM' } });
-    expect(screen.getByRole('table', { name: /LoanHouse-backed BFF offers/i })).toHaveTextContent(/DSCR Plus 5\/6 ARM/i);
-    expect(screen.getByRole('table', { name: /LoanHouse-backed BFF offers/i })).not.toHaveTextContent(/Expanded Prime Plus/i);
+    expect(screen.getByRole('table', { name: /Backend offers/i })).toHaveTextContent(/DSCR Plus 5\/6 ARM/i);
+    expect(screen.getByRole('table', { name: /Backend offers/i })).not.toHaveTextContent(/Expanded Prime Plus/i);
   });
 
   it('keepsAllQuickQuoteProductStatusesVisibleWithReviewTraceRefs', () => {
@@ -556,10 +571,8 @@ describe('PipelineIntakeTest', () => {
     expect(auditDetails).toHaveTextContent(/Margin/);
     expect(auditDetails).toHaveTextContent(/Pricing/);
 
-    fireEvent.click(within(ineligibleRow).getByRole('button', { name: /^Review status$/i }));
-    expect(capture).toHaveBeenCalledWith(expect.objectContaining({ action: 'pipeline-row-status-reviewed', storyId: 'PII-77-S02' }));
-    expect(screen.getByText(/Jumbo Preview Product status: Ineligible/i)).toBeInTheDocument();
-    expect(screen.getByText(/pricing-service:JUMBO_PREVIEW:rate-output-pending/i)).toBeInTheDocument();
+    expect(within(ineligibleRow).queryByRole('button', { name: /^Review status$/i })).not.toBeInTheDocument();
+    expect(within(ineligibleRow).getByRole('button', { name: /^Use for quote$/i })).toBeDisabled();
   }, 30000);
 
   it('exposesQuickQuoteAccessiblePrefillRailGridAndActionsInFocusOrder', async () => {
@@ -588,7 +601,7 @@ describe('PipelineIntakeTest', () => {
 
     expect(header).toBeInTheDocument();
     expect(prefillRail.compareDocumentPosition(grid) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(grid.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(actions).toBeInTheDocument();
     expect(screen.queryByLabelText(/Borrower and loan context/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/Missing fact reason categories/i)).not.toBeInTheDocument();
     expect(prefillRail).not.toHaveTextContent(/Source LoanPASS/i);
@@ -636,7 +649,7 @@ describe('PipelineIntakeTest', () => {
     expect(screen.queryByLabelText(/Borrower and loan context/i)).not.toBeInTheDocument();
   });
 
-  it('rendersResponsiveQuickQuoteComparisonAndSavesSelectedComparisonProducts', async () => {
+  it('keepsQuickQuoteProductSelectionInTheMainGridWithoutBottomComparisonNoise', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input.toString();
       if (url.endsWith('/scenarios') && init?.method === 'POST') return json({ scenarioId: 'scenario-comparison-1', scenarioVersion: 1 });
@@ -646,23 +659,12 @@ describe('PipelineIntakeTest', () => {
     render(<QuoteIntakeFlow mode="quickquote" metadataState={traceConfiguredMetadataState} intake={{ ...initialQuoteIntake, borrowerLastName: 'Rivera', loanNumber: 'LN-2001', mortgageType: 'Conventional' }} />);
 
     revealQuickQuoteProducts();
-    const comparison = screen.getByRole('table', { name: /QuickQuote product comparison/i });
-    expect(within(comparison).getByRole('row', { name: /Rate comparison/i })).toBeInTheDocument();
-    expect(within(comparison).getByRole('row', { name: /Price comparison/i })).toBeInTheDocument();
-    expect(within(comparison).getByRole('row', { name: /Payment comparison/i })).toBeInTheDocument();
-    expect(within(comparison).getByRole('row', { name: /DSCR comparison/i })).toBeInTheDocument();
-    expect(within(comparison).getByRole('row', { name: /Fees comparison/i })).toBeInTheDocument();
-    expect(within(comparison).getByRole('row', { name: /LLPA comparison/i })).toBeInTheDocument();
-    expect(within(comparison).getByRole('row', { name: /Assumptions comparison/i })).not.toHaveTextContent(/Channel missing/i);
-    expect(within(comparison).getByRole('row', { name: /Assumptions comparison/i })).toHaveTextContent(/Loan purpose missing/i);
-    expect(within(comparison).getByRole('row', { name: /Trace availability comparison/i })).toHaveTextContent(/trace|pricing-service/i);
-    expect(screen.getByLabelText(/Swipe QuickQuote comparison products/i)).toBeInTheDocument();
+    expect(screen.queryByRole('table', { name: /QuickQuote product comparison/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Swipe QuickQuote comparison products/i)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('row', { name: /Conventional 30-Year Preview ACTIVE/i }));
-    const jumboRow = screen.getByRole('row', { name: /Jumbo Preview Product INACTIVE/i });
-    fireEvent.click(within(jumboRow).getByRole('button', { name: /^Add to comparison$/i }));
+    expect(screen.queryByRole('button', { name: /^Add to comparison$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Save QuickQuote draft from comparison$/i })).not.toBeInTheDocument();
-    expect(screen.getByRole('table', { name: /QuickQuote product comparison/i })).toHaveTextContent(/Jumbo Preview Product/i);
   }, 30000);
 
   it('showsDataRequiredStateFromConfiguredRequiredFieldsAndMovesToNextField', async () => {

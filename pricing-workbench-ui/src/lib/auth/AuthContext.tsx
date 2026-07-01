@@ -26,9 +26,9 @@ export interface AuthContextType {
 
 export const rolePermissionMatrix: Record<UserRole, readonly Permission[]> = {
   loan_officer: ['quote:create', 'quote:read', 'quote:update', 'scenario:create', 'scenario:read', 'scenario:update', 'lock:create', 'lock:read', 'lock:update', 'eligibility:read', 'borrower:manage'],
-  pricing_analyst: ['quote:read', 'pricing:read', 'pricing:waterfall', 'margin:read', 'margin:analyze', 'scenario:read', 'scenario:what-if', 'adjustment:read', 'rate-feed:read', 'product:read', 'pricing:analysis'],
-  operations_lead: ['quote:read', 'lock:create', 'lock:read', 'lock:update', 'lock:manage', 'partner:read', 'partner:manage', 'ops:read', 'ops:manage', 'rate-feed:read', 'rate-feed:manage', 'rate-sheet:read', 'rate-sheet:manage', 'tenant:manage'],
-  governance_reviewer: ['quote:read', 'compliance:read', 'compliance:manage', 'audit:read', 'audit:replay', 'governance:read', 'governance:manage', 'rules:read', 'rules:manage', 'model:read', 'model:governance', 'quality:read'],
+  pricing_analyst: ['quote:read', 'pricing:read', 'pricing:waterfall', 'margin:read', 'margin:analyze', 'scenario:read', 'scenario:what-if', 'adjustment:read', 'rate-feed:read', 'product:read', 'pricing:analysis', 'tenant:onboard'],
+  operations_lead: ['quote:read', 'lock:create', 'lock:read', 'lock:update', 'lock:manage', 'partner:read', 'partner:manage', 'ops:read', 'ops:manage', 'rate-feed:read', 'rate-feed:manage', 'rate-sheet:read', 'rate-sheet:manage', 'tenant:manage', 'tenant:onboard'],
+  governance_reviewer: ['quote:read', 'compliance:read', 'compliance:manage', 'audit:read', 'audit:replay', 'governance:read', 'governance:manage', 'rules:read', 'rules:manage', 'model:read', 'model:governance', 'quality:read', 'tenant:onboard'],
   admin: ['*'],
   partner_manager: ['partner:read', 'partner:manage', 'partner:quotes', 'partner:integrations', 'webhook:manage', 'quote:read', 'lock:read'],
   compliance_officer: ['compliance:read', 'compliance:manage', 'audit:read', 'audit:replay', 'privacy:read', 'privacy:manage', 'security:read', 'security:events'],

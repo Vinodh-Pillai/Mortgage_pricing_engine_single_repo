@@ -74,7 +74,7 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     personaVisibility: ['loan-officer', 'pricing-analyst', 'admin'],
     dependencyStatus: 'QuickQuote shell uses configured/mock UI state only until product eligibility and pricing contracts are connected.',
     evidenceTarget: '.local-harness/evidence/PII-77-S01/quickquote-shell.json',
-    match: (pathname) => pathname === '/quote/start',
+    match: (pathname) => pathname === '/quote/start' || pathname === '/quickquote',
   },
   {
     id: 'quote-intake',
@@ -97,7 +97,7 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     dataBoundary: 'lib/api/offers',
     stateCoverage: ['load-state', 'empty', 'blocked', 'ready'],
     evidenceTarget: '.local-harness/evidence/PII-22-S21/quote-offers.json',
-    match: (pathname) => /^\/quote\/[^/]+\/offers\/?$/.test(pathname),
+    match: (pathname) => /^\/quote\/[^/]+\/offers\/?$/.test(pathname) || pathname === '/compare-offers' || pathname === '/scenario-analysis',
   },
   {
     id: 'quote-detail',
@@ -174,7 +174,7 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     dataBoundary: 'lib/api/marginProfitability',
     stateCoverage: ['load-state', 'blocked', 'redacted', 'floor-evidence', 'approval', 'replay-evidence'],
     evidenceTarget: '.local-harness/evidence/PII-24-S16/margin-profitability.json',
-    match: (pathname) => pathname.startsWith('/pricing/margins'),
+    match: (pathname) => pathname.startsWith('/pricing/margins') || pathname === '/margin-profitability',
   },
   {
     id: 'exception-concessions',
@@ -298,11 +298,11 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     screenPackage: 'screens/tenantAdmin',
     dataBoundary: 'tenant-context-service /api/v1/admin/tenants',
     stateCoverage: ['loading', 'empty', 'blocked', 'needs-attention', 'ready'],
-    personaVisibility: ['admin'],
+    personaVisibility: ['admin', 'operations-lead', 'pricing-analyst', 'governance-reviewer'],
     dependencyStatus: 'Tenant-context-service admin APIs own lifecycle, user counts, branding, and feature flags.',
     adapterStatus: 'Local tenant management screen renders fallback evidence when the admin API is unavailable.',
     evidenceTarget: '.local-harness/evidence/PII-52-S01/tenant-admin.json',
-    match: (pathname) => pathname === '/admin/tenants' || pathname.startsWith('/admin/tenants/'),
+    match: (pathname) => pathname === '/admin/tenants' || pathname === '/tenant-admin' || pathname.startsWith('/admin/tenants/'),
   },
   {
     id: 'product-admin',
@@ -372,7 +372,7 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     dependencyStatus: 'Rate sheet service grid and validation contracts control publish readiness.',
     adapterStatus: 'Upload, validation, remediation, and publish states are represented with local evidence capture.',
     evidenceTarget: '.local-harness/evidence/PII-25-S04/rate-sheet-intake.json',
-    match: (pathname) => pathname.startsWith('/pricing/rate-sheets'),
+    match: (pathname) => pathname.startsWith('/pricing/rate-sheets') || pathname === '/rate-sheet-intake',
   },
   {
     id: 'rate-feed-pipeline',
@@ -386,7 +386,7 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     dependencyStatus: 'Rate-feed, governance, and adjustment service events control publish and cache-invalidation state.',
     adapterStatus: 'The monitor shows local fallback data when the pipeline API is unavailable and uses backend rows when connected.',
     evidenceTarget: '.local-harness/evidence/PII-32-S01/pipeline-monitor.json',
-    match: (pathname) => pathname.startsWith('/admin/ratefeed/pipeline'),
+    match: (pathname) => pathname.startsWith('/admin/ratefeed/pipeline') || pathname === '/rate-feed-pipeline',
   },
   {
     id: 'pricing-analysis',
@@ -425,7 +425,7 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     dataBoundary: 'lib/api/adminGovernance',
     stateCoverage: ['load-state', 'descriptors', 'pending-review', 'dynamic-rule-evidence', 'blocked', 'ready'],
     evidenceTarget: '.local-harness/evidence/PII-24-S24/admin-governance-lifecycle.json',
-    match: (pathname) => pathname === '/admin/governance' || pathname.startsWith('/admin/governance/'),
+    match: (pathname) => pathname === '/admin/governance' || pathname === '/governance' || pathname.startsWith('/admin/governance/'),
   },
   {
     id: 'rules-engine',

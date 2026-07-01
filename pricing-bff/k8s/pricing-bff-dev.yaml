@@ -19,6 +19,7 @@ data:
   WCPE_SYNTHETIC_ONLY: "false"
   LOANWEFT_INTEGRATIONS_QUOTE_SERVICE_BASE_URL: http://quote-service.wcpe-dev.svc.cluster.local:8080
   LOANWEFT_INTEGRATIONS_LOCK_SERVICE_BASE_URL: http://lock-service.wcpe-dev.svc.cluster.local:8080
+  LOANWEFT_INTEGRATIONS_MARGIN_SERVICE_BASE_URL: http://margin-service.wcpe-dev.svc.cluster.local:8080
   TENANT_CONTEXT_URL: http://tenant-context-service.wcpe-dev.svc.cluster.local:8080
 ---
 apiVersion: apps/v1

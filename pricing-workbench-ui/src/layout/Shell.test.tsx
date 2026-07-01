@@ -74,12 +74,12 @@ describe('responsive layout shell', () => {
     expect(getBreakpointForWidth(1600)).toBe('wide');
   });
 
-  it('builds navigation from registry modules and persona visibility', () => {
+  it('builds navigation from registry modules and route visibility', () => {
     const items = buildNavigationTree(modules, 'run-123', 'operations lead');
     expect(items).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Quote workspace', route: '/quote/run-123/offers', group: 'Quotes' })]));
     expect(items).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Operations dashboard', group: 'Operations', badgeCount: undefined })]));
     expect(items).not.toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Quick Quote', group: 'Pipeline' })]));
-    expect(items).not.toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Feature Flags', group: 'Admin' })]));
+    expect(items).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Feature Flags', group: 'Admin', route: '/admin/tenants?section=feature-flags' })]));
   });
 
   it('renders header nav content footer and focusable skip link', () => {

@@ -4,6 +4,9 @@ import { exerciseTable, expectMajorFunctionalityPage, openAsAdmin, runBasicA11yK
 test.describe('PII-25 lock management page', () => {
   test('covers active locks, statuses, detail route, bulk actions, visual and a11y checks', async ({ page }) => {
     await openAsAdmin(page, '/locks');
+    const lockManagementHeading = page.getByRole('heading', { name: 'Lock Management', exact: true });
+    await expect(lockManagementHeading).toHaveCount(1);
+    await expect(lockManagementHeading).toBeVisible();
     await expectMajorFunctionalityPage(page, 'Lock Management', ['Active Locks', 'Lock Requests', 'Expiring Soon', 'Bulk Actions', 'Investor Delivery']);
     await expect(page.getByText(/requested|confirmed|expired|cancelled|delivered/i).first()).toBeVisible();
     await expect(page.getByRole('button', { name: /Bulk extend \(preview disabled\)/i })).toBeDisabled();

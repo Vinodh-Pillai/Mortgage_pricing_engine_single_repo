@@ -119,7 +119,6 @@ export function Header({ breadcrumb, notificationCount, showAuthenticatedChrome 
     <header className={`layout-header${compactHeader ? ' layout-header--compact' : ''}`} role="banner">
       <div className={`layout-header__brand${showNavigationToggle ? ' layout-header__brand--with-nav-toggle' : ''}`}>
         {navigationToggle}
-        <div className="layout-header__brand-mark" aria-hidden="true">LW</div>
         <div className="layout-header__title">
           <h1>{t('pricingWorkbench')}</h1>
           <nav aria-label={t('navigation:breadcrumb')} className="layout-breadcrumbs">

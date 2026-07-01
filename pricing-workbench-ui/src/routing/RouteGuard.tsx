@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/auth/AuthContext';
-import type { Permission } from '../lib/auth/personas';
+import { canonicalRouteForAccess, type Permission } from '../lib/auth/personas';
 
 export interface RouteGuardProps {
   children: ReactElement;
@@ -51,6 +51,8 @@ export function RouteGuard({ children, route, requiredPermission, publicRoutes =
   const { isAuthenticated, isLoading, hasPermission, canAccessRoute } = useAuth();
   const targetRoute = route ?? `${location.pathname}${location.search}${location.hash}`;
   const pathname = route ?? location.pathname;
+  const canonicalPath = canonicalRouteForAccess(pathname);
+  const accessRoute = canonicalPath === pathname ? targetRoute : canonicalPath;
   const isPublic = publicRoutes.some((publicRoute) => publicRoute === pathname);
 
   if (isPublic) return children;
@@ -63,9 +65,13 @@ export function RouteGuard({ children, route, requiredPermission, publicRoutes =
     return <UnauthenticatedRedirect to="/login" />;
   }
 
-  const allowed = requiredPermission ? hasPermission(requiredPermission) : canAccessRoute(targetRoute);
+  const allowed = requiredPermission ? hasPermission(requiredPermission) : canAccessRoute(accessRoute);
   if (!allowed) {
     return accessDeniedComponent ?? <AccessDenied route={targetRoute} />;
+  }
+
+  if (canonicalPath !== pathname) {
+    return <Navigate to={canonicalPath} replace state={{ from: location, localDevAlias: pathname }} />;
   }
 
   return children;

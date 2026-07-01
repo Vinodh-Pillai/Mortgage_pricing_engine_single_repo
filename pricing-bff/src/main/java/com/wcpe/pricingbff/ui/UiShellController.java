@@ -119,12 +119,10 @@ class PricingBffUiFallbackAdapter {
           "Complete the highlighted workspace fields.", "Finish tenant setup details.", blockers.values().stream().toList()));
     }
 
-    String tenantId = "tenant-" + Integer.toUnsignedString((normalized(setup.get("tenantName")) + "|"
-        + normalized(setup.get("operationsContact"))).hashCode(), 36);
-    return ResponseEntity.status(HttpStatus.CREATED).body(new TenantWorkspaceResult(tenantId, "RECORDED",
-        "Tenant workspace setup was recorded in local preview mode.",
-        "Connect configured tenant and identity services before production onboarding.",
-        List.of("Tenant service contract is not configured in this local response.",
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(new TenantWorkspaceResult(null, "BLOCKED",
+        "Tenant workspace setup requires configured tenant-context-service admin persistence.",
+        "Connect tenant-context-service admin routing before onboarding writes can be accepted.",
+        List.of("No local tenant ID was created.",
             "Identity provider and credentials remain external configuration.")));
   }
 
@@ -159,6 +157,88 @@ class PricingBffUiFallbackAdapter {
             "Product authorization remains blocked until configured catalog mappings are available."),
         productContract,
         List.of("field@desired-mortgage-type", "field@desired-loan-term", "field@desired-amortization-type")));
+  }
+
+  ResponseEntity<?> tenantAdminList(String search, String status, Integer page, Integer size, String uiTraceId) {
+    Map<String, Object> body = tenantAdminUnavailableBody("list-tenants", "", "", uiTraceId);
+    body.put("content", List.of());
+    body.put("totalElements", 0);
+    body.put("totalPages", 0);
+    body.put("page", page == null ? 0 : Math.max(0, page));
+    body.put("size", size == null ? 20 : Math.max(1, size));
+    body.put("search", normalizedRaw(search));
+    body.put("statusFilter", normalizedRaw(status));
+    body.put("readModel", Map.of(
+        "source", "tenant-context-service",
+        "configured", false,
+        "contentAvailable", false,
+        "reason", "Durable tenant admin persistence is not configured for this BFF environment."));
+    return ResponseEntity.ok(body);
+  }
+
+  ResponseEntity<?> tenantAdminRecord(String tenantId, String uiTraceId) {
+    String tenantKey = normalizedTenantKey(tenantId);
+    Map<String, Object> body = tenantAdminUnavailableBody("read-tenant", tenantKey, "", uiTraceId);
+    body.put("tenantId", tenantKey);
+    body.put("tenant", null);
+    body.put("readModel", Map.of(
+        "source", "tenant-context-service",
+        "configured", false,
+        "contentAvailable", false,
+        "reason", "Durable tenant admin persistence is not configured for this BFF environment."));
+    return ResponseEntity.ok(body);
+  }
+
+  ResponseEntity<?> createTenantAdminRecord(Map<String, Object> payload, String actorId, String uiTraceId) {
+    Map<String, Object> body = tenantAdminUnavailableBody("create-tenant", "", actorId, uiTraceId);
+    body.put("receivedFields", payload == null ? List.of() : payload.keySet().stream().sorted().toList());
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(body);
+  }
+
+  ResponseEntity<?> updateTenantAdminRecord(String tenantId, Map<String, Object> payload, String actorId, String uiTraceId) {
+    Map<String, Object> body = tenantAdminUnavailableBody("update-tenant", tenantId, actorId, uiTraceId);
+    body.put("receivedFields", payload == null ? List.of() : payload.keySet().stream().sorted().toList());
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(body);
+  }
+
+  ResponseEntity<?> changeTenantAdminStatus(String tenantId, String action, String uiTraceId) {
+    Map<String, Object> body = tenantAdminUnavailableBody("tenant-status-" + normalizedRaw(action), tenantId, "", uiTraceId);
+    body.put("requestedAction", normalizedRaw(action));
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(body);
+  }
+
+  ResponseEntity<?> tenantFeatureFlags(String tenantId, String uiTraceId) {
+    Map<String, Object> body = tenantAdminUnavailableBody("read-feature-flags", tenantId, "", uiTraceId);
+    body.put("tenantId", normalizedTenantKey(tenantId));
+    body.put("flags", Map.of());
+    return ResponseEntity.ok(body);
+  }
+
+  ResponseEntity<?> updateTenantFeatureFlags(String tenantId, Map<String, Object> payload, String actorId, String uiTraceId) {
+    Map<String, Object> body = tenantAdminUnavailableBody("update-feature-flags", tenantId, actorId, uiTraceId);
+    body.put("receivedFields", payload == null ? List.of() : payload.keySet().stream().sorted().toList());
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(body);
+  }
+
+  private Map<String, Object> tenantAdminUnavailableBody(String operation, String tenantId, String actorId, String uiTraceId) {
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("status", "BLOCKED");
+    body.put("code", "TENANT_CONTEXT_ADMIN_CONTRACT_REQUIRED");
+    body.put("message", "Tenant admin operations require configured tenant-context-service admin routing and durable persistence.");
+    body.put("operation", normalizedRaw(operation));
+    body.put("tenantContext", normalizedTenantKey(tenantId));
+    body.put("actorId", normalizedRaw(actorId));
+    body.put("uiTraceId", normalizeTrace(uiTraceId));
+    body.put("dependencyStatus", "TENANT_CONTEXT_ADMIN_CONTRACT_NOT_CONFIGURED");
+    body.put("persistenceConfigured", false);
+    body.put("writeDisabled", true);
+    body.put("fakePersistence", false);
+    body.put("blocker", Map.of(
+        "service", "tenant-context-service",
+        "capability", "durable tenant admin persistence",
+        "action", "Configure the tenant-context-service admin persistence contract before enabling tenant admin writes or authoritative reads."));
+    body.put("events", List.of("TenantAdminRouteBlocked"));
+    return body;
   }
 
   PipelineSettingsView pipelineSettings(String tenantId, String uiTraceId) {
@@ -330,11 +410,8 @@ class PricingBffUiFallbackAdapter {
     if (denied != null) return denied;
     String tenantKey = normalizedTenantKey(tenantId);
     String traceId = normalizeTrace(uiTraceId);
-    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("status", "BLOCKED",
-        "message", DURABLE_UI_STORE_REQUIRED,
-        "code", "DRAFT_SCENARIO_PERSISTENCE_REQUIRED",
-        "tenantContext", tenantKey,
-        "uiTraceId", traceId));
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(
+        draftScenarioPersistenceBlocked(tenantKey, "", "create", traceId));
   }
 
   ResponseEntity<?> updateDraftScenario(String tenantId, String scenarioId, String section, String tenantContext,
@@ -342,33 +419,50 @@ class PricingBffUiFallbackAdapter {
     ResponseEntity<Map<String, String>> denied = denyCrossTenantDraftAccess(tenantId, tenantContext, uiTraceId);
     if (denied != null) return denied;
     String traceId = normalizeTrace(uiTraceId);
-    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("status", "BLOCKED",
-        "message", DURABLE_UI_STORE_REQUIRED,
-        "code", "DRAFT_SCENARIO_PERSISTENCE_REQUIRED",
-        "scenarioId", normalizedRaw(scenarioId),
-        "section", normalizedRaw(section),
-        "uiTraceId", traceId));
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(
+        draftScenarioPersistenceBlocked(normalizedTenantKey(tenantId), scenarioId, section, traceId));
   }
 
   ResponseEntity<?> getDraftScenario(String tenantId, String scenarioId, String tenantContext, String uiTraceId) {
     ResponseEntity<Map<String, String>> denied = denyCrossTenantDraftAccess(tenantId, tenantContext, uiTraceId);
     if (denied != null) return denied;
-    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("status", "BLOCKED",
-        "message", DURABLE_UI_STORE_REQUIRED,
-        "code", "DRAFT_SCENARIO_PERSISTENCE_REQUIRED",
-        "scenarioId", normalizedRaw(scenarioId),
-        "uiTraceId", normalizeTrace(uiTraceId)));
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(
+        draftScenarioPersistenceBlocked(normalizedTenantKey(tenantId), scenarioId, "read", normalizeTrace(uiTraceId)));
   }
 
   ResponseEntity<?> findDraftScenarios(String tenantId, String tenantContext, String uiTraceId,
       String borrowerLastName, String loanNumber, String status) {
     ResponseEntity<Map<String, String>> denied = denyCrossTenantDraftAccess(tenantId, tenantContext, uiTraceId);
     if (denied != null) return denied;
-    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("status", "BLOCKED",
-        "message", DURABLE_UI_STORE_REQUIRED,
-        "code", "DRAFT_SCENARIO_PERSISTENCE_REQUIRED",
-        "tenantContext", normalizedTenantKey(tenantId),
-        "uiTraceId", normalizeTrace(uiTraceId)));
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(
+        draftScenarioPersistenceBlocked(normalizedTenantKey(tenantId), "", "search", normalizeTrace(uiTraceId)));
+  }
+
+  private Map<String, Object> draftScenarioPersistenceBlocked(String tenantContext, String scenarioId, String section,
+      String uiTraceId) {
+    String normalizedScenarioId = normalizedRaw(scenarioId);
+    String normalizedSection = normalizedRaw(section);
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("status", "BLOCKED");
+    body.put("message", DURABLE_UI_STORE_REQUIRED);
+    body.put("code", "DRAFT_SCENARIO_PERSISTENCE_REQUIRED");
+    body.put("tenantContext", normalizedTenantKey(tenantContext));
+    body.put("scenarioId", normalizedScenarioId);
+    body.put("section", normalizedSection);
+    body.put("uiTraceId", normalizeTrace(uiTraceId));
+    body.put("dependencyStatus", "DRAFT_SCENARIO_PERSISTENCE_NOT_CONFIGURED");
+    body.put("retryable", false);
+    body.put("nonRetryable", true);
+    body.put("retryAfterSeconds", 0);
+    body.put("clientAction", "STOP_AUTOSAVE_AND_SHOW_PERSISTENCE_BLOCKER");
+    body.put("events", List.of("DraftScenarioPersistenceBlocked"));
+    if ("local-unsynced-pipeline-draft".equals(normalizedScenarioId)) {
+      body.put("stableFailureId", "local-unsynced-pipeline-draft:persistence-required");
+      body.put("blockedDraftId", "local-unsynced-pipeline-draft");
+      body.put("actionableMessage",
+          "This local unsynced draft cannot be patched until durable draft persistence is configured; stop retrying this draft and keep the user on the current form.");
+    }
+    return body;
   }
 
   private ResponseEntity<Map<String, String>> denyCrossTenantDraftAccess(String tenantId, String tenantContext, String uiTraceId) {
@@ -454,6 +548,31 @@ class PricingBffUiFallbackAdapter {
         "channels", catalogChannelRefs(),
         "dependencyStatus", "CATALOG_SERVICE_CHANNELS_CONTRACT_NOT_CONFIGURED",
         "uiTraceId", normalizeTrace(uiTraceId));
+  }
+
+  ResponseEntity<?> activeApplicationForm(String tenantId, String uiTraceId) {
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("status", "BLOCKED");
+    body.put("readModelType", "ACTIVE_APPLICATION_FORM_BLOCKED_READ_MODEL");
+    body.put("blocked", true);
+    body.put("writeDisabled", true);
+    body.put("fakePersistence", false);
+    body.put("schemaAvailable", false);
+    body.put("code", "APPLICATION_FORM_SCHEMA_CONTRACT_REQUIRED");
+    body.put("dependencyStatus", "APPLICATION_FORM_SCHEMA_NOT_CONFIGURED");
+    body.put("tenantContext", normalizedTenantKey(tenantId));
+    body.put("uiTraceId", normalizeTrace(uiTraceId));
+    body.put("retryable", false);
+    body.put("clientAction", "SHOW_APPLICATION_FORM_CONTRACT_BLOCKER");
+    body.put("actionableBlocker",
+        "Configure the tenant-owned application form schema contract before QuickQuote can render authoritative active form fields.");
+    body.put("blockers", List.of(Map.of(
+        "code", "APPLICATION_FORM_SCHEMA_CONTRACT_REQUIRED",
+        "message", "Tenant-owned application form schema contract is required before active form fields can be rendered.",
+        "action", "Configure the tenant-owned application form schema contract.")));
+    body.put("allowedActions", List.of());
+    body.put("events", List.of("ApplicationFormContractBlocked"));
+    return ResponseEntity.ok(body);
   }
 
   private List<Map<String, Object>> catalogProductRefs() {

@@ -1,3 +1,5 @@
+import { fetchTenantProducts } from './tenantHome';
+
 export type BorrowerIntake = {
   channel: string;
   channelCode: string;
@@ -484,33 +486,22 @@ export async function fetchTenantDropdownOptions(
   tenantId: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<TenantDropdownOptions> {
-  try {
-    const productOptions = await fetchTenantProductDropdownOptions(tenantId, fetchImpl);
-    return {
-      ...productOptions,
-      loanPassEnums: {},
-    };
-  } catch {
-    const catalogOptions = await fetchCatalogDropdownOptions(tenantId, fetchImpl);
-    return {
-      ...catalogOptions,
-      loanPassEnums: {},
-    };
-  }
+  const productOptions = await fetchTenantProductDropdownOptions(tenantId, fetchImpl);
+  return {
+    ...productOptions,
+    loanPassEnums: {},
+  };
 }
 
 async function fetchTenantProductDropdownOptions(tenantId: string, fetchImpl: typeof fetch): Promise<Omit<TenantDropdownOptions, 'loanPassEnums'>> {
-  const response = await fetchImpl(`/api/v1/tenants/${encodeURIComponent(tenantId)}/products?page=1&pageSize=500`, {
-    headers: {
-      Accept: 'application/json',
-      'X-Ui-Trace-Id': 'pipeline-dropdown-config-trace',
-    },
-  });
+  const payload = await fetchTenantProducts({
+    tenantId,
+    status: 'ALL',
+    page: 1,
+    pageSize: 500,
+  }, fetchImpl);
 
-  return normalizeTenantProductDropdowns(await readPipelineJson<unknown>(response, {
-    endpointContext: 'tenant product dropdown configuration',
-    unavailableMessage: 'Tenant product dropdown configuration is temporarily unavailable.',
-  }));
+  return normalizeTenantProductDropdowns(payload);
 }
 
 function normalizeTenantProductDropdowns(payload: unknown): Omit<TenantDropdownOptions, 'loanPassEnums'> {
@@ -522,46 +513,6 @@ function normalizeTenantProductDropdowns(payload: unknown): Omit<TenantDropdownO
   const channels = optionList(filters.channels, products.map((product) => product.channelCode));
   if (productTypes.length === 0 && investors.length === 0 && channels.length === 0) throw new Error('Tenant product dropdown configuration returned no selectable options.');
   return { productTypes, investors, channels, source: 'tenant-products' };
-}
-
-async function fetchCatalogDropdownOptions(tenantId: string, fetchImpl: typeof fetch): Promise<Omit<TenantDropdownOptions, 'loanPassEnums'>> {
-  const [products, investors, channels] = await Promise.all([
-    fetchCatalogPayload(`/api/v1/tenants/${encodeURIComponent(tenantId)}/product-catalog/products`, 'product catalog products', fetchImpl),
-    fetchCatalogPayload(`/api/v1/tenants/${encodeURIComponent(tenantId)}/product-catalog/investors`, 'product catalog investors', fetchImpl),
-    fetchCatalogPayload(`/api/v1/tenants/${encodeURIComponent(tenantId)}/product-catalog/channels`, 'product catalog channels', fetchImpl),
-  ]);
-
-  const productRecords = extractRecords(products, 'products');
-  const investorRecords = extractRecords(investors, 'investors');
-  const channelRecords = extractRecords(channels, 'channels');
-  const productTypes = optionList(productRecords.map((product) => product.productType ?? product.type ?? product.productFamily));
-  const investorOptions = optionList(investorRecords.map((investor) => investor.investorCode ?? investor.code ?? investor.id), productRecords.map((product) => product.investorCode));
-  const channelOptions = optionList(channelRecords.map((channel) => channel.channelCode ?? channel.code ?? channel.id), productRecords.map((product) => product.channelCode));
-  if (productTypes.length === 0 && investorOptions.length === 0 && channelOptions.length === 0) throw new Error('Catalog dropdown configuration returned no selectable options.');
-  return { productTypes, investors: investorOptions, channels: channelOptions, source: 'tenant-config' };
-}
-
-async function fetchCatalogPayload(path: string, endpointContext: string, fetchImpl: typeof fetch): Promise<unknown> {
-  const response = await fetchImpl(path, {
-    headers: {
-      Accept: 'application/json',
-      'X-Ui-Trace-Id': 'pipeline-dropdown-config-trace',
-    },
-  });
-  return readPipelineJson<unknown>(response, {
-    endpointContext,
-    unavailableMessage: `${endpointContext} is temporarily unavailable.`,
-  });
-}
-
-function extractRecords(payload: unknown, key: string): Record<string, unknown>[] {
-  if (Array.isArray(payload)) return payload.filter(isRecord);
-  const record = asRecord(payload);
-  const keyed = record[key];
-  if (Array.isArray(keyed)) return keyed.filter(isRecord);
-  const items = record.items;
-  if (Array.isArray(items)) return items.filter(isRecord);
-  return [];
 }
 
 function optionList(...sources: unknown[]): DropdownOption[] {

@@ -280,6 +280,7 @@ export const routePermissionRules: RoutePermissionRule[] = [
   { pattern: '/quality/validation', permissions: ['quality:read', 'governance:read'], match: 'any' },
   { pattern: '/tenant/onboarding', permissions: ['tenant:onboard', 'tenant:manage', 'admin:*'], match: 'any' },
   { pattern: '/admin/tenants/new', permissions: ['tenant:onboard', 'tenant:manage', 'admin:*'], match: 'any' },
+  { pattern: '/admin/tenants*', permissions: ['tenant:onboard', 'tenant:manage', 'admin:*'], match: 'any' },
   { pattern: '/admin/*', permissions: ['admin:*', 'governance:read'], match: 'any' },
   { pattern: '/rules-engine*', permissions: ['rules:read', 'admin:*', 'governance:read'], match: 'any' },
   { pattern: '/custom-rules*', permissions: ['rules:read'], match: 'all' },
@@ -290,6 +291,19 @@ export const routePermissionRules: RoutePermissionRule[] = [
   { pattern: '/advisory/ml', permissions: ['governance:read'], match: 'all' },
   { pattern: '/service-modules', permissions: ['admin:*', 'governance:read'], match: 'any' },
 ];
+
+export const localDevRouteAliases: Record<string, string> = {
+  '/compare-offers': '/quote/run-test/offers',
+  '/scenario-analysis': '/quote/run-test/offers',
+  '/quickquote': '/quote/start',
+  '/rate-sheet-intake': '/pricing/rate-sheets',
+  '/rate-feed-pipeline': '/admin/ratefeed/pipeline',
+  '/tenant-admin': '/admin/tenants',
+  '/tenant-onboarding': '/tenant/onboarding',
+  '/governance': '/admin/governance',
+  '/margin-profitability': '/pricing/margins',
+  '/lock-management': '/lock-management',
+};
 
 const roleAliasEntries: Array<[PersonaRole, string[]]> = [
   ['loan-officer', ['loan-officer', 'loan officer', 'loan_officer', 'lo']],
@@ -365,8 +379,13 @@ export function matchesRoutePattern(route: string, pattern: string): boolean {
 }
 
 export function permissionsForRoute(route: string): RoutePermissionRule | undefined {
-  const path = normalizePath(route);
+  const path = canonicalRouteForAccess(route);
   return routePermissionRules.find((rule) => matchesRoutePattern(path, rule.pattern));
+}
+
+export function canonicalRouteForAccess(route: string): string {
+  const path = normalizePath(route);
+  return localDevRouteAliases[path.replace(/\/$/, '') || '/'] ?? path;
 }
 
 export function canAccessRoute(persona: Persona, route: string): boolean {

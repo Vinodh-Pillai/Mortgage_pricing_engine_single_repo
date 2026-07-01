@@ -178,26 +178,27 @@ export function TenantAdminScreen({ fetchImpl, evidence, onEvidenceCapture }: Te
   const saveTenant = async () => {
     if (!form.tenantName.trim() || !form.displayName.trim()) return;
     if (editingTenant) {
-      setState({ ...state, tenants: tenants.map((tenant) => tenant.tenantId === editingTenant.tenantId ? { ...tenant, ...form, name: form.tenantName, displayName: form.displayName } : tenant) });
+      setState({ kind: 'blocked', tenants, message: 'Tenant profile updates require tenant-context-service admin persistence before local rows can change.' });
       setShowTenantModal(false);
       return;
     }
     try {
       const created = await createTenantAdminRecord(form, fetchImpl);
       setState({ kind: 'loaded', source: 'api', message: 'Tenant created through admin API.', tenants: [created, ...tenants] });
-    } catch {
-      setState({ ...state, tenants: [{ ...form, tenantId: `tenant-local-${tenants.length + 1}`, name: form.tenantName, status: 'PENDING_ACTIVATION', createdAt: 'local-preview:created-at', assignedUserCount: 0 }, ...tenants] });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Tenant creation requires tenant-context-service admin persistence.';
+      setState({ kind: 'blocked', tenants, message });
     }
     setShowTenantModal(false);
   };
 
   const changeStatus = async (tenant: TenantAdminRecord, action: 'activate' | 'suspend' | 'deactivate') => {
-    const nextStatus: TenantStatus = action === 'activate' ? 'ACTIVE' : action === 'suspend' ? 'SUSPENDED' : 'DEACTIVATED';
     try {
       const updated = await updateTenantStatus(tenant.tenantId, action, fetchImpl);
       setState({ ...state, tenants: tenants.map((item) => item.tenantId === tenant.tenantId ? updated : item) });
-    } catch {
-      setState({ ...state, tenants: tenants.map((item) => item.tenantId === tenant.tenantId ? { ...item, status: nextStatus } : item) });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : `Tenant ${action} requires tenant-context-service admin persistence.`;
+      setState({ kind: 'blocked', tenants, message });
     }
   };
 

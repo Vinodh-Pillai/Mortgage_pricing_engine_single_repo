@@ -16,7 +16,7 @@ describe('TenantAdminScreen', () => {
     expect(screen.getAllByText(/PENDING ACTIVATION/i).length).toBeGreaterThan(0);
   });
 
-  it('supports create modal fields and feature flag affordance', async () => {
+  it('keeps failed create writes blocked without fabricating tenant rows and keeps feature flag affordance', async () => {
     const fetchImpl = vi.fn().mockRejectedValue(new Error('offline')) as unknown as typeof fetch;
 
     render(<TenantAdminScreen fetchImpl={fetchImpl} />);
@@ -30,14 +30,15 @@ describe('TenantAdminScreen', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: /^Create Tenant$/i }));
 
     await waitFor(() => expect(screen.queryByRole('dialog', { name: /Tenant profile and branding/i })).not.toBeInTheDocument());
-    expect(screen.getByText('new-lender')).toBeInTheDocument();
+    expect(screen.queryByText('new-lender')).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(/offline/i);
 
     fireEvent.click(screen.getAllByRole('button', { name: /Feature Flags/i })[0]);
     expect(await screen.findByRole('dialog', { name: /Feature Flags/i })).toBeInTheDocument();
     expect(screen.getByText(/quick pricer/i)).toBeInTheDocument();
   });
 
-  it('supports search, status filters, lifecycle preview actions, edit modal, and blocked evidence capture', async () => {
+  it('supports search, status filters, fail-closed lifecycle actions, edit modal, and blocked evidence capture', async () => {
     const fetchImpl = vi.fn().mockRejectedValue(new Error('offline')) as unknown as typeof fetch;
     const onEvidenceCapture = vi.fn();
 
@@ -57,19 +58,23 @@ describe('TenantAdminScreen', () => {
     expect(screen.getByText('acme-mortgage')).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole('button', { name: 'Activate' })[0]);
     fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'all' } });
-    await waitFor(() => expect(screen.getAllByText('ACTIVE').length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/offline/i));
+    expect(screen.getAllByText(/PENDING ACTIVATION/i).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Suspend' }).find((button) => !button.hasAttribute('disabled'))!);
-    await waitFor(() => expect(screen.getByText('SUSPENDED')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/offline/i));
+    expect(screen.queryByText('SUSPENDED')).not.toBeInTheDocument();
     fireEvent.click(screen.getAllByRole('button', { name: 'Deactivate' }).find((button) => !button.hasAttribute('disabled'))!);
-    await waitFor(() => expect(screen.getByText('DEACTIVATED')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/offline/i));
+    expect(screen.queryByText('DEACTIVATED')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Edit' })[0]);
     const dialog = screen.getByRole('dialog', { name: /Tenant profile and branding/i });
     expect(within(dialog).getByLabelText(/^Tenant Name$/i)).toBeDisabled();
     fireEvent.change(within(dialog).getByLabelText(/^Display Name$/i), { target: { value: 'Updated Tenant Preview' } });
     fireEvent.click(within(dialog).getByRole('button', { name: /^Save Tenant$/i }));
-    expect(await screen.findByText('Updated Tenant Preview')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/Tenant profile updates require/i));
+    expect(screen.queryByText('Updated Tenant Preview')).not.toBeInTheDocument();
   });
 
   it('renders injected empty evidence as an empty ready state without blocked API fetch', () => {

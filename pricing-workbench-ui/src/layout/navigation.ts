@@ -45,7 +45,7 @@ const capabilityDefinitions: CapabilityDefinition[] = [
   { id: 'draft-scenarios', label: 'Draft Scenarios', group: 'Pipeline', icon: '◌', moduleId: 'quote-intake', route: '/pipeline?view=drafts' },
 
   { id: 'product-catalog', label: 'Product Catalog', group: 'Products', icon: '▦', moduleId: 'product-admin', route: '/admin/products', badgeTone: 'alert' },
-  { id: 'product-management', label: 'Product Management', group: 'Products', icon: '◫', moduleId: 'product-management', route: '/admin/products/catalog' },
+  { id: 'product-management', label: 'Product Management', group: 'Products', icon: '◫', moduleId: 'product-management', route: '/admin/products/catalog', badgeTone: 'alert', badgeCount: 1, badgeLabel: '1 alert' },
   { id: 'investor-management', label: 'Investor Management', group: 'Products', icon: '◈', moduleId: 'investor-management', route: '/admin/investors' },
   { id: 'stipulations', label: 'Stipulations', group: 'Products', icon: '✦', moduleId: 'product-admin', route: '/admin/products?section=stipulations', badgeTone: 'alert' },
 
@@ -115,8 +115,8 @@ function itemForCapability(definition: CapabilityDefinition, moduleById: Map<str
   const module = definition.moduleId ? moduleById.get(definition.moduleId) : undefined;
   const route = definition.route ? resolveRoute(definition.route, activeRunId) : module ? routeFor(module, activeRunId) : '/service-modules';
   const personas = module?.personaVisibility?.length ? module.personaVisibility : defaultPersonas;
-  const badgeCount = undefined;
-  const badgeTone = undefined;
+  const badgeCount = definition.badgeCount;
+  const badgeTone = badgeCount ? definition.badgeTone : undefined;
   return {
     id: definition.id,
     label: definition.label,
@@ -126,7 +126,7 @@ function itemForCapability(definition: CapabilityDefinition, moduleById: Map<str
     personas,
     badgeCount,
     badgeTone,
-    badgeLabel: undefined,
+    badgeLabel: badgeCount ? definition.badgeLabel ?? `${badgeCount} ${badgeCount === 1 ? 'alert' : 'alerts'}` : undefined,
     sourceModuleId: module?.id ?? definition.moduleId,
   };
 }

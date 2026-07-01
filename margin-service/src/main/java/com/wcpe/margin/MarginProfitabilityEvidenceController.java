@@ -7,7 +7,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 public class MarginProfitabilityEvidenceController {
-  @GetMapping("/api/v1/margins/profitability-evidence")
+  @GetMapping({"/api/v1/margins/profitability-evidence", "/api/v1/margins/profitability"})
   public MarginProfitabilityEvidenceView profitabilityEvidence(
       @RequestHeader(value = "X-Tenant-Context", required = false) String tenantContext,
       @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId,
