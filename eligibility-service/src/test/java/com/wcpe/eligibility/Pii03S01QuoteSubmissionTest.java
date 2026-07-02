@@ -2,13 +2,16 @@ package com.wcpe.eligibility;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wcpe.eligibility.domain.models.QuoteSubmissionRequest;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -28,6 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc
 @Testcontainers(disabledWithoutDocker = true)
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class Pii03S01QuoteSubmissionTest {
     private static final UUID TENANT_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
 
@@ -46,11 +50,25 @@ class Pii03S01QuoteSubmissionTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
-    @BeforeAll
-    static void setup() {
-        System.setProperty("spring.datasource.url", postgres.getJdbcUrl());
-        System.setProperty("spring.datasource.username", postgres.getUsername());
-        System.setProperty("spring.datasource.password", postgres.getPassword());
+    @DynamicPropertySource
+    static void postgresProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", postgres::getJdbcUrl);
+        registry.add("spring.datasource.username", postgres::getUsername);
+        registry.add("spring.datasource.password", postgres::getPassword);
+    }
+
+    @BeforeEach
+    void clearQuoteSubmissionArtifacts() {
+        jdbcTemplate.update("delete from eligibility.outbox_event where tenant_id = ?", TENANT_ID);
+        jdbcTemplate.update("delete from eligibility.audit_record where tenant_id = ?", TENANT_ID);
+        jdbcTemplate.update("delete from eligibility.quote_option where tenant_id = ?", TENANT_ID);
+        jdbcTemplate.update("delete from eligibility.quote where tenant_id = ?", TENANT_ID);
+        jdbcTemplate.update("delete from eligibility.audit_package where tenant_id = ?", TENANT_ID);
+        jdbcTemplate.update("delete from eligibility.scenario_fact_issue where tenant_id = ?", TENANT_ID);
+        jdbcTemplate.update("delete from eligibility.scenario where tenant_id = ?", TENANT_ID);
+        jdbcTemplate.update("delete from eligibility.idempotency_record where tenant_id = ?", TENANT_ID);
+        jdbcTemplate.update("delete from eligibility.eligibility_decision where tenant_id = ?", TENANT_ID);
+        jdbcTemplate.update("delete from eligibility.eligibility_evaluation where tenant_id = ?", TENANT_ID);
     }
 
     @Test

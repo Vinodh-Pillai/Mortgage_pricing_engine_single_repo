@@ -410,7 +410,7 @@ export const workbenchModules: WorkbenchScreenModule[] = [
     screenPackage: 'screens/locks',
     dataBoundary: 'lock-service management APIs',
     stateCoverage: ['loading', 'empty', 'blocked', 'needs-attention', 'ready'],
-    personaVisibility: ['operations-lead', 'loan-officer', 'admin', 'partner-manager'],
+    personaVisibility: ['operations-lead', 'loan-officer', 'admin'],
     dependencyStatus: 'Lock-service expiration and investor delivery refs govern blocked and attention states.',
     adapterStatus: 'Screen renders lock statuses, bulk action controls, and evidence capture without changing backend state.',
     evidenceTarget: '.local-harness/evidence/PII-25-S04/lock-management.json',

@@ -1,0 +1,11 @@
+{
+  "name": "rule-evaluation-fixtures.v1",
+  "fixtures": [
+    { "rule": "loan-limit", "inputFixture": "scenario-loan-limit-fail.json", "expectedStatus": "INELIGIBLE", "evidenceRequired": true },
+    { "rule": "fico-ltv", "inputFixture": "scenario-missing-fico.json", "expectedStatus": "VALIDATION_FAILED", "evidenceRequired": true },
+    { "rule": "occupancy-purpose", "inputFixture": "scenario-conventional-purchase-happy.json", "expectedStatus": "ELIGIBLE", "evidenceRequired": true },
+    { "rule": "property-type", "inputFixture": "scenario-condo-warning.json", "expectedStatus": "ELIGIBLE_WITH_WARNINGS", "evidenceRequired": true },
+    { "rule": "investor-overlays", "inputFixture": "scenario-investor-overlay-fail.json", "expectedStatus": "INELIGIBLE", "evidenceRequired": true },
+    { "rule": "cache-health", "inputFixture": "scenario-conventional-purchase-happy.json", "expectedStatus": "POSTGRES_FALLBACK", "evidenceRequired": true }
+  ]
+}

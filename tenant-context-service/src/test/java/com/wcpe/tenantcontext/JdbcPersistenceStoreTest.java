@@ -102,7 +102,22 @@ class JdbcPersistenceStoreTest {
     }
 
     @Test
-    void tenantFieldConfigurationJdbcPathPersistsReadsAndKeepsDraftsFailClosed() {
+    void tenantRegistrationJdbcConstructorCreatesUuidTenantWithoutMemoryFallback() {
+        RecordingJdbcTemplate jdbc = new RecordingJdbcTemplate();
+        TenantRegistrationService service = new TenantRegistrationService(jdbc, CLOCK);
+
+        TenantRegistrationService.TenantDetails created = service.createTenant(new TenantRegistrationService.TenantCreateRequest(
+            "Acme Lending", "Acme Lending LLC", "", "", "", "", "", "", "US", "", "", "#1E40AF", "#3B82F6", "admin-alpha"
+        ), "admin-alpha");
+
+        assertThatCode(() -> UUID.fromString(created.tenantId())).doesNotThrowAnyException();
+        assertThat(created.status()).isEqualTo(TenantRegistrationService.TenantStatus.PENDING_ACTIVATION);
+        assertThat(jdbc.updates()).anySatisfy(call -> assertThat(call.sql()).contains("INSERT INTO tenant.tenant"));
+        assertThat(jdbc.updates()).anySatisfy(call -> assertThat(call.sql()).contains("INSERT INTO tenant.tenant_feature_flag"));
+    }
+
+    @Test
+    void tenantFieldConfigurationJdbcPathPersistsReadsDraftPublishesVersionAndAudit() {
         RecordingJdbcTemplate jdbc = new RecordingJdbcTemplate();
         TenantFieldConfigurationStoreService service = new TenantFieldConfigurationStoreService(jdbc, CLOCK);
         TenantFieldConfiguration field = nativeField("tenant-alpha", "CLIENT_SETTINGS", "tenant-custom-1", "Alpha custom field");
@@ -115,12 +130,30 @@ class JdbcPersistenceStoreTest {
                 assertThat(mapped.surface()).isEqualTo("CLIENT_SETTINGS");
                 assertThat(mapped.nameAlias()).isEqualTo("Alpha custom field");
             });
-        assertThatThrownBy(() -> service.saveDraft("tenant-alpha", "CLIENT_SETTINGS", List.of(field), "admin-alpha"))
-            .isInstanceOf(TenantFieldConfigException.class)
-            .extracting(Throwable::getMessage)
-            .isEqualTo("TENANT_FIELD_PERSISTENCE_CONTRACT_MISSING");
+        TenantFieldConfiguration draftField = nativeField("tenant-alpha", "CLIENT_SETTINGS", "tenant-custom-2", "Draft field");
+        service.saveDraft("tenant-alpha", "CLIENT_SETTINGS", List.of(draftField), "admin-alpha");
+        jdbc.whenQueryContains("FROM tenant.tenant_field_configuration_draft WHERE", draftRow());
+        jdbc.whenQueryContains("FROM tenant.tenant_field_configuration_draft_field", fieldRow(draftField));
+        jdbc.whenQueryContains("FROM tenant.tenant_field_configuration WHERE", fieldRow(field));
+        jdbc.whenQueryContains("COALESCE(MAX(version_number)", List.of(row("current_version", 0)));
+
+        service.publishDraft("tenant-alpha", "CLIENT_SETTINGS", "admin-alpha");
+        jdbc.whenQueryContains("FROM tenant.tenant_field_configuration_audit", List.of(row(
+            "tenant_id", "tenant-alpha",
+            "user_id", "admin-alpha",
+            "old_value", "Alpha custom field",
+            "new_value", "Draft field",
+            "affected_surface", "CLIENT_SETTINGS",
+            "recorded_at", ts(NOW),
+            "action", "PUBLISH"
+        )));
 
         assertThat(jdbc.updates()).anySatisfy(call -> assertThat(call.sql()).contains("INSERT INTO tenant.tenant_field_configuration"));
+        assertThat(jdbc.updates()).anySatisfy(call -> assertThat(call.sql()).contains("INSERT INTO tenant.tenant_field_configuration_draft"));
+        assertThat(jdbc.updates()).anySatisfy(call -> assertThat(call.sql()).contains("INSERT INTO tenant.tenant_field_configuration_version"));
+        assertThat(service.auditRecordsForTenant("tenant-alpha"))
+            .singleElement()
+            .satisfies(record -> assertThat(record.action()).isEqualTo("PUBLISH"));
     }
 
     @Test
@@ -263,7 +296,7 @@ class JdbcPersistenceStoreTest {
 
     private static List<Map<String, Object>> fieldRow(TenantFieldConfiguration field) {
         return List.of(row(
-            "configuration_id", "tenant-alpha:CLIENT_SETTINGS:tenant-custom-1",
+            "configuration_id", field.configurationId() == null ? field.tenantId() + ":CLIENT_SETTINGS:" + field.fieldId() : field.configurationId(),
             "tenant_id", field.tenantId(),
             "surface", "CLIENT_SETTINGS",
             "field_id", field.fieldId(),
@@ -275,6 +308,17 @@ class JdbcPersistenceStoreTest {
             "omitted", field.omitted(),
             "updated_at", ts(field.updatedAt()),
             "audit_ref", "tenant-field-config:tenant-alpha:CLIENT_SETTINGS:tenant-custom-1"
+        ));
+    }
+
+    private static List<Map<String, Object>> draftRow() {
+        return List.of(row(
+            "tenant_id", "tenant-alpha",
+            "surface", "CLIENT_SETTINGS",
+            "draft_id", "draft:tenant-alpha:CLIENT_SETTINGS",
+            "condition_field_refs_json", "{}",
+            "saved_at", ts(NOW),
+            "user_id", "admin-alpha"
         ));
     }
 

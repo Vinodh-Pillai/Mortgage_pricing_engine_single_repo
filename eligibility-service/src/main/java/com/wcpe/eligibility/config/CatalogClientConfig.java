@@ -75,9 +75,4 @@ public class CatalogClientConfig {
         return new FicoLtvMatrixRepository(jdbc);
     }
 
-    @Bean
-    public EligibilityRule ficoLtvMatrixRule(FicoLtvMatrixProperties properties,
-                                              FicoLtvMatrixRepository repository) {
-        return new FicoLtvMatrixRule(properties, repository);
-    }
 }

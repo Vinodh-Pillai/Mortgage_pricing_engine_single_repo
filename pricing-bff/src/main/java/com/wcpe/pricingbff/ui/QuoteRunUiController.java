@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -43,8 +44,9 @@ class QuoteRunUiController {
 
   @GetMapping("/api/v1/tenants/{tenantId}/quote-runs/{runId}/pricing-waterfall")
   Object pricingWaterfall(@PathVariable String tenantId, @PathVariable String runId,
+      @RequestParam(value = "selectedOfferId", required = false) String selectedOfferId,
       @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
-    return adapter.pricingWaterfall(tenantId, runId, uiTraceId);
+    return adapter.pricingWaterfall(tenantId, runId, selectedOfferId, uiTraceId);
   }
 
   @GetMapping("/api/v1/tenants/{tenantId}/quote-runs/{runId}/journey")

@@ -7,13 +7,14 @@ test.describe('PII-25 lock management page', () => {
     const lockManagementHeading = page.getByRole('heading', { name: 'Lock Management', exact: true });
     await expect(lockManagementHeading).toHaveCount(1);
     await expect(lockManagementHeading).toBeVisible();
-    await expectMajorFunctionalityPage(page, 'Lock Management', ['Active Locks', 'Lock Requests', 'Expiring Soon', 'Bulk Actions', 'Investor Delivery']);
+    await expectMajorFunctionalityPage(page, 'Lock Management', ['Live lock records', 'Bulk lock actions', 'Investor delivery and audit evidence']);
     await expect(page.getByText(/requested|confirmed|expired|cancelled|delivered/i).first()).toBeVisible();
-    await expect(page.getByRole('button', { name: /Bulk extend \(preview disabled\)/i })).toBeDisabled();
-    await expect(page.getByRole('button', { name: /Bulk cancel \(preview disabled\)/i })).toBeDisabled();
+    await expect(page.getByRole('button', { name: /Bulk read/i }).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: /Extend disabled/i }).first()).toBeDisabled();
+    await expect(page.getByRole('button', { name: /Relock disabled/i }).first()).toBeDisabled();
     await page.goto('/locks/lock-e2e', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('heading', { name: 'Lock Management', exact: true })).toBeVisible();
-    await exerciseTable(page, 'Borrower ref B', 'Borrower ref');
+    await exerciseTable(page, 'quote:', 'Quote / borrower ref');
     await runBasicA11yKeyboardCheck(page);
     await expect(page).toHaveScreenshot('lock-management.png', { fullPage: true, maxDiffPixelRatio: 0.001 });
   });

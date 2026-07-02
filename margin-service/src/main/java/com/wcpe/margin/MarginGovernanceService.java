@@ -32,7 +32,7 @@ public final class MarginGovernanceService {
   private final Store store;
 
   public MarginGovernanceService(Clock clock) {
-    this(clock, Store.failClosed("MarginGovernanceService"));
+    this(clock, MarginDurableStores.governanceStore());
   }
 
   MarginGovernanceService(Clock clock, Store store) {

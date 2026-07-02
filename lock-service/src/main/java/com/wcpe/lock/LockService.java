@@ -129,6 +129,10 @@ public final class LockService {
       .orElseThrow(() -> new LockServiceException("NOT_FOUND", "Lock was not found for tenant"));
   }
 
+  public List<LockModels.RateLockRecord> listLocks(UUID tenantId) {
+    return repository.list(tenantId);
+  }
+
   public LockModels.LockDetailResponse getLockDetail(UUID tenantId, String lockId) {
     LockModels.RateLockRecord lock = getLock(tenantId, lockId);
     LockModels.LockExpirationSchedule schedule = repository.findExpirationSchedule(tenantId, lockId).orElse(null);

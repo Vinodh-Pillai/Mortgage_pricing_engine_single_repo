@@ -48,6 +48,24 @@ class OfferUiController {
     return adapter.lockWorkflow(runId, selectedOfferId, uiTraceId);
   }
 
+  @GetMapping("/api/v1/tenants/{tenantId}/locks")
+  Object lockManagement(@PathVariable String tenantId,
+      @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
+    return adapter.lockManagement(tenantId, uiTraceId);
+  }
+
+  @GetMapping("/api/v1/tenants/{tenantId}/locks/{lockId}")
+  ResponseEntity<?> lockManagementDetail(@PathVariable String tenantId, @PathVariable String lockId,
+      @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
+    return adapter.lockManagementDetail(tenantId, lockId, uiTraceId);
+  }
+
+  @PostMapping("/api/v1/tenants/{tenantId}/locks/{lockId}/actions/{action}")
+  ResponseEntity<?> requestLockManagementAction(@PathVariable String tenantId, @PathVariable String lockId, @PathVariable String action,
+      @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
+    return adapter.requestLockManagementAction(tenantId, lockId, action, uiTraceId);
+  }
+
   @PostMapping("/api/v1/tenants/{tenantId}/quote-runs/{runId}/lock/confirm")
   ResponseEntity<?> confirmLock(@PathVariable String runId,
       @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId,

@@ -44,6 +44,7 @@ function renderGuard(initialEntry: string) {
           <Route path="/login" element={<LoginProbe />} />
           <Route path="/ops/dashboard" element={<RouteGuard><p>ops allowed</p></RouteGuard>} />
           <Route path="/quote/start" element={<RouteGuard><p>quickquote allowed</p></RouteGuard>} />
+          <Route path="/partner-integrations" element={<RouteGuard><p>partner integrations allowed</p></RouteGuard>} />
           <Route path="/admin/governance" element={<RouteGuard><p>admin allowed</p></RouteGuard>} />
         </Routes>
       </MemoryRouter>
@@ -95,6 +96,12 @@ describe('RouteGuard', () => {
     window.localStorage.setItem(ACTIVE_PERSONA_STORAGE_KEY, 'persona-loan-officer');
     renderGuard('/quote/start');
     expect(await screen.findByText('quickquote allowed')).toBeInTheDocument();
+  });
+
+  it('RouteGuardTest.allowsPartnerIntegrationsForPartnerManagerPersonaAfterBackendMe401', async () => {
+    window.localStorage.setItem(ACTIVE_PERSONA_STORAGE_KEY, 'persona-partner-manager');
+    renderGuard('/partner-integrations');
+    expect(await screen.findByText('partner integrations allowed')).toBeInTheDocument();
   });
 
   it('RouteGuardTest.loginCanAuthorizePreservedDestination', async () => {

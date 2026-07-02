@@ -1,5 +1,6 @@
 import type { BorrowerIntake, DropdownOption, ScenarioIntakeField } from '../../../lib/api/quoteRuns';
 import { HelpIcon } from '../../../design-system/icons';
+import { displayChannelLabel } from '../../../lib/utils/channelDisplay';
 import type { IntakeFieldErrors } from '../validation';
 import { isBorrowerIntakeField, isHeaderMetadataField } from '../metadata';
 
@@ -355,7 +356,7 @@ function MetadataDrivenField({
   return (
     <div className={`${fieldValueType(field) === 'textarea' ? 'quote-intake-field quote-intake-field--wide' : 'quote-intake-field'}${error ? ' quote-intake-field--error' : ''}`}>
       <div className="quote-intake-field-label">
-        <label htmlFor={field.fieldId}>{field.label}{field.required ? <span className="quote-intake-required-badge" aria-hidden="true">Required</span> : null}</label>
+        <label htmlFor={field.fieldId}>{field.label}{field.required ? <span className="quote-intake-required-badge" aria-label="required">*</span> : null}</label>
         {helpTooltip ? <button type="button" className="quote-intake-help-icon" aria-label={helpTooltip} title={helpTooltip}><HelpIcon size={16} /></button> : null}
       </div>
       {selectOptions ? (
@@ -483,6 +484,7 @@ function displayValue(fieldId: keyof BorrowerIntake, value: string) {
 }
 
 function friendlyEnumLabel(value: string) {
+  if (/^(corr|correspondent|retail|wholesale|tpo|consumer_direct)$/i.test(value.trim())) return displayChannelLabel(value);
   return value
     .toLowerCase()
     .split('_')

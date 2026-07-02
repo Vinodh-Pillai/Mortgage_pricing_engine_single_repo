@@ -59,7 +59,7 @@ class RateSheetNormalizationPolicyTest {
       @SuppressWarnings("unchecked") Supplier<NormalizeBatchResponse> command = inv.getArgument(4);
       return command.get();
     });
-    when(repository.batchParseSource(TENANT, BATCH)).thenReturn(new RateFeedRepository.BatchParseSource(BATCH, INVESTOR, CHANNEL, FORMAT, "PARSED", "hash-file"));
+    when(repository.batchParseSource(TENANT, BATCH)).thenReturn(new RateFeedRepository.BatchParseSource(BATCH, INVESTOR, CHANNEL, FORMAT, "PARSED", "hash-file", "local://synthetic/src/test/resources/ratesheets/stored-valid.csv"));
     when(jdbc.queryForObject(startsWith("select result_hash"), eq(String.class), any(), any())).thenReturn("hash-parse");
     when(jdbc.query(startsWith("select source_row_number"), any(RowMapper.class), any(), any())).thenAnswer(inv -> {
       @SuppressWarnings("unchecked") RowMapper<Object> mapper = inv.getArgument(1);
@@ -86,7 +86,7 @@ class RateSheetNormalizationPolicyTest {
       @SuppressWarnings("unchecked") Supplier<NormalizeBatchResponse> command = inv.getArgument(4);
       return command.get();
     });
-    when(repository.batchParseSource(TENANT, BATCH)).thenReturn(new RateFeedRepository.BatchParseSource(BATCH, INVESTOR, CHANNEL, FORMAT, "PARSED", "hash-file"));
+    when(repository.batchParseSource(TENANT, BATCH)).thenReturn(new RateFeedRepository.BatchParseSource(BATCH, INVESTOR, CHANNEL, FORMAT, "PARSED", "hash-file", "local://synthetic/src/test/resources/ratesheets/stored-valid.csv"));
     when(jdbc.queryForObject(startsWith("select result_hash"), eq(String.class), any(), any())).thenReturn("hash-parse");
     when(jdbc.query(startsWith("select source_row_number"), any(RowMapper.class), any(), any())).thenAnswer(inv -> {
       @SuppressWarnings("unchecked") RowMapper<Object> mapper = inv.getArgument(1);
@@ -110,7 +110,7 @@ class RateSheetNormalizationPolicyTest {
       @SuppressWarnings("unchecked") Supplier<NormalizeBatchResponse> command = inv.getArgument(4);
       return command.get();
     });
-    when(repository.batchParseSource(TENANT, BATCH)).thenReturn(new RateFeedRepository.BatchParseSource(BATCH, INVESTOR, CHANNEL, FORMAT, "PARSED", "hash-file"));
+    when(repository.batchParseSource(TENANT, BATCH)).thenReturn(new RateFeedRepository.BatchParseSource(BATCH, INVESTOR, CHANNEL, FORMAT, "PARSED", "hash-file", "local://synthetic/src/test/resources/ratesheets/stored-valid.csv"));
     when(jdbc.queryForObject(startsWith("select result_hash"), eq(String.class), any(), any())).thenReturn("hash-parse");
     when(jdbc.query(startsWith("select source_row_number"), any(RowMapper.class), any(), any())).thenAnswer(inv -> {
       @SuppressWarnings("unchecked") RowMapper<Object> mapper = inv.getArgument(1);
@@ -134,7 +134,7 @@ class RateSheetNormalizationPolicyTest {
       @SuppressWarnings("unchecked") Supplier<NormalizeBatchResponse> command = inv.getArgument(4);
       return command.get();
     });
-    when(repository.batchParseSource(TENANT, BATCH)).thenReturn(new RateFeedRepository.BatchParseSource(BATCH, INVESTOR, CHANNEL, FORMAT, "PARSED", "hash-file"));
+    when(repository.batchParseSource(TENANT, BATCH)).thenReturn(new RateFeedRepository.BatchParseSource(BATCH, INVESTOR, CHANNEL, FORMAT, "PARSED", "hash-file", "local://synthetic/src/test/resources/ratesheets/stored-valid.csv"));
     when(jdbc.queryForObject(startsWith("select result_hash"), eq(String.class), any(), any())).thenReturn("hash-parse");
     when(jdbc.query(startsWith("select source_row_number"), any(RowMapper.class), any(), any())).thenAnswer(inv -> {
       @SuppressWarnings("unchecked") RowMapper<Object> mapper = inv.getArgument(1);

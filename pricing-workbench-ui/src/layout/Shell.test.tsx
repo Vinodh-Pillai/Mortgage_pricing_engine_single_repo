@@ -251,7 +251,7 @@ describe('responsive layout shell', () => {
     expect(screen.getByRole('dialog', { name: 'Primary navigation drawer' })).not.toHaveTextContent(/\b0\b/);
   });
 
-  it('opens user menu with role badge and persists theme toggles', () => {
+  it('opens user menu without role text and persists theme toggles', () => {
     installMatchMedia(false);
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
     const toggle = vi.fn();
@@ -264,13 +264,13 @@ describe('responsive layout shell', () => {
     fireEvent.click(screen.getByRole('button', { name: 'User menu for Alex Rivera' }));
     expect(document.querySelector('.layout-user-menu-shell')).toHaveClass('layout-user-menu-shell--open');
     expect(screen.getByRole('button', { name: 'User menu for Alex Rivera' })).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('menu', { name: 'User menu for Alex Rivera' })).not.toHaveTextContent('Profile');
-    expect(screen.getByRole('menu', { name: 'User menu for Alex Rivera' })).not.toHaveTextContent('Settings');
+    expect(screen.getByRole('menu', { name: 'User menu for Alex Rivera' })).toHaveTextContent('Profile');
+    expect(screen.getByRole('menu', { name: 'User menu for Alex Rivera' })).toHaveTextContent('Settings');
     expect(screen.getByRole('menu', { name: 'User menu for Alex Rivera' })).toHaveTextContent('Sign Out');
-    expect(screen.getByRole('menuitem', { name: 'Sign Out' })).toHaveFocus();
+    expect(screen.getByRole('menuitem', { name: 'Profile' })).toHaveFocus();
     fireEvent.keyDown(screen.getByRole('menu', { name: 'User menu for Alex Rivera' }), { key: 'Tab', shiftKey: true });
     expect(screen.getByRole('menuitem', { name: 'Sign Out' })).toHaveFocus();
-    expect(screen.getAllByText('Pricing analyst').some((element) => element.classList.contains('layout-role-badge'))).toBe(true);
+    expect(screen.queryByText('Pricing analyst')).not.toBeInTheDocument();
 
     const themeToggle = screen.getByRole('button', { name: 'Toggle theme' });
     expect(themeToggle).toHaveClass('layout-theme-toggle');

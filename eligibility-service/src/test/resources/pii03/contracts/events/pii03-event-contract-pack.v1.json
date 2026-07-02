@@ -1,0 +1,38 @@
+{
+  "name": "pii03-event-contract-pack.v1",
+  "events": [
+    "ScenarioSubmitted.v1",
+    "ScenarioValidated.v1",
+    "QuoteEligibilityRequested.v1",
+    "QuoteEligibilityShellCreated.v1",
+    "LoanLimitSetPublished.v1",
+    "FicoLtvMatrixPublished.v1",
+    "OccupancyPurposeRuleSetPublished.v1",
+    "PropertyTypeRuleSetPublished.v1",
+    "InvestorOverlaySetPublished.v1",
+    "EligibilityCacheInvalidated.v1",
+    "EligibilityExplanationViewed.v1",
+    "EligibilityRuleModuleRegistered.v1"
+  ],
+  "requiredEnvelopeFields": [
+    "eventId",
+    "eventType",
+    "eventVersion",
+    "tenantId",
+    "aggregateId",
+    "aggregateVersion",
+    "correlationId",
+    "causationId",
+    "schemaUri",
+    "occurredAtUtc"
+  ],
+  "compatibilityExamples": [
+    {
+      "eventType": "QuoteEligibilityShellCreated",
+      "schemaUri": "https://pricing/contracts/pii03/events/QuoteEligibilityShellCreated.v1.json",
+      "payload": {
+        "resultHash": "sha256:synthetic-event-result"
+      }
+    }
+  ]
+}

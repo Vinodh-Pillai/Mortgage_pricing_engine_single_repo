@@ -216,7 +216,7 @@ public final class PartnerIntegrationWorkbenchService {
   }
 
   private DependencyStatus dependencyStatus(PartnerQuote quote) {
-    return quote == null ? DependencyStatus.unavailable("partner-quote-service") : quote.dependencyStatus();
+    return quote == null ? DependencyStatus.unavailable(DependencyName.PARTNER_QUOTE_SERVICE) : quote.dependencyStatus();
   }
 
   private DependencyStatus aggregateWebhookDependencies(String partnerId) {
@@ -312,11 +312,33 @@ public final class PartnerIntegrationWorkbenchService {
   }
 
   public enum DependencyName {
-    PARTNER_QUOTE_SERVICE,
+    PARTNER_QUOTE_SERVICE("partner-quote-service"),
     PRICING_SERVICE,
     LOCK_SERVICE,
     NOTIFICATIONS,
-    WEBHOOK_ROUTING
+    WEBHOOK_ROUTING;
+
+    private final String externalId;
+
+    DependencyName() {
+      this.externalId = name();
+    }
+
+    DependencyName(String externalId) {
+      this.externalId = externalId;
+    }
+
+    static Optional<DependencyName> fromDependencyId(String dependency) {
+      if (isBlank(dependency)) {
+        return Optional.empty();
+      }
+      for (DependencyName knownDependency : values()) {
+        if (knownDependency.name().equals(dependency) || knownDependency.externalId.equals(dependency)) {
+          return Optional.of(knownDependency);
+        }
+      }
+      return Optional.empty();
+    }
   }
 
   public enum DependencyState {
@@ -338,8 +360,15 @@ public final class PartnerIntegrationWorkbenchService {
       return new DependencyStatus(states);
     }
 
+    public static DependencyStatus unavailable(DependencyName dependency) {
+      return dependency == null ? new DependencyStatus(Map.of()) : new DependencyStatus(Map.of(dependency.name(), DependencyState.UNAVAILABLE));
+    }
+
     public static DependencyStatus unavailable(String dependency) {
-      return new DependencyStatus(Map.of(dependency, DependencyState.UNAVAILABLE));
+      if (isBlank(dependency)) {
+        return new DependencyStatus(Map.of());
+      }
+      return DependencyName.fromDependencyId(dependency).map(DependencyStatus::unavailable).orElseGet(() -> new DependencyStatus(Map.of(dependency, DependencyState.UNAVAILABLE)));
     }
 
     public boolean allAvailable() {

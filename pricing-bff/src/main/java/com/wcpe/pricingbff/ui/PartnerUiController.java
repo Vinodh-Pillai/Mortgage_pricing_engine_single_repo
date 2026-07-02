@@ -75,4 +75,18 @@ class PartnerUiController {
       @RequestBody(required = false) PricingBffUiFallbackAdapter.PartnerSafetyToggleRequest request) {
     return adapter.updatePartnerWebhookSafety(webhookId, uiTraceId, request);
   }
+
+  @GetMapping("/api/v1/partners/{partnerId}/integrations/alerts")
+  Object partnerIntegrationAlerts(@PathVariable String partnerId,
+      @RequestHeader(value = "X-Tenant-Context", required = false) String tenantContext,
+      @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
+    return adapter.partnerIntegrationAlerts(partnerId, tenantContext, uiTraceId);
+  }
+
+  @PostMapping("/api/v1/partners/{partnerId}/integrations/alerts/{alertId}/actions")
+  ResponseEntity<?> recordPartnerIntegrationAlertAction(@PathVariable String alertId,
+      @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId,
+      @RequestBody(required = false) PricingBffUiFallbackAdapter.PartnerIntegrationAlertActionRequest request) {
+    return adapter.recordPartnerIntegrationAlertAction(alertId, uiTraceId, request);
+  }
 }

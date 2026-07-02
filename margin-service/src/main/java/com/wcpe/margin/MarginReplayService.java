@@ -45,7 +45,7 @@ public final class MarginReplayService {
   private final Store store;
 
   public MarginReplayService(Clock clock) {
-    this(clock, Store.failClosed("MarginReplayService"));
+    this(clock, MarginDurableStores.replayStore());
   }
 
   MarginReplayService(Clock clock, Store store) {

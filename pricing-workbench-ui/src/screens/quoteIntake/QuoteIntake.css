@@ -1729,7 +1729,7 @@
   align-items: start;
   display: grid;
   gap: 0.9rem;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: minmax(320px, 24%) minmax(0, 1fr);
   inline-size: 100%;
   min-block-size: calc(100dvh - 12rem);
 }

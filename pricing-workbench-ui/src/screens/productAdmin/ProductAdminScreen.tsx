@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { fetchProductAdmin, type ProductAdminMapping, type ProductAdminProduct, type ProductAdminStipulation, type ProductAdminView } from '../../lib/api/products';
+import { displayChannelLabel } from '../../lib/utils/channelDisplay';
 import type { ScreenProps, ScreenVisualState } from '../contract/ScreenProps';
 
 type ProductAdminScreenProps = Partial<ScreenProps> & {
@@ -339,7 +340,7 @@ function ProductsTab({ products, onCreate, onAdvance, onPreviewEdit, onPreviewDe
         {products.map((product) => (
           <div role="row" className="quote-table__row" key={product.productId}>
             <span role="cell"><strong>{product.productName}</strong><br /><code>{product.productCode}</code><br />{product.description}</span>
-            <span role="cell">Type: {product.productType}<br />Investor: {product.investorCode}<br />Channel: {product.channelCode}</span>
+            <span role="cell">Type: {product.productType}<br />Investor: {product.investorCode}<br />Channel: {displayChannelLabel(product.channelCode)}</span>
             <span role="cell">Loan amount: {rangeText(product.minLoanAmount, product.maxLoanAmount)}<br />FICO/LTV/DTI: {constraintText(product)}<ChipList label={`${product.productCode} eligibility refs`} values={[...product.propertyTypes, ...product.occupancyTypes, ...product.loanPurposes]} /></span>
             <span role="cell"><strong>{product.status}</strong><br />Version {product.version}<br />{product.changeSummary}<br /><button type="button" onClick={() => onAdvance(product.productId)} disabled={product.status === 'DEPRECATED'}>Advance status</button></span>
             <span role="cell"><button type="button" aria-label={`Edit product preview for ${product.productCode}`} onClick={() => onPreviewEdit(product.productId)}>Edit preview</button><button type="button" aria-label={`Delete product preview for ${product.productCode}`} onClick={() => onPreviewDelete(product.productId)}>Delete preview</button></span>

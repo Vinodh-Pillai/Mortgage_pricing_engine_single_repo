@@ -1,8 +1,7 @@
 import { useMemo, useState } from 'react';
-import { MajorFunctionalityPage, type EvidenceCapture, type FunctionalityPageConfig } from '../shared/MajorFunctionalityPage';
-import type { ScreenVisualState } from '../contract/ScreenProps';
-
-type RateSheetRow = { id: string; investor: string; effectiveDate: string; status: string };
+import { publishRateSheetUpload, uploadRateSheetForParsing, validateRateSheetUpload, type RateSheetPublishResult, type RateSheetUploadMetadata, type RateSheetUploadResult } from '../../lib/api/rateSheetIntake';
+import { useOptionalTenantId } from '../../lib/data/tenant';
+import type { EvidenceCapture } from '../shared/MajorFunctionalityPage';
 
 type FileInspection = {
   name: string;
@@ -13,13 +12,218 @@ type FileInspection = {
   hashStatus: 'pending' | 'available' | 'unavailable';
 };
 
-type ValidationOutcome = {
-  status: 'idle' | 'blocked' | 'parser-unimplemented' | 'unsupported-type';
-  message: string;
-  parsedRows: number;
-};
+type BackendState =
+  | { kind: 'idle'; message: string }
+  | { kind: 'uploading'; message: string }
+  | { kind: 'loaded'; result: RateSheetUploadResult }
+  | { kind: 'blocked'; message: string };
 
-const supportedInspectionExtensions = new Set(['pdf', 'xlsm', 'xlsx']);
+const supportedInspectionExtensions = new Set(['csv', 'pdf', 'xlsm', 'xlsx']);
+const pdfOcrBlockedMessage = 'PDF/OCR rate sheet intake requires an approved external document extractor/OCR handoff. This repository currently exposes rate-feed OCR review contracts but no PDF table extraction adapter, so PDF upload is blocked before parser execution.';
+
+export const rateSheetIntakeEvidenceTarget = '.local-harness/evidence/PII-25-S04/rate-sheet-intake.json';
+
+export function RateSheetIntakeScreen({ onEvidenceCapture }: { onEvidenceCapture?: EvidenceCapture }) {
+  const tenantId = useOptionalTenantId();
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [inspection, setInspection] = useState<FileInspection | null>(null);
+  const [metadata, setMetadata] = useState<RateSheetUploadMetadata>({ investorId: '', channelId: '', productCode: '', effectiveAt: '' });
+  const [backendState, setBackendState] = useState<BackendState>({ kind: 'idle', message: 'Select a file, then upload it to the backend parser.' });
+  const [publishResult, setPublishResult] = useState<RateSheetPublishResult | null>(null);
+  const selectedFileSummary = useMemo(() => {
+    if (!inspection) return 'No file selected';
+    return `${inspection.name} · ${inspection.extension.toUpperCase()} · ${formatBytes(inspection.sizeBytes)}`;
+  }, [inspection]);
+
+  async function inspectFile(file: File | undefined) {
+    setPublishResult(null);
+    setBackendState({ kind: 'idle', message: 'Upload to backend parser before validation or publish.' });
+    setSelectedFile(file ?? null);
+    if (!file) {
+      setInspection(null);
+      return;
+    }
+
+    const nextInspection: FileInspection = {
+      name: file.name,
+      extension: extensionFor(file.name),
+      sizeBytes: file.size,
+      lastModified: Number.isFinite(file.lastModified) ? new Date(file.lastModified).toISOString() : 'unknown',
+      hash: 'hash pending',
+      hashStatus: 'pending',
+    };
+    setInspection(nextInspection);
+    try {
+      const hash = await hashFile(file);
+      setInspection({ ...nextInspection, hash, hashStatus: 'available' });
+    } catch {
+      setInspection({ ...nextInspection, hash: 'hash unavailable in this browser session', hashStatus: 'unavailable' });
+    }
+  }
+
+  async function uploadAndParse() {
+    if (!selectedFile || !inspection) {
+      setBackendState({ kind: 'blocked', message: 'Select a CSV, XLSM, XLSX, or PDF file before backend upload.' });
+      return;
+    }
+    if (!tenantId) {
+      setBackendState({ kind: 'blocked', message: 'Select a tenant context before uploading a rate sheet.' });
+      return;
+    }
+    if (inspection.hashStatus !== 'available') {
+      setBackendState({ kind: 'blocked', message: inspection.hashStatus === 'pending' ? 'Wait for source hash calculation before backend upload.' : 'Source hash is unavailable; select the file again or use a browser session with file hashing support.' });
+      return;
+    }
+    if (!supportedInspectionExtensions.has(inspection.extension)) {
+      setBackendState({ kind: 'blocked', message: `${inspection.extension.toUpperCase()} is not an accepted rate sheet intake format. Supported repo-backed formats are CSV parser upload and XLSX/XLSM structural/profile analysis; PDF/OCR remains externally blocked.` });
+      return;
+    }
+    if (inspection.extension === 'pdf') {
+      setBackendState({ kind: 'blocked', message: pdfOcrBlockedMessage });
+      return;
+    }
+    if (inspection.extension === 'csv' && (!metadata.investorId.trim() || !metadata.channelId.trim() || !metadata.productCode.trim() || !metadata.effectiveAt.trim())) {
+      setBackendState({ kind: 'blocked', message: 'CSV parser upload requires investorId, channelId, productCode, and effectiveAt supplied by the user. The UI will not invent rate-feed metadata.' });
+      return;
+    }
+    setBackendState({ kind: 'uploading', message: 'Uploading source file to backend parser...' });
+    try {
+      const result = await uploadRateSheetForParsing(tenantId, selectedFile, inspection.hash, metadata);
+      setBackendState({ kind: 'loaded', result });
+      capture(result, []);
+    } catch (error: unknown) {
+      setBackendState({ kind: 'blocked', message: error instanceof Error ? error.message : 'Backend upload/parse is unavailable.' });
+    }
+  }
+
+  async function refreshValidation() {
+    if (backendState.kind !== 'loaded' || !backendState.result.uploadId) return;
+    if (!tenantId) {
+      setBackendState({ kind: 'blocked', message: 'Select a tenant context before refreshing validation.' });
+      return;
+    }
+    setBackendState({ kind: 'uploading', message: 'Loading backend row validation...' });
+    try {
+      const result = await validateRateSheetUpload(tenantId, backendState.result.uploadId);
+      setBackendState({ kind: 'loaded', result });
+      capture(result, []);
+    } catch (error: unknown) {
+      setBackendState({ kind: 'blocked', message: error instanceof Error ? error.message : 'Backend row validation is unavailable.' });
+    }
+  }
+
+  async function publish() {
+    if (backendState.kind !== 'loaded' || !backendState.result.uploadId || !backendState.result.publishReady) return;
+    if (!tenantId) {
+      setPublishResult({ status: 'BLOCKED', message: 'Select a tenant context before publishing a rate sheet.', auditRefs: [] });
+      return;
+    }
+    try {
+      const result = await publishRateSheetUpload(tenantId, backendState.result.uploadId, {
+        expectedValidationResultHash: backendState.result.validationResultHash,
+        expectedVersionHash: backendState.result.versionHash,
+      });
+      setPublishResult(result);
+      capture(backendState.result, result.auditRefs);
+    } catch (error: unknown) {
+      setPublishResult({ status: 'BLOCKED', message: error instanceof Error ? error.message : 'Backend publish is unavailable.', auditRefs: [] });
+    }
+  }
+
+  function capture(result: RateSheetUploadResult, publishRefs: string[]) {
+    const refs = [rateSheetIntakeEvidenceTarget, result.uploadId, result.sourceHash, result.uiTraceId, ...result.auditRefs, ...publishRefs].filter(Boolean);
+    onEvidenceCapture?.({
+      screenId: 'rate-sheet-intake',
+      timestamp: new Date().toISOString(),
+      state: result.publishReady ? 'ready' : result.parsedRows.length > 0 ? 'needs-attention' : 'blocked',
+      dataRefs: refs,
+      blockers: result.validationIssues.filter((issue) => issue.severity === 'BLOCKING').map((issue) => issue.message),
+      evidenceTarget: rateSheetIntakeEvidenceTarget,
+      refs,
+    });
+  }
+
+  const parsedRows = backendState.kind === 'loaded' ? backendState.result.parsedRows : [];
+  const validationIssues = backendState.kind === 'loaded' ? backendState.result.validationIssues : [];
+  const publishReady = backendState.kind === 'loaded' && backendState.result.publishReady;
+  const hashReady = inspection?.hashStatus === 'available';
+  const uploadDisabled = !selectedFile || !hashReady || backendState.kind === 'uploading' || !tenantId;
+
+  return (
+    <main className="functionality-page" data-screen-id="rate-sheet-intake" aria-labelledby="rate-sheet-title">
+      <section className="hero" aria-labelledby="rate-sheet-title">
+        <p className="eyebrow">Rate sheet service</p>
+        <h1 id="rate-sheet-title">Rate Sheet Intake</h1>
+        <p>Upload a rate sheet to backend parser/validation APIs. The browser inspects metadata and source hash only; it does not invent parser rows or publish unparsed files.</p>
+      </section>
+
+      <section className="panel" aria-labelledby="rate-sheet-upload-heading">
+        <h2 id="rate-sheet-upload-heading">Backend upload and parse</h2>
+        <label className="drop-zone">
+          <strong>Select CSV, XLSM, XLSX, or PDF rate sheet source</strong>
+          <span>{selectedFileSummary}</span>
+          <input aria-label="Rate sheet source file" type="file" accept=".csv,.pdf,.xlsm,.xlsx" onChange={(event) => void inspectFile(event.target.files?.[0])} />
+        </label>
+        <div className="form-grid" aria-label="CSV parser metadata">
+          <label>Investor ID<input aria-label="Investor ID" value={metadata.investorId} onChange={(event) => setMetadata({ ...metadata, investorId: event.target.value })} placeholder="UUID from rate-feed configuration" /></label>
+          <label>Channel ID<input aria-label="Channel ID" value={metadata.channelId} onChange={(event) => setMetadata({ ...metadata, channelId: event.target.value })} placeholder="UUID from rate-feed configuration" /></label>
+          <label>Product code<input aria-label="Product code" value={metadata.productCode} onChange={(event) => setMetadata({ ...metadata, productCode: event.target.value })} placeholder="Configured product code" /></label>
+          <label>Effective at<input aria-label="Effective at" value={metadata.effectiveAt} onChange={(event) => setMetadata({ ...metadata, effectiveAt: event.target.value })} placeholder="ISO-8601 instant" /></label>
+        </div>
+        <dl aria-label="Selected file inspection">
+          <dt>File name</dt><dd>{inspection?.name ?? 'Not selected'}</dd>
+          <dt>Extension</dt><dd>{inspection?.extension.toUpperCase() ?? 'Not selected'}</dd>
+          <dt>Size</dt><dd>{inspection ? formatBytes(inspection.sizeBytes) : 'Not selected'}</dd>
+          <dt>Last modified</dt><dd>{inspection?.lastModified ?? 'Not selected'}</dd>
+          <dt>Source hash</dt><dd>{inspection?.hash ?? 'Not selected'}</dd>
+        </dl>
+        {!tenantId ? <div className="banner banner--blocked" role="alert"><strong>Tenant context required</strong><span>Select a tenant before uploading a rate sheet.</span></div> : null}
+        {inspection?.hashStatus === 'pending' ? <p role="status">Calculating source hash before upload is enabled...</p> : null}
+        {inspection?.hashStatus === 'unavailable' ? <div className="banner banner--blocked" role="alert"><strong>Source hash unavailable</strong><span>Upload is disabled because the backend parser requires a concrete source hash.</span></div> : null}
+        <div className="action-toolbar" aria-label="Rate sheet backend controls">
+          <button type="button" className="ds-control ds-button ds-size-sm ds-variant-secondary" onClick={() => void uploadAndParse()} disabled={uploadDisabled}>{backendState.kind === 'uploading' ? 'Uploading...' : 'Upload and parse'}</button>
+          <button type="button" className="ds-control ds-button ds-size-sm ds-variant-secondary" onClick={() => void refreshValidation()} disabled={backendState.kind !== 'loaded' || !backendState.result.uploadId}>Refresh validation</button>
+          <button type="button" className="ds-control ds-button ds-size-sm ds-variant-primary" onClick={() => void publish()} disabled={!publishReady}>Publish</button>
+        </div>
+        {backendState.kind === 'blocked' ? <div className="banner banner--blocked" role="alert"><strong>Live backend blocked</strong><span>{backendState.message}</span></div> : <p role="status">{backendState.kind === 'loaded' ? `${parsedRows.length} parser-backed rows loaded.` : backendState.message}</p>}
+        <p>Publish remains disabled until backend parser rows exist and blocking validation issues are resolved.</p>
+        {backendState.kind === 'loaded' && backendState.result.structuralAnalysis ? <StructuralAnalysis analysis={backendState.result.structuralAnalysis} /> : null}
+      </section>
+
+      <section className="panel" aria-labelledby="rate-sheet-validation-heading">
+        <h2 id="rate-sheet-validation-heading">Parser rows and validation</h2>
+        {parsedRows.length === 0 ? <p role="status">No parser-backed rows are loaded. The UI will not fabricate rate rows.</p> : (
+          <div className="quote-table" role="table" aria-label="Rate sheet parser rows">
+            <div role="row" className="quote-table__row quote-table__row--head"><span role="columnheader">Row</span><span role="columnheader">Product</span><span role="columnheader">Rate</span><span role="columnheader">Status</span><span role="columnheader">Issues</span></div>
+            {parsedRows.map((row) => <div key={row.rowId} role="row" className="quote-table__row"><span role="cell">{row.rowNumber ?? row.rowId}</span><span role="cell">{row.productRef}</span><span role="cell">{row.rateRef}</span><span role="cell">{row.status}</span><span role="cell"><IssueList issues={row.validationIssues} /></span></div>)}
+          </div>
+        )}
+        <IssueList issues={validationIssues} />
+      </section>
+
+      <section className="panel" aria-labelledby="rate-sheet-publish-heading">
+        <h2 id="rate-sheet-publish-heading">Publish activation and audit replay</h2>
+        {publishResult ? <div className={publishResult.status === 'PUBLISHED' ? 'banner banner--success' : 'banner banner--blocked'} role={publishResult.status === 'PUBLISHED' ? 'status' : 'alert'}><strong>{publishResult.status}</strong><span>{publishResult.message}</span><RefList values={publishResult.auditRefs} /></div> : <p role="status">Publish has not run for this upload.</p>}
+        {backendState.kind === 'loaded' ? <RefList values={backendState.result.auditRefs} /> : null}
+      </section>
+    </main>
+  );
+}
+
+function IssueList({ issues }: { issues: Array<{ rowNumber: number | null; column: string; severity: string; message: string }> }) {
+  if (issues.length === 0) return <p>No validation issues supplied.</p>;
+  return <ul>{issues.map((issue, index) => <li key={`${issue.rowNumber ?? 'row'}-${issue.column}-${index}`}><strong>{issue.severity}</strong> row {issue.rowNumber ?? 'n/a'} {issue.column}: {issue.message}</li>)}</ul>;
+}
+
+function RefList({ values }: { values: string[] }) {
+  if (values.length === 0) return null;
+  return <ul>{values.map((value) => <li key={value}><code>{value}</code></li>)}</ul>;
+}
+
+function StructuralAnalysis({ analysis }: { analysis: NonNullable<RateSheetUploadResult['structuralAnalysis']> }) {
+  const mappingCount = Array.isArray(analysis.mappings) ? analysis.mappings.length : 0;
+  return <div className="banner banner--info" role="status"><strong>XLSX/XLSM structural/profile analysis</strong><span>{analysis.formatType || 'format'} · {analysis.confidence} confidence · {mappingCount} proposed mappings. Publish remains disabled until a CSV parser upload or approved downstream parser handoff supplies parser rows.</span></div>;
+}
 
 function extensionFor(fileName: string) {
   const suffix = fileName.split('.').pop()?.trim().toLowerCase();
@@ -40,139 +244,6 @@ async function hashFile(file: File) {
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
   return `fnv1a-32:${hash.toString(16).padStart(8, '0')}`;
-}
-
-function messageForValidation(inspection: FileInspection | null): ValidationOutcome {
-  if (!inspection) {
-    return { status: 'blocked', parsedRows: 0, message: 'Select a PDF, XLSM, or XLSX file before validation. No rows were parsed.' };
-  }
-
-  if (!supportedInspectionExtensions.has(inspection.extension)) {
-    return {
-      status: 'unsupported-type',
-      parsedRows: 0,
-      message: `${inspection.extension.toUpperCase()} is not an accepted rate sheet intake format for this workflow. Supported inspection types are PDF, XLSM, and XLSX.`,
-    };
-  }
-
-  const typeName = inspection.extension.toUpperCase();
-  return {
-    status: 'parser-unimplemented',
-    parsedRows: 0,
-    message: `${typeName} file inspection succeeded for ${inspection.name}, but the ${typeName} row parser is not implemented in this UI. No rate rows were invented or staged; publish stays disabled until a tenant-scoped service parser returns parsed rows that pass validation.`,
-  };
-}
-
-export const rateSheetIntakeEvidenceTarget = '.local-harness/evidence/PII-25-S04/rate-sheet-intake.json';
-
-const rateSheetConfig: FunctionalityPageConfig<RateSheetRow> = {
-  screenId: 'rate-sheet-intake',
-  evidenceTarget: rateSheetIntakeEvidenceTarget,
-  breadcrumb: 'Pricing / Rate sheets',
-  eyebrow: 'Rate sheet service',
-  title: 'Rate Sheet Intake',
-  summary: 'Supports rate sheet upload, validation review, investor mapping, effective dates, and publish readiness.',
-  dataBoundary: 'rate-sheet-service: GET/PATCH /api/v1/rate-sheets',
-  sections: [
-    { id: 'upload-import', eyebrow: 'Import', title: 'File Inspection', summary: 'Reads selected file metadata and source fingerprint before any parser work.', status: 'ready', items: ['Name, extension, and size', 'Source hash where available', 'No local rate invention'] },
-    { id: 'validation-results', eyebrow: 'Validation', title: 'Validation Results', summary: 'Parser readiness and row-validation result.', status: 'needs-attention', items: ['PDF parser status', 'XLSM/XLSX parser status', 'Parsed-row gate'] },
-    { id: 'rate-grid', eyebrow: 'Grid', title: 'Rate Grid', summary: 'Read-only grid metadata from backend.', status: 'blocked', items: ['Grid ref', 'Cell lineage', 'Source version'] },
-    { id: 'investor-mapping', eyebrow: 'Investor', title: 'Investor Mapping', summary: 'Investor mapping references.', status: 'needs-attention', items: ['Investor key', 'Mapping status', 'Review ref'] },
-    { id: 'effective-dates', eyebrow: 'Timing', title: 'Effective Dates', summary: 'Effective date windows from service metadata.', status: 'ready', items: ['Start date ref', 'Cutoff ref', 'Timezone ref'] },
-    { id: 'publish-workflow', eyebrow: 'Publish', title: 'Publish Workflow', summary: 'Publish is blocked until tenant-scoped parsed rows pass validation.', status: 'empty', items: ['Tenant selection required', 'Validated parsed rows required', 'Publish writes governed rates through rate-sheet-service'] },
-  ],
-  metrics: [
-    { label: 'File intake', value: 'Inspect only', help: 'The browser reads selected file metadata and a source hash where available.' },
-    { label: 'Validation', value: 'Parser-gated', help: 'PDF/XLSM/XLSX parser availability is reported by file type; parsed rows are not fabricated.' },
-    { label: 'Publish', value: 'Disabled', help: 'Publishing stays disabled until a tenant is selected and parsed rows pass validation.' },
-  ],
-  rows: [
-    { id: 'rs-001', investor: 'Investor mapping A', effectiveDate: 'service-owned', status: 'needs-attention' },
-    { id: 'rs-002', investor: 'Investor mapping B', effectiveDate: 'service-owned', status: 'ready' },
-    { id: 'rs-003', investor: 'Investor mapping C', effectiveDate: 'service-owned', status: 'blocked' },
-  ],
-  columns: [
-    { key: 'investor', header: 'Investor mapping' },
-    { key: 'effectiveDate', header: 'Effective date source' },
-    { key: 'status', header: 'Status', render: (row) => <span className={`functionality-badge functionality-badge--${row.status}`}>{row.status}</span> },
-  ],
-  tableCaption: 'Rate sheet intake records',
-  primaryActions: [],
-  secondaryActions: [{ id: 'publish-rate-sheet', label: 'Publish', disabled: true }],
-  emptyMessage: 'No rate sheet uploads are available for this pricing workspace.',
-  blockedMessage: 'Rate sheet intake is blocked until rate-sheet-service grid contracts are available.',
-  attentionMessage: 'Validation and investor mapping rows need remediation.',
-};
-
-export function RateSheetIntakeScreen({ visualState, onEvidenceCapture }: { visualState?: ScreenVisualState; onEvidenceCapture?: EvidenceCapture }) {
-  const [inspection, setInspection] = useState<FileInspection | null>(null);
-  const [validationOutcome, setValidationOutcome] = useState<ValidationOutcome>({ status: 'idle', parsedRows: 0, message: 'Validation has not run. Publish remains disabled.' });
-  const selectedFileSummary = useMemo(() => {
-    if (!inspection) return 'No file selected';
-    return `${inspection.name} · ${inspection.extension.toUpperCase()} · ${formatBytes(inspection.sizeBytes)}`;
-  }, [inspection]);
-
-  async function inspectFile(file: File | undefined, recordAction: (actionId: string) => void) {
-    if (!file) {
-      setInspection(null);
-      setValidationOutcome({ status: 'idle', parsedRows: 0, message: 'Validation has not run. Publish remains disabled.' });
-      return;
-    }
-
-    const nextInspection: FileInspection = {
-      name: file.name,
-      extension: extensionFor(file.name),
-      sizeBytes: file.size,
-      lastModified: Number.isFinite(file.lastModified) ? new Date(file.lastModified).toISOString() : 'unknown',
-      hash: 'hash pending',
-      hashStatus: 'pending',
-    };
-    setInspection(nextInspection);
-    setValidationOutcome({ status: 'idle', parsedRows: 0, message: 'Validation has not run. Publish remains disabled.' });
-    recordAction('rate-sheet-file-inspected');
-
-    try {
-      const hash = await hashFile(file);
-      setInspection({ ...nextInspection, hash, hashStatus: 'available' });
-    } catch {
-      setInspection({ ...nextInspection, hash: 'hash unavailable in this browser session', hashStatus: 'unavailable' });
-    }
-  }
-
-  function validateSelectedFile(recordAction: (actionId: string) => void) {
-    setValidationOutcome(messageForValidation(inspection));
-    recordAction('rate-sheet-validate-rows');
-  }
-
-  const config = {
-    ...rateSheetConfig,
-    renderSpotlight: (recordAction: (actionId: string) => void) => (
-      <section className="section-card" aria-labelledby="rate-sheet-upload-heading">
-        <h2 id="rate-sheet-upload-heading">File inspection and publish gate</h2>
-        <label className="drop-zone">
-          <strong>Select PDF, XLSM, or XLSX rate sheet source</strong>
-          <span>{selectedFileSummary}</span>
-          <input aria-label="Rate sheet source file" type="file" accept=".pdf,.xlsm,.xlsx" onChange={(event) => void inspectFile(event.target.files?.[0], recordAction)} />
-        </label>
-        <dl aria-label="Selected file inspection">
-          <dt>File name</dt><dd>{inspection?.name ?? 'Not selected'}</dd>
-          <dt>Extension</dt><dd>{inspection?.extension.toUpperCase() ?? 'Not selected'}</dd>
-          <dt>Size</dt><dd>{inspection ? formatBytes(inspection.sizeBytes) : 'Not selected'}</dd>
-          <dt>Last modified</dt><dd>{inspection?.lastModified ?? 'Not selected'}</dd>
-          <dt>Source hash</dt><dd>{inspection?.hash ?? 'Not selected'}</dd>
-          <dt>Tenant gate</dt><dd>Tenant must be selected by the service workflow before parsed rates can publish.</dd>
-          <dt>Parser status</dt><dd>{validationOutcome.status}</dd>
-        </dl>
-        <div className="action-toolbar" aria-label="Rate sheet validation controls">
-          <button type="button" className="ds-control ds-button ds-size-sm ds-variant-secondary" onClick={() => validateSelectedFile(recordAction)}>Validate rows</button>
-        </div>
-        <p role="status">{validationOutcome.message}</p>
-        <p>Parsed rows ready for publish: {validationOutcome.parsedRows}. Publish remains disabled until tenant-scoped parsed rows pass validation.</p>
-        <p>When enabled, Publish sends validated parsed rows, the source hash, and tenant/effective-date metadata to rate-sheet-service for governed rate activation and audit replay. This UI does not publish unparsed local files.</p>
-      </section>
-    ),
-  } satisfies FunctionalityPageConfig<RateSheetRow>;
-  return <MajorFunctionalityPage config={config} visualState={visualState} onEvidenceCapture={onEvidenceCapture} />;
 }
 
 export default RateSheetIntakeScreen;

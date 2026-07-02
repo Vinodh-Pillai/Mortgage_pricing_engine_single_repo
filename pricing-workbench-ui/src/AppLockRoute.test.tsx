@@ -38,6 +38,9 @@ describe('App quote lock route', () => {
         if (url.href === `${bffBaseUrl}/api/auth/me`) {
           return { ok: true, status: 200, json: async () => ({ user: authUser }) };
         }
+        if (url.pathname === '/api/v1/tenants/tenant-live/locks') {
+          return { ok: true, status: 200, json: async () => ({ tenantContext: 'tenant-live', dependencyStatus: 'LOCK_SERVICE_LIVE_READ_READY', uiTraceId: 'locks-route-test', events: [], pendingCount: 1, expiringCount: 0, locks: [{ lockId: 'lock-route-1', runId: 'run-route-1', borrowerRef: 'quote:run-route-1', status: 'REQUESTED', expiresAt: null, investorDeliveryStatus: 'not supplied by lock-service list contract', auditRefs: [], blockers: [], availableActions: ['read', 'detail'], actionBlockers: { extend: 'LOCK_EXTENSION_REQUIRED_FIELDS_NOT_SUPPLIED', relock: 'LOCK_RELOCK_REQUIRED_FIELDS_NOT_SUPPLIED', deliver: 'LOCK_INVESTOR_DELIVERY_ROUTE_NOT_EXPOSED_BY_LOCK_SERVICE' } }] }) };
+        }
         return { ok: true, status: 200, json: async () => ({}) };
       }),
     );
@@ -84,9 +87,9 @@ describe('App quote lock route', () => {
   });
 
   it('routes /lock-management directly to the Lock Management page', async () => {
-    renderApp('/lock-management');
+    renderApp('/lock-management?tenantId=tenant-live');
 
-    expect(await screen.findByRole('heading', { name: /^Lock Management$/i }, { timeout: 5000 })).toBeInTheDocument();
-    expect(screen.getByRole('table', { name: /Lock management records/i })).toBeInTheDocument();
+    expect(await screen.findByRole('table', { name: /Lock management records/i }, { timeout: 5000 })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /^Lock Management$/i })).toBeInTheDocument();
   });
 });

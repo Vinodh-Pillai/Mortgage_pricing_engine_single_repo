@@ -7,7 +7,10 @@ info:
     The quote service accepts the required LoanPass request fields already mapped
     by the LOS intake adapter, allows tenantId from the request body when the
     X-Tenant-ID header is omitted, and validates X-Tenant-ID against the request
-    body tenantId when both are supplied.
+    body tenantId when both are supplied. This repository does not currently
+    vendor an approved public LoanPass swagger/schema artifact, so this contract
+    is local structural compatibility evidence only and must not be treated as a
+    byte-for-byte public LoanPass swagger diff.
 servers:
   - url: /api/v1
 paths:

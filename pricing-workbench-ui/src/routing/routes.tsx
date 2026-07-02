@@ -56,6 +56,8 @@ export const routeComponentLoaders: Record<string, () => Promise<{ default: Comp
   'rules-engine': () => import('../screens/rulesEngine/RulesEngineScreen'),
   'pricing-profiles': () => import('../screens/pricingProfiles/PricingProfilesScreen'),
   'user-management': () => import('../screens/userManagement/UserManagementScreen'),
+  'user-profile': () => import('../screens/user/UserAccountScreen').then((module) => ({ default: module.UserProfileScreen })),
+  'user-settings': () => import('../screens/user/UserAccountScreen').then((module) => ({ default: module.UserSettingsScreen })),
   'rate-sheet-intake': () => import('../screens/ratesheet/RateSheetIntakeScreen').then((module) => ({ default: module.RateSheetIntakeScreen })),
   'pricing-analysis': () => import('../screens/pricing/PricingAnalysisScreen').then((module) => ({ default: module.PricingAnalysisScreen })),
   'lock-management': () => import('../screens/locks/LockManagementScreen').then((module) => ({ default: module.LockManagementScreen })),
@@ -97,6 +99,8 @@ const pricingAnalysisModule = workbenchModules.find((module) => module.id === 'p
 const pricingWaterfallModule = workbenchModules.find((module) => module.id === 'pricing-waterfall');
 const quoteJourneyModule = workbenchModules.find((module) => module.id === 'quote-journey');
 const lockManagementModule = workbenchModules.find((module) => module.id === 'lock-management');
+const userManagementModule = workbenchModules.find((module) => module.id === 'user-management');
+const partnerTransportModule = workbenchModules.find((module) => module.id === 'partner-transport');
 
 const scenarioChildRoutes: WorkbenchRouteDefinition[] = scenarioModule ? [
   { ...definitionForModule(scenarioModule), id: 'scenario-fico-sensitivity', path: '/quote/:runId/what-if/fico-sensitivity', label: 'FICO sensitivity', breadcrumb: 'FICO Sensitivity', lazyComponent: lazyScreen(routeComponentLoaders['scenario-fico-sensitivity']) },
@@ -132,11 +136,24 @@ const functionalityChildRoutes: WorkbenchRouteDefinition[] = [
   ...(marginProfitabilityModule ? [{ ...definitionForModule(marginProfitabilityModule), id: 'margin-profitability-direct-alias', path: '/margin-profitability', label: 'Margin Profitability', breadcrumb: 'Margin Profitability', lazyComponent: lazyScreen(routeComponentLoaders['margin-profitability']) }] : []),
   ...(adminGovernanceModule ? [{ ...definitionForModule(adminGovernanceModule), id: 'governance-lifecycle-direct-alias', path: '/governance', label: 'Governance Lifecycle', breadcrumb: 'Governance Lifecycle', lazyComponent: lazyScreen(routeComponentLoaders['admin-governance']) }] : []),
   ...(pricingAnalysisModule ? [{ ...definitionForModule(pricingAnalysisModule), id: 'pricing-analysis-run', path: '/pricing/analysis/:runId', label: 'Pricing Analysis Run', breadcrumb: 'Pricing Analysis Run', lazyComponent: lazyScreen(routeComponentLoaders['pricing-analysis']) }] : []),
-  ...(pricingWaterfallModule ? [{ ...definitionForModule(pricingWaterfallModule), id: 'pricing-waterfall-preview', path: '/pricing/waterfall', label: 'Pricing Waterfall Preview', breadcrumb: 'Pricing Waterfall Preview', lazyComponent: lazyScreen(routeComponentLoaders['pricing-waterfall']) }] : []),
-  ...(quoteJourneyModule ? [{ ...definitionForModule(quoteJourneyModule), id: 'quote-journey-preview', path: '/journey-map', label: 'Quote Journey Map Preview', breadcrumb: 'Quote Journey Map Preview', lazyComponent: lazyScreen(routeComponentLoaders['quote-journey']) }] : []),
+  ...(pricingWaterfallModule ? [
+    { ...definitionForModule(pricingWaterfallModule), id: 'pricing-waterfall-select-run', path: '/pricing/waterfall', label: 'Pricing Waterfall', breadcrumb: 'Select Pricing Run', lazyComponent: lazyScreen(routeComponentLoaders['not-found']) },
+    { ...definitionForModule(pricingWaterfallModule), id: 'pricing-waterfall-preview', path: '/pricing/waterfall/preview', label: 'Pricing Waterfall Preview', breadcrumb: 'Pricing Waterfall Preview', lazyComponent: lazyScreen(routeComponentLoaders['pricing-waterfall']) },
+  ] : []),
+  ...(quoteJourneyModule ? [
+    { ...definitionForModule(quoteJourneyModule), id: 'quote-journey-select-run', path: '/journey-map', label: 'Quote Journey Map', breadcrumb: 'Select Quote Run', lazyComponent: lazyScreen(routeComponentLoaders['not-found']) },
+    { ...definitionForModule(quoteJourneyModule), id: 'quote-journey-preview', path: '/journey-map/preview', label: 'Quote Journey Map Preview', breadcrumb: 'Quote Journey Map Preview', lazyComponent: lazyScreen(routeComponentLoaders['quote-journey']) },
+  ] : []),
   ...(lockManagementModule ? [
     { ...definitionForModule(lockManagementModule), id: 'lock-management-alias', path: '/lock-management', label: 'Lock Management', breadcrumb: 'Lock Management', lazyComponent: lazyScreen(routeComponentLoaders['lock-management']) },
     { ...definitionForModule(lockManagementModule), id: 'lock-management-detail', path: '/locks/:lockId', label: 'Lock Detail', breadcrumb: 'Lock Detail', lazyComponent: lazyScreen(routeComponentLoaders['lock-management']) },
+  ] : []),
+  ...(partnerTransportModule ? [
+    { ...definitionForModule(partnerTransportModule), id: 'partner-integrations-direct-alias', path: '/partner-integrations', label: 'Partner Integrations', breadcrumb: 'Partner Integrations', lazyComponent: lazyScreen(routeComponentLoaders['partner-transport']) },
+  ] : []),
+  ...(userManagementModule ? [
+    { ...definitionForModule(userManagementModule), id: 'user-profile', path: '/user/profile', label: 'User Profile', breadcrumb: 'User Profile', lazyComponent: lazyScreen(routeComponentLoaders['user-profile']) },
+    { ...definitionForModule(userManagementModule), id: 'user-settings', path: '/user/settings', label: 'User Settings', breadcrumb: 'User Settings', lazyComponent: lazyScreen(routeComponentLoaders['user-settings']) },
   ] : []),
 ];
 

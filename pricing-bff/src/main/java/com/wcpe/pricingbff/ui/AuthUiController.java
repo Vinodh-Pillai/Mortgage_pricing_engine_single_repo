@@ -92,6 +92,18 @@ class AuthUiController {
     return forwardWithoutBody("/api/auth/me", headers);
   }
 
+  @GetMapping("/api/user/profile")
+  ResponseEntity<String> userProfile(@RequestHeader HttpHeaders headers) {
+    if (!hasAuthCredentials(headers)) return unauthenticatedContract();
+    return accountContractRequired("profile");
+  }
+
+  @GetMapping("/api/user/settings")
+  ResponseEntity<String> userSettings(@RequestHeader HttpHeaders headers) {
+    if (!hasAuthCredentials(headers)) return unauthenticatedContract();
+    return accountContractRequired("settings");
+  }
+
   private void seedSyntheticUsers() {
     putSyntheticUser("admin@" + SYNTHETIC_DOMAIN, "Synthetic Admin User", "admin", PUBLIC_SYNTHETIC_PASSWORD);
     putSyntheticUser("sarah.mitchell@" + SYNTHETIC_DOMAIN, "Sarah Mitchell", "loan_officer", PUBLIC_SYNTHETIC_PASSWORD);
@@ -289,6 +301,19 @@ class AuthUiController {
     return ResponseEntity.status(503)
         .contentType(MediaType.APPLICATION_JSON)
         .body("{\"error\":\"Tenant-context authentication contract is not configured for the BFF\"}");
+  }
+
+  private ResponseEntity<String> accountContractRequired(String surface) {
+    String contractCode = "settings".equals(surface) ? "ACCOUNT_SETTINGS_CONTRACT_REQUIRED" : "ACCOUNT_PROFILE_CONTRACT_REQUIRED";
+    String surfaceLabel = "settings".equals(surface) ? "settings" : "profile";
+    String verb = "settings".equals(surface) ? "require" : "requires";
+    return ResponseEntity.status(503)
+        .contentType(MediaType.APPLICATION_JSON)
+        .body("{\"status\":\"BLOCKED\",\"code\":\"" + contractCode + "\"," 
+            + "\"surface\":\"" + surface + "\"," 
+            + "\"message\":\"User " + surfaceLabel + " " + verb + " a configured account-management contract; pricing-bff did not return synthetic account fallback data.\"," 
+            + "\"dependencyStatus\":\"ACCOUNT_MANAGEMENT_CONTRACT_NOT_CONFIGURED\"," 
+            + "\"fakePersistence\":false}");
   }
 
   private void copyAuthHeaders(HttpHeaders inbound, HttpHeaders outbound) {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Avatar, roleColorKeyForLabel, roleColors, themeStorageKey } from '../design-system';
 import { useTranslation } from '../lib/i18n';
@@ -161,8 +161,6 @@ export function Header({ breadcrumb, notificationCount, showAuthenticatedChrome 
             <button ref={userMenuTriggerRef} className="layout-user-menu" type="button" aria-haspopup="menu" aria-expanded={userMenuOpen} aria-controls="layout-user-menu-dropdown" aria-label={t('userMenuFor', { name: displayName })} onClick={() => setUserMenuOpen((open) => !open)}>
               <Avatar initials={initials} roleColor={roleColor} roleLabel={user.role} aria-hidden="true" />
               <span>{displayName}</span>
-              <small>{user.role}</small>
-              <span className="layout-user-menu__arrow" aria-hidden="true">⌄</span>
             </button>
             {userMenuOpen ? (
               <div id="layout-user-menu-dropdown" ref={userMenuDropdownRef} className="layout-user-menu__dropdown" role="menu" aria-label={t('userMenuFor', { name: displayName })} onKeyDown={handleUserMenuKeyDown}>
@@ -170,9 +168,10 @@ export function Header({ breadcrumb, notificationCount, showAuthenticatedChrome 
                   <Avatar initials={initials} roleColor={roleColor} roleLabel={user.role} aria-hidden="true" />
                   <div>
                     <strong>{displayName}</strong>
-                    <span className="layout-role-badge" style={{ '--layout-role-color': roleColor } as CSSProperties}>{user.role}</span>
                   </div>
                 </div>
+                <Link role="menuitem" className="layout-user-menu__item" to="/user/profile" onClick={closeUserMenu}>Profile</Link>
+                <Link role="menuitem" className="layout-user-menu__item" to="/user/settings" onClick={closeUserMenu}>Settings</Link>
                 <button type="button" role="menuitem" className="layout-user-menu__item" onClick={() => { onLogout?.(); closeUserMenu(); }}>Sign Out</button>
               </div>
             ) : null}

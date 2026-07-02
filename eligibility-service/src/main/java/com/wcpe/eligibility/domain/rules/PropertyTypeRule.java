@@ -74,7 +74,7 @@ public class PropertyTypeRule implements EligibilityRule {
             );
 
             PropertyTypeEvaluationRequest evalRequest = new PropertyTypeEvaluationRequest(
-                UUID.fromString("scenario-placeholder"),
+                UUID.randomUUID(),
                 1,
                 null,
                 candidate,
@@ -82,6 +82,16 @@ public class PropertyTypeRule implements EligibilityRule {
             );
 
             var result = propertyTypeRuleService.evaluate(tenantId, evalRequest);
+
+            if ("PROPERTY_TYPE_RULE_NOT_CONFIGURED".equals(result.decision().reasonCode())) {
+                return new RuleDecision(
+                    UUID.randomUUID(), productCode, investorCode,
+                    "R04", "PROPERTY_TYPE", "PASS", "ELIGIBLE",
+                    null, "Property type is acceptable.",
+                    propertyType, null,
+                    Map.of("ruleSetVersion", 4, "deterministic", true, "phase", "legacy_property_type_fallback")
+                );
+            }
 
             String severity = mapToSeverity(result.decision().eligibilityStatus());
 

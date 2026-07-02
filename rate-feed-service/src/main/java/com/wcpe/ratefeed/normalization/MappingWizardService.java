@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.wcpe.ratefeed.domain.RateFeedModels.RateFeedException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,8 +34,9 @@ public class MappingWizardService {
     this(heuristicAnalyzer, llmMappingProposer, mapper, null);
   }
 
+  @Autowired
   public MappingWizardService(MappingWizardHeuristicAnalyzer heuristicAnalyzer, LLMMappingProposer llmMappingProposer, ObjectMapper mapper,
-                              NormalizationProfileRepository profileRepository) {
+                               NormalizationProfileRepository profileRepository) {
     this.heuristicAnalyzer = heuristicAnalyzer;
     this.llmMappingProposer = llmMappingProposer;
     this.mapper = mapper;

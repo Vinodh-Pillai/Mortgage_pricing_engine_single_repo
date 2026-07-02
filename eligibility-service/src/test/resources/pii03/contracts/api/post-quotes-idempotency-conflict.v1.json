@@ -1,0 +1,11 @@
+{
+  "name": "post-quotes-idempotency-conflict.v1",
+  "method": "POST",
+  "path": "/tenants/{tenantId}/quotes",
+  "requiredHeaders": ["Authorization", "Idempotency-Key"],
+  "response": {
+    "body": {
+      "code": "IDEMPOTENCY_CONFLICT"
+    }
+  }
+}

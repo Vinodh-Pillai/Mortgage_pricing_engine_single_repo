@@ -113,7 +113,7 @@ describe('PII-24-S09 progressive quick quote intake', () => {
 
     renderQuickQuoteIntake({ onChange });
 
-    expect(screen.getByRole('heading', { name: /New prospect intake/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /^QuickQuote$/i })).toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: /Quote intake progress/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Identity\s*in progress/i })).toHaveAttribute('aria-current', 'step');
     expect(screen.getByRole('textbox', { name: /^Quote intent$/i })).toHaveAttribute('aria-invalid', 'false');

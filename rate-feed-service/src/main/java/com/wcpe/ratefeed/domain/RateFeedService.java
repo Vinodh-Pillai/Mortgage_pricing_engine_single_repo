@@ -19,14 +19,18 @@ import com.wcpe.ratefeed.resolution.RateResolver;
 import com.wcpe.ratefeed.role.RateFeedRoles;
 import com.wcpe.ratefeed.service.ReplayService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
 
 import java.io.*;
 import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.*;
 import java.util.*;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -46,6 +50,7 @@ class RateFeedService {
   private static final int MAX_SCAN_RESULT_ID_LENGTH = 256;
   private static final String LOCAL_UPLOAD_PREFIX = "local://rate-feed-upload/";
   private static final String LOCAL_SYNTHETIC_PREFIX = "local://synthetic/";
+  private static final String LOCAL_UPLOAD_STORE_DIR = "build/rate-feed-upload";
 
   private final RateFeedRepository repository;
   private final JdbcTemplate jdbc;
@@ -114,13 +119,14 @@ class RateFeedService {
     Map<String, Object> idempotencyIdentity = new LinkedHashMap<>();
     idempotencyIdentity.put("command", "completeUploadSession");
     idempotencyIdentity.put("uploadSessionId", sessionId);
-    idempotencyIdentity.put("body", request);
+    idempotencyIdentity.put("body", completionIdentityBody(request));
     return repository.idempotent(tenantId, idempotencyKey, idempotencyIdentity, CompleteUploadResponse.class, () -> {
       validateCompletion(request);
       RateFeedRepository.UploadSessionRow session = repository.session(tenantId, sessionId);
       if (!"OPEN".equals(session.status())) throw new RateFeedException(HttpStatus.CONFLICT, "UPLOAD_SESSION_NOT_OPEN", "Upload session is not open.");
       if (Instant.now().isAfter(session.expiresAt())) throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "UPLOAD_SESSION_EXPIRED", "Upload session has expired.");
-      return repository.complete(tenantId, session, request, actor(actor), correlation(correlationId), idempotencyKey);
+      CompleteUploadRequest durableRequest = persistUploadedCsvBytes(session.uploadSessionId(), request);
+      return repository.complete(tenantId, session, durableRequest, actor(actor), correlation(correlationId), idempotencyKey);
     });
   }
 
@@ -134,8 +140,9 @@ class RateFeedService {
         request.contentLengthBytes(), null, request.notes());
     UploadSessionResponse session = createSession(tenantId, sessionRequest, childIdempotencyKey(idempotencyKey, "session"), actor, correlationId);
 
+    String completionStorageObjectId = defaultCompletionStorageObjectId(request.registeredFileReference(), request.csvContent(), session.uploadUrl());
     CompleteUploadRequest completion = new CompleteUploadRequest(
-        request.fileSha256(), request.registeredFileReference(), request.scanResultId(), request.scanStatus());
+        request.fileSha256(), completionStorageObjectId, request.scanResultId(), request.scanStatus(), request.csvContent());
     CompleteUploadResponse completed = completeRegisteredUpload(tenantId, session.uploadSessionId(), sessionRequest, session.expiresAt(), completion,
         childIdempotencyKey(idempotencyKey, "complete"), actor, correlationId);
 
@@ -153,15 +160,63 @@ class RateFeedService {
     Map<String, Object> idempotencyIdentity = new LinkedHashMap<>();
     idempotencyIdentity.put("command", "createRatesheetUpload");
     idempotencyIdentity.put("uploadSessionId", sessionId);
-    idempotencyIdentity.put("body", request);
+    idempotencyIdentity.put("body", completionIdentityBody(request));
     return repository.idempotent(tenantId, idempotencyKey, idempotencyIdentity, CompleteUploadResponse.class, () -> {
       validateCompletion(request);
       RateFeedRepository.UploadSessionRow session = new RateFeedRepository.UploadSessionRow(sessionId, sessionRequest.investorId(),
           sessionRequest.channelId(), sessionRequest.feedFormatId(), sessionRequest.sourceType(), sessionRequest.effectiveAt(),
           sessionRequest.timezone(), sessionRequest.fileName(), normalizeMediaType(sessionRequest.contentType()), sessionRequest.contentLengthBytes(),
           sessionRequest.supersedesBatchId(), "OPEN", expiresAt, actor(actor), correlation(correlationId));
-      return repository.complete(tenantId, session, request, actor(actor), correlation(correlationId), idempotencyKey);
+      CompleteUploadRequest durableRequest = persistUploadedCsvBytes(session.uploadSessionId(), request);
+      return repository.complete(tenantId, session, durableRequest, actor(actor), correlation(correlationId), idempotencyKey);
     });
+  }
+
+  private static String defaultCompletionStorageObjectId(String registeredFileReference, String csvContent, String sessionUploadUrl) {
+    if (registeredFileReference != null && !registeredFileReference.isBlank()) return registeredFileReference;
+    if (csvContent != null && !csvContent.isBlank()) return sessionUploadUrl;
+    return registeredFileReference;
+  }
+
+  private CompleteUploadRequest persistUploadedCsvBytes(UUID uploadSessionId, CompleteUploadRequest request) {
+    String csvContent = request.csvContent();
+    if (csvContent == null || csvContent.isBlank()) return request;
+    byte[] bytes = csvContent.getBytes(StandardCharsets.UTF_8);
+    if (bytes.length > MAX_BYTES) throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "FILE_TOO_LARGE", "File exceeds maximum size.");
+    for (byte b : bytes) if (b == 0) throw validation("CSV_ENCODING_UNSUPPORTED", "CSV contains binary content.");
+    String actualHash = Hashing.sha256(csvContent).replaceFirst("^sha256:", "");
+    if (!actualHash.equalsIgnoreCase(request.fileSha256())) {
+      throw validation("SOURCE_FILE_HASH_MISMATCH", "Uploaded CSV bytes do not match fileSha256.");
+    }
+    Path root = Path.of(System.getProperty("user.dir", ".")).toAbsolutePath().normalize();
+    Path uploadStore = root.resolve(LOCAL_UPLOAD_STORE_DIR).normalize();
+    Path target = uploadStore.resolve(uploadSessionId + ".csv").normalize();
+    if (!target.startsWith(uploadStore)) throw validation("INVALID_STORAGE_OBJECT_REFERENCE", "local upload storage reference escapes the upload store.");
+    try {
+      Files.createDirectories(uploadStore);
+      Files.writeString(target, csvContent, StandardCharsets.UTF_8);
+    } catch (IOException ex) {
+      throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "SOURCE_FILE_UNAVAILABLE", "Uploaded CSV bytes could not be persisted for parser handoff.");
+    }
+    return new CompleteUploadRequest(request.fileSha256().toLowerCase(Locale.ROOT), LOCAL_UPLOAD_PREFIX + uploadSessionId,
+        request.scanResultId(), request.scanStatus(), null);
+  }
+
+  private Map<String, Object> completionIdentityBody(CompleteUploadRequest request) {
+    Map<String, Object> body = new LinkedHashMap<>();
+    if (request == null) {
+      body.put("request", null);
+      return body;
+    }
+    body.put("fileSha256", request.fileSha256());
+    body.put("storageObjectId", request.storageObjectId());
+    body.put("scanResultId", request.scanResultId());
+    body.put("scanStatus", request.scanStatus());
+    if (request.csvContent() != null && !request.csvContent().isBlank()) {
+      body.put("csvContentSha256", Hashing.sha256(request.csvContent()).replaceFirst("^sha256:", ""));
+      body.put("csvContentBytes", request.csvContent().getBytes(StandardCharsets.UTF_8).length);
+    }
+    return body;
   }
 
   private static String childIdempotencyKey(String idempotencyKey, String suffix) {
@@ -551,7 +606,8 @@ class RateFeedService {
     jdbc.update("update rate_feed.rate_feed_batch set status='PARSING', updated_at=now() where tenant_id=? and batch_id=?", tenantId, batchId);
 
     try {
-      ParsedCsv parsed = parseCsvContent(request.csvContent(), parseProfile);
+      String sourceContent = parserSourceContent(request.csvContent(), batch);
+      ParsedCsv parsed = parseCsvContent(sourceContent, parseProfile);
       persistParsedRows(tenantId, batchId, parsed);
       int blockingErrors = (int) parsed.fields().stream().filter(f -> "ERROR".equals(f.severity())).count();
       int warnings = (int) parsed.fields().stream().filter(f -> "WARNING".equals(f.severity())).count();
@@ -565,12 +621,14 @@ class RateFeedService {
       return new RateFeedModels.ParseBatchResponse(parseJobId, batchId, finalStatus);
     } catch (RuntimeException ex) {
       String failureMessage = Optional.ofNullable(ex.getMessage()).orElse(ex.getClass().getSimpleName());
-      String checksum = sourceChecksum(request.csvContent());
-      int rowCount = estimatedSourceRowCount(request.csvContent());
+      String sourceContent = request.csvContent();
+      try { sourceContent = parserSourceContent(request.csvContent(), batch); } catch (RuntimeException ignored) { }
+      String checksum = sourceChecksum(sourceContent);
+      int rowCount = estimatedSourceRowCount(sourceContent);
       int errorCount = 1;
       int warningCount = 0;
       Map<String, Object> validationSummary = parseFailureValidationSummary(rowCount, errorCount, warningCount, failureMessage);
-      persistParseFailureRows(tenantId, batchId, request.csvContent(), failureMessage);
+      persistParseFailureRows(tenantId, batchId, sourceContent, failureMessage);
       String resultHash = Hashing.sha256(repository.json(Map.of("batchId", batchId, "parseJobId", parseJobId, "profileVersion", parseProfile.version(), "sourceChecksum", checksum, "rowCount", rowCount, "errorCount", errorCount, "warningCount", warningCount, "validationSummary", validationSummary, "error", failureMessage)));
       jdbc.update("update rate_feed.rate_feed_parse_job set status='PARSE_FAILED', completed_at=now(), row_count=?, error_count=?, warning_count=?, result_hash=? where tenant_id=? and parse_job_id=?", rowCount, errorCount, warningCount, resultHash, tenantId, parseJobId);
       jdbc.update("update rate_feed.rate_feed_batch set status='PARSE_FAILED', updated_at=now(), result_hash=? where tenant_id=? and batch_id=?", resultHash, tenantId, batchId);
@@ -1201,7 +1259,8 @@ class RateFeedService {
     if (sheet.status() != RateSheetStatus.APPROVED) throw new RateFeedException(HttpStatus.CONFLICT, "APPROVAL_REQUIRED", "Rate sheet version must be approved before publish.");
     String submitter = workflowActor(tenantId, versionId, "submitted_by");
     if (actor.equals(submitter)) throw new RateFeedException(HttpStatus.FORBIDDEN, "SOD_VIOLATION", "Submitter cannot publish their own rate sheet version.");
-    if (request.expectedValidationResultHash() == null || !request.expectedValidationResultHash().equals(sheet.gridHash())) throw new RateFeedException(HttpStatus.CONFLICT, "STALE_VERSION_HASH", "expectedValidationResultHash does not match the validated rate sheet grid hash.");
+    ValidationEvidence validationEvidence = requireParserBackedValidationEvidence(tenantId, sheet);
+    if (request.expectedValidationResultHash() == null || !request.expectedValidationResultHash().equals(validationEvidence.resultHash())) throw new RateFeedException(HttpStatus.CONFLICT, "STALE_VERSION_HASH", "expectedValidationResultHash does not match the latest parser-backed validation result hash.");
     if (request.expectedVersionHash() == null || !request.expectedVersionHash().equals(sheet.resultHash())) throw new RateFeedException(HttpStatus.CONFLICT, "STALE_VERSION_HASH", "expectedVersionHash does not match the current rate sheet version hash.");
     Instant publishAt = request.publishAt() == null ? Instant.now() : request.publishAt();
     if (publishAt.isAfter(Instant.now().plus(Duration.ofSeconds(30)))) throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "SCHEDULER_UNAVAILABLE", "Future publication requires scheduler infrastructure that is not available in this service slice.");
@@ -1404,6 +1463,31 @@ class RateFeedService {
     return points;
   }
 
+  private ValidationEvidence requireParserBackedValidationEvidence(UUID tenantId, RateSheet sheet) {
+    UUID batchId = sourceBatchId(tenantId, sheet.sheetId());
+    if (batchId == null) {
+      throw new RateFeedException(HttpStatus.CONFLICT, "PARSER_VALIDATION_REQUIRED", "Publish requires a parser-backed source batch and validation evidence.");
+    }
+    Long parsedRows = jdbc.queryForObject("select count(distinct row_id) from rate_feed.rate_feed_parsed_field where tenant_id=? and batch_id=? and severity <> 'ERROR'", Long.class, tenantId, batchId);
+    if (parsedRows == null || parsedRows == 0) {
+      throw new RateFeedException(HttpStatus.CONFLICT, "PARSER_VALIDATION_REQUIRED", "Publish requires parser-backed accepted rows for this rate sheet version.");
+    }
+    List<ValidationEvidence> evidence = jdbc.query("select validation_job_id,status,blocking_error_count,result_hash from rate_feed.rate_feed_validation_job where tenant_id=? and batch_id=? order by completed_at desc nulls last, started_at desc limit 1",
+        (rs, row) -> new ValidationEvidence(rs.getObject("validation_job_id", UUID.class), rs.getString("status"), rs.getInt("blocking_error_count"), rs.getString("result_hash")), tenantId, batchId);
+    if (evidence.isEmpty() || evidence.get(0).blockingErrorCount() > 0 || !Set.of("PASSED", "PASSED_WITH_WARNINGS").contains(evidence.get(0).status())) {
+      throw new RateFeedException(HttpStatus.CONFLICT, "PARSER_VALIDATION_REQUIRED", "Publish requires a passing parser-backed validation report.");
+    }
+    return evidence.get(0);
+  }
+
+  private UUID sourceBatchId(UUID tenantId, UUID sheetId) {
+    try {
+      return jdbc.queryForObject("select source_batch_id from rate_feed.rate_sheet where tenant_id=? and sheet_id=?", UUID.class, tenantId, sheetId);
+    } catch (EmptyResultDataAccessException ex) {
+      return null;
+    }
+  }
+
   private RateSheet tenantSheetForUpdate(UUID tenantId, UUID sheetId) {
     try {
       return jdbc.queryForObject("select * from rate_feed.rate_sheet where tenant_id=? and sheet_id=? for update", new Object[]{tenantId, sheetId}, sheetMapper());
@@ -1542,6 +1626,53 @@ class RateFeedService {
     }
     if (rowCount == 0) throw validation("EMPTY_RATE_SHEET", "CSV file has no data rows.");
     return new ParsedCsv(rowCount, fields, parseProfile.id(), parseProfile.version(), checksum);
+  }
+
+  private String parserSourceContent(String requestCsvContent, RateFeedRepository.BatchParseSource batch) {
+    if (requestCsvContent != null && !requestCsvContent.isBlank()) return requestCsvContent;
+    String storageObjectId = batch.storageObjectId();
+    if (storageObjectId == null || storageObjectId.isBlank()) {
+      throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "SOURCE_FILE_UNAVAILABLE", "Uploaded raw file content is not available to the local parser.");
+    }
+    if (storageObjectId.startsWith(LOCAL_SYNTHETIC_PREFIX)) {
+      return readProjectLocalCsvReference(storageObjectId.substring(LOCAL_SYNTHETIC_PREFIX.length()), "local synthetic");
+    }
+    if (storageObjectId.startsWith(LOCAL_UPLOAD_PREFIX)) {
+      return readStoredLocalUploadReference(storageObjectId.substring(LOCAL_UPLOAD_PREFIX.length()));
+    }
+    throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "SOURCE_FILE_UNAVAILABLE", "Registered upload storage cannot be read by the local parser; supply parser-backed content or a configured repo-local CSV reference.");
+  }
+
+  private String readProjectLocalCsvReference(String suffix, String referenceType) {
+    if (suffix.isBlank() || suffix.contains("..") || suffix.startsWith("/") || !suffix.toLowerCase(Locale.ROOT).endsWith(".csv")) {
+      throw validation("INVALID_STORAGE_OBJECT_REFERENCE", referenceType + " parser references must name a project-local CSV file.");
+    }
+    Path root = Path.of(System.getProperty("user.dir", ".")).toAbsolutePath().normalize();
+    Path source = root.resolve(suffix).normalize();
+    if (!source.startsWith(root)) throw validation("INVALID_STORAGE_OBJECT_REFERENCE", referenceType + " parser reference escapes the service root.");
+    try {
+      return Files.readString(source, StandardCharsets.UTF_8);
+    } catch (IOException ex) {
+      throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "SOURCE_FILE_UNAVAILABLE", "Configured " + referenceType + " CSV reference is not readable by the parser.");
+    }
+  }
+
+  private String readStoredLocalUploadReference(String uploadRef) {
+    UUID uploadSessionId;
+    try {
+      uploadSessionId = UUID.fromString(uploadRef);
+    } catch (IllegalArgumentException ex) {
+      throw validation("INVALID_STORAGE_OBJECT_REFERENCE", "local upload parser references must end with the upload session UUID issued by createSession.");
+    }
+    Path root = Path.of(System.getProperty("user.dir", ".")).toAbsolutePath().normalize();
+    Path uploadStore = root.resolve(LOCAL_UPLOAD_STORE_DIR).normalize();
+    Path source = uploadStore.resolve(uploadSessionId + ".csv").normalize();
+    if (!source.startsWith(uploadStore)) throw validation("INVALID_STORAGE_OBJECT_REFERENCE", "local upload parser reference escapes the upload store.");
+    try {
+      return Files.readString(source, StandardCharsets.UTF_8);
+    } catch (IOException ex) {
+      throw new RateFeedException(HttpStatus.UNPROCESSABLE_ENTITY, "SOURCE_FILE_UNAVAILABLE", "Local upload storage reference has no readable repo-local CSV bytes; upload completion must persist bytes before parser readiness can be claimed.");
+    }
   }
 
   private ParsedField parsedField(int sourceRow, String fieldName, String raw, int sourceColumn) {
@@ -1709,6 +1840,7 @@ class RateFeedService {
   private record ParsedField(int sourceRowNumber, String fieldName, String rawValue, String candidateValue, int sourceColumn, String severity, String errorCode, String message) {}
   private record ParseProfile(String id, String version) {}
   private record ProfileSelection(UUID profileId, String profileVersion, int matchScore, String routingAction) {}
+  private record ValidationEvidence(UUID validationJobId, String status, int blockingErrorCount, String resultHash) {}
   private record OcrCellForApproval(UUID cellId, int rowIndex, int columnIndex, String rawText, String reviewedText, String status) {}
   private record ValidationCandidate(UUID entryId, int sourceRowNumber, String canonicalProductKey, int lockPeriodDays, BigDecimal ratePercent, BigDecimal pricePoints, String adjustmentType, BigDecimal adjustmentValue, String adjustmentUnit, String severity, String message) {}
   private record ValidationFindingDraft(UUID entryId, RateFeedModels.ValidationFindingSeverity severity, String ruleCode, String ruleVersion, String fieldName, String messageCode, Map<String, Object> messageParams, String remediationCode, Integer sourceRowNumber) {
@@ -1821,7 +1953,7 @@ class RateFeedService {
         new RateFeedModels.RuleBookPrecisionPolicyResponse(draft.precisionPolicy().pointsScale(), draft.precisionPolicy().bpsScale(), draft.precisionPolicy().moneyScale(), draft.precisionPolicy().roundingMode()),
         draft.sourceRowCount(), rules.size(), draft.gridHash(), warnings, rules,
         Map.of("pipeline", "/api/v1/tenants/" + tenantId + "/ratefeed/pipeline", "governanceDraft", "governance-service:RuleSetDraftSaved.v1"), resultHash);
-    recordPipelineRow(sheetId, response, actor(actor), correlation(correlationId));
+    recordPipelineRow(tenantId, sheetId, response, actor(actor), correlation(correlationId));
     try {
       repository.audit(tenantId, sheetId, "RATE_SHEET_MAPPED_TO_RULE_BOOK", "RateSheetRuleBookPipeline", actor(actor), correlation(correlationId), null, resultHash,
           Map.of("ruleBookId", response.ruleBookId(), "businessKey", response.businessKey(), "ruleCount", response.ruleCount(), "gridHash", response.gridHash()));
@@ -1835,10 +1967,25 @@ class RateFeedService {
 
   public RateFeedModels.PipelineStatusResponse pipelineStatus(UUID tenantId) {
     RateFeedRoles.require(RateFeedRoles.RATE_FEED_VIEW);
-    throw new RateFeedException(HttpStatus.SERVICE_UNAVAILABLE, "PIPELINE_PROJECTION_STORE_UNAVAILABLE", "Pipeline status requires a durable projection table; in-memory pipeline status storage is disabled.");
+    List<RateFeedModels.PipelineStatusRow> rows = jdbc.query("select sheet_id,rule_book_id,rate_sheet,investor,status,rule_count,last_action,grid_hash,source_row_count,warning_count,dimensions_used::text,governance_history::text,sample_simulation::text from rate_feed.rate_sheet_rulebook_pipeline_projection where tenant_id=? order by updated_at desc",
+        (rs, row) -> new RateFeedModels.PipelineStatusRow(
+            rs.getObject("sheet_id", UUID.class),
+            rs.getObject("rule_book_id", UUID.class),
+            rs.getString("rate_sheet"),
+            rs.getString("investor"),
+            rs.getString("status"),
+            rs.getInt("rule_count"),
+            rs.getString("last_action"),
+            rs.getString("grid_hash"),
+            rs.getInt("source_row_count"),
+            rs.getInt("warning_count"),
+            readStringList(rs.getString("dimensions_used")),
+            readGovernanceHistory(rs.getString("governance_history")),
+            readSampleSimulation(rs.getString("sample_simulation"))), tenantId);
+    return new RateFeedModels.PipelineStatusResponse(rows, rows.size(), Instant.now());
   }
 
-  private void recordPipelineRow(UUID sheetId, RateFeedModels.MapToRuleBookResponse response, String actor, String correlationId) {
+  private void recordPipelineRow(UUID tenantId, UUID sheetId, RateFeedModels.MapToRuleBookResponse response, String actor, String correlationId) {
     List<String> dimensions = response.rules().stream().flatMap(rule -> rule.conditions().stream().map(RateFeedModels.RuleBookConditionResponse::dimension)).distinct().sorted().toList();
     RateFeedModels.PipelineSampleSimulation sample = response.rules().isEmpty()
         ? new RateFeedModels.PipelineSampleSimulation("no mapped rules", "n/a", "n/a", "SKIPPED")
@@ -1848,7 +1995,23 @@ class RateFeedService {
         new RateFeedModels.PipelineGovernanceStage("SIMULATE", "READY", Instant.now(), "governance-service", correlationId),
         new RateFeedModels.PipelineGovernanceStage("APPROVE", "WAITING_FOR_ADMIN", Instant.now(), "pricing-admin", "manual-approval-required"),
         new RateFeedModels.PipelineGovernanceStage("PUBLISH", "WAITING_ON_APPROVAL", Instant.now(), "governance-service", "RuleBookPublished.v1"));
-    throw new RateFeedException(HttpStatus.SERVICE_UNAVAILABLE, "PIPELINE_PROJECTION_STORE_UNAVAILABLE", "Cannot record pipeline status without a durable projection table; in-memory pipeline status storage is disabled.");
+    jdbc.update("insert into rate_feed.rate_sheet_rulebook_pipeline_projection(tenant_id,sheet_id,rule_book_id,rate_sheet,investor,status,rule_count,last_action,grid_hash,source_row_count,warning_count,dimensions_used,governance_history,sample_simulation,result_hash) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) on conflict (tenant_id,sheet_id,rule_book_id) do update set status=excluded.status, rule_count=excluded.rule_count, last_action=excluded.last_action, grid_hash=excluded.grid_hash, source_row_count=excluded.source_row_count, warning_count=excluded.warning_count, dimensions_used=excluded.dimensions_used, governance_history=excluded.governance_history, sample_simulation=excluded.sample_simulation, result_hash=excluded.result_hash, updated_at=now()",
+        tenantId, sheetId, response.ruleBookId(), response.businessKey(), response.selector().investor(), response.status(), response.ruleCount(), "RATE_SHEET_MAPPED_TO_RULE_BOOK", response.gridHash(), response.sourceRowCount(), response.warnings().size(), repository.jsonb(dimensions), repository.jsonb(history), repository.jsonb(sample), response.resultHash());
+  }
+
+  private List<String> readStringList(String json) {
+    try { return mapper.readValue(json, new TypeReference<List<String>>() {}); }
+    catch (Exception ex) { return List.of(); }
+  }
+
+  private List<RateFeedModels.PipelineGovernanceStage> readGovernanceHistory(String json) {
+    try { return mapper.readValue(json, new TypeReference<List<RateFeedModels.PipelineGovernanceStage>>() {}); }
+    catch (Exception ex) { return List.of(); }
+  }
+
+  private RateFeedModels.PipelineSampleSimulation readSampleSimulation(String json) {
+    try { return mapper.readValue(json, RateFeedModels.PipelineSampleSimulation.class); }
+    catch (Exception ex) { return new RateFeedModels.PipelineSampleSimulation("unavailable", "unavailable", "unavailable", "UNKNOWN"); }
   }
 
   private RateSheet getSheet(UUID sheetId) {

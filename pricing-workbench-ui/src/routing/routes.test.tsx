@@ -39,9 +39,11 @@ describe('RoutingTest', () => {
     expect(matchAppRoute('/quote/run-123/what-if/fico-sensitivity').id).toBe('scenario-fico-sensitivity');
   });
 
-  it('RoutingTest.exposesPreviewEvidenceAliasesForRequestedReviewPages', () => {
-    expect(matchAppRoute('/pricing/waterfall')).toEqual(expect.objectContaining({ id: 'pricing-waterfall-preview', sourceModuleId: 'pricing-waterfall' }));
-    expect(matchAppRoute('/journey-map')).toEqual(expect.objectContaining({ id: 'quote-journey-preview', sourceModuleId: 'quote-journey' }));
+  it('RoutingTest.exposesRunSelectionRoutesAndKeepsPreviewsOnExplicitPreviewPaths', () => {
+    expect(matchAppRoute('/pricing/waterfall')).toEqual(expect.objectContaining({ id: 'pricing-waterfall-select-run', sourceModuleId: 'pricing-waterfall' }));
+    expect(matchAppRoute('/journey-map')).toEqual(expect.objectContaining({ id: 'quote-journey-select-run', sourceModuleId: 'quote-journey' }));
+    expect(matchAppRoute('/pricing/waterfall/preview')).toEqual(expect.objectContaining({ id: 'pricing-waterfall-preview', sourceModuleId: 'pricing-waterfall' }));
+    expect(matchAppRoute('/journey-map/preview')).toEqual(expect.objectContaining({ id: 'quote-journey-preview', sourceModuleId: 'quote-journey' }));
     expect(matchAppRoute('/lock-management')).toEqual(expect.objectContaining({ id: 'lock-management-alias', sourceModuleId: 'lock-management' }));
   });
 
@@ -53,6 +55,7 @@ describe('RoutingTest', () => {
     expect(matchAppRoute('/governance')).toEqual(expect.objectContaining({ id: 'governance-lifecycle-direct-alias', sourceModuleId: 'admin-governance' }));
     expect(matchAppRoute('/margin-profitability')).toEqual(expect.objectContaining({ id: 'margin-profitability-direct-alias', sourceModuleId: 'margin-profitability' }));
     expect(matchAppRoute('/quickquote')).toEqual(expect.objectContaining({ id: 'quickquote-direct-alias', sourceModuleId: 'quickquote' }));
+    expect(matchAppRoute('/partner-integrations')).toEqual(expect.objectContaining({ id: 'partner-integrations-direct-alias', sourceModuleId: 'partner-transport' }));
   });
 
   it('RoutingTest.handles404ForUnknownRoutes', () => {

@@ -10,6 +10,7 @@ import { ResumeDraft, draftToBackup } from './ResumeDraft';
 import { StepFields, type DropdownOptionsByField } from './steps/StepFields';
 import { errorsToValidation, firstInvalidField, validateFields, type IntakeFieldErrors } from './validation';
 import { businessFacingText } from '../../lib/utils/businessFacingText';
+import { displayChannelLabel } from '../../lib/utils/channelDisplay';
 import './QuoteIntake.css';
 
 type QuoteMode = 'pipeline' | 'quickquote';
@@ -237,6 +238,7 @@ const quickQuoteSafeProductFilters: ProductFilterState = {
 };
 
 const productPageSize = 10;
+const liveOfferPageSize = 10;
 
 const initialQuoteIntakeDefaults: Partial<Record<keyof BorrowerIntake, string>> = {
   channel: '',
@@ -441,7 +443,8 @@ export function PipelineIntakePage({
   const [selectedLiveOfferId, setSelectedLiveOfferId] = useState<string>('');
   const [selectedProduct, setSelectedProduct] = useState<AuthorizedProduct | null>(null);
   const [productDetailOpen, setProductDetailOpen] = useState(false);
-  const [comparisonProductCodes, setComparisonProductCodes] = useState<string[]>(() => tenantHomePreviewProducts.slice(0, 2).map((product) => product.productCode));
+  const [comparisonProductCodes, setComparisonProductCodes] = useState<string[]>([]);
+  const [liveOfferPage, setLiveOfferPage] = useState(1);
   const [rowActionState, setRowActionState] = useState<ProductRowActionState | null>(null);
   const [dropdownConfigState, setDropdownConfigState] = useState<DropdownConfigState>(() => tenantDropdownConfigCache.get(tenantId) ?? { kind: 'loading', options: fallbackTenantDropdownOptions(), message: 'Loading tenant dropdown options...' });
   const [saveOpen, setSaveOpen] = useState(false);
@@ -492,6 +495,7 @@ export function PipelineIntakePage({
   }), [productFilters.channel, productFilters.ficoMax, productFilters.ficoMin, productFilters.investor, productFilters.loanAmountMax, productFilters.loanAmountMin, productFilters.ltvMax, productFilters.ltvMin, productFilters.occupancy, productFilters.productType, productFilters.propertyType, productFilters.rateMax, productFilters.rateMin, productFilters.status, productFilters.term, productPage, tenantId]);
   const liveOffers = liveOfferState.kind === 'loaded' ? liveOfferState.comparison.offers : [];
   const liveFilteredOffers = useMemo(() => filterLiveOffers(liveOffers, productFilters), [liveOffers, productFilters]);
+  const pagedLiveOffers = useMemo(() => liveFilteredOffers.slice((liveOfferPage - 1) * liveOfferPageSize, liveOfferPage * liveOfferPageSize), [liveFilteredOffers, liveOfferPage]);
   const liveFilterOptions = useMemo(() => availableFiltersForOffers(liveOffers), [liveOffers]);
   const productRows = tenantProductsState.response.products;
   const totalProductCount = tenantProductsState.response.totalCount;
@@ -557,14 +561,16 @@ export function PipelineIntakePage({
   const quickQuoteGridStyle = { '--quote-product-grid-template': priceScenarioGridTemplate(quickQuoteColumns) } as CSSProperties;
   const quickQuoteProductsVisible = mode !== 'quickquote' || submitAttempted || flowState.kind === 'created';
   const quickQuoteVisibleProducts = productRows;
+  const quickQuoteRequiresExplicitProductSelection = false;
   const losPrefillMappings = useMemo(() => quickQuotePrefillMappingsForMetadata(runtimeMetadata, runtimeSections), [runtimeMetadata, runtimeSections]);
   const losOverrideRows = useMemo(() => Object.values(losOverrideAudit).sort((left, right) => left.label.localeCompare(right.label)), [losOverrideAudit]);
   const quickQuoteLoading = metadataState.kind === 'loading' || applicationFormRuntimeState.kind === 'loading' || dropdownConfigState.kind === 'loading' || flowState.kind === 'submitting';
   const quickQuoteLaunchLoading = metadataState.kind === 'loading' || applicationFormRuntimeState.kind === 'loading' || flowState.kind === 'submitting';
-  const startReady = true;
-  const quoteReady = launchMissingRequiredFields.length === 0 && (mode === 'quickquote' || Boolean(selectedProduct));
+  const quoteReady = launchMissingRequiredFields.length === 0 && (mode === 'quickquote' || Boolean(selectedProduct)) && !quickQuoteRequiresExplicitProductSelection;
   const launchDisabled = flowState.kind === 'submitting' || !quoteReady;
-  const launchStatus = quoteReady
+  const launchStatus = quickQuoteRequiresExplicitProductSelection
+    ? 'Select one product before launch; multiple-product launch contract is not available.'
+    : quoteReady
     ? mode === 'quickquote' && !quickQuoteProductsVisible
       ? 'Submit details to view product options'
       : selectedProduct || mode !== 'quickquote'
@@ -575,7 +581,7 @@ export function PipelineIntakePage({
       : mode === 'quickquote'
         ? 'Complete required fields to launch quote'
         : 'Select a product and complete required fields';
-  const completionPercent = completedFactPercent(values);
+  const selectedMetricDetail = selectedProduct ? launchStatus : 'No product selected for launch';
 
   useEffect(() => {
     capture('quote-mode-active', modeSwitchAuditDetail(mode, 'active'));
@@ -822,6 +828,7 @@ export function PipelineIntakePage({
   function setFilter(key: keyof ProductFilterState, value: string) {
     setHasUnsavedModeChanges(true);
     setProductPage(1);
+    setLiveOfferPage(1);
     setProductFilters((current) => ({ ...current, [key]: value }));
     if (key === 'productType') changeField('mortgageType', value);
     if (key === 'investor') changeField('investorCode', value);
@@ -849,6 +856,7 @@ export function PipelineIntakePage({
     changeField('investorCode', product.investorCode, { autoSave: false });
     changeField('mortgageType', mortgageType, { autoSave: false });
     setSelectedProduct(product);
+    setComparisonProductCodes([product.productCode]);
     setProductDetailOpen(false);
     setHasUnsavedModeChanges(true);
     setProductFilters((current) => ({ ...current, productType: product.productType, investor: product.investorCode, channel: product.channelCode, status: product.status }));
@@ -916,6 +924,12 @@ export function PipelineIntakePage({
 
   function revealQuickQuoteProducts() {
     setSubmitAttempted(true);
+    if (mode === 'quickquote' && !selectedProduct && quickQuoteRequiresExplicitProductSelection) {
+      setFlowState({ kind: 'blocked', validation: { passed: false, status: 'BLOCKED', message: 'Select exactly one product before launching QuickQuote. Multiple-product launch requires a backend contract that is not present.', blockers: {} } });
+      setStatusMessage('Select one product before launch; multiple-product launch contract is not available.');
+      capture('quote-launch-blocked', { blockers: ['multiple-product-launch-contract-missing'] });
+      return;
+    }
     setStatusMessage('QuickQuote product options are ready for review.');
     capture('quickquote-products-revealed', { missingFields: missingRequiredFields.length, candidates: totalProductCount });
     const cachedRunId = loadCachedLiveRunId(tenantId);
@@ -1328,7 +1342,7 @@ export function PipelineIntakePage({
 
   function quoteDetailFields() {
     const detailFieldIds = Array.from(new Set<keyof BorrowerIntake>([...minimumQuoteFields, 'documentationType', 'state', 'zip']));
-    return fieldsById(detailFieldIds).map((field) => ({
+    return detailFieldIds.map((fieldId) => fieldForId(runtimeSections, fieldId) ?? fallbackQuoteDetailField(fieldId)).map((field) => ({
       ...field,
       required: minimumQuoteFields.includes(field.fieldId),
     }));
@@ -1388,7 +1402,7 @@ export function PipelineIntakePage({
 
         <div className="quickquote-grid-shell">
           <aside className="quickquote-prefill-rail" aria-label="QuickQuote pricing input rail">
-            <FilterCard title="Filters" eyebrow="Products" badge={activeFilterCount > 0 ? `${activeFilterCount} active` : undefined}>
+            <FilterCard title="Product filters" eyebrow="Tenant products" badge={activeFilterCount > 0 ? `${activeFilterCount} active` : undefined}>
               <SelectFilter label="Mortgage type" value={productFilters.productType} values={availableFilters.productTypes} onChange={(value) => setFilter('productType', value)} formatter={productTypeLabel} />
               <SelectFilter label="Investor" value={productFilters.investor} values={availableFilters.investors} onChange={(value) => setFilter('investor', value)} />
               <SelectFilter label="Channel" value={productFilters.channel} values={availableFilters.channels} onChange={(value) => setFilter('channel', value)} formatter={channelLabel} />
@@ -1419,7 +1433,7 @@ export function PipelineIntakePage({
             {!quickQuoteLoading && productRows.length === 0 ? <QuickQuoteEmptyState missingFacts={missingRequiredFields.length} /> : null}
 
             {!quickQuoteProductsVisible ? <QuickQuoteSubmitGate missingFacts={missingRequiredFields.length} /> : liveOfferState.kind === 'loaded' ? (
-              <LiveOfferGrid runId={liveOfferState.runId} offers={liveFilteredOffers} selectedOfferId={selectedLiveOfferId} onSelect={selectLiveOffer} onDetail={navigateLiveOfferDetail} onLock={navigateLiveOfferLock} />
+              <LiveOfferGrid runId={liveOfferState.runId} offers={pagedLiveOffers} totalOffers={liveFilteredOffers.length} selectedOfferId={selectedLiveOfferId} page={liveOfferPage} pageSize={liveOfferPageSize} onSelect={selectLiveOffer} onDetail={navigateLiveOfferDetail} onLock={navigateLiveOfferLock} />
             ) : (
               <div className="quote-product-grid quote-product-grid--quickquote" role="table" aria-label="QuickQuote product eligibility grid" style={quickQuoteGridStyle}>
                 <div className="quote-product-row quote-product-row--header" role="row">
@@ -1433,6 +1447,8 @@ export function PipelineIntakePage({
             {quickQuoteProductsVisible && liveOfferState.kind === 'loading' ? <p className="quote-intake-status" role="status">Loading backend offers...</p> : null}
             {quickQuoteProductsVisible && liveOfferState.kind === 'unavailable' ? <p className="quote-intake-status" role="alert">{liveOfferState.message}</p> : null}
 
+            {quickQuoteRequiresExplicitProductSelection ? <p className="quote-intake-status" role="alert">Select one product before launch. The UI will not submit a multi-product launch without a backend contract.</p> : null}
+            {quickQuoteProductsVisible && liveOfferState.kind === 'loaded' ? <ProductPagination page={liveOfferPage} pageSize={liveOfferPageSize} totalCount={liveFilteredOffers.length} onPageChange={setLiveOfferPage} /> : null}
             {quickQuoteProductsVisible && liveOfferState.kind !== 'loaded' ? <ProductPagination page={tenantProductsState.response.page} pageSize={tenantProductsState.response.pageSize} totalCount={tenantProductsState.response.totalCount} onPageChange={setProductPage} /> : null}
           </section>
         </div>
@@ -1448,12 +1464,7 @@ export function PipelineIntakePage({
       <div className="quote-pipeline-topbar">
         <div>
           <p className="eyebrow">Pipeline</p>
-          <h1>Progressive Quote Intake</h1>
-          <nav className="quote-intake-status" aria-label="Available workbench modules">
-            Progressive Quote Intake · Quote Comparison · Lock Management · Scenario Analysis · Tenant Onboarding · Product Management · Rate Sheet Intake · Pricing Analysis
-          </nav>
-          {showProgressiveCompatibility ? <p className="quote-intake-status">New prospect intake</p> : null}
-          <h2 id="intake-heading">Intake</h2>
+          <h1 id="intake-heading">Pipeline intake</h1>
           <nav className="quickquote-mode-toggle" aria-label="Quote mode">
             <a href="/quote/start" onClick={(event) => requestModeSwitch(event, 'quickquote')}>QuickQuote</a>
             <a href="/pipeline" aria-current="page" onClick={(event) => requestModeSwitch(event, 'pipeline')}>Pipeline</a>
@@ -1462,11 +1473,13 @@ export function PipelineIntakePage({
         <div className="quote-pipeline-topbar__stats" aria-label="Pipeline status">
           <MetricCard label="Products" value={String(liveOffers.length > 0 ? liveFilteredOffers.length : productRows.length)} detail={liveOffers.length > 0 ? `${liveOffers.length} backend offers` : `${totalProductCount} total`} />
           {activeFilterCount > 0 ? <MetricCard label="Filters" value={String(activeFilterCount)} detail="active" /> : null}
-          {completionPercent > 0 ? <MetricCard label="Profile" value={`${completionPercent}%`} detail="complete" tone={quoteReady ? 'ready' : startReady ? 'attention' : undefined} /> : null}
+          <MetricCard label="Selected" value={selectedProduct ? selectedProduct.productName : 'None'} detail={selectedMetricDetail} tone={quoteReady ? 'ready' : undefined} />
         </div>
         <div className="quote-pipeline-topbar__actions" aria-label="Pipeline actions">
           <button type="button" onClick={openSavePipelineModal}>Save Pipeline</button>
           <button type="button" onClick={() => { setRetrieveKeys(identifierKeysFromValues(values)); setRetrieveError(''); setRetrieveOpen(true); window.setTimeout(() => focusModalIdentifierField('retrieve', 'borrowerLastName'), 0); }}>Retrieve Pipeline</button>
+          <button type="submit" form="pipeline-product-form" className="quote-intake-primary" disabled={launchDisabled} aria-describedby="quote-launch-state">{flowState.kind === 'submitting' ? 'Launching...' : 'Launch Quote'}</button>
+          <span id="quote-launch-state" className="quote-pipeline-action-status">{launchStatus}</span>
         </div>
       </div>
 
@@ -1498,12 +1511,13 @@ export function PipelineIntakePage({
           {applicationFormRuntimeState.kind === 'loaded' ? <ApplicationFormRuntimeRenderer sections={runtimeSections} values={values} errors={visibleErrors} dropdownOptions={fieldDropdownOptions} dropdownLoading={dropdownConfigState.kind === 'loading'} onChange={changeField} /> : null}
 
           {startFields().length > 0 ? (
-            <FilterCard title="Keys" eyebrow="Save" badge={startReady ? 'Ready' : 'Required fields'}>
+            <FilterCard title="Save keys" eyebrow="Pipeline identifiers">
               <StepFields fields={startFields()} intake={values} errors={visibleErrors} onChange={changeField} dropdownOptions={fieldDropdownOptions} dropdownLoading={dropdownConfigState.kind === 'loading'} />
             </FilterCard>
           ) : null}
 
-          <FilterCard title="Filters" eyebrow="Products" badge={activeFilterCount > 0 ? `${activeFilterCount} active` : undefined}>
+          <FilterCard title="Product filters" eyebrow="Tenant products" badge={activeFilterCount > 0 ? `${activeFilterCount} active` : undefined}>
+            <p className="quote-filter-card__help">Channel options are displayed from tenant product or BFF responses; raw API values stay unchanged for filtering.</p>
             <SelectFilter label="Mortgage type" value={productFilters.productType} values={availableFilters.productTypes} onChange={(value) => setFilter('productType', value)} formatter={productTypeLabel} />
             <SelectFilter label="Investor" value={productFilters.investor} values={availableFilters.investors} onChange={(value) => setFilter('investor', value)} />
             <SelectFilter label="Channel" value={productFilters.channel} values={availableFilters.channels} onChange={(value) => setFilter('channel', value)} formatter={channelLabel} />
@@ -1518,7 +1532,7 @@ export function PipelineIntakePage({
             <button type="button" className="quote-filter-clear" onClick={clearFilters}>Clear</button>
           </FilterCard>
 
-          <FilterCard title="Quote" eyebrow="Launch" badge={quoteReady ? 'Ready' : 'Required fields'}>
+          <FilterCard title="Quote inputs" eyebrow="Pricing">
             <StepFields fields={quoteDetailFields()} intake={values} errors={visibleErrors} onChange={changeField} dropdownOptions={fieldDropdownOptions} dropdownLoading={dropdownConfigState.kind === 'loading'} />
           </FilterCard>
         </aside>
@@ -1542,7 +1556,7 @@ export function PipelineIntakePage({
           ) : null}
 
           {liveOfferState.kind === 'loaded' ? (
-            <LiveOfferGrid runId={liveOfferState.runId} offers={liveFilteredOffers} selectedOfferId={selectedLiveOfferId} onSelect={selectLiveOffer} onDetail={navigateLiveOfferDetail} onLock={navigateLiveOfferLock} />
+            <LiveOfferGrid runId={liveOfferState.runId} offers={pagedLiveOffers} totalOffers={liveFilteredOffers.length} selectedOfferId={selectedLiveOfferId} page={liveOfferPage} pageSize={liveOfferPageSize} onSelect={selectLiveOffer} onDetail={navigateLiveOfferDetail} onLock={navigateLiveOfferLock} />
           ) : (
             <div className="quote-product-grid quote-product-grid--rows" role="table" aria-label="Filtered mortgage products" style={productGridStyle}>
               <div className="quote-product-row quote-product-row--header" role="row">
@@ -1553,18 +1567,12 @@ export function PipelineIntakePage({
               ))}
             </div>
           )}
+          {liveOfferState.kind === 'loaded' ? <ProductPagination page={liveOfferPage} pageSize={liveOfferPageSize} totalCount={liveFilteredOffers.length} onPageChange={setLiveOfferPage} /> : null}
           {liveOfferState.kind !== 'loaded' ? <ProductPagination page={tenantProductsState.response.page} pageSize={tenantProductsState.response.pageSize} totalCount={tenantProductsState.response.totalCount} onPageChange={setProductPage} /> : null}
           {liveOfferState.kind === 'loading' ? <p className="quote-intake-status" role="status">Loading backend offers...</p> : null}
           {liveOfferState.kind === 'unavailable' ? <p className="quote-intake-status" role="alert">{liveOfferState.message}</p> : null}
         </section>
 
-        <div className="quote-pipeline-launchbar">
-          <div>
-            <strong>{selectedProduct?.productName ?? 'Product selection pending'}</strong>
-            <span id="quote-launch-state">{launchStatus}</span>
-          </div>
-          <button type="submit" className="quote-intake-primary" disabled={launchDisabled} aria-describedby="quote-launch-state">{flowState.kind === 'submitting' ? 'Launching...' : 'Launch Quote'}</button>
-        </div>
       </form>
 
       {selectedProduct && productDetailOpen ? <ProductDetailPanel product={selectedProduct} values={values} metadata={runtimeMetadata} onBack={() => setProductDetailOpen(false)} onUse={applyProduct} /> : null}
@@ -1614,7 +1622,7 @@ function routeForMode(mode: QuoteMode, product?: AuthorizedProduct | null) {
   return product?.productCode ? `/pipeline?product=${encodeURIComponent(product.productCode)}` : '/pipeline';
 }
 
-function LiveOfferGrid({ runId, offers, selectedOfferId, onSelect, onDetail, onLock }: { runId: string; offers: OfferSummary[]; selectedOfferId: string; onSelect: (runId: string, offer: OfferSummary) => void; onDetail: (runId: string, offer: OfferSummary) => void; onLock: (runId: string, offer: OfferSummary) => void }) {
+function LiveOfferGrid({ runId, offers, totalOffers, selectedOfferId, page, pageSize, onSelect, onDetail, onLock }: { runId: string; offers: OfferSummary[]; totalOffers: number; selectedOfferId: string; page: number; pageSize: number; onSelect: (runId: string, offer: OfferSummary) => void; onDetail: (runId: string, offer: OfferSummary) => void; onLock: (runId: string, offer: OfferSummary) => void }) {
   if (offers.length === 0) {
     return (
       <div className="quote-product-empty" role="status">
@@ -1636,7 +1644,7 @@ function LiveOfferGrid({ runId, offers, selectedOfferId, onSelect, onDetail, onL
         <div role="columnheader">Source</div>
         <div role="columnheader">Actions</div>
       </div>
-      {offers.slice(0, 100).map((offer) => {
+      {offers.map((offer) => {
         const selected = selectedOfferId === offer.offerId;
         return (
           <div key={offer.offerId} className="quote-product-row" role="row" aria-label={`${offer.productLabel ?? offer.offerId} ${offerStatusText(offer)}`} aria-selected={selected} data-selected={selected} data-product-status={offerStatusText(offer).toLowerCase()}>
@@ -1658,7 +1666,7 @@ function LiveOfferGrid({ runId, offers, selectedOfferId, onSelect, onDetail, onL
           </div>
         );
       })}
-      {offers.length > 100 ? <p role="status">Showing first 100 offers from {offers.length} backend offers.</p> : null}
+      {totalOffers > pageSize ? <p role="status">Showing backend offers {(page - 1) * pageSize + 1}-{(page - 1) * pageSize + offers.length} of {totalOffers}.</p> : null}
     </div>
   );
 }
@@ -1697,13 +1705,13 @@ function ApplicationFormRuntimeRenderer({
   const visibleSections = sections.filter(({ fields }) => fields.length > 0);
   if (visibleSections.length === 0) {
     return (
-      <FilterCard title="Borrower Details" eyebrow="Profile" badge="Blocked">
+      <FilterCard title="Borrower details" eyebrow="Application fields">
         <p className="quote-intake-empty" role="status">Application fields are unavailable for this borrower profile.</p>
       </FilterCard>
     );
   }
   return (
-    <FilterCard title="Borrower Details" eyebrow="Profile" badge="Ready">
+    <FilterCard title="Borrower details" eyebrow="Application fields">
       <div className="quote-runtime-form" aria-label="Borrower details form">
         {visibleSections.map(({ step, fields }) => (
           <section key={step.section} className="quote-runtime-form__section" aria-labelledby={`runtime-${step.section}-heading`}>
@@ -2682,6 +2690,17 @@ function fallbackPricingField(fieldId: keyof BorrowerIntake): ScenarioIntakeFiel
   };
 }
 
+function fallbackQuoteDetailField(fieldId: keyof BorrowerIntake): ScenarioIntakeField {
+  return {
+    ...fallbackPricingField(fieldId),
+    groupId: 'quote-inputs',
+    dataType: fieldId === 'baseLoanAmount' || fieldId === 'decisionCreditScore' ? 'number' : 'text',
+    required: minimumQuoteFields.includes(fieldId),
+    helpText: 'Pipeline quote input.',
+    sourceRef: 'pipeline-quote-inputs',
+  };
+}
+
 function fallbackDropdownConfigState(message: string): DropdownConfigState {
   return { kind: 'fallback', options: fallbackTenantDropdownOptions(), message };
 }
@@ -3294,12 +3313,6 @@ function numberFromFilter(value: string) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function completedFactPercent(values: BorrowerIntake) {
-  const trackedFields: Array<keyof BorrowerIntake> = ['borrowerLastName', 'loanNumber', 'mortgageType', 'channel', 'loanPurpose', 'documentationType', 'decisionCreditScore', 'baseLoanAmount', 'state', 'zip', 'propertyType', 'occupancyType', 'purchasePrice', 'appraisedValue'];
-  const completed = trackedFields.filter((field) => (values[field] ?? '').trim()).length;
-  return Math.round((completed / trackedFields.length) * 100);
-}
-
 function rateIndicator(product: AuthorizedProduct) {
   if (product.baseRateMin != null && product.baseRateMax != null) return `${product.baseRateMin.toFixed(3)}% - ${product.baseRateMax.toFixed(3)}%`;
   if (product.baseRateMin != null || product.baseRateMax != null) return `${(product.baseRateMin ?? product.baseRateMax)?.toFixed(3)}%`;
@@ -3460,8 +3473,7 @@ function productTypeLabel(value: string) {
 }
 
 function channelLabel(value: string) {
-  const mapped: Record<string, string> = { RETAIL: 'Retail', WHOLESALE: 'Wholesale', CORR: 'Correspondent', CORRESPONDENT: 'Correspondent', TPO: 'TPO', CONSUMER_DIRECT: 'Consumer Direct' };
-  return mapped[value.toUpperCase()] ?? friendlyLabel(value);
+  return displayChannelLabel(value);
 }
 
 function friendlyLabel(value: string) {

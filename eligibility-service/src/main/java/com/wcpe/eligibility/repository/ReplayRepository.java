@@ -27,7 +27,7 @@ public class ReplayRepository {
             throw new IllegalStateException("Failed to serialize replay data", e);
         }
         jdbc.update(
-            "insert into eligibility.replay_record(tenant_id,replay_id,input_hash,output_hash,replay_status,policy_version,rule_set_version,replay_json,occurred_at) values (?,?,?,?,?,?,?,?,?)",
+            "insert into eligibility.replay_record(tenant_id,replay_id,input_hash,output_hash,replay_status,policy_version,rule_set_version,replay_json,occurred_at) values (?,?,?,?,?,?,?,?::jsonb,?)",
             tenantId,
             UUID.fromString((String) replayData.get("replayId")),
             (String) replayData.get("inputHash"),

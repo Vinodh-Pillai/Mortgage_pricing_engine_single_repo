@@ -11,7 +11,7 @@ export const lockManagementScreenModule = createScreenModule({
   screenPackage: 'screens/locks',
   dataBoundary: 'lock-service management APIs',
   stateCoverage: allVisualStates,
-  personaVisibility: ['operations-lead', 'loan-officer', 'admin', 'partner-manager'],
+  personaVisibility: ['operations-lead', 'loan-officer', 'admin'],
   dependencyStatus: 'Lock-service expiration and investor delivery refs govern blocked and attention states.',
   adapterStatus: 'Screen renders lock statuses, bulk action controls, and evidence capture without changing backend state.',
   evidenceTarget: lockManagementEvidenceTarget,

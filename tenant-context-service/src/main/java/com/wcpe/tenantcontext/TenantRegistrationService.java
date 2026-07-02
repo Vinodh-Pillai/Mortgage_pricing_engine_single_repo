@@ -99,6 +99,24 @@ public class TenantRegistrationService {
         }
 
         String normalizedName = normalizeName(request.tenantName());
+        if (jdbcBacked()) {
+            Optional<TenantRecord> existing = jdbcTenantByName(normalizedName);
+            if (existing.isPresent()) {
+                throw new TenantRegistrationException(409, "TENANT_NAME_EXISTS", "Tenant name already exists.", existing.get().tenantId(), Map.of());
+            }
+            UUID tenantUuid = UUID.randomUUID();
+            Instant now = Instant.now(clock);
+            TenantRecord record = new TenantRecord(
+                tenantUuid.toString(), request.tenantName().trim(), optional(request.displayName()).isBlank() ? request.tenantName().trim() : optional(request.displayName()),
+                TenantStatus.PENDING_ACTIVATION, now, now, null, null, null, 0, optional(request.logoUrl()), optional(request.primaryColor()),
+                optional(request.secondaryColor()), optional(request.contactEmail()), optional(request.contactPhone()), optional(request.addressLine1()),
+                optional(request.city()), optional(request.state()), optional(request.postalCode()), optional(request.country()).isBlank() ? "US" : optional(request.country()),
+                optional(request.nmlsId()), optional(createdBy)
+            );
+            jdbcInsertTenant(tenantUuid, record, optional(createdBy));
+            jdbcSaveFeatureFlags(record.tenantId(), defaultFeatureFlags(createdBy));
+            return record.toDetails();
+        }
         TenantRegistrationStore store = requireTestStore();
         String existingTenantId = store.tenantIdByNormalizedName(normalizedName).orElse(null);
         if (existingTenantId != null) {
@@ -158,7 +176,11 @@ public class TenantRegistrationService {
             optional(updatedBy),
             Instant.now(clock)
         );
-        requireTestStore().saveTenant(normalizeName(updated.name()), updated);
+        if (jdbcBacked()) {
+            jdbcUpdateTenant(updated);
+        } else {
+            requireTestStore().saveTenant(normalizeName(updated.name()), updated);
+        }
         return updated.toDetails();
     }
 
@@ -167,6 +189,14 @@ public class TenantRegistrationService {
         TenantFilter safeFilter = filter == null ? new TenantFilter("", "") : filter;
         String search = optional(safeFilter.search()).toLowerCase(Locale.ROOT);
         String status = optional(safeFilter.status()).toUpperCase(Locale.ROOT);
+        if (jdbcBacked()) {
+            return jdbcTemplate.query("""
+                SELECT * FROM tenant.tenant
+                WHERE (? = '' OR LOWER(tenant_name) LIKE ? OR LOWER(COALESCE(display_name, '')) LIKE ?)
+                  AND (? = '' OR status = ?)
+                ORDER BY tenant_name
+                """, (rs, rowNum) -> jdbcTenantRecord(rs).toDetails(), search, "%" + search + "%", "%" + search + "%", status, status);
+        }
         List<TenantDetails> tenants = new java.util.ArrayList<>();
         for (TenantRecord record : requireTestStore().tenants()) {
             boolean searchMatches = search.isBlank()
@@ -187,7 +217,7 @@ public class TenantRegistrationService {
         }
 
         TenantRecord active = record.withStatus(TenantStatus.ACTIVE, Instant.now(clock), "system");
-        requireTestStore().saveTenant(normalizeName(active.name()), active);
+        saveTenantRecord(active);
         return active.toDetails();
     }
 
@@ -198,7 +228,7 @@ public class TenantRegistrationService {
             throw new TenantRegistrationException(409, "TENANT_NOT_ACTIVE", "Only active tenants can be suspended.");
         }
         TenantRecord suspended = record.withStatus(TenantStatus.SUSPENDED, Instant.now(clock), "system");
-        requireTestStore().saveTenant(normalizeName(suspended.name()), suspended);
+        saveTenantRecord(suspended);
         return suspended.toDetails();
     }
 
@@ -210,7 +240,7 @@ public class TenantRegistrationService {
             throw new TenantRegistrationException(409, "TENANT_NOT_ACTIVE", "Only active or suspended tenants can be deactivated.");
         }
         TenantRecord deactivated = record.withStatus(TenantStatus.DEACTIVATED, Instant.now(clock), "system");
-        requireTestStore().saveTenant(normalizeName(deactivated.name()), deactivated);
+        saveTenantRecord(deactivated);
         return deactivated.toDetails();
     }
 
@@ -243,18 +273,29 @@ public class TenantRegistrationService {
             int nextVersion = previous == null ? 1 : previous.version() + 1;
             existing.put(featureKey, featureFlag(featureKey, entry.getValue() != null && entry.getValue(), nextVersion, optional(updatedBy)));
         }
-        requireTestStore().saveFeatureFlags(normalizedTenantId, existing);
+        if (jdbcBacked()) {
+            jdbcSaveFeatureFlags(normalizedTenantId, existing);
+        } else {
+            requireTestStore().saveFeatureFlags(normalizedTenantId, existing);
+        }
         return new TenantFeatureFlags(normalizedTenantId, Map.copyOf(existing));
     }
 
     public long getUserCount(String tenantId) {
         requireJdbcContractOrMemoryTestMode();
-        return requireTenant(tenantId).assignedUserCount();
+        TenantRecord tenant = requireTenant(tenantId);
+        if (jdbcBacked()) {
+            return jdbcAssignedUserCount(tenant.tenantId());
+        }
+        return tenant.assignedUserCount();
     }
 
     public TenantDetails createAssignedUser(String tenantId) {
         requireJdbcContractOrMemoryTestMode();
         TenantRecord record = requireTenant(tenantId);
+        if (jdbcBacked()) {
+            throw new TenantRegistrationException(503, "TENANT_USER_ASSIGNMENT_PERSISTENCE_CONTRACT_MISSING", "Tenant user assignment count is not present in the durable tenant schema; refusing to fake a production count.");
+        }
         if (record.status() == TenantStatus.SUSPENDED) {
             throw new TenantRegistrationException(409, "TENANT_SUSPENDED", "Suspended tenant cannot accept new user creation.");
         }
@@ -269,15 +310,19 @@ public class TenantRegistrationService {
 
     int tenantCount() {
         requireJdbcContractOrMemoryTestMode();
+        if (jdbcBacked()) {
+            Integer count = jdbcTemplate.query("SELECT COUNT(*) AS tenant_count FROM tenant.tenant", rs -> rs.next() ? rs.getInt("tenant_count") : 0);
+            return count == null ? 0 : count;
+        }
         return requireTestStore().tenantCount();
     }
 
     private void requireJdbcContractOrMemoryTestMode() {
-        if (jdbcTemplate != null) {
-            throw new TenantRegistrationException(503, "TENANT_REGISTRATION_PERSISTENCE_CONTRACT_MISSING",
-                "tenant.tenant uses UUID tenant_id while the service contract currently exposes string tenant identifiers; refusing in-memory fallback until the datasource/schema contract is reconciled.");
-        }
-        requireTestStore();
+        if (!jdbcBacked()) requireTestStore();
+    }
+
+    private boolean jdbcBacked() {
+        return jdbcTemplate != null;
     }
 
     private TenantRegistrationStore requireTestStore() {
@@ -290,6 +335,9 @@ public class TenantRegistrationService {
 
     private TenantRecord requireTenant(String tenantId) {
         String normalized = required(tenantId, "tenantId");
+        if (jdbcBacked()) {
+            return jdbcTenantById(normalized).orElseThrow(() -> new TenantRegistrationException(404, "NOT_FOUND", "Tenant was not found."));
+        }
         TenantRecord record = requireTestStore().tenantById(normalized).orElse(null);
         if (record == null) {
             throw new TenantRegistrationException(404, "NOT_FOUND", "Tenant was not found.");
@@ -329,10 +377,123 @@ public class TenantRegistrationService {
     }
 
     private LinkedHashMap<String, FeatureFlag> featureFlagsFor(String tenantId, String updatedBy) {
+        if (jdbcBacked()) {
+            LinkedHashMap<String, FeatureFlag> flags = jdbcFeatureFlagsByTenantId(tenantId);
+            if (flags.isEmpty()) {
+                flags = defaultFeatureFlags(updatedBy);
+                jdbcSaveFeatureFlags(tenantId, flags);
+            }
+            return flags;
+        }
         TenantRegistrationStore store = requireTestStore();
         LinkedHashMap<String, FeatureFlag> flags = store.featureFlagsByTenantId(tenantId).orElseGet(() -> defaultFeatureFlags(updatedBy));
         store.saveFeatureFlags(tenantId, flags);
         return flags;
+    }
+
+    private void saveTenantRecord(TenantRecord record) {
+        if (jdbcBacked()) jdbcUpdateTenant(record); else requireTestStore().saveTenant(normalizeName(record.name()), record);
+    }
+
+    private Optional<TenantRecord> jdbcTenantByName(String normalizedName) {
+        return jdbcTemplate.query("""
+            SELECT * FROM tenant.tenant WHERE LOWER(tenant_name) = ?
+            """, (rs, rowNum) -> jdbcTenantRecord(rs), normalizedName).stream().findFirst();
+    }
+
+    private Optional<TenantRecord> jdbcTenantById(String tenantId) {
+        UUID uuid = parseTenantUuid(tenantId);
+        return jdbcTemplate.query("SELECT * FROM tenant.tenant WHERE tenant_id = ?", (rs, rowNum) -> jdbcTenantRecord(rs), uuid).stream().findFirst();
+    }
+
+    private void jdbcInsertTenant(UUID tenantUuid, TenantRecord record, String createdBy) {
+        jdbcTemplate.update("""
+            INSERT INTO tenant.tenant (tenant_id, tenant_name, display_name, status, logo_url, primary_color, secondary_color,
+              contact_email, contact_phone, address_line1, city, state, postal_code, country, nmls_id, created_at, updated_at, created_by, updated_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, tenantUuid, record.name(), record.displayName(), record.status().name(), blankToNull(record.logoUrl()), blankToNull(record.primaryColor()),
+            blankToNull(record.secondaryColor()), blankToNull(record.contactEmail()), blankToNull(record.contactPhone()), blankToNull(record.addressLine1()),
+            blankToNull(record.city()), blankToNull(record.state()), blankToNull(record.postalCode()), blankToNull(record.country()), blankToNull(record.nmlsId()),
+            java.sql.Timestamp.from(record.createdAt()), java.sql.Timestamp.from(record.updatedAt()), blankToNull(createdBy), blankToNull(record.updatedBy()));
+    }
+
+    private void jdbcUpdateTenant(TenantRecord record) {
+        jdbcTemplate.update("""
+            UPDATE tenant.tenant SET display_name = ?, status = ?, logo_url = ?, primary_color = ?, secondary_color = ?,
+              contact_email = ?, contact_phone = ?, address_line1 = ?, city = ?, state = ?, postal_code = ?, country = ?, nmls_id = ?,
+              updated_at = ?, activated_at = ?, suspended_at = ?, deactivated_at = ?, updated_by = ?
+            WHERE tenant_id = ?
+            """, record.displayName(), record.status().name(), blankToNull(record.logoUrl()), blankToNull(record.primaryColor()), blankToNull(record.secondaryColor()),
+            blankToNull(record.contactEmail()), blankToNull(record.contactPhone()), blankToNull(record.addressLine1()), blankToNull(record.city()), blankToNull(record.state()),
+            blankToNull(record.postalCode()), blankToNull(record.country()), blankToNull(record.nmlsId()), java.sql.Timestamp.from(record.updatedAt()),
+            ts(record.activatedAt()), ts(record.suspendedAt()), ts(record.deactivatedAt()), blankToNull(record.updatedBy()), parseTenantUuid(record.tenantId()));
+    }
+
+    private LinkedHashMap<String, FeatureFlag> jdbcFeatureFlagsByTenantId(String tenantId) {
+        LinkedHashMap<String, FeatureFlag> flags = new LinkedHashMap<>();
+        jdbcTemplate.query("""
+            SELECT feature_key, enabled, updated_at, updated_by FROM tenant.tenant_feature_flag WHERE tenant_id = ? ORDER BY feature_key
+            """, rs -> {
+                while (rs.next()) {
+                    String key = rs.getString("feature_key");
+                    flags.put(key, featureFlag(key, rs.getBoolean("enabled"), 1, rs.getString("updated_by")));
+                }
+                return null;
+            }, parseTenantUuid(tenantId));
+        return flags;
+    }
+
+    private void jdbcSaveFeatureFlags(String tenantId, LinkedHashMap<String, FeatureFlag> flags) {
+        UUID uuid = parseTenantUuid(tenantId);
+        flags.forEach((featureKey, flag) -> jdbcTemplate.update("""
+            INSERT INTO tenant.tenant_feature_flag (tenant_id, feature_key, enabled, config, updated_at, updated_by)
+            VALUES (?, ?, ?, CAST(? AS jsonb), ?, ?)
+            ON CONFLICT (tenant_id, feature_key) DO UPDATE SET enabled = EXCLUDED.enabled, config = EXCLUDED.config,
+              updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by
+            """, uuid, featureKey, flag.enabled(), "{}", java.sql.Timestamp.from(flag.updatedAt()), blankToNull(flag.updatedBy())));
+    }
+
+    private int jdbcAssignedUserCount(String tenantId) {
+        Integer count = jdbcTemplate.query("""
+            SELECT COUNT(*) AS assigned_user_count
+            FROM tenant.tenant_pipeline_user_assignment
+            WHERE tenant_id = ?
+            """, rs -> rs.next() ? rs.getInt("assigned_user_count") : 0, tenantId);
+        return count == null ? 0 : count;
+    }
+
+    private TenantRecord jdbcTenantRecord(java.sql.ResultSet rs) throws java.sql.SQLException {
+        String tenantId = String.valueOf(rs.getObject("tenant_id"));
+        return new TenantRecord(
+            tenantId, rs.getString("tenant_name"), optional(rs.getString("display_name")),
+            TenantStatus.valueOf(rs.getString("status")), instant(rs.getTimestamp("created_at")), instant(rs.getTimestamp("updated_at")),
+            instant(rs.getTimestamp("activated_at")), instant(rs.getTimestamp("suspended_at")), instant(rs.getTimestamp("deactivated_at")),
+            jdbcAssignedUserCount(tenantId), optional(rs.getString("logo_url")), optional(rs.getString("primary_color")), optional(rs.getString("secondary_color")),
+            optional(rs.getString("contact_email")), optional(rs.getString("contact_phone")), optional(rs.getString("address_line1")),
+            optional(rs.getString("city")), optional(rs.getString("state")), optional(rs.getString("postal_code")), optional(rs.getString("country")),
+            optional(rs.getString("nmls_id")), optional(rs.getString("updated_by"))
+        );
+    }
+
+    private static UUID parseTenantUuid(String tenantId) {
+        try {
+            return UUID.fromString(required(tenantId, "tenantId"));
+        } catch (IllegalArgumentException ex) {
+            throw new TenantRegistrationException(422, "TENANT_ID_NOT_UUID", "Durable tenant identifiers must be UUID strings.");
+        }
+    }
+
+    private Instant instant(java.sql.Timestamp timestamp) {
+        return timestamp == null ? Instant.now(clock) : timestamp.toInstant();
+    }
+
+    private static java.sql.Timestamp ts(Instant instant) {
+        return instant == null ? null : java.sql.Timestamp.from(instant);
+    }
+
+    private static String blankToNull(String value) {
+        String optional = optional(value);
+        return optional.isBlank() ? null : optional;
     }
 
     private static String normalizeName(String name) {

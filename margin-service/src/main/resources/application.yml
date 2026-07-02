@@ -14,3 +14,12 @@ management:
     web:
       exposure:
         include: health,info,prometheus
+
+wcpe:
+  margin:
+    process-local-store:
+      # Keep false for deployable production defaults. Local/dev/test profiles may use the
+      # profile-gated process-local adapter; production must wire a durable repository adapter.
+      enabled: ${WCPE_MARGIN_PROCESS_LOCAL_STORE_ENABLED:false}
+    durable-store:
+      path: ${WCPE_MARGIN_DURABLE_STORE_PATH:}

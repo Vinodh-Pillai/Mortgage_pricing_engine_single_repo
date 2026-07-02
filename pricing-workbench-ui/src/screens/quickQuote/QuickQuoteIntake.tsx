@@ -23,7 +23,7 @@ export default function QuickQuoteIntake({
   const navigate = useNavigate();
   return (
     <>
-      <h1>New prospect intake</h1>
+      <h1>QuickQuote</h1>
       <QuoteIntakeFlow
         intake={intake}
         errors={errors}

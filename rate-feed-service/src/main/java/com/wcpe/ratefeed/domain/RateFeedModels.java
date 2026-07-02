@@ -16,7 +16,9 @@ public final class RateFeedModels {
   // ── Status enums ────────────────────────────────────────────────────────────
 
   public enum BatchStatus {
-    UPLOADED, PARSING, VALIDATED, ACTIVE, SUPERSEDED, REJECTED;
+    UPLOADED, PARSING, PARSED, PARSE_FAILED, NORMALIZED, NORMALIZATION_FAILED,
+    VALIDATION_PASSED, VALIDATION_FAILED, VALIDATED, ACTIVE, SUPERSEDED, REJECTED,
+    OCR_REVIEW_REQUIRED, OCR_APPROVED, OCR_FAILED, OCR_REJECTED, RECEIVED, VALIDATION_PENDING;
 
     static BatchStatus from(String value) {
       if (value == null) return UPLOADED;
@@ -55,7 +57,11 @@ public final class RateFeedModels {
 
   public record UploadSessionRequest(UUID investorId, UUID channelId, UUID feedFormatId, String sourceType, Instant effectiveAt, String timezone, String fileName, String contentType, long contentLengthBytes, UUID supersedesBatchId, String notes) {}
   public record UploadSessionResponse(UUID uploadSessionId, String uploadUrl, long maxBytes, Instant expiresAt, Map<String, String> requiredHeaders, String status, String resultHash) {}
-  public record CompleteUploadRequest(String fileSha256, String storageObjectId, String scanResultId, String scanStatus) {}
+  public record CompleteUploadRequest(String fileSha256, String storageObjectId, String scanResultId, String scanStatus, String csvContent) {
+    public CompleteUploadRequest(String fileSha256, String storageObjectId, String scanResultId, String scanStatus) {
+      this(fileSha256, storageObjectId, scanResultId, scanStatus, null);
+    }
+  }
   public record CompleteUploadResponse(UUID batchId, String status, UUID rawFileId, UUID parserCommandId, Map<String, String> links, String resultHash) {}
 
   public record RatesheetUploadRequest(
@@ -74,8 +80,32 @@ public final class RateFeedModels {
     String scanStatus,
     String templateProfileId,
     String productFamily,
-    String notes
-  ) {}
+    String notes,
+    String csvContent
+  ) {
+    public RatesheetUploadRequest(
+      UUID investorId,
+      UUID channelId,
+      UUID feedFormatId,
+      String sourceType,
+      Instant effectiveAt,
+      String timezone,
+      String fileName,
+      String contentType,
+      long contentLengthBytes,
+      String registeredFileReference,
+      String fileSha256,
+      String scanResultId,
+      String scanStatus,
+      String templateProfileId,
+      String productFamily,
+      String notes
+    ) {
+      this(investorId, channelId, feedFormatId, sourceType, effectiveAt, timezone, fileName, contentType,
+          contentLengthBytes, registeredFileReference, fileSha256, scanResultId, scanStatus, templateProfileId,
+          productFamily, notes, null);
+    }
+  }
   public record RatesheetUploadResponse(UUID uploadId, UUID intakeJobId, String status, String validationStatusUrl, String detectedTemplateStatus, String auditReference, String resultHash) {}
 
   public record BatchResponse(UUID batchId, UUID uploadSessionId, UUID investorId, UUID channelId, UUID feedFormatId, String sourceType, BatchStatus status, Instant effectiveAt, String timezone, UUID rawFileId, String fileSha256, String fileName, String contentType, long contentLengthBytes, UUID supersedesBatchId, String uploadedBy, String correlationId, String resultHash) {}

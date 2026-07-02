@@ -119,6 +119,12 @@ class QuoteRuntimeConfiguration {
     }
 
     @Bean
+    @ConditionalOnProperty(prefix = "quote.synthetic-dependencies", name = "enabled", havingValue = "true")
+    QuoteDependencies syntheticQuoteDependencies() {
+        return new SyntheticQuoteDependencies();
+    }
+
+    @Bean
     @ConditionalOnMissingBean
     QuoteDependencies quoteDependencies() {
         return new FailClosedQuoteDependencies();

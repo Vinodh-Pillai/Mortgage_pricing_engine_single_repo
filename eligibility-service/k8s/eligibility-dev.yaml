@@ -2,6 +2,9 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: wcpe-dev
+  labels:
+    app.kubernetes.io/part-of: world-class-pricing-engine
+    environment: dev
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -19,6 +22,8 @@ kind: Deployment
 metadata:
   name: eligibility-service
   namespace: wcpe-dev
+  labels:
+    app: eligibility-service
 spec:
   replicas: 1
   selector:
@@ -31,7 +36,7 @@ spec:
     spec:
       containers:
         - name: eligibility-service
-          image: 192.168.4.93:5000/eligibility-service:0.1.2
+          image: 192.168.4.102:32061/mortgage-pricing/eligibility-service:0.1.0-requirement-increment-5-20260701T082248Z-amd64
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

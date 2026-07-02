@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
@@ -30,10 +31,18 @@ class PricingBffUiFallbackAdapter {
   private static final String DURABLE_UI_STORE_REQUIRED =
       "Durable UI persistence is not configured; process-local tenant and draft state is disabled.";
   private final PricingBffQuoteServiceLoanPassClient quoteServiceClient;
+  private final LockManagementServiceClient lockManagementClient;
   private final Map<QuoteRunContextKey, QuoteRunContext> quoteRunContexts = new ConcurrentHashMap<>();
 
   PricingBffUiFallbackAdapter(PricingBffQuoteServiceLoanPassClient quoteServiceClient) {
+    this(quoteServiceClient, LockManagementServiceClient.notConfigured());
+  }
+
+  @Autowired
+  PricingBffUiFallbackAdapter(PricingBffQuoteServiceLoanPassClient quoteServiceClient,
+      LockManagementServiceClient lockManagementClient) {
     this.quoteServiceClient = quoteServiceClient;
+    this.lockManagementClient = lockManagementClient == null ? LockManagementServiceClient.notConfigured() : lockManagementClient;
   }
 
   @GetMapping("/api/ui/health")
@@ -55,6 +64,7 @@ class PricingBffUiFallbackAdapter {
     return switch (normalized) {
       case "lo", "loan-officer" -> "loan-officer";
       case "pricing-analyst" -> "pricing-analyst";
+      case "partner-manager", "partner", "partner-admin" -> "partner-manager";
       case "operations", "operations-lead", "ops-lead" -> "operations-lead";
       case "admin", "administrator" -> "admin";
       case "borrower", "consumer" -> "borrower";
@@ -86,6 +96,9 @@ class PricingBffUiFallbackAdapter {
           new UiMenuItem("ops-cases", "Ops Cases", "/ops/dashboard", "main-content"),
           new UiMenuItem("rate-feed-ops", "Rate Feed Ops", "/ops/rate-feeds", "main-content"),
           new UiMenuItem("lock-workflow", "Lock Workflow", "/quote/run-test/lock", "main-content"),
+          new UiMenuItem("partner-integrations", "Partner Integrations", "/partners/integrations", "main-content"));
+      case "partner-manager" -> List.of(
+          new UiMenuItem("partner-quotes", "Partner Quote Lifecycle", "/partners/quotes", "main-content"),
           new UiMenuItem("partner-integrations", "Partner Integrations", "/partners/integrations", "main-content"));
       default -> List.of(new UiMenuItem("role-metadata-unavailable", "Role metadata unavailable", "#role-metadata-unavailable", "role-metadata-unavailable"));
     };
@@ -758,115 +771,29 @@ class PricingBffUiFallbackAdapter {
   }
 
   PricingWaterfallView pricingWaterfall(String tenantId, String runId, String uiTraceId) {
-    String traceId = uiTraceId == null || uiTraceId.isBlank() ? "pw-s05-local-trace" : uiTraceId;
-    return new PricingWaterfallView(tenantId, runId, "BLOCKED", false,
-        "PRICING_SERVICE_WATERFALL_CONTRACT_NOT_CONFIGURED",
-        new WaterfallBaseSelection("base-selection-ref-required", "grid-version-ref-required",
-            new RedactedWaterfallValue(null, true, "pricing.waterfall.restricted.read permission is required for selected note rate"),
-            new RedactedWaterfallValue(null, true, "pricing.waterfall.restricted.read permission is required for base price"),
-            List.of("grid-resolution", "candidate-generation", "rate-selection")),
-        new WaterfallFinalPrice("final-price-ref-required",
-            new RedactedWaterfallValue(null, true, "pricing.waterfall.restricted.read permission is required for rounded final price"),
-            List.of(
-                new WaterfallLedgerRow(1, "BASE_PRICE", new RedactedWaterfallValue(null, true,
-                    "pricing.waterfall.restricted.read permission is required for ledger values"), "START",
-                    new RedactedWaterfallValue(null, true,
-                        "pricing.waterfall.restricted.read permission is required for ledger values"),
-                    "grid-version-ref-required", "BASE_RATE_SELECTED", null),
-                new WaterfallLedgerRow(2, "ADJUSTMENTS_AND_MARGINS", new RedactedWaterfallValue(null, true,
-                    "pricing.waterfall.restricted.read permission is required for ledger values"), "BACKEND_OWNED",
-                    new RedactedWaterfallValue(null, true,
-                        "pricing.waterfall.restricted.read permission is required for ledger values"),
-                    "adjustment-margin-version-refs-required", "CONFIGURED_PRICING_EVIDENCE_REQUIRED", null),
-                new WaterfallLedgerRow(3, "ROUND_FINAL_PRICE", new RedactedWaterfallValue(null, true,
-                    "pricing.waterfall.restricted.read permission is required for ledger values"), "ROUND",
-                    new RedactedWaterfallValue(null, true,
-                        "pricing.waterfall.restricted.read permission is required for ledger values"),
-                    "rounding-policy-ref-required", "ROUNDING_TRACE_REQUIRED", "configured-rounding-mode-required")),
-            List.of("adjustment-version-refs-required", "margin-version-refs-required"),
-            List.of("rounding-policy-ref-required", "configured-rounding-trace-required")),
-        List.of(
-            new WaterfallBlocker("PRICING_SERVICE_CONTRACT_REQUIRED",
-                "Pricing-service waterfall review must provide base selection, final price steps, rounding review, and processing records before values can be shown.",
-                "pricing-service.waterfall"),
-            new WaterfallBlocker("MISSING_PRICE_POLICY_REQUIRED",
-                "Missing-price handling remains fail-closed until pricing-service returns an explicit incident or valid-price result.",
-                "pricing-service.missing-price")),
-        List.of("grid-version-ref-required", "adjustment-version-refs-required", "rounding-policy-ref-required"),
-        List.of("audit:base-selection-required", "audit:final-price-required", "audit:missing-price-required"),
-        "replay-hash-required", "version-graph-hash-required", "result-hash-required", "waterfall-evidence-hash-required",
-        traceId, List.of("PricingWaterfallOpened"),
-        "Configured pricing-service waterfall contract is unavailable; this BFF response exposes non-secret references, redactions, and blockers only.");
+    return pricingWaterfall(tenantId, runId, null, uiTraceId);
+  }
+
+  PricingWaterfallView pricingWaterfall(String tenantId, String runId, String selectedOfferId, String uiTraceId) {
+    String traceId = normalizeTrace(uiTraceId);
+    try {
+      LoanPassExecutionSummaryResponse response = quoteServiceClient.executeSummary(tenantId, runId, traceId,
+          quoteRunContextFields(tenantId, runId));
+      return waterfallFromLoanPassSummary(tenantId, runId, traceId, selectedOfferId, response);
+    } catch (PricingBffQuoteServiceLoanPassClient.QuoteServiceUnavailableException ex) {
+      return pricingWaterfallMissingLiveRecords(tenantId, runId, traceId, ex.getMessage());
+    }
   }
 
   QuoteJourneyMapView quoteJourneyMap(String tenantId, String runId, String uiTraceId) {
-    String tenant = tenantId == null || tenantId.isBlank() ? "ui-preview-tenant" : tenantId;
-    String traceId = uiTraceId == null || uiTraceId.isBlank() ? "journey-s19-local-trace" : uiTraceId;
-    JourneyDrilldownRefs refs = new JourneyDrilldownRefs(runId, "scenario-ref-required",
-        "quote-option-contract-required", "lock-ref-required", traceId);
-    return new QuoteJourneyMapView(tenant, runId, "BLOCKED_WITH_FALLBACK_FACTS",
-        "CROSS_SERVICE_CONTRACTS_PARTIAL_OR_UNAVAILABLE",
-        List.of(
-            new QuoteJourneyNode("scenario-facts", "Scenario facts", "scenario-service", "BLOCKED",
-                new JourneyFreshness("STALE_OR_UNKNOWN", "scenario-service.snapshot-required",
-                    "Scenario facts are visible only as configured refs until scenario-service snapshot freshness is supplied."),
-                List.of("scenario-version-ref-required", "audit-package-required-after-scenario-service-create"),
-                List.of("SCENARIO_SERVICE_CONTRACT_REQUIRED"), "replay-hash-required-after-scenario-service-create",
-                List.of("catalog-candidates", "eligibility"), "/quote/" + runId + "/status", refs),
-            new QuoteJourneyNode("catalog-candidates", "Catalog candidates", "catalog-service", "UNAVAILABLE",
-                new JourneyFreshness("UNKNOWN", "catalog-service.catalog-version-required",
-                    "Catalog participation is not configured for this run in the local BFF fallback."),
-                List.of("product-catalog-version-ref-required", "catalog-snapshot-ref-required"),
-                List.of("CATALOG_CONTRACT_UNAVAILABLE"), "catalog-replay-hash-required",
-                List.of("rate-grids", "eligibility"), "/admin/products/catalog", refs),
-            new QuoteJourneyNode("rate-grids", "Rate grids", "rate-feed-service", "UNAVAILABLE",
-                new JourneyFreshness("UNKNOWN", "rate-feed-service.grid-version-required",
-                    "Rate grid freshness must come from rate-feed-service; the BFF does not infer market data."),
-                List.of("grid-version-ref-required", "rate-feed-audit-ref-required"),
-                List.of("RATE_FEED_CONTRACT_UNAVAILABLE"), "rate-feed-replay-hash-required",
-                List.of("pricing-waterfall"), "/ops/rate-feeds", refs),
-            new QuoteJourneyNode("eligibility", "Eligibility", "eligibility-service", "VISIBLE_WITH_BLOCKERS",
-                new JourneyFreshness("FRESHNESS_REQUIRED", "eligibility-service.decision-cache-required",
-                    "Eligibility freshness is backend-owned and shown as a cache ref."),
-                List.of("eligibility-service:decision-ref-required", "eligibility-evidence-id-required"),
-                List.of("UNKNOWN_REQUIRED_FACT", "CONFLICTING_FACT"), "eligibility-replay-hash-required",
-                List.of("pricing-waterfall", "quote-ranking"), "/quote/" + runId + "/eligibility", refs),
-            new QuoteJourneyNode("pricing-waterfall", "Pricing waterfall", "pricing-service", "BLOCKED",
-                new JourneyFreshness("FRESHNESS_REQUIRED", "pricing-service.waterfall-version-required",
-                    "Pricing values remain redacted until a configured pricing-service waterfall contract responds."),
-                List.of("pricing-service:waterfall-ref-required", "waterfall-evidence-hash-required"),
-                List.of("PRICING_SERVICE_CONTRACT_REQUIRED"), "replay-hash-required",
-                List.of("quote-ranking", "adjustments", "margin"), "/quote/" + runId + "/pricing-waterfall", refs),
-            new QuoteJourneyNode("quote-ranking", "Quote ranking", "quote-service", "VISIBLE_WITH_REFS",
-                new JourneyFreshness("FRESHNESS_REQUIRED", "quote-service.ranking-snapshot-required",
-                    "Ranking evidence is shown as backend-owned refs without UI-side score calculation."),
-                List.of("quote-service.ranking", "snapshot:quote-service:run:" + runId, "audit:quote-ready-required"),
-                List.of("QUOTE_SERVICE_SELECTION_POLICY_REQUIRED"), "quote-ranking-replay-hash-required",
-                List.of("selection", "lock"), "/quote/" + runId + "/offers", refs),
-            new QuoteJourneyNode("selection", "Selection handoff", "pricing-bff", "VISIBLE_WITH_REFS",
-                new JourneyFreshness("LOCAL_TRACE", "pricing-bff.selection-handoff", "Selection refs are preserved for downstream lock workflow."),
-                List.of("selected-offer:required", "scenario-version:required", "audit:quote-selection-required"),
-                List.of("SELECTED_OFFER_REQUIRED"), "selection-replay-hash-required",
-                List.of("lock"), "/quote/" + runId + "/offers", refs),
-            new QuoteJourneyNode("lock", "Lock", "lock-service", "BLOCKED",
-                new JourneyFreshness("FRESHNESS_REQUIRED", "lock-service.freshness-check", "Lock freshness and eligibility remain lock-service owned."),
-                List.of("lock-eligibility:pending:quote-option-contract-required", "lock-service.lifecycle-ref-required"),
-                List.of("LOCK_SERVICE_CONTRACT_REQUIRED"), "lock-replay-hash-required",
-                List.of("exception-compliance", "audit-integration"), "/quote/" + runId + "/lock", refs),
-            new QuoteJourneyNode("exception-compliance", "Exception and compliance", "exception-service/compliance-service", "BLOCKED",
-                new JourneyFreshness("UNKNOWN", "exception-compliance.review-required", "Governed review contracts are unavailable in local fallback mode."),
-                List.of("exception-approval-route-ref-required", "compliance-review-ref-required"),
-                List.of("EXCEPTION_SERVICE_CONTRACT_REQUIRED", "COMPLIANCE_SERVICE_CONTRACT_REQUIRED"),
-                "exception-compliance-replay-hash-required", List.of("audit-integration"), "/exceptions/concessions", refs),
-            new QuoteJourneyNode("audit-integration", "Audit and integration events", "audit-replay-service/integration-service", "BLOCKED",
-                new JourneyFreshness("UNKNOWN", "audit-integration.event-envelope-required", "Audit and partner event delivery are represented by refs only."),
-                List.of("audit-record-id-required", "event-envelope-ref-required", "partner-delivery-ref-required"),
-                List.of("AUDIT_REPLAY_SERVICE_CONTRACT_REQUIRED", "INTEGRATION_SERVICE_CONTRACT_REQUIRED"),
-                "audit-integration-replay-hash-required", List.of(), "/audit/replay", refs)),
-        List.of("Configured cross-service contracts are partial or unavailable; the journey map shows fallback refs and blocked states instead of hiding gaps."),
-        List.of("ScenarioService", "CatalogService", "RateFeedService", "EligibilityService", "PricingService", "QuoteService", "LockService", "ExceptionService", "ComplianceService", "AuditReplayService", "IntegrationService"),
-        traceId, List.of("QuoteJourneyMapOpened"),
-        "Configured service journey facts are unavailable or partial; pricing-bff exposes non-secret refs, blockers, freshness labels, replay hashes, and safe drilldown routes only.");
+    String traceId = normalizeTrace(uiTraceId);
+    try {
+      LoanPassExecutionSummaryResponse response = quoteServiceClient.executeSummary(tenantId, runId, traceId,
+          quoteRunContextFields(tenantId, runId));
+      return quoteJourneyFromLoanPassSummary(tenantId, runId, traceId, response);
+    } catch (PricingBffQuoteServiceLoanPassClient.QuoteServiceUnavailableException ex) {
+      return quoteJourneyMissingLiveRecords(tenantId, runId, traceId, ex.getMessage());
+    }
   }
 
   MarginProfitabilityView marginProfitability(String tenantContext, String uiTraceId) {
@@ -1014,45 +941,6 @@ class PricingBffUiFallbackAdapter {
     }
   }
 
-  private QuoteDetailView quoteDetailFallback(String tenantId, String runId, String optionId, String traceId) {
-    OfferSummary summary = OfferComparisonView.contractVisible(runId, traceId).offers().stream()
-        .filter(offer -> offer.offerId().equals(optionId))
-        .findFirst()
-        .orElse(new OfferSummary(optionId, 1, "Backend-ranked offer", "Backend-ranked offer", null,
-            null, null, "payment-ref-required", "apr-ref-required", "score:backend-owned", "rank-score-ref-required",
-            null, "Backend-owned refs", List.of("quote-service.option:" + optionId),
-            List.of("Rank and score must come from quote-service ranking response"),
-            List.of("DETAIL_EVIDENCE_REQUIRED"), "AVAILABLE", "scenario-ref-required", 7,
-            List.of("quote-service.option:" + optionId, "pricing-service:waterfall-ref-required"),
-            List.of("lock-eligibility:pending:" + optionId), List.of("snapshot:quote-service:run:" + runId),
-            List.of("audit:quote-ready-required", "replay-hash-required"),
-            List.of("summary", "ranking", "waterfall", "compliance", "audit-replay"),
-            List.of(), List.of(), List.of(), List.of()));
-    PricingWaterfallView waterfall = pricingWaterfall(tenantId, runId, traceId);
-    return new QuoteDetailView(tenantId, runId, optionId, "DETAIL_VISIBLE_WITH_BACKEND_REFS", summary,
-        OfferExplanationView.available(runId, optionId, traceId), waterfall,
-        List.of(
-            new QuoteDetailPanel("summary", "Card summary", "VISIBLE", List.of("product id", "investor id", "channel", "lock period"),
-                List.of("quote-service.option:" + optionId, "catalog-service.product-ref-required"), List.of()),
-            new QuoteDetailPanel("ranking", "Ranking and tie breakers", "VISIBLE", List.of("rank", "criterion scores", "tie breakers", "warnings"),
-                List.of("quote-service.ranking", "quote-service.explanation"), List.of("tie-breaker-evidence-required")),
-            new QuoteDetailPanel("waterfall", "Pricing waterfall", "REDACTED", List.of("note rate", "final price bps", "adjustments", "margins", "rounding review references"),
-                List.of("pricing-service.waterfall", "adjustment-service.evidence", "margin-service.evidence"), List.of("restricted pricing values require backend permission")),
-            new QuoteDetailPanel("compliance", "Compliance flags", "VISIBLE_WITH_BLOCKERS", List.of("compliance flags", "hidden fields", "unavailable reasons"),
-                List.of("compliance-service.review-ref-required"), List.of("configured compliance evidence required")),
-            new QuoteDetailPanel("audit-replay", "Review and processing records", "VISIBLE", List.of("review references", "processing records", "version references"),
-                List.of("audit-replay-service.package-ref-required", "quote-service.snapshot"), List.of())),
-        List.of(
-            new QuoteDetailRedaction("selectedNoteRate", "REDACTED", "pricing.waterfall.restricted.read permission is required for selected note rate", "audit:note-rate-redaction-required"),
-            new QuoteDetailRedaction("finalPriceBps", "REDACTED", "pricing.waterfall.restricted.read permission is required for final price", "audit:final-price-redaction-required"),
-            new QuoteDetailRedaction("hiddenFields", "UNAVAILABLE", "Configured compliance-service hidden-field evidence is required before display", "audit:hidden-field-reason-required")),
-        List.of("compliance-review-ref-required", "fair-lending-flag-ref-required", "privacy-redaction-ref-required"),
-        List.of("audit:quote-detail-opened", "audit:waterfall-redactions-required"),
-        "quote-detail-replay-hash-required", "quote-detail-evidence-hash-required", traceId,
-        List.of("QuoteDetailOpened", "QuoteDetailBackendRefsBound"),
-        "Configured quote, pricing, compliance, and review record setup is unavailable; pricing-bff exposes non-secret refs, redaction reasons, blockers, and processing records only.");
-  }
-
   private static PricingWaterfallView blockedWaterfall(String tenantId, String runId, String traceId, String reason) {
     RedactedWaterfallValue unavailable = new RedactedWaterfallValue(null, true, reason);
     return new PricingWaterfallView(tenantId, runId, "BLOCKED", false, "QUOTE_SERVICE_CLIENT_REQUIRED",
@@ -1064,26 +952,201 @@ class PricingBffUiFallbackAdapter {
         "result-unavailable", "evidence-unavailable", traceId, List.of("QuoteServiceWaterfallFailClosed"), reason);
   }
 
-  private static PricingWaterfallView waterfallFromLoanPassProduct(String tenantId, String runId, String traceId,
-      LoanPassProductExecutionResult product) {
+  private static PricingWaterfallView pricingWaterfallMissingLiveRecords(String tenantId, String runId, String traceId,
+      String reason) {
+    RedactedWaterfallValue unavailable = new RedactedWaterfallValue(null, true, reason);
+    return new PricingWaterfallView(tenantId, runId, "BLOCKED_MISSING_LIVE_RECORDS", false,
+        "QUOTE_SERVICE_LIVE_PRICING_RECORDS_REQUIRED",
+        new WaterfallBaseSelection("missing-live-quote-service-summary", "missing-live-version", unavailable,
+            unavailable, List.of()),
+        new WaterfallFinalPrice("missing-live-pricing-result", unavailable, List.of(), List.of(), List.of()),
+        List.of(new WaterfallBlocker("MISSING_LIVE_PRICING_RECORDS", reason, "quote-service.execute-summary")),
+        List.of(), List.of("audit:pricing-waterfall-live-records-required"), "replay-unavailable",
+        "version-graph-unavailable", "result-unavailable", "evidence-unavailable", traceId,
+        List.of("PricingWaterfallLiveRecordsMissing"), reason);
+  }
+
+  private static PricingWaterfallView pricingWaterfallBlockedProductSelection(String tenantId, String runId, String traceId,
+      String code, String reason, String evidenceRef) {
+    RedactedWaterfallValue unavailable = new RedactedWaterfallValue(null, true, reason);
+    return new PricingWaterfallView(tenantId, runId, "BLOCKED_" + code, false, code,
+        new WaterfallBaseSelection("blocked-product-selection", "missing-selected-product-ref", unavailable,
+            unavailable, List.of()),
+        new WaterfallFinalPrice("blocked-product-selection", unavailable, List.of(), List.of(), List.of()),
+        List.of(new WaterfallBlocker(code, reason, evidenceRef)), List.of(),
+        List.of("audit:pricing-waterfall:" + code.toLowerCase(Locale.ROOT)), "replay-unavailable",
+        "version-graph-unavailable", "result-unavailable", "evidence-unavailable", traceId,
+        List.of("PricingWaterfallProductSelectionBlocked"), reason);
+  }
+
+  private static PricingWaterfallView pricingWaterfallMissingLiveFields(String tenantId, String runId, String traceId,
+      LoanPassExecutionProductSummary product, String reason) {
+    String productId = product == null ? "missing-product-id" : safeText(product.productId(), "missing-product-id");
+    String version = product == null ? "version-unavailable" : safeText(product.versionNumber(), "version-unavailable");
+    RedactedWaterfallValue unavailable = new RedactedWaterfallValue(null, true, reason);
+    return new PricingWaterfallView(tenantId, runId, "BLOCKED_MISSING_LIVE_PRICING_FIELDS", false,
+        "QUOTE_SERVICE_LIVE_PRICING_FIELDS_REQUIRED",
+        new WaterfallBaseSelection("quote-service-summary:" + productId, version, unavailable, unavailable, List.of()),
+        new WaterfallFinalPrice("quote-service-summary:" + productId, unavailable, List.of(), List.of(), List.of()),
+        List.of(new WaterfallBlocker("MISSING_LIVE_PRICING_FIELDS", reason, "quote-service.calculatedFields:product:" + productId)),
+        product == null ? List.of() : sourceEvidenceRefs(product.productFields(), product.versionNumber()),
+        List.of("audit:pricing-waterfall-live-fields-required:" + productId), "replay-unavailable",
+        "version-graph:quote-service-summary:" + version, "result-unavailable", "evidence-unavailable", traceId,
+        List.of("PricingWaterfallLiveFieldsMissing"), reason);
+  }
+
+  private static PricingWaterfallView pricingWaterfallMissingLiveProductFields(String tenantId, String runId,
+      String traceId, LoanPassProductExecutionResult product, String reason) {
+    String productId = product == null ? "missing-product-id" : safeText(product.productId(), "missing-product-id");
+    String version = product == null ? "version-unavailable" : safeText(product.versionNumber(), "version-unavailable");
+    RedactedWaterfallValue unavailable = new RedactedWaterfallValue(null, true, reason);
+    return new PricingWaterfallView(tenantId, runId, "BLOCKED_MISSING_LIVE_PRICING_FIELDS", false,
+        "QUOTE_SERVICE_LIVE_PRICING_FIELDS_REQUIRED",
+        new WaterfallBaseSelection("quote-service-product:" + productId, version, unavailable, unavailable, List.of()),
+        new WaterfallFinalPrice("quote-service-product:" + productId, unavailable, List.of(), List.of(), List.of()),
+        List.of(new WaterfallBlocker("MISSING_LIVE_PRICING_FIELDS", reason, "quote-service.calculatedFields:product:" + productId)),
+        product == null ? List.of() : sourceEvidenceRefs(product.productFields(), product.versionNumber()),
+        List.of("audit:pricing-waterfall-live-fields-required:" + productId), "replay-unavailable",
+        "version-graph:quote-service-product:" + version, "result-unavailable", "evidence-unavailable", traceId,
+        List.of("PricingWaterfallLiveFieldsMissing"), reason);
+  }
+
+  private static PricingWaterfallView waterfallFromLoanPassSummary(String tenantId, String runId, String traceId,
+      String selectedOfferId, LoanPassExecutionSummaryResponse response) {
+    List<LoanPassExecutionProductSummary> products = liveProducts(response == null ? List.of() : response.products());
+    if (products == null || products.isEmpty()) {
+      return pricingWaterfallMissingLiveRecords(tenantId, runId, traceId,
+          "Quote-service LoanPass execute-summary returned no products for this run; BFF did not synthesize waterfall rows.");
+    }
+    WaterfallProductSelection selection = selectWaterfallProduct(products, selectedOfferId);
+    if (selection.blockedReason() != null) {
+      return pricingWaterfallBlockedProductSelection(tenantId, runId, traceId, selection.blockerCode(),
+          selection.blockedReason(), selection.evidenceRef());
+    }
+    LoanPassExecutionProductSummary product = selection.product();
+    List<CreditApplicationField> calculatedFields = safeFieldList(product.calculatedFields());
+    if (calculatedFields.isEmpty()) {
+      return pricingWaterfallMissingLiveFields(tenantId, runId, traceId, product,
+          "Quote-service summary selected product " + safeText(product.productId(), "missing-product-id")
+              + " without calculatedFields; BFF kept pricing waterfall fail-closed.");
+    }
     List<WaterfallLedgerRow> rows = new ArrayList<>();
     int ordinal = 1;
-    for (CreditApplicationField field : product.calculatedFields()) {
+    for (CreditApplicationField field : calculatedFields) {
       String fieldId = safeText(field.fieldId(), "calculated-field-" + ordinal);
       String value = fieldValueText(field);
+      if (value.isBlank()) continue;
+      rows.add(new WaterfallLedgerRow(ordinal++, fieldId, new RedactedWaterfallValue(value, false, null),
+          "QUOTE_SERVICE_SUMMARY_FIELD", new RedactedWaterfallValue(value, false, null),
+          "quote-service.execute-summary." + fieldId, fieldId, null));
+    }
+    if (rows.isEmpty()) {
+      return pricingWaterfallMissingLiveFields(tenantId, runId, traceId, product,
+          "Quote-service summary selected product " + safeText(product.productId(), "missing-product-id")
+              + " with sparse calculatedFields but no usable field values; BFF kept pricing waterfall fail-closed.");
+    }
+    RedactedWaterfallValue noteRate = new RedactedWaterfallValue(fieldValue(calculatedFields, List.of("note-rate", "noteRate")), false, null);
+    RedactedWaterfallValue price = new RedactedWaterfallValue(fieldValue(calculatedFields, List.of("quote-service-price", "price")), false, null);
+    String productId = safeText(product.productId(), "quote-service-product");
+    return new PricingWaterfallView(tenantId, runId, "QUOTE_SERVICE_LOANPASS_SUMMARY_VISIBLE", true,
+        "quote-service.execute-summary",
+        new WaterfallBaseSelection("quote-service-summary:" + productId,
+            safeText(product.versionNumber(), "version-unavailable"), noteRate, price,
+            rows.stream().map(WaterfallLedgerRow::step).toList()),
+        new WaterfallFinalPrice("quote-service-summary:" + productId, price, rows,
+            fieldRefs(calculatedFields, List.of("adjustment")), fieldRefs(calculatedFields, List.of("round"))),
+        List.of(), sourceEvidenceRefs(product.productFields(), product.versionNumber()),
+        List.of("audit:quote-service-summary:" + productId), "replay:quote-service-summary:" + runId,
+        "version-graph:quote-service-summary:" + safeText(product.versionNumber(), "version-unavailable"),
+        "result:quote-service-summary:" + productId, "evidence:quote-service-summary:" + productId, traceId,
+        List.of("PricingWaterfallLiveSummaryBound"), "");
+  }
+
+  private static QuoteJourneyMapView quoteJourneyMissingLiveRecords(String tenantId, String runId, String traceId,
+      String reason) {
+    String tenant = tenantId == null || tenantId.isBlank() ? "tenant-context-missing" : tenantId;
+    return new QuoteJourneyMapView(tenant, runId, "BLOCKED_MISSING_LIVE_RECORDS",
+        "QUOTE_SERVICE_LIVE_RECORDS_REQUIRED", List.of(),
+        List.of("MISSING_LIVE_RECORDS: " + reason),
+        List.of("quote-service.execute-summary", "quote-service.execute-product", "lock-service.lifecycle"),
+        traceId, List.of("QuoteJourneyLiveRecordsMissing"), reason);
+  }
+
+  private static QuoteJourneyMapView quoteJourneyFromLoanPassSummary(String tenantId, String runId, String traceId,
+      LoanPassExecutionSummaryResponse response) {
+    List<LoanPassExecutionProductSummary> products = liveProducts(response == null ? List.of() : response.products());
+    if (products == null || products.isEmpty()) {
+      return quoteJourneyMissingLiveRecords(tenantId, runId, traceId,
+          "Quote-service LoanPass execute-summary returned no products for this run; BFF did not create fake journey nodes.");
+    }
+    String tenant = tenantId == null || tenantId.isBlank() ? "tenant-context-missing" : tenantId;
+    String firstProductId = products.size() == 1 ? safeText(products.get(0).productId(), "quote-product-live-ref") : "quote-product-selection-required";
+    JourneyDrilldownRefs refs = new JourneyDrilldownRefs(runId, "quote-service-run:" + runId, firstProductId,
+        "missing-live-lock-record", traceId);
+    List<QuoteJourneyNode> nodes = new ArrayList<>();
+    nodes.add(new QuoteJourneyNode("quote-summary", "Quote summary", "quote-service", "LIVE_RECORDS_AVAILABLE",
+        new JourneyFreshness("LIVE_RESPONSE", "quote-service.execute-summary",
+            "Quote-service returned run-specific LoanPass summary records for this BFF request."),
+        List.of("snapshot:quote-service:run:" + runId), List.of(), "replay:quote-service-summary:" + runId,
+        products.stream().map(product -> "product:" + safeText(product.productId(), "missing-product-id")).toList(),
+        "/quote/" + runId + "/offers", refs));
+    for (LoanPassExecutionProductSummary product : products) {
+      String productId = safeText(product.productId(), "missing-product-id");
+      List<String> rateRefs = fieldRefs(product.calculatedFields(), List.of("rate", "apr", "price", "payment"));
+      nodes.add(new QuoteJourneyNode("product-" + productId, firstNonBlank(product.productName(), product.productCode(), productId),
+          "quote-service", rateRefs.isEmpty() ? "LIVE_RECORDS_AVAILABLE_WITH_MISSING_PRICE_FIELDS" : "LIVE_RECORDS_AVAILABLE",
+          new JourneyFreshness("LIVE_RESPONSE", "quote-service.execute-summary.product:" + productId,
+              "Product evidence came from quote-service execute-summary for this run."),
+          mergeRefs(List.of("quote-service.execute-summary:product:" + productId), sourceEvidenceRefs(product.productFields(), product.versionNumber())),
+          rateRefs.isEmpty() ? List.of("MISSING_LIVE_PRICING_FIELDS") : List.of(),
+          "replay:quote-service-summary:" + runId + ":" + productId, List.of("lock"),
+          "/quote/" + runId + "/offers/" + productId + "/detail", refs));
+    }
+    nodes.add(new QuoteJourneyNode("lock", "Lock", "lock-service", "BLOCKED_MISSING_LIVE_RECORDS",
+        new JourneyFreshness("LIVE_CONTRACT_REQUIRED", "lock-service.lifecycle",
+            "Lock lifecycle records are not available through the current BFF contract."),
+        List.of(), List.of("LOCK_SERVICE_LIVE_CONTRACT_REQUIRED"), "lock-replay-unavailable", List.of(),
+        "/quote/" + runId + "/lock", refs));
+    return new QuoteJourneyMapView(tenant, runId, "LIVE_QUOTE_RECORDS_WITH_BLOCKED_LOCK",
+        "QUOTE_SERVICE_LIVE_RECORDS_AVAILABLE", nodes, List.of("Lock lifecycle remains blocked until a live lock-service BFF contract is available."),
+        List.of("quote-service.execute-summary", "quote-service.execute-product", "lock-service.lifecycle"), traceId,
+        List.of("QuoteJourneyLiveQuoteRecordsBound"), "");
+  }
+
+  static PricingWaterfallView waterfallFromLoanPassProduct(String tenantId, String runId, String traceId,
+      LoanPassProductExecutionResult product) {
+    List<CreditApplicationField> calculatedFields = safeFieldList(product == null ? null : product.calculatedFields());
+    if (calculatedFields.isEmpty()) {
+      return pricingWaterfallMissingLiveProductFields(tenantId, runId, traceId, product,
+          "Quote-service execute-product returned product "
+              + safeText(product == null ? null : product.productId(), "missing-product-id")
+              + " without calculatedFields; BFF kept pricing waterfall fail-closed.");
+    }
+    List<WaterfallLedgerRow> rows = new ArrayList<>();
+    int ordinal = 1;
+    for (CreditApplicationField field : calculatedFields) {
+      String fieldId = safeText(field.fieldId(), "calculated-field-" + ordinal);
+      String value = fieldValueText(field);
+      if (value.isBlank()) continue;
       rows.add(new WaterfallLedgerRow(ordinal++, fieldId, new RedactedWaterfallValue(value, false, null),
           "QUOTE_SERVICE_CALCULATED_FIELD", new RedactedWaterfallValue(value, false, null),
           "quote-service.calculatedFields." + fieldId, fieldId, null));
     }
-    RedactedWaterfallValue noteRate = new RedactedWaterfallValue(fieldValue(product.calculatedFields(), List.of("rate", "noteRate")), false, null);
-    RedactedWaterfallValue price = new RedactedWaterfallValue(fieldValue(product.calculatedFields(), List.of("price")), false, null);
+    if (rows.isEmpty()) {
+      return pricingWaterfallMissingLiveProductFields(tenantId, runId, traceId, product,
+          "Quote-service execute-product returned product "
+              + safeText(product == null ? null : product.productId(), "missing-product-id")
+              + " with sparse calculatedFields but no usable field values; BFF kept pricing waterfall fail-closed.");
+    }
+    RedactedWaterfallValue noteRate = new RedactedWaterfallValue(fieldValue(calculatedFields, List.of("rate", "noteRate")), false, null);
+    RedactedWaterfallValue price = new RedactedWaterfallValue(fieldValue(calculatedFields, List.of("price")), false, null);
     return new PricingWaterfallView(tenantId, runId, "QUOTE_SERVICE_LOANPASS_PRODUCT_VISIBLE", true,
         statusText(product.metadata(), "source", "quote-service.execute-product"),
         new WaterfallBaseSelection("quote-service-product:" + product.productId(),
             statusText(product.metadata(), "versionNumber", safeText(product.versionNumber(), "version-unavailable")), noteRate, price,
             rows.stream().map(WaterfallLedgerRow::step).toList()),
         new WaterfallFinalPrice("quote-service-product:" + product.productId(), price, rows,
-            fieldRefs(product.calculatedFields(), List.of("adjustment")), fieldRefs(product.calculatedFields(), List.of("round"))),
+            fieldRefs(calculatedFields, List.of("adjustment")), fieldRefs(calculatedFields, List.of("round"))),
         List.of(), metadataStrings(product.metadata(), "metadataRefs"), List.of("audit:quote-service-product:" + product.productId()),
         "replay:quote-service-product:" + product.productId(), "version-graph:quote-service-product:" + product.productId(),
         "result:quote-service-product:" + product.productId(), "evidence:quote-service-product:" + product.productId(),
@@ -1091,10 +1154,61 @@ class PricingBffUiFallbackAdapter {
   }
 
   private static List<String> fieldRefs(List<CreditApplicationField> fields, List<String> keywords) {
+    if (fields == null || keywords == null || keywords.isEmpty()) return List.of();
     return fields.stream()
+        .filter(field -> field != null)
         .map(field -> safeText(field.fieldId(), ""))
         .filter(fieldId -> keywords.stream().anyMatch(keyword -> fieldId.toLowerCase(Locale.ROOT).contains(keyword.toLowerCase(Locale.ROOT))))
         .toList();
+  }
+
+  private static List<String> fieldRefsWithUsableValues(List<CreditApplicationField> fields, List<String> keywords) {
+    if (fields == null || keywords == null || keywords.isEmpty()) return List.of();
+    return fields.stream()
+        .filter(field -> field != null)
+        .filter(field -> !fieldValueText(field).isBlank())
+        .map(field -> safeText(field.fieldId(), ""))
+        .filter(fieldId -> keywords.stream().anyMatch(keyword -> fieldId.toLowerCase(Locale.ROOT).contains(keyword.toLowerCase(Locale.ROOT))))
+        .toList();
+  }
+
+  private static List<LoanPassExecutionProductSummary> liveProducts(List<LoanPassExecutionProductSummary> products) {
+    if (products == null) return List.of();
+    return products.stream().filter(product -> product != null).toList();
+  }
+
+  private static List<CreditApplicationField> safeFieldList(List<CreditApplicationField> fields) {
+    if (fields == null) return List.of();
+    return fields.stream().filter(field -> field != null).toList();
+  }
+
+  private static WaterfallProductSelection selectWaterfallProduct(List<LoanPassExecutionProductSummary> products,
+      String selectedOfferId) {
+    String selected = selectedOfferId == null ? "" : selectedOfferId.trim();
+    if (products.size() == 1 && selected.isBlank()) {
+      return WaterfallProductSelection.selected(products.get(0));
+    }
+    if (selected.isBlank()) {
+      return WaterfallProductSelection.blocked("AMBIGUOUS_PRODUCT_SELECTION",
+          "Quote-service summary returned " + products.size()
+              + " products but no selectedOfferId/product evidence was supplied; BFF did not choose the first product.",
+          "quote-service.execute-summary:products");
+    }
+    return products.stream()
+        .filter(product -> selectedMatchesProduct(product, selected))
+        .findFirst()
+        .map(WaterfallProductSelection::selected)
+        .orElseGet(() -> WaterfallProductSelection.blocked("SELECTED_PRODUCT_NOT_FOUND",
+            "Selected offer/product " + selected
+                + " was not present in quote-service execute-summary; BFF kept pricing waterfall fail-closed.",
+            "selected-offer:" + selected));
+  }
+
+  private static boolean selectedMatchesProduct(LoanPassExecutionProductSummary product, String selected) {
+    if (product == null || selected == null || selected.isBlank()) return false;
+    return selected.equals(product.productId())
+        || selected.equals(product.productCode())
+        || selected.equals(product.productName());
   }
 
   private static int loanHouseOfferSortBucket(LoanPassExecutionProductSummary product) {
@@ -1110,6 +1224,7 @@ class PricingBffUiFallbackAdapter {
     List<String> refs = new ArrayList<>();
     if (versionNumber != null && !versionNumber.isBlank()) refs.add("schemaVersion:" + versionNumber);
     for (CreditApplicationField field : fields == null ? List.<CreditApplicationField>of() : fields) {
+      if (field == null) continue;
       if (!safeText(field.fieldId(), "").toLowerCase(Locale.ROOT).contains("source-refs")) continue;
       Object value = field.value() == null ? null : field.value().value();
       if (value instanceof Map<?, ?> map) {
@@ -1148,7 +1263,9 @@ class PricingBffUiFallbackAdapter {
   }
 
   private static String fieldValue(List<CreditApplicationField> fields, List<String> keywords) {
+    if (fields == null || keywords == null || keywords.isEmpty()) return null;
     return fields.stream()
+        .filter(field -> field != null)
         .filter(field -> keywords.stream().anyMatch(keyword -> safeText(field.fieldId(), "").toLowerCase(Locale.ROOT).contains(keyword.toLowerCase(Locale.ROOT))))
         .map(PricingBffUiFallbackAdapter::fieldValueText)
         .filter(value -> !value.isBlank())
@@ -1200,6 +1317,17 @@ class PricingBffUiFallbackAdapter {
     return "";
   }
 
+  private record WaterfallProductSelection(LoanPassExecutionProductSummary product, String blockerCode,
+      String blockedReason, String evidenceRef) {
+    static WaterfallProductSelection selected(LoanPassExecutionProductSummary product) {
+      return new WaterfallProductSelection(product, null, null, null);
+    }
+
+    static WaterfallProductSelection blocked(String blockerCode, String reason, String evidenceRef) {
+      return new WaterfallProductSelection(null, blockerCode, reason, evidenceRef);
+    }
+  }
+
   EligibilityModuleView eligibilityModule(String runId, String quoteOptionId, String uiTraceId) {
     String traceId = normalizeTrace(uiTraceId);
     String optionId = quoteOptionId == null || quoteOptionId.isBlank() ? "quote-option-contract-required" : quoteOptionId;
@@ -1248,6 +1376,19 @@ class PricingBffUiFallbackAdapter {
     return LockWorkflowView.ready(runId, selectedOfferId, normalizeTrace(uiTraceId));
   }
 
+  LockManagementView lockManagement(String tenantId, String uiTraceId) {
+    return lockManagementClient.lockManagement(normalizeTenant(tenantId), uiTraceId);
+  }
+
+  ResponseEntity<LockManagementDetailResult> lockManagementDetail(String tenantId, String lockId, String uiTraceId) {
+    return lockManagementClient.lockDetail(normalizeTenant(tenantId), lockId, uiTraceId);
+  }
+
+  ResponseEntity<LockManagementActionResult> requestLockManagementAction(String tenantId, String lockId, String action,
+      String uiTraceId) {
+    return lockManagementClient.requestLockManagementAction(normalizeTenant(tenantId), lockId, action, uiTraceId);
+  }
+
   @PostMapping("/api/v1/tenants/{tenantId}/quote-runs/{runId}/lock/confirm")
   ResponseEntity<LockConfirmationResult> confirmLock(@PathVariable String runId,
       @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId,
@@ -1256,9 +1397,8 @@ class PricingBffUiFallbackAdapter {
     if (request == null || request.selectedOfferId() == null || request.selectedOfferId().isBlank()) {
       return ResponseEntity.badRequest().body(LockConfirmationResult.blocked(runId, traceId));
     }
-    if (request.selectedOfferId().toLowerCase(Locale.ROOT).contains("conflict")) {
-      return ResponseEntity.status(HttpStatus.CONFLICT)
-          .body(LockConfirmationResult.conflict(runId, request.selectedOfferId(), traceId));
+    if (!request.disclosuresAccepted()) {
+      return ResponseEntity.badRequest().body(LockConfirmationResult.disclosuresRequired(runId, request.selectedOfferId(), traceId));
     }
     return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
         .body(LockConfirmationResult.failClosed(runId, request.selectedOfferId(), traceId));
@@ -1270,11 +1410,10 @@ class PricingBffUiFallbackAdapter {
       @RequestHeader(value = "X-Tenant-Context", required = false) String tenantContext,
       @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
     String normalizedStatus = normalized(status).toUpperCase(Locale.ROOT);
-    List<PartnerQuoteSummary> quotes = partnerQuoteFallbacks().stream()
-        .filter(quote -> normalizedStatus.isBlank() || quote.status().equalsIgnoreCase(normalizedStatus))
-        .toList();
-    return new PartnerQuoteListView(partnerId, normalizeTenant(tenantContext), normalizedStatus, quotes,
-        normalizePartnerTrace(uiTraceId), List.of("PartnerQuoteLoaded"));
+    return new PartnerQuoteListView(partnerId, normalizeTenant(tenantContext), normalizedStatus, List.of(),
+        "PARTNER_QUOTE_LIFECYCLE_CONTRACT_REQUIRED",
+        List.of("Partner quote lifecycle records require a configured partner/integration service contract; pricing-bff did not return fallback quotes."),
+        normalizePartnerTrace(uiTraceId), List.of("PartnerQuoteLiveContractBlocked"));
   }
 
   @GetMapping("/api/v1/partners/{partnerId}/quotes/{quoteId}")
@@ -1283,15 +1422,13 @@ class PricingBffUiFallbackAdapter {
       @RequestHeader(value = "X-Partner-Role", required = false) String partnerRole,
       @RequestHeader(value = "X-Tenant-Context", required = false) String tenantContext,
       @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
-    PartnerQuoteSummary summary = partnerQuoteFallbacks().stream()
-        .filter(quote -> quote.quoteId().equals(quoteId))
-        .findFirst()
-        .orElseGet(() -> PartnerQuoteSummary.blocked(quoteId));
     boolean hasRoleContext = partnerRole != null && !partnerRole.isBlank();
     PartnerQuoteAction reprice = partnerRepriceAction(hasRoleContext, apiPermit);
-    return new PartnerQuoteDetail(summary.quoteId(), summary.borrowerLabel(), summary.status(), summary.slaState(),
-        summary.lockState(), summary.errorFlags(), normalizeTenant(tenantContext), partnerId,
-        List.of("PartnerQuoteLoaded"), Map.of("reprice", reprice), normalizePartnerTrace(uiTraceId));
+    return new PartnerQuoteDetail(quoteId, "Borrower context unavailable", "BLOCKED", "PARTNER_SLA_CONTRACT_REQUIRED",
+        "LOCK_STATE_CONTRACT_REQUIRED", List.of("PARTNER_QUOTE_LIFECYCLE_CONTRACT_REQUIRED"),
+        normalizeTenant(tenantContext), partnerId, "PARTNER_QUOTE_LIFECYCLE_CONTRACT_REQUIRED",
+        List.of("Configured partner quote lifecycle/integration records are required before quote detail can be shown."),
+        List.of("PartnerQuoteLiveContractBlocked"), Map.of("reprice", reprice), normalizePartnerTrace(uiTraceId));
   }
 
   @PostMapping("/api/v1/partners/{partnerId}/quotes/{quoteId}/reprice")
@@ -1301,11 +1438,7 @@ class PricingBffUiFallbackAdapter {
       @RequestHeader(value = "X-Ui-Trace-Id", required = false) String uiTraceId) {
     boolean hasRoleContext = partnerRole != null && !partnerRole.isBlank();
     PartnerQuoteAction action = partnerRepriceAction(hasRoleContext, apiPermit);
-    if (!action.permitted()) {
-      return ResponseEntity.status(HttpStatus.FORBIDDEN).body(PartnerRepriceResult.blocked(quoteId, action,
-          normalizePartnerTrace(uiTraceId)));
-    }
-    return ResponseEntity.status(HttpStatus.ACCEPTED).body(PartnerRepriceResult.accepted(quoteId,
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(PartnerRepriceResult.blocked(quoteId, action,
         normalizePartnerTrace(uiTraceId)));
   }
 
@@ -1318,20 +1451,20 @@ class PricingBffUiFallbackAdapter {
 
   RateFeedOperationsView rateFeedOperations(String tenantContext, String uiTraceId) {
     String traceId = uiTraceId == null || uiTraceId.isBlank() ? "rf-s03-local-trace" : uiTraceId;
-    return new RateFeedOperationsView(normalizeTenant(tenantContext), "RATE_FEED_SERVICE_CONTRACT_NOT_CONFIGURED",
+    return new RateFeedOperationsView(normalizeTenant(tenantContext), "RATE_FEED_SERVICE_UI_PROXY_AVAILABLE",
         List.of(
-            new RateFeedWorkflowStep("upload", "Upload received", "UPLOAD_READY", "rate-feed-service upload sessions and import endpoints", "batchId-required", "raw-file-ref-required"),
-            new RateFeedWorkflowStep("parse", "Parse and normalize", "PARSE_AND_NORMALIZE_VISIBLE", "rate-feed-service parse-results and normalized-entries endpoints", "parse-job-ref-required", "parse-result-hash-required"),
-            new RateFeedWorkflowStep("validate", "Validation review", "VALIDATION_BLOCKERS_VISIBLE", "rate-feed-service validation-report endpoint", "validation-job-ref-required", "validation-result-hash-required"),
-            new RateFeedWorkflowStep("activate", "Activate or reject", "ACTION_BLOCKED_UNTIL_CONFIGURED_SERVICE", "rate-feed-service publish, rollback, activate, and reject endpoints", "approval-ref-required", "activation-audit-ref-required"),
-            new RateFeedWorkflowStep("replay", "Replay and cache evidence", "EVIDENCE_BLOCKED_UNTIL_CONFIGURED_SERVICE", "rate-feed-service replay and cache-invalidation endpoints", "replay-hash-required", "cache-invalidation-command-required")),
+            new RateFeedWorkflowStep("upload", "Upload received", "UPLOAD_READY", "pricing-bff /api/v1/tenants/{tenantId}/rate-sheets/uploads proxy to rate-feed-service", "rate-sheet-upload-proxy", "raw-file-ref-from-browser"),
+            new RateFeedWorkflowStep("parse", "Parse and normalize", "CSV_PARSE_OR_EXCEL_STRUCTURE_ANALYSIS_VISIBLE", "rate-feed-service CSV import plus mapping-wizard XLSX/XLSM analysis", "parse-or-structure-ref", "parser-or-profile-result-hash"),
+            new RateFeedWorkflowStep("validate", "Validation review", "VALIDATION_RESULT_VISIBLE", "rate-feed-service validate/grid endpoints through BFF", "validation-job-or-sheet-ref", "validation-result-hash"),
+            new RateFeedWorkflowStep("activate", "Activate or reject", "PUBLISH_PROXY_AVAILABLE_FOR_VALIDATED_CSV", "pricing-bff publish proxy to rate-feed-service activate endpoint", "approval-ref-from-user-action", "activation-audit-ref"),
+            new RateFeedWorkflowStep("replay", "Replay and cache evidence", "EVIDENCE_REFS_PRESERVED", "rate-feed-service audit/grid refs returned to UI", "replay-hash-required-when-live-replay-configured", "cache-invalidation-command-required-when-live-replay-configured")),
         List.of(
             new RateFeedGridBlocker("source-row-12", "noteRate", "BLOCKER", "SOURCE_ROW_VALIDATION_REQUIRED", "source:rate-feed-batch/row/12", "configured validation report required"),
             new RateFeedGridBlocker("source-row-19", "lockPeriod", "WARNING", "SOURCE_REFERENCE_REVIEW_REQUIRED", "source:rate-feed-batch/row/19", "operator review required before publish")),
         List.of("sheet-version-ref-required", "activation-audit-ref-required", "partner-submission-ref-required"),
         List.of("cache-invalidation-command-required", "replay-hash-required", "outbox-event-ref-required"),
-        true,
-        "Configured rate-feed-service operations contract is unavailable in this local BFF fallback; UI actions show workflow state and blockers only and do not recalculate rates.",
+        false,
+        "Rate Sheet Intake uses the BFF rate-feed proxy for CSV upload/validate/publish and XLSX/XLSM structural/profile analysis. PDF/OCR remains blocked until an approved external extractor supplies parser handoff artifacts.",
         traceId,
         List.of("RateFeedOperationsOpened"));
   }
@@ -1484,8 +1617,23 @@ class PricingBffUiFallbackAdapter {
         "INTEGRATION_SERVICE_CHANNEL_CONTRACT_NOT_CONFIGURED", partnerChannelWorkbenchTabs(),
         new PartnerServiceAccountBlockedState(true, "integration-service.partner-channel.workbench.read",
             "integration-platform-owner", "credentials-not-rendered"),
-        "Configured integration-service partner channel state is unavailable; pricing-bff exposes non-secret fallback modules, retry state, exception queue reasons, redaction state, and audit references only.",
+        "Configured integration-service partner channel state is unavailable; pricing-bff exposes non-secret live-contract-blocked modules, retry state, exception queue reasons, redaction state, and audit references only.",
         normalizePartnerTrace(uiTraceId), List.of("PartnerIntegrationWorkbenchOpened"));
+  }
+
+  PartnerIntegrationAlertsView partnerIntegrationAlerts(String partnerId, String tenantContext, String uiTraceId) {
+    return new PartnerIntegrationAlertsView(partnerId, normalizeTenant(tenantContext),
+        "PARTNER_INTEGRATION_ALERT_CONTRACT_BLOCKED", List.of(), "ALERT_RULES_CONTRACT_REQUIRED",
+        "Configured integration-service alert rules and live alert actions are unavailable; pricing-bff returns an empty fail-closed alerts view and does not synthesize partner alert records.",
+        normalizePartnerTrace(uiTraceId), List.of("PartnerIntegrationAlertsLiveContractBlocked"));
+  }
+
+  ResponseEntity<PartnerIntegrationAlertActionResult> recordPartnerIntegrationAlertAction(String alertId, String uiTraceId,
+      PartnerIntegrationAlertActionRequest request) {
+    String action = request == null || request.action() == null || request.action().isBlank() ? "UNSPECIFIED" : request.action();
+    return ResponseEntity.status(HttpStatus.CONFLICT).body(new PartnerIntegrationAlertActionResult(alertId, action,
+        "BLOCKED", "Partner integration alert actions require the configured integration-service alert contract.",
+        normalizePartnerTrace(uiTraceId), List.of("PartnerIntegrationAlertActionBlocked")));
   }
 
   @PostMapping("/api/v1/partners/{partnerId}/integrations/webhooks/{webhookId}/test")
@@ -1511,8 +1659,8 @@ class PricingBffUiFallbackAdapter {
           List.of("WebhookActionBlocked")));
     }
     return ResponseEntity.status(HttpStatus.ACCEPTED).body(new PartnerWebhookActionResult(webhookId, request.eventId(),
-        "ACCEPTED", "Webhook replay request recorded by pricing-bff fallback.",
-        "Configured upstream replay execution remains outside this UI fallback slice.", false, traceId,
+        "ACCEPTED", "Webhook replay request recorded by pricing-bff while live replay execution remains contract-blocked.",
+        "Configured upstream replay execution remains outside this live contract-blocked UI slice.", false, traceId,
         List.of("WebhookReplayRequested")));
   }
 
@@ -1527,7 +1675,7 @@ class PricingBffUiFallbackAdapter {
           "Safety toggle change requires explicit confirmation.", traceId, List.of("WebhookSafetyToggleBlocked")));
     }
     return ResponseEntity.status(HttpStatus.ACCEPTED).body(new PartnerSafetyToggleResult(webhookId, request.route(),
-        request.paused(), "VISIBLE", "Safety toggle change is visible in the BFF fallback response.", traceId,
+        request.paused(), "VISIBLE", "Safety toggle change is visible in the BFF contract-blocked response.", traceId,
         List.of("WebhookSafetyToggled")));
   }
 
@@ -1724,35 +1872,64 @@ class PricingBffUiFallbackAdapter {
   }
 
   ScenarioAnalysisWorkspaceView scenarioAnalysisWorkspace(String tenantContext, String runId, String uiTraceId) {
-    String traceId = uiTraceId == null || uiTraceId.isBlank() ? "sa-s15-local-trace" : uiTraceId;
-    List<ScenarioAnalysisBlocker> guardrailBlockers = List.of(
-        new ScenarioAnalysisBlocker("REQUIRED_FACTS_MISSING", "BLOCKER",
-            "Scenario-analysis-service requires backend fact refs before this variant can be priced or promoted.",
-            List.of("fact:fico-score-ref", "fact:ltv-ref", "fact:lock-period-ref", "fact:product-ref"),
-            "scenario-analysis-service.guardrail-policy"),
-        new ScenarioAnalysisBlocker("POLICY_DECISION_BACKEND_REQUIRED", "WARNING",
-            "Guardrail policy result is shown as backend-owned text; pricing-bff does not infer eligibility or rate impact.",
-            List.of("policy-version-ref", "audit-ref-required"), "scenario-analysis-service.guardrail-evaluate"));
+    String traceId = normalizeTrace(uiTraceId);
+    try {
+      LoanPassExecutionSummaryResponse response = quoteServiceClient.executeSummary(tenantContext, runId, traceId,
+          quoteRunContextFields(tenantContext, runId));
+      return scenarioAnalysisFromLoanPassSummary(tenantContext, runId, traceId, response);
+    } catch (PricingBffQuoteServiceLoanPassClient.QuoteServiceUnavailableException ex) {
+      return scenarioAnalysisMissingLiveRecords(tenantContext, runId, traceId, ex.getMessage());
+    }
+  }
+
+  private ScenarioAnalysisWorkspaceView scenarioAnalysisMissingLiveRecords(String tenantContext, String runId,
+      String traceId, String reason) {
+    ScenarioAnalysisBlocker blocker = new ScenarioAnalysisBlocker("MISSING_LIVE_PRICING_RECORDS", "BLOCKER",
+        reason, List.of("quote-service.execute-summary", "runId:" + safeText(runId, "missing-run-id")),
+        "quote-service.execute-summary");
     return new ScenarioAnalysisWorkspaceView(normalizeTenant(tenantContext), runId,
-        "SCENARIO_ANALYSIS_SERVICE_CONTRACT_NOT_CONFIGURED",
-        List.of(
-            new ScenarioAnalysisDimension("fico", "FICO sensitivity", "backend-current-fico-ref", "scenario-analysis-service.fico-sensitivity", List.of("fact:fico-score-ref", "sourceQuoteVersion"), true),
-            new ScenarioAnalysisDimension("ltv", "LTV sensitivity", "backend-current-ltv-ref", "scenario-analysis-service.ltv-sensitivity", List.of("fact:property-value-ref", "fact:loan-amount-ref"), true),
-            new ScenarioAnalysisDimension("lockPeriod", "Lock period sensitivity", "backend-current-lock-period-ref", "scenario-analysis-service.lock-period-comparison", List.of("fact:lock-period-ref", "fact:lock-start-date-ref"), true),
-            new ScenarioAnalysisDimension("product", "Product sensitivity", "backend-product-comparison-ref", "scenario-analysis-service.product-comparison", List.of("fact:product-ref", "fact:investor-ref"), true)),
-        List.of(
-            new ScenarioAnalysisVariant("variant-base", "Backend baseline variant", "VISIBLE", List.of("fico", "ltv", "lockPeriod"), List.of("fact:source-quote-version", "fact:fico-score-ref", "fact:ltv-ref"), List.of(), List.of("analysis-result-ref:base")),
-            new ScenarioAnalysisVariant("variant-guardrail-blocked", "Guardrail blocked variant", "BLOCKED", List.of("fico", "ltv", "product"), List.of("fact:fico-score-ref", "fact:ltv-ref", "fact:product-ref"), guardrailBlockers, List.of("analysis-result-ref:blocker-details"))),
-        List.of(
-            new ScenarioAnalysisBatchRow("row-001", "variant-base", "fico + ltv + lockPeriod", "VISIBLE", "batch-result-ref:row-001", "no open guardrail blockers"),
-            new ScenarioAnalysisBatchRow("row-002", "variant-guardrail-blocked", "fico + ltv + product", "BLOCKED", "batch-result-ref:row-002", "REQUIRED_FACTS_MISSING")),
-        List.of(new ScenarioAnalysisSavedAnalysis("analysis-saved-required", "Saved FICO/LTV sensitivity", "analysis-version-ref-required", "timestamp-supplied-by-scenario-analysis-service", "export-ref-required", "replay-hash-required")),
-        List.of("export-ref-required", "what-if-export-manifest-required"),
-        List.of("replay-hash-required", "input-bundle-ref-required", "policy-snapshot-ref-required"),
-        guardrailBlockers,
-        "Configured scenario-analysis-service workspace contract is unavailable in this local BFF fallback; response carries backend-owned refs, blockers, export refs, replay refs, and required facts only.",
-        traceId,
-        List.of("ScenarioAnalysisWorkspaceOpened", "ScenarioAnalysisBackendRefsVisible"));
+        "QUOTE_SERVICE_LIVE_PRICING_RECORDS_REQUIRED", List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
+        List.of(blocker), reason, traceId, List.of("ScenarioAnalysisLiveRecordsMissing"));
+  }
+
+  private ScenarioAnalysisWorkspaceView scenarioAnalysisFromLoanPassSummary(String tenantContext, String runId,
+      String traceId, LoanPassExecutionSummaryResponse response) {
+    List<LoanPassExecutionProductSummary> products = liveProducts(response == null ? List.of() : response.products());
+    if (products.isEmpty()) {
+      return scenarioAnalysisMissingLiveRecords(tenantContext, runId, traceId,
+          "Quote-service LoanPass execute-summary returned no products for this run; BFF did not synthesize scenario-analysis variants.");
+    }
+    List<ScenarioAnalysisDimension> dimensions = List.of(
+        new ScenarioAnalysisDimension("quoteProduct", "Quote-service product evidence", "live-product-count:" + products.size(),
+            "quote-service.execute-summary", List.of("quote-service.execute-summary", "runId:" + runId), true),
+        new ScenarioAnalysisDimension("pricingFields", "Quote-service pricing fields", "live-calculated-fields",
+            "quote-service.calculatedFields", List.of("quote-service.calculatedFields"), true));
+    List<ScenarioAnalysisVariant> variants = new ArrayList<>();
+    List<ScenarioAnalysisBatchRow> rows = new ArrayList<>();
+    for (int i = 0; i < products.size(); i++) {
+      LoanPassExecutionProductSummary product = products.get(i);
+      String productId = safeText(product.productId(), "product-" + (i + 1));
+      List<CreditApplicationField> calculatedFields = safeFieldList(product.calculatedFields());
+      List<String> rates = fieldRefsWithUsableValues(calculatedFields, List.of("rate", "price", "payment", "apr"));
+      List<ScenarioAnalysisBlocker> blockers = rates.isEmpty()
+          ? List.of(new ScenarioAnalysisBlocker("MISSING_LIVE_PRICE_FIELDS", "BLOCKER",
+              "Quote-service summary returned the product without pricing/rate calculated fields.",
+              List.of("quote-service.calculatedFields", "product:" + productId), "quote-service.execute-summary"))
+          : List.of();
+      String variantId = "quote-product-" + productId;
+      variants.add(new ScenarioAnalysisVariant(variantId, firstNonBlank(product.productName(), product.productCode(), productId),
+          blockers.isEmpty() ? "LIVE_RECORDS_AVAILABLE" : "BLOCKED", List.of("quoteProduct", "pricingFields"),
+          mergeRefs(List.of("quote-service.execute-summary:product:" + productId), sourceEvidenceRefs(safeFieldList(product.productFields()), product.versionNumber())),
+          blockers, rates));
+      rows.add(new ScenarioAnalysisBatchRow("row-" + (i + 1), variantId, "quote-service product evidence",
+          blockers.isEmpty() ? "LIVE_RECORDS_AVAILABLE" : "BLOCKED", "quote-service.execute-summary:product:" + productId,
+          blockers.isEmpty() ? "live quote-service fields available" : "MISSING_LIVE_PRICE_FIELDS"));
+    }
+    return new ScenarioAnalysisWorkspaceView(normalizeTenant(tenantContext), runId,
+        "QUOTE_SERVICE_LIVE_RECORDS_AVAILABLE", dimensions, variants, rows, List.of(),
+        List.of("quote-service.execute-summary"), List.of("replay:quote-service-summary:" + runId),
+        variants.stream().flatMap(variant -> variant.guardrailBlockers().stream()).toList(), "", traceId,
+        List.of("ScenarioAnalysisLiveQuoteRecordsBound"));
   }
 
   ResponseEntity<ScenarioRecalculationResult> scenarioAnalysisRecalculate(String tenantContext, String runId,
@@ -1915,14 +2092,6 @@ class PricingBffUiFallbackAdapter {
         List.of("MlAdvisoryInsightsOpened", "MlAdvisoryGovernanceGroupedByModelVersion"));
   }
 
-  private List<PartnerQuoteSummary> partnerQuoteFallbacks() {
-    return List.of(
-        new PartnerQuoteSummary("quote-active", "Borrower context available", "ACTIVE",
-            "Awaiting configured SLA contract", "LOCK_NOT_REQUESTED", List.of()),
-        new PartnerQuoteSummary("quote-blocked", "Borrower context redacted", "BLOCKED",
-            "Awaiting configured SLA contract", "LOCK_BLOCKED", List.of("UPSTREAM_PARTNER_CONTRACT_NOT_CONFIGURED")));
-  }
-
   private List<OpsCaseSummary> opsCaseFallbacks() {
     return List.of(
         new OpsCaseSummary("ops-lock-blocked", "CRITICAL", "Age supplied by configured ops-case API", "SLA contract required",
@@ -2004,20 +2173,15 @@ class PricingBffUiFallbackAdapter {
   }
 
   private PartnerQuoteAction partnerRepriceAction(boolean hasRoleContext, boolean apiPermit) {
-    boolean permitted = hasRoleContext && apiPermit;
-    if (permitted) {
-      return new PartnerQuoteAction(true, true, "API permit is true and partner role context is present.",
-          "/partners/support/reprice");
-    }
-    return new PartnerQuoteAction(false, false,
-        "Reprice requires partner role context and an explicit API permit from the configured partner quote contract.",
+    return new PartnerQuoteAction(hasRoleContext && apiPermit, false,
+        "Reprice requires partner role context, explicit API permit, and a configured partner quote lifecycle contract; pricing-bff will not record live-contract-blocked reprice requests.",
         "/partners/support/reprice");
   }
 
   private List<PartnerWebhookDeliveryAttempt> partnerWebhookAttempts() {
     return List.of(
         new PartnerWebhookDeliveryAttempt("webhook-pricing-updates", "event-quote-active", "/partners/quotes",
-            "DELIVERED", "NONE", "2026-06-08T07:15:00Z", "No failure recorded in fallback sample.",
+            "DELIVERED", "NONE", "2026-06-08T07:15:00Z", "No failure recorded in the configured contract-blocked view.",
             "CONFIRMED_REQUIRED_FOR_REPLAY", "MASKING_INDICATOR_PRESENT", "CONSENT_INDICATOR_PRESENT"),
         new PartnerWebhookDeliveryAttempt("webhook-pricing-updates", "event-quote-blocked", "/partners/quotes",
             "FAILED", "UPSTREAM_PARTNER_CONTRACT_NOT_CONFIGURED", "2026-06-08T07:15:00Z",
@@ -2032,16 +2196,16 @@ class PricingBffUiFallbackAdapter {
   private List<PartnerSafetyToggle> partnerSafetyToggles() {
     return List.of(
         new PartnerSafetyToggle("webhook-pricing-updates", "/partners/quotes", false,
-            "Auto-emit is enabled in the visible BFF fallback state."),
+            "Auto-emit is enabled in the visible BFF contract-blocked state."),
         new PartnerSafetyToggle("webhook-lock-alerts", "/partners/alerts", true,
-            "Auto-emit is paused for this route in the visible BFF fallback state."));
+            "Auto-emit is paused for this route in the visible BFF contract-blocked state."));
   }
 
   private List<PartnerChannelWorkbenchTab> partnerChannelWorkbenchTabs() {
     return List.of(
         partnerChannelTab("quote-requests", "Quote requests", "/partners/integrations/quote-requests",
             "QUOTE_REQUESTS_VISIBLE_WITH_CONTRACT_BLOCKERS", "partner-operations-owner",
-            partnerChannelItem("quote-request-fallback", "Quote request intake setup", "READY_FALLBACK",
+            partnerChannelItem("quote-request-contract-blocked", "Quote request intake setup", "READY_CONTRACT_BLOCKED",
                 "manual-review-required", "none", "payload-redacted", List.of("audit:partner-quote-request-required"))),
         partnerChannelTab("webhook-delivery", "Webhook delivery", "/partners/integrations/webhook-delivery",
             "WEBHOOK_DELIVERY_VISIBLE_WITH_RETRY_STATE", "integration-platform-owner",
@@ -2971,34 +3135,6 @@ class PricingBffUiFallbackAdapter {
           warnings, List.of("quote-service.execute-summary"), traceId, List.of("QuoteServiceSummaryBound"));
     }
 
-    static OfferComparisonView contractVisible(String runId, String traceId) {
-      return new OfferComparisonView(runId, "QUOTE_SERVICE_EVIDENCE_VISIBLE", List.of(
-          new OfferSummary("quote-option-contract-required", 1, "Backend-ranked offer", "Backend-ranked offer", null,
-              null, null, "payment-ref-required", "apr-ref-required", "score:backend-owned", "rank-score-ref-required",
-              null, "Backend-owned refs", List.of("quote-service.ranking"),
-              List.of("Rank 1 from quote-service ranking response", "Policy and version refs are displayed without UI-side pricing math"),
-              List.of("LOCK_PERIOD_REQUIRED", "FILTER_FACTS_PENDING"), "AVAILABLE", "scenario-ref-required", 7,
-              List.of("eligibility-service:decision-ref-required", "pricing-service:waterfall-ref-required"),
-              List.of("lock-eligibility:pending:quote-option-contract-required"),
-              List.of("snapshot:quote-service:run:" + runId),
-              List.of("audit:quote-ready-required", "replay-hash-required"),
-              List.of("ranking", "comparison", "detail"), List.of(), List.of(), List.of(), List.of()),
-          new OfferSummary("quote-option-backup-contract", 2, "Alternate backend-ranked offer", "Backend-ranked offer", null,
-              null, null, "payment-ref-required", "apr-ref-required", "score:backend-owned", "rank-score-ref-required-secondary",
-              null, "Backend-owned refs", List.of("quote-service.ranking"),
-              List.of("Rank 2 remains selectable only when configured selection policy permits it"),
-              List.of("NON_TOP_RANK_REASON_REQUIRED"), "AVAILABLE", "scenario-ref-required", 7,
-              List.of("eligibility-service:alternate-decision-ref-required"),
-              List.of("lock-eligibility:pending:quote-option-backup-contract"),
-              List.of("snapshot:quote-service:run:" + runId),
-              List.of("audit:quote-ready-required", "audit:alternate-option-required"),
-              List.of("ranking", "comparison", "detail"), List.of(), List.of(), List.of(), List.of())),
-          List.of("rank", "score", "confidence"), null, false,
-          "Quote-service offer evidence is represented with backend-owned refs; UI actions stay blocked only when required facts are missing.",
-          List.of("requestedLockPeriods", "scenarioVersion", "filterFacts"),
-          List.of("quote-service.ranking", "quote-service.explanation", "quote-service.selection"), traceId,
-          List.of("OfferListRendered", "QuoteServiceEvidenceBound"));
-    }
   }
 
   record OfferSummary(String offerId, int rank, String productLabel, String productFamily, String investor,
@@ -3184,23 +3320,28 @@ class PricingBffUiFallbackAdapter {
     }
 
     static LockWorkflowView ready(String runId, String selectedOfferId, String traceId) {
-      return new LockWorkflowView(runId, selectedOfferId, "READY", false, List.of(), List.of(),
-          "Confirming records the selected offer for lock workflow tracking. Final lock eligibility remains owned by the configured lock-service contract.",
-          "Confirm lock request", traceId, List.of("LockAttempted"), "UPSTREAM_LOCK_CONTRACT_NOT_CONFIGURED",
+      return new LockWorkflowView(runId, selectedOfferId, "BLOCKED_LIVE_CONTRACT_REQUIRED", true,
+          List.of("Lock-service live lifecycle contract is required before lock submission can be enabled."),
+          List.of(new LockBlockerView("LOCK_SERVICE_LIVE_CONTRACT_REQUIRED",
+              "The UI BFF has selected-offer context but no live lock-service lifecycle/read-write contract for this route.",
+              "Wire a lock-service BFF client that accepts quote run, selected offer, idempotency, freshness, policy, and audit refs.")),
+          "No lock terms are confirmed or previewed from BFF-local state.",
+          "Connect live lock-service lifecycle contract before enabling lock actions.", traceId,
+          List.of("LockLiveContractBlocked"), "LOCK_SERVICE_LIVE_CONTRACT_REQUIRED",
           List.of("quote-run:" + runId, "selected-offer:" + selectedOfferId,
               "lock-eligibility:pending:" + selectedOfferId, "audit:quote-selection-required"),
           List.of(
-              new LockLifecycleCheck("Quote freshness", "PENDING_CONFIGURED_SERVICE", "lock-service:freshness-check",
+              new LockLifecycleCheck("Quote freshness", "BLOCKED_LIVE_CONTRACT_REQUIRED", "lock-service:freshness-check",
                   "Lock-service must return the authoritative freshness decision before live submission."),
               new LockLifecycleCheck("Scenario and pricing hashes", "VISIBLE", "quote-service:selected-offer-snapshot",
                   "Compare backend hashes; the UI does not override mismatches.")),
           List.of("selected-offer-ref", "lock-eligibility-ref", "freshness-check-id", "rate-sheet-version-ref",
               "scenario-hash", "pricing-result-hash"),
           List.of(
-              new LockStateTransition("OFFER_SELECTED", "READY_FOR_LOCK_REQUEST", "lock.lifecycle.ready." + selectedOfferId,
-                  "VISIBLE"),
-              new LockStateTransition("READY_FOR_LOCK_REQUEST", "SUBMISSION_PENDING_BACKEND", "lock.lifecycle.submit." + selectedOfferId,
-                  "PENDING_CONFIGURED_SERVICE")),
+              new LockStateTransition("OFFER_SELECTED", "BLOCKED_LIVE_CONTRACT_REQUIRED", "lock.lifecycle.blocked.contract-required." + selectedOfferId,
+                  "BLOCKED_LIVE_CONTRACT_REQUIRED"),
+              new LockStateTransition("BLOCKED_LIVE_CONTRACT_REQUIRED", "BLOCKED_LIVE_CONTRACT_REQUIRED", "lock.lifecycle.submit.blocked." + selectedOfferId,
+                  "LOCK_SERVICE_LIVE_CONTRACT_REQUIRED")),
           lifecycleAuditGroups(runId, selectedOfferId));
     }
   }
@@ -3236,53 +3377,71 @@ class PricingBffUiFallbackAdapter {
           List.of("Select an offer before confirming lock."), lifecycleAuditGroups(runId, "blocked-confirm"));
     }
 
-    static LockConfirmationResult conflict(String runId, String selectedOfferId, String traceId) {
-      return new LockConfirmationResult(runId, selectedOfferId, "CONFLICT", null, null, null, null,
-          "Lock conflict returned by BFF fallback: refresh status or choose another offer without losing context.", traceId,
-          List.of("LockBlocked"), List.of("A competing lock context exists for the selected offer."),
-          lifecycleAuditGroups(runId, "conflict-" + selectedOfferId));
+    static LockConfirmationResult disclosuresRequired(String runId, String selectedOfferId, String traceId) {
+      return new LockConfirmationResult(runId, selectedOfferId, "BLOCKED", null, null, null, null,
+          "Lock confirmation requires accepted disclosures before a live lock-service request can be considered.", traceId,
+          List.of("LockBlocked"), List.of("Accept disclosures before requesting a live lock."),
+          lifecycleAuditGroups(runId, "disclosures-required-" + selectedOfferId));
     }
 
     static LockConfirmationResult failClosed(String runId, String selectedOfferId, String traceId) {
       return new LockConfirmationResult(runId, selectedOfferId, "BLOCKED", null, "LOCK_SERVICE_EVIDENCE_REQUIRED",
           null, null,
-          "Lock confirmation requires durable lock-service evidence; pricing-bff does not synthesize confirmed locks.",
+          "Lock confirmation requires a live lock-service lifecycle contract; pricing-bff does not synthesize confirmed locks or conflict states.",
           traceId, List.of("LockBlocked"),
-          List.of("Durable lock-service confirmation evidence is required before returning CONFIRMED."),
+          List.of("Live lock-service request, freshness, policy, and audit evidence are required before returning CONFIRMED."),
           lifecycleAuditGroups(runId, "evidence-required-" + selectedOfferId));
     }
   }
 
+  record LockManagementRecord(String lockId, String runId, String borrowerRef, String status, String expiresAt,
+      String investorDeliveryStatus, List<String> auditRefs, List<String> blockers, List<String> availableActions,
+      Map<String, String> actionBlockers, String expiryStatus) {}
+
+  record LockManagementView(String tenantContext, String dependencyStatus, List<LockManagementRecord> locks,
+      String uiTraceId, List<String> events, List<String> blockers, boolean fakePersistence, int pendingCount,
+      int expiringCount) {}
+
+  record LockManagementDetailResult(String lockId, String status, int version, String createdAt, String expiresAt,
+      String expirationBusinessDays, String calendarConfigHash, String uiTraceId, List<String> events,
+      List<String> blockers) {}
+
+  record LockManagementActionResult(String lockId, String action, String status, String message, String auditRef,
+      List<String> blockers, String uiTraceId, List<String> events) {}
+
   record PartnerQuoteSummary(String quoteId, String borrowerLabel, String status, String slaState, String lockState,
-      List<String> errorFlags) {
-    static PartnerQuoteSummary blocked(String quoteId) {
-      return new PartnerQuoteSummary(quoteId, "Borrower context unavailable", "BLOCKED",
-          "Awaiting configured SLA contract", "LOCK_BLOCKED", List.of("PARTNER_QUOTE_NOT_FOUND_IN_FALLBACK"));
-    }
-  }
+      List<String> errorFlags) {}
 
   record PartnerQuoteAction(boolean visible, boolean permitted, String guidance, String supportHandoffRoute) {}
 
   record PartnerQuoteListView(String partnerId, String tenantContext, String statusFilter,
-      List<PartnerQuoteSummary> quotes, String uiTraceId, List<String> events) {}
+      List<PartnerQuoteSummary> quotes, String dependencyStatus, List<String> blockers, String uiTraceId,
+      List<String> events) {}
 
   record PartnerQuoteDetail(String quoteId, String borrowerLabel, String status, String slaState, String lockState,
-      List<String> errorFlags, String tenantContext, String partnerId, List<String> lifecycleEvents,
-      Map<String, PartnerQuoteAction> actions, String uiTraceId) {}
+      List<String> errorFlags, String tenantContext, String partnerId, String dependencyStatus, List<String> blockers,
+      List<String> lifecycleEvents, Map<String, PartnerQuoteAction> actions, String uiTraceId) {}
 
   record PartnerRepriceResult(String quoteId, String status, String message, String guidance, String supportHandoffRoute,
       String uiTraceId, List<String> events) {
     static PartnerRepriceResult blocked(String quoteId, PartnerQuoteAction action, String traceId) {
-      return new PartnerRepriceResult(quoteId, "BLOCKED", "Partner reprice is blocked by the BFF fallback contract.",
+      return new PartnerRepriceResult(quoteId, "BLOCKED", "Partner reprice requires a live partner quote lifecycle contract.",
           action.guidance(), action.supportHandoffRoute(), traceId, List.of("PartnerActionBlocked"));
     }
 
-    static PartnerRepriceResult accepted(String quoteId, String traceId) {
-      return new PartnerRepriceResult(quoteId, "ACCEPTED", "Partner reprice request recorded by pricing-bff fallback.",
-          "Configured upstream repricing remains outside this UI fallback slice.", "/partners/support/reprice", traceId,
-           List.of("PartnerQuoteRepriced"));
-    }
   }
+
+  record PartnerIntegrationAlert(String alertId, String severity, String alertClass, String triggerType,
+      String routeTarget, boolean acknowledged, List<String> blockers, String recoveryOwner, String actionState) {}
+
+  record PartnerIntegrationAlertsView(String partnerId, String tenantContext, String dependencyStatus,
+      List<PartnerIntegrationAlert> alerts, String rulesStatus, String fallbackReason, String uiTraceId,
+      List<String> events) {}
+
+  record PartnerIntegrationAlertActionRequest(String action) {}
+
+  record PartnerIntegrationAlertActionResult(String alertId, String action, String status, String message,
+      String uiTraceId, List<String> events) {}
 
   record OpsCaseListView(String tenantContext, List<OpsCaseSummary> cases, String uiTraceId, List<String> events) {}
 

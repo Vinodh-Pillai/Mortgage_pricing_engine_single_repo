@@ -1,0 +1,23 @@
+{
+  "manifestVersion": 1,
+  "entries": [
+    {
+      "fixtureName": "scenario-conventional-purchase-happy.json",
+      "canonicalInputHash": "sha256:ba6c7d7ade68184d4b1ac23a878241bb0e0faf3b36fd2a7fc245a5020af10001",
+      "configVersionGraphHash": "sha256:2ca364b5cb375c1b7b5f77ccf0640acdc21c751acb46f0e985c1a58fbaf90001",
+      "expectedQuoteStatus": "QUOTED",
+      "expectedOptionStatuses": ["ELIGIBLE"],
+      "expectedResultHash": "sha256:9d48d1b20f0f3f4a9b6c2b6f15e40bb4aa00f8f35d6f8f6d05a348f8bb6bd001",
+      "expectedEventSequence": ["ScenarioSubmitted", "ScenarioValidated", "QuoteEligibilityRequested", "QuoteEligibilityShellCreated"]
+    },
+    {
+      "fixtureName": "scenario-investor-overlay-fail.json",
+      "canonicalInputHash": "sha256:f7c6eb4fcab52b95933f8567f3d3667b2c97d2132728a2e60df8c66b31610001",
+      "configVersionGraphHash": "sha256:2ca364b5cb375c1b7b5f77ccf0640acdc21c751acb46f0e985c1a58fbaf90001",
+      "expectedQuoteStatus": "ELIGIBILITY_ONLY",
+      "expectedOptionStatuses": ["INELIGIBLE"],
+      "expectedResultHash": "sha256:fc30c641a84ca9c9c1d71b9b4a4ab25a416f771ddadff2d73b0cb924250d0001",
+      "expectedEventSequence": ["ScenarioSubmitted", "ScenarioValidated", "QuoteEligibilityRequested", "QuoteEligibilityShellCreated"]
+    }
+  ]
+}

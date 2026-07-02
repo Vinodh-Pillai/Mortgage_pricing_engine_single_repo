@@ -5,10 +5,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import com.wcpe.ratefeed.domain.RateFeedModels.CompleteUploadRequest;
 import com.wcpe.ratefeed.domain.RateFeedModels.CompleteUploadResponse;
 import com.wcpe.ratefeed.domain.RateFeedModels.RateFeedException;
 import com.wcpe.ratefeed.domain.RateFeedModels.RatesheetUploadRequest;
 import com.wcpe.ratefeed.domain.RateFeedModels.RatesheetUploadResponse;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
@@ -48,6 +51,42 @@ class RatesheetUploadEndpointTest {
     assertThat(response.getBody().validationStatusUrl()).endsWith("/validation-report");
     verify(repository).saveSession(any(), any(), any(), eq("pricing-analyst"), eq("corr-upload"), any(), any());
     verify(repository).complete(any(), any(), any(), eq("pricing-analyst"), eq("corr-upload"), eq("upload-key:complete"));
+  }
+
+  @Test
+  void csvContentWithoutRegisteredFileReferenceUsesSessionUploadUrlForDurableParserReference() throws Exception {
+    arrangePersistence();
+    UUID batchId = UUID.fromString("00000000-0000-0000-0000-000000000311");
+    when(repository.complete(any(), any(), any(), any(), any(), any())).thenReturn(new CompleteUploadResponse(
+        batchId,
+        "UPLOADED",
+        UUID.fromString("00000000-0000-0000-0000-000000000312"),
+        UUID.fromString("00000000-0000-0000-0000-000000000313"),
+        Map.of("batch", "/api/v1/tenants/00000000-0000-0000-0000-000000000100/rate-feed-batches/" + batchId),
+        "result-hash"));
+    String csv = "product,note_rate,lock_period,price,investor,channel\n"
+        + "CONVENTIONAL,6.125,30,108.5," + investor() + "," + channel() + "\n";
+    String fileSha256 = Hashing.sha256(csv).replaceFirst("^sha256:", "");
+    RatesheetUploadRequest request = new RatesheetUploadRequest(investor(), channel(), format(), "MANUAL_UPLOAD",
+        Instant.parse("2026-06-17T12:00:00Z"), "America/New_York", "Ratesheet.csv", "text/csv",
+        csv.getBytes(java.nio.charset.StandardCharsets.UTF_8).length, null, fileSha256, null, "CLEAN",
+        null, "CONVENTIONAL", "inline csv upload", csv);
+
+    ResponseEntity<RatesheetUploadResponse> response = controller.createRatesheetUpload(tenant(), request, authorizedHttp());
+
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    assertThat(response.getBody()).isNotNull();
+    UUID uploadId = response.getBody().uploadId();
+    Path storedCsv = Path.of("build/rate-feed-upload", uploadId + ".csv");
+    try {
+      assertThat(Files.readString(storedCsv)).isEqualTo(csv);
+      var completedRequest = org.mockito.ArgumentCaptor.forClass(CompleteUploadRequest.class);
+      verify(repository).complete(any(), any(), completedRequest.capture(), eq("pricing-analyst"), eq("corr-upload"), eq("upload-key:complete"));
+      assertThat(completedRequest.getValue().storageObjectId()).isEqualTo("local://rate-feed-upload/" + uploadId);
+      assertThat(completedRequest.getValue().csvContent()).isNull();
+    } finally {
+      Files.deleteIfExists(storedCsv);
+    }
   }
 
   @Test

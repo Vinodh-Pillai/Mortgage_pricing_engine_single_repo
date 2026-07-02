@@ -1,0 +1,16 @@
+{
+  "name": "post-quotes-conventional-purchase-success.v1",
+  "method": "POST",
+  "path": "/tenants/{tenantId}/quotes",
+  "requiredHeaders": ["Authorization", "Idempotency-Key"],
+  "response": {
+    "body": {
+      "quoteOptions": [
+        {
+          "loanAmount": "synthetic-money-value",
+          "ltvRatio": "synthetic-ratio-value"
+        }
+      ]
+    }
+  }
+}

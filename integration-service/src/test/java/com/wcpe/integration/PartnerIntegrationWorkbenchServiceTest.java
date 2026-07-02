@@ -95,6 +95,21 @@ class PartnerIntegrationWorkbenchServiceTest {
   }
 
   @Test
+  void repriceBlocksWhenPartnerQuoteDependencyUnavailableThroughExternalId() {
+    PartnerIntegrationWorkbenchService service = service();
+    DependencyStatus partnerQuoteUnavailable = DependencyStatus.unavailable("partner-quote-service");
+    service.upsertQuote(quote(QUOTE_ID, QuoteStatus.PRICED, SlaState.BREACHED, LockState.EXPIRED, true, partnerQuoteUnavailable));
+
+    PartnerRepriceResult result = service.reprice(new RepriceCommand(PARTNER_ID, QUOTE_ID, "pricing-ops", CORRELATION_ID)).value().orElseThrow();
+
+    assertFalse(result.accepted());
+    assertEquals("DEPENDENCY_OR_POLICY_BLOCKED", result.reason());
+    assertFalse(partnerQuoteUnavailable.allAvailable());
+    assertEquals(DependencyState.UNAVAILABLE, result.metadata().dependencyStatus().statusByDependency().get(DependencyName.PARTNER_QUOTE_SERVICE.name()));
+    assertFalse(result.metadata().dependencyStatus().statusByDependency().containsKey("partner-quote-service"));
+  }
+
+  @Test
   void webhookHealthWithDLQ() {
     PartnerIntegrationWorkbenchService service = service();
     service.upsertWebhook(webhook(SafetyState.RESUMED, availableDependencies()));

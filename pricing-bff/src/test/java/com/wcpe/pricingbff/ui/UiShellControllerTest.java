@@ -4,6 +4,7 @@ import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.hasSize;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -15,6 +16,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 
 @SpringBootTest(properties = "loanweft.integrations.margin-service.base-url=")
@@ -34,6 +36,7 @@ class UiShellControllerTest {
     assertThat(context.getBean(OfferUiController.class)).isNotNull();
     assertThat(context.getBean(PartnerUiController.class)).isNotNull();
     assertThat(context.getBean(OpsUiController.class)).isNotNull();
+    assertThat(context.getBean(RateSheetIntakeProxyController.class)).isNotNull();
     assertThat(context.getBean(ComplianceUiController.class)).isNotNull();
     assertThat(context.getBean(QualityUiController.class)).isNotNull();
     assertThat(context.getBean(CustomRuleEvidenceUiController.class)).isNotNull();
@@ -60,6 +63,22 @@ class UiShellControllerTest {
     mvc.perform(get("/api/auth/me"))
         .andExpect(status().isUnauthorized())
         .andExpect(jsonPath("$.error").value("Authentication credentials are required"));
+  }
+
+  @Test
+  void userProfileAndSettingsFailClosedWithoutAccountManagementContract() throws Exception {
+    mvc.perform(get("/api/user/profile").header("Authorization", "Bearer test-token"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.status").value("BLOCKED"))
+        .andExpect(jsonPath("$.code").value("ACCOUNT_PROFILE_CONTRACT_REQUIRED"))
+        .andExpect(jsonPath("$.surface").value("profile"))
+        .andExpect(jsonPath("$.fakePersistence").value(false));
+
+    mvc.perform(get("/api/user/settings").header("Authorization", "Bearer test-token"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.code").value("ACCOUNT_SETTINGS_CONTRACT_REQUIRED"))
+        .andExpect(jsonPath("$.dependencyStatus").value("ACCOUNT_MANAGEMENT_CONTRACT_NOT_CONFIGURED"))
+        .andExpect(jsonPath("$.surface").value("settings"));
   }
 
   @Test
@@ -138,6 +157,12 @@ class UiShellControllerTest {
         .andExpect(jsonPath("$.items[?(@.id == 'ops-cases')]", hasSize(1)))
         .andExpect(jsonPath("$.items[?(@.id == 'rate-feed-ops')]", hasSize(1)))
         .andExpect(jsonPath("$.items[?(@.id == 'user-management')]", empty()));
+
+    mvc.perform(get("/api/v1/ui/menus/partner-manager"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.persona").value("partner-manager"))
+        .andExpect(jsonPath("$.items[?(@.id == 'partner-quotes')]", hasSize(1)))
+        .andExpect(jsonPath("$.items[?(@.id == 'lock-workflow')]", empty()));
 
     mvc.perform(get("/api/v1/ui/menus/not-a-role"))
         .andExpect(status().isOk())
@@ -784,16 +809,13 @@ class UiShellControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.tenantContext").value("tenant-test"))
         .andExpect(jsonPath("$.runId").value("run-test"))
-        .andExpect(jsonPath("$.dependencyStatus").value("SCENARIO_ANALYSIS_SERVICE_CONTRACT_NOT_CONFIGURED"))
-        .andExpect(jsonPath("$.dimensions", hasSize(4)))
-        .andExpect(jsonPath("$.dimensions[0].dimensionId").value("fico"))
-        .andExpect(jsonPath("$.dimensions[0].backendOnly").value(true))
-        .andExpect(jsonPath("$.variants[1].status").value("BLOCKED"))
-        .andExpect(jsonPath("$.variants[1].guardrailBlockers[0].blockerCode").value("REQUIRED_FACTS_MISSING"))
-        .andExpect(jsonPath("$.batchGrid", hasSize(2)))
-        .andExpect(jsonPath("$.savedAnalyses[0].exportRef").value("export-ref-required"))
-        .andExpect(jsonPath("$.replayRefs[0]").value("replay-hash-required"))
-        .andExpect(jsonPath("$.events[0]").value("ScenarioAnalysisWorkspaceOpened"));
+        .andExpect(jsonPath("$.dependencyStatus").value("QUOTE_SERVICE_LIVE_PRICING_RECORDS_REQUIRED"))
+        .andExpect(jsonPath("$.dimensions", empty()))
+        .andExpect(jsonPath("$.variants", empty()))
+        .andExpect(jsonPath("$.batchGrid", empty()))
+        .andExpect(jsonPath("$.blockers[0].blockerCode").value("MISSING_LIVE_PRICING_RECORDS"))
+        .andExpect(jsonPath("$.blockers[0].sourceRef").value("quote-service.execute-summary"))
+        .andExpect(jsonPath("$.events[0]").value("ScenarioAnalysisLiveRecordsMissing"));
   }
 
   @Test
@@ -1133,18 +1155,17 @@ class UiShellControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.tenantContext").value("demo-tenant"))
         .andExpect(jsonPath("$.runId").value("run-test"))
-        .andExpect(jsonPath("$.status").value("BLOCKED"))
+        .andExpect(jsonPath("$.status").value("BLOCKED_MISSING_LIVE_RECORDS"))
         .andExpect(jsonPath("$.restrictedValuesVisible").value(false))
-        .andExpect(jsonPath("$.dependencyStatus").value("PRICING_SERVICE_WATERFALL_CONTRACT_NOT_CONFIGURED"))
-        .andExpect(jsonPath("$.baseSelection.gridVersionRef").value("grid-version-ref-required"))
+        .andExpect(jsonPath("$.dependencyStatus").value("QUOTE_SERVICE_LIVE_PRICING_RECORDS_REQUIRED"))
+        .andExpect(jsonPath("$.baseSelection.gridVersionRef").value("missing-live-version"))
         .andExpect(jsonPath("$.baseSelection.selectedNoteRate.redacted").value(true))
-        .andExpect(jsonPath("$.finalPrice.ledger", hasSize(3)))
-        .andExpect(jsonPath("$.finalPrice.ledger[2].step").value("ROUND_FINAL_PRICE"))
-        .andExpect(jsonPath("$.blockers[0].code").value("PRICING_SERVICE_CONTRACT_REQUIRED"))
-        .andExpect(jsonPath("$.auditRefs[1]").value("audit:final-price-required"))
-        .andExpect(jsonPath("$.replayHash").value("replay-hash-required"))
-        .andExpect(jsonPath("$.evidenceHash").value("waterfall-evidence-hash-required"))
-        .andExpect(jsonPath("$.events[0]").value("PricingWaterfallOpened"));
+        .andExpect(jsonPath("$.finalPrice.ledger", empty()))
+        .andExpect(jsonPath("$.blockers[0].code").value("MISSING_LIVE_PRICING_RECORDS"))
+        .andExpect(jsonPath("$.auditRefs[0]").value("audit:pricing-waterfall-live-records-required"))
+        .andExpect(jsonPath("$.replayHash").value("replay-unavailable"))
+        .andExpect(jsonPath("$.evidenceHash").value("evidence-unavailable"))
+        .andExpect(jsonPath("$.events[0]").value("PricingWaterfallLiveRecordsMissing"));
   }
 
   @Test
@@ -1167,14 +1188,16 @@ class UiShellControllerTest {
             .param("selectedOfferId", "offer-1")
             .header("X-Ui-Trace-Id", "trace-brw-s04"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.status").value("READY"))
-        .andExpect(jsonPath("$.lockDisabled").value(false))
+        .andExpect(jsonPath("$.status").value("BLOCKED_LIVE_CONTRACT_REQUIRED"))
+        .andExpect(jsonPath("$.lockDisabled").value(true))
         .andExpect(jsonPath("$.selectedOfferId").value("offer-1"))
+        .andExpect(jsonPath("$.blockerDetails[0].code").value("LOCK_SERVICE_LIVE_CONTRACT_REQUIRED"))
         .andExpect(jsonPath("$.selectedQuoteRefs[1]").value("selected-offer:offer-1"))
         .andExpect(jsonPath("$.freshnessChecks[0].sourceRef").value("lock-service:freshness-check"))
-        .andExpect(jsonPath("$.stateTransitions[0].eventId").value("lock.lifecycle.ready.offer-1"))
+        .andExpect(jsonPath("$.freshnessChecks[0].status").value("BLOCKED_LIVE_CONTRACT_REQUIRED"))
+        .andExpect(jsonPath("$.stateTransitions[0].eventId").value("lock.lifecycle.blocked.contract-required.offer-1"))
         .andExpect(jsonPath("$.auditGroups[0].eventId").value("lock.confirmation.offer-1"))
-        .andExpect(jsonPath("$.events[0]").value("LockAttempted"));
+        .andExpect(jsonPath("$.events[0]").value("LockLiveContractBlocked"));
 
     mvc.perform(post("/api/v1/tenants/demo-tenant/quote-runs/run-test/lock/confirm")
             .header("X-Ui-Trace-Id", "trace-brw-s04")
@@ -1185,10 +1208,34 @@ class UiShellControllerTest {
         .andExpect(jsonPath("$.lockId").isEmpty())
         .andExpect(jsonPath("$.lockStatus").value("LOCK_SERVICE_EVIDENCE_REQUIRED"))
         .andExpect(jsonPath("$.statusRoute").isEmpty())
-        .andExpect(jsonPath("$.message").value("Lock confirmation requires durable lock-service evidence; pricing-bff does not synthesize confirmed locks."))
-        .andExpect(jsonPath("$.blockers[0]").value("Durable lock-service confirmation evidence is required before returning CONFIRMED."))
+        .andExpect(jsonPath("$.message").value("Lock confirmation requires a live lock-service lifecycle contract; pricing-bff does not synthesize confirmed locks or conflict states."))
+        .andExpect(jsonPath("$.blockers[0]").value("Live lock-service request, freshness, policy, and audit evidence are required before returning CONFIRMED."))
         .andExpect(jsonPath("$.auditGroups[0].eventId").value("lock.confirmation.evidence-required-offer-1"))
         .andExpect(jsonPath("$.events[0]").value("LockBlocked"));
+  }
+
+  @Test
+  void lockManagementRoutesExposeReadContractAndBlockUnsupportedActionsWithout404() throws Exception {
+    mvc.perform(get("/api/v1/tenants/demo-tenant/locks")
+            .header("X-Ui-Trace-Id", "trace-lock-management"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.tenantContext").value("demo-tenant"))
+        .andExpect(jsonPath("$.dependencyStatus").value("LOCK_SERVICE_BASE_URL_NOT_CONFIGURED"))
+        .andExpect(jsonPath("$.locks", empty()))
+        .andExpect(jsonPath("$.blockers[0]").value("Configure loanweft.integrations.lock-service.base-url, LOANWEFT_INTEGRATIONS_LOCK_SERVICE_BASE_URL, or LOCK_SERVICE_BASE_URL before reading lock-service records."))
+        .andExpect(jsonPath("$.fakePersistence").value(false))
+        .andExpect(jsonPath("$.pendingCount").value(0))
+        .andExpect(jsonPath("$.expiringCount").value(0))
+        .andExpect(jsonPath("$.events[0]").value("LockManagementReadBlocked"));
+
+    mvc.perform(post("/api/v1/tenants/demo-tenant/locks/lock-preview/actions/extend")
+            .header("X-Ui-Trace-Id", "trace-lock-management-action"))
+        .andExpect(status().isUnprocessableEntity())
+        .andExpect(jsonPath("$.lockId").value("lock-preview"))
+        .andExpect(jsonPath("$.action").value("extend"))
+        .andExpect(jsonPath("$.status").value("BLOCKED"))
+        .andExpect(jsonPath("$.blockers[0]").value("LOCK_EXTENSION_REQUIRED_FIELDS_NOT_SUPPLIED"))
+        .andExpect(jsonPath("$.events[0]").value("LockManagementActionDisabled"));
   }
 
   @Test
@@ -1197,10 +1244,10 @@ class UiShellControllerTest {
             .header("X-Ui-Trace-Id", "trace-brw-s04")
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"selectedOfferId\":\"conflict-offer\",\"disclosuresAccepted\":true}"))
-        .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.status").value("CONFLICT"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.status").value("BLOCKED"))
         .andExpect(jsonPath("$.selectedOfferId").value("conflict-offer"))
-        .andExpect(jsonPath("$.blockers[0]").value("A competing lock context exists for the selected offer."))
+        .andExpect(jsonPath("$.blockers[0]").value("Live lock-service request, freshness, policy, and audit evidence are required before returning CONFIRMED."))
         .andExpect(jsonPath("$.events[0]").value("LockBlocked"));
   }
 
@@ -1214,9 +1261,10 @@ class UiShellControllerTest {
         .andExpect(jsonPath("$.partnerId").value("partner-preview"))
         .andExpect(jsonPath("$.tenantContext").value("tenant-test"))
         .andExpect(jsonPath("$.statusFilter").value("BLOCKED"))
-        .andExpect(jsonPath("$.quotes", hasSize(1)))
-        .andExpect(jsonPath("$.quotes[0].quoteId").value("quote-blocked"))
-        .andExpect(jsonPath("$.events[0]").value("PartnerQuoteLoaded"));
+        .andExpect(jsonPath("$.quotes", empty()))
+        .andExpect(jsonPath("$.dependencyStatus").value("PARTNER_QUOTE_LIFECYCLE_CONTRACT_REQUIRED"))
+        .andExpect(jsonPath("$.blockers[0]").value(org.hamcrest.Matchers.containsString("did not return fallback quotes")))
+        .andExpect(jsonPath("$.events[0]").value("PartnerQuoteLiveContractBlocked"));
   }
 
   @Test
@@ -1228,9 +1276,11 @@ class UiShellControllerTest {
             .header("X-Ui-Trace-Id", "trace-ch-s02"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.tenantContext").value("tenant-test"))
+        .andExpect(jsonPath("$.status").value("BLOCKED"))
+        .andExpect(jsonPath("$.dependencyStatus").value("PARTNER_QUOTE_LIFECYCLE_CONTRACT_REQUIRED"))
         .andExpect(jsonPath("$.actions.reprice.visible").value(true))
-        .andExpect(jsonPath("$.actions.reprice.permitted").value(true))
-        .andExpect(jsonPath("$.lifecycleEvents[0]").value("PartnerQuoteLoaded"));
+        .andExpect(jsonPath("$.actions.reprice.permitted").value(false))
+        .andExpect(jsonPath("$.lifecycleEvents[0]").value("PartnerQuoteLiveContractBlocked"));
   }
 
   @Test
@@ -1239,10 +1289,10 @@ class UiShellControllerTest {
             .header("X-Ui-Trace-Id", "trace-ch-s02")
             .contentType(MediaType.APPLICATION_JSON)
             .content("{}"))
-        .andExpect(status().isForbidden())
+        .andExpect(status().isServiceUnavailable())
         .andExpect(jsonPath("$.status").value("BLOCKED"))
         .andExpect(jsonPath("$.guidance")
-            .value("Reprice requires partner role context and an explicit API permit from the configured partner quote contract."))
+            .value("Reprice requires partner role context, explicit API permit, and a configured partner quote lifecycle contract; pricing-bff will not record live-contract-blocked reprice requests."))
         .andExpect(jsonPath("$.supportHandoffRoute").value("/partners/support/reprice"))
         .andExpect(jsonPath("$.events[0]").value("PartnerActionBlocked"));
   }
@@ -1277,18 +1327,32 @@ class UiShellControllerTest {
             .header("X-Ui-Trace-Id", "trace-rf-s03"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.tenantContext").value("tenant-test"))
-        .andExpect(jsonPath("$.dependencyStatus").value("RATE_FEED_SERVICE_CONTRACT_NOT_CONFIGURED"))
+        .andExpect(jsonPath("$.dependencyStatus").value("RATE_FEED_SERVICE_UI_PROXY_AVAILABLE"))
         .andExpect(jsonPath("$.workflowSteps", hasSize(5)))
         .andExpect(jsonPath("$.workflowSteps[0].stepId").value("upload"))
         .andExpect(jsonPath("$.workflowSteps[1].label").value("Parse and normalize"))
-        .andExpect(jsonPath("$.workflowSteps[2].sourceBoundary").value("rate-feed-service validation-report endpoint"))
+        .andExpect(jsonPath("$.workflowSteps[2].sourceBoundary").value("rate-feed-service validate/grid endpoints through BFF"))
         .andExpect(jsonPath("$.workflowSteps[3].label").value("Activate or reject"))
-        .andExpect(jsonPath("$.workflowSteps[4].resultHashRef").value("cache-invalidation-command-required"))
+        .andExpect(jsonPath("$.workflowSteps[4].resultHashRef").value("cache-invalidation-command-required-when-live-replay-configured"))
         .andExpect(jsonPath("$.rowBlockers[0].sourceReference").value("source:rate-feed-batch/row/12"))
         .andExpect(jsonPath("$.sourceReferences[1]").value("activation-audit-ref-required"))
         .andExpect(jsonPath("$.replayEvidence[0]").value("cache-invalidation-command-required"))
-        .andExpect(jsonPath("$.actionsDisabled").value(true))
+        .andExpect(jsonPath("$.actionsDisabled").value(false))
         .andExpect(jsonPath("$.events[0]").value("RateFeedOperationsOpened"));
+  }
+
+  @Test
+  void rateSheetIntakeProxyBlocksPdfBeforeParserWithPreciseExtractorMessage() throws Exception {
+    MockMultipartFile file = new MockMultipartFile("file", "investor.pdf", "application/pdf", "pdf-bytes".getBytes());
+
+    mvc.perform(multipart("/api/v1/tenants/tenant-test/rate-sheets/uploads")
+            .file(file)
+            .param("sourceHash", "fnv1a-32:12345678")
+            .header("X-Ui-Trace-Id", "trace-rate-sheet"))
+        .andExpect(status().isUnprocessableEntity())
+        .andExpect(jsonPath("$.status").value("BLOCKED"))
+        .andExpect(jsonPath("$.auditRefs[0]").value("PDF_OCR_EXTERNAL_EXTRACTOR_REQUIRED"))
+        .andExpect(jsonPath("$.validationIssues[0].message").value("PDF/OCR rate sheet intake requires an approved external document extractor/OCR handoff. This repository currently exposes rate-feed OCR review contracts but no PDF table extraction adapter, so PDF upload is blocked before parser execution."));
   }
 
   @Test
@@ -1417,6 +1481,29 @@ class UiShellControllerTest {
         .andExpect(jsonPath("$.serviceAccount.recoveryOwner").value("integration-platform-owner"))
         .andExpect(jsonPath("$.serviceAccount.credentialExposure").value("credentials-not-rendered"))
         .andExpect(jsonPath("$.events[0]").value("PartnerIntegrationWorkbenchOpened"));
+  }
+
+  @Test
+  void partnerIntegrationAlertsRouteReturnsEmptyFailClosedContractShape() throws Exception {
+    mvc.perform(get("/api/v1/partners/partner-preview/integrations/alerts")
+            .header("X-Tenant-Context", "tenant-test")
+            .header("X-Ui-Trace-Id", "trace-ch-s12"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.partnerId").value("partner-preview"))
+        .andExpect(jsonPath("$.tenantContext").value("tenant-test"))
+        .andExpect(jsonPath("$.dependencyStatus").value("PARTNER_INTEGRATION_ALERT_CONTRACT_BLOCKED"))
+        .andExpect(jsonPath("$.alerts", empty()))
+        .andExpect(jsonPath("$.rulesStatus").value("ALERT_RULES_CONTRACT_REQUIRED"))
+        .andExpect(jsonPath("$.events[0]").value("PartnerIntegrationAlertsLiveContractBlocked"));
+
+    mvc.perform(post("/api/v1/partners/partner-preview/integrations/alerts/alert-preview/actions")
+            .header("X-Ui-Trace-Id", "trace-ch-s12")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"action\":\"ACKNOWLEDGE\"}"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.alertId").value("alert-preview"))
+        .andExpect(jsonPath("$.status").value("BLOCKED"))
+        .andExpect(jsonPath("$.events[0]").value("PartnerIntegrationAlertActionBlocked"));
   }
 
   @Test
@@ -1611,24 +1698,12 @@ class UiShellControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.tenantContext").value("demo-tenant"))
         .andExpect(jsonPath("$.runId").value("run-test"))
-        .andExpect(jsonPath("$.status").value("BLOCKED_WITH_FALLBACK_FACTS"))
-        .andExpect(jsonPath("$.dependencyStatus").value("CROSS_SERVICE_CONTRACTS_PARTIAL_OR_UNAVAILABLE"))
-        .andExpect(jsonPath("$.nodes", hasSize(10)))
-        .andExpect(jsonPath("$.nodes[0].nodeId").value("scenario-facts"))
-        .andExpect(jsonPath("$.nodes[0].freshness.status").value("STALE_OR_UNKNOWN"))
-        .andExpect(jsonPath("$.nodes[0].evidenceRefs[0]").value("scenario-version-ref-required"))
-        .andExpect(jsonPath("$.nodes[0].replayHash").value("replay-hash-required-after-scenario-service-create"))
-        .andExpect(jsonPath("$.nodes[1].status").value("UNAVAILABLE"))
-        .andExpect(jsonPath("$.nodes[1].blockers[0]").value("CATALOG_CONTRACT_UNAVAILABLE"))
-        .andExpect(jsonPath("$.nodes[4].drilldownRoute").value("/quote/run-test/pricing-waterfall"))
-        .andExpect(jsonPath("$.nodes[5].downstreamDependencies[1]").value("lock"))
-        .andExpect(jsonPath("$.nodes[7].drilldownRefs.runId").value("run-test"))
-        .andExpect(jsonPath("$.nodes[7].drilldownRefs.scenarioRef").value("scenario-ref-required"))
-        .andExpect(jsonPath("$.nodes[7].drilldownRefs.quoteRef").value("quote-option-contract-required"))
-        .andExpect(jsonPath("$.nodes[7].drilldownRefs.lockRef").value("lock-ref-required"))
-        .andExpect(jsonPath("$.nodes[7].drilldownRefs.correlationRef").value("trace-journey-s19"))
-        .andExpect(jsonPath("$.blockers[0]").value(org.hamcrest.Matchers.containsString("fallback refs and blocked states")))
-        .andExpect(jsonPath("$.events[0]").value("QuoteJourneyMapOpened"));
+        .andExpect(jsonPath("$.status").value("BLOCKED_MISSING_LIVE_RECORDS"))
+        .andExpect(jsonPath("$.dependencyStatus").value("QUOTE_SERVICE_LIVE_RECORDS_REQUIRED"))
+        .andExpect(jsonPath("$.nodes", empty()))
+        .andExpect(jsonPath("$.serviceContracts[0]").value("quote-service.execute-summary"))
+        .andExpect(jsonPath("$.blockers[0]").value(org.hamcrest.Matchers.startsWith("MISSING_LIVE_RECORDS")))
+        .andExpect(jsonPath("$.events[0]").value("QuoteJourneyLiveRecordsMissing"));
   }
 
   @Test

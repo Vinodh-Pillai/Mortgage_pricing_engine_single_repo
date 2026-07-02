@@ -20,8 +20,13 @@ tasks.withType(JavaCompile).configureEach {
 dependencies {
   implementation 'org.springframework.boot:spring-boot-starter-web'
   implementation 'org.springframework.boot:spring-boot-starter-actuator'
+  implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+  implementation 'org.flywaydb:flyway-core'
+  implementation 'org.flywaydb:flyway-database-postgresql'
+  runtimeOnly 'org.postgresql:postgresql:42.7.4'
   testImplementation 'org.springframework.boot:spring-boot-starter-test'
   testImplementation 'org.assertj:assertj-core:3.25.3'
+  testImplementation 'com.h2database:h2:2.2.224'
 }
 
 tasks.named('bootJar') {

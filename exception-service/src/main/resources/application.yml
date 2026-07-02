@@ -14,3 +14,11 @@ management:
     web:
       exposure:
         include: health,info,prometheus
+
+wcpe:
+  exception:
+    repository:
+      # Production deployments must set WCPE_EXCEPTION_REPOSITORY_PATH or the equivalent
+      # wcpe.exception.repository.path system property. The temp JSON adapter is allowed only
+      # for local/dev/test profiles or explicit wcpe.exception.local-json-store.enabled=true.
+      path: ${WCPE_EXCEPTION_REPOSITORY_PATH:}

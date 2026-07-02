@@ -6,6 +6,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
@@ -92,6 +94,64 @@ class RatesheetValidationParsingStoryTest {
   }
 
   @Test
+  void parseBatchReadsConfiguredLocalSyntheticStoredBytesWhenRequestContentIsOmitted() throws Exception {
+    arrangeRepository();
+    when(repository.batchParseSource(TENANT, BATCH)).thenReturn(new RateFeedRepository.BatchParseSource(BATCH, INVESTOR, CHANNEL, FORMAT, "UPLOADED", hash64(), "local://synthetic/src/test/resources/ratesheets/stored-valid.csv"));
+
+    RateFeedModels.ParseBatchResponse response = service.parseBatch(TENANT, BATCH,
+        new RateFeedModels.ParseBatchRequest("INITIAL", hash64(), null, "configured-profile:v7"),
+        "parse-key", "worker", "corr-parse");
+
+    assertThat(response.status()).isEqualTo("PARSED");
+    verify(jdbc, atLeastOnce()).update(startsWith("insert into rate_feed.rate_feed_parsed_field"), any(), any(), any(), eq("canonical_product_key"), eq("CONVENTIONAL"), eq("CONVENTIONAL"), eq(1), eq("INFO"), isNull(), isNull(), eq(2));
+  }
+
+  @Test
+  void parseBatchReadsRepoLocalUploadStorageReferenceWhenRequestContentIsOmitted() throws Exception {
+    UUID uploadSessionId = UUID.fromString("00000000-0000-0000-0000-000000000777");
+    Path uploadStore = Path.of("build/rate-feed-upload");
+    Path storedCsv = uploadStore.resolve(uploadSessionId + ".csv");
+    Files.createDirectories(uploadStore);
+    Files.writeString(storedCsv, "product,note_rate,lock_period,price,investor,channel\n"
+        + "CONVENTIONAL,6.125,30,108.5," + INVESTOR + "," + CHANNEL + "\n");
+    try {
+      arrangeRepository();
+      when(repository.batchParseSource(TENANT, BATCH)).thenReturn(new RateFeedRepository.BatchParseSource(BATCH, INVESTOR, CHANNEL, FORMAT, "UPLOADED", hash64(), "local://rate-feed-upload/" + uploadSessionId));
+
+      RateFeedModels.ParseBatchResponse response = service.parseBatch(TENANT, BATCH,
+          new RateFeedModels.ParseBatchRequest("INITIAL", hash64(), null, "configured-profile:v7"),
+          "parse-key", "worker", "corr-parse");
+
+      assertThat(response.status()).isEqualTo("PARSED");
+      verify(jdbc, atLeastOnce()).update(startsWith("insert into rate_feed.rate_feed_parsed_field"), any(), any(), any(), eq("canonical_product_key"), eq("CONVENTIONAL"), eq("CONVENTIONAL"), eq(1), eq("INFO"), isNull(), isNull(), eq(2));
+    } finally {
+      Files.deleteIfExists(storedCsv);
+    }
+  }
+
+  @Test
+  void parseBatchFailsClosedWhenLocalUploadReferenceHasNoReadableBytes() throws Exception {
+    arrangeRepository();
+    UUID uploadSessionId = UUID.fromString("00000000-0000-0000-0000-000000000778");
+    when(repository.batchParseSource(TENANT, BATCH)).thenReturn(new RateFeedRepository.BatchParseSource(BATCH, INVESTOR, CHANNEL, FORMAT, "UPLOADED", hash64(), "local://rate-feed-upload/" + uploadSessionId));
+
+    RateFeedModels.ParseBatchResponse response = service.parseBatch(TENANT, BATCH,
+        new RateFeedModels.ParseBatchRequest("INITIAL", hash64(), null, "configured-profile:v7"),
+        "parse-key", "worker", "corr-parse");
+
+    assertThat(response.status()).isEqualTo("PARSE_FAILED");
+    ArgumentCaptor<Object> outboxPayload = ArgumentCaptor.forClass(Object.class);
+    verify(repository).outbox(eq(TENANT), eq(BATCH), eq("RateSheetParseFailed.v1"), eq(1), eq("worker"), eq("corr-parse"), any(), outboxPayload.capture());
+    @SuppressWarnings("unchecked")
+    Map<String, Object> payload = (Map<String, Object>) outboxPayload.getValue();
+    assertThat(payload)
+        .containsEntry("templateProfileId", "configured-profile:v7")
+        .containsEntry("rowCount", 0)
+        .containsEntry("errorCount", 1);
+    assertThat(payload.get("message").toString()).contains("Local upload storage reference has no readable repo-local CSV bytes");
+  }
+
+  @Test
   void parseBatchFailsClosedForAmbiguousHeaderMappingWithActionableSummary() throws Exception {
     arrangeRepository();
     String csv = "rate,note_rate,lock_period,price\n6.125,6.250,30,108.5\n";
@@ -146,7 +206,7 @@ class RatesheetValidationParsingStoryTest {
   @SuppressWarnings("unchecked")
   private void arrangeRepository() throws Exception {
     RequestContext.roles("RATE_FEED_PARSE,RATE_FEED_VIEW,RATE_FEED_NORMALIZE");
-    when(repository.batchParseSource(TENANT, BATCH)).thenReturn(new RateFeedRepository.BatchParseSource(BATCH, INVESTOR, CHANNEL, FORMAT, "UPLOADED", hash64()));
+    when(repository.batchParseSource(TENANT, BATCH)).thenReturn(new RateFeedRepository.BatchParseSource(BATCH, INVESTOR, CHANNEL, FORMAT, "UPLOADED", hash64(), "local://synthetic/src/test/resources/ratesheets/stored-valid.csv"));
     when(repository.json(any())).thenAnswer(invocation -> mapper.writeValueAsString(invocation.getArgument(0)));
     when(repository.idempotent(any(), any(), any(), eq(RateFeedModels.ParseBatchResponse.class), any()))
         .thenAnswer(invocation -> ((Supplier<RateFeedModels.ParseBatchResponse>) invocation.getArgument(4)).get());

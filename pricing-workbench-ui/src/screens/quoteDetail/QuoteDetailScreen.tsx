@@ -278,7 +278,7 @@ function ChipList({ label, values }: { label: string; values: string[] }) {
 }
 
 function pricingEvidenceAvailability(values: string[] | null | undefined) {
-  return (values ?? []).some((value) => value.trim()) ? ['Pricing service evidence available'] : [];
+  return (values ?? []).some((value) => value.trim()) ? ['Connected pricing review reference available'] : [];
 }
 
 function safeDetailMessage(value: string | number | null | undefined, fallback: string) {

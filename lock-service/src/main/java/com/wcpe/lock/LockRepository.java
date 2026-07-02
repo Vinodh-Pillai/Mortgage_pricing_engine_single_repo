@@ -26,6 +26,10 @@ class LockRepository {
     return unavailable();
   }
 
+  List<LockModels.RateLockRecord> list(UUID tenantId) {
+    return unavailable();
+  }
+
   void replace(LockModels.RateLockRecord record) {
     unavailable();
   }

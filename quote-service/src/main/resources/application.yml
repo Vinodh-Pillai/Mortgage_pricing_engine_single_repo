@@ -11,8 +11,10 @@ quote:
   loanhouse:
     capture-loader:
       enabled: ${QUOTE_LOANHOUSE_CAPTURE_LOADER_ENABLED:true}
-      tenant-id: ${QUOTE_LOANHOUSE_CAPTURE_LOADER_TENANT_ID:2aba740b-74ee-3068-a456-4df1e64b7c02}
+      tenant-id: ${QUOTE_LOANHOUSE_CAPTURE_LOADER_TENANT_ID:11111111-1111-1111-1111-111111111111}
       resource: ${QUOTE_LOANHOUSE_CAPTURE_LOADER_RESOURCE:classpath:loanhouse/product-records.json}
+  synthetic-dependencies:
+    enabled: ${QUOTE_SYNTHETIC_DEPENDENCIES_ENABLED:false}
 
 server:
   port: ${SERVER_PORT:8080}

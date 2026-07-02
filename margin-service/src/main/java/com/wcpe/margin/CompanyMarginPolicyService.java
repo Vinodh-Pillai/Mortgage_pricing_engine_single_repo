@@ -45,7 +45,7 @@ public final class CompanyMarginPolicyService {
 
   public CompanyMarginPolicyService(Clock clock, SrpCalculationService srpCalculationService,
       OverlayRuleRepository overlayRuleRepository) {
-    this(clock, srpCalculationService, overlayRuleRepository, Store.failClosed("CompanyMarginPolicyService"));
+    this(clock, srpCalculationService, overlayRuleRepository, MarginDurableStores.companyMarginPolicyStore());
   }
 
   CompanyMarginPolicyService(Clock clock, SrpCalculationService srpCalculationService,

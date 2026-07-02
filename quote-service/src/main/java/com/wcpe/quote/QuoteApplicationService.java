@@ -3,6 +3,7 @@ package com.wcpe.quote;
 import com.wcpe.quote.parallel.ParallelPricingOrchestrator;
 import com.wcpe.quote.parallel.PricingBatchResult;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.math.BigDecimal;
@@ -624,7 +625,8 @@ public class QuoteApplicationService {
             throw new QuoteCreateException("NO_AUTHORIZED_PRODUCTS_FOR_TENANT", "No authorized products are available for tenant");
         }
         PricingBatchResult pricingResult = priceCandidates(request, authorizedCandidates);
-        List<QuoteOption> options = ranker.rank(pricingResult.successful(), policy, expiresAt);
+        UUID quoteId = UUID.nameUUIDFromBytes((request.tenantId() + ":" + request.idempotencyKey()).getBytes(StandardCharsets.UTF_8));
+        List<QuoteOption> options = scopeOptionIdsToQuote(quoteId, ranker.rank(pricingResult.successful(), policy, expiresAt));
         QuoteStatus status = quoteStatusFor(options, pricingResult, authorizedCandidates.size());
         QuoteInputVersionSet versionSet = new QuoteInputVersionSet(
             request.scenarioVersion(),
@@ -637,7 +639,7 @@ public class QuoteApplicationService {
         String replayHash = ReplayHash.sha256(normalizedReplayInput(request, versionSet, policy, options));
         Quote quote = new Quote(
             request.tenantId(),
-            UUID.nameUUIDFromBytes((request.tenantId() + ":" + request.idempotencyKey()).getBytes()),
+            quoteId,
             request.scenarioId(),
             request.scenarioVersion(),
             status,
@@ -659,6 +661,31 @@ public class QuoteApplicationService {
         cache.put(quote);
         recordAuditAndEvents(quote, snapshot);
         return quote;
+    }
+
+    private static List<QuoteOption> scopeOptionIdsToQuote(UUID quoteId, List<QuoteOption> options) {
+        return options.stream()
+            .map(option -> new QuoteOption(
+                UUID.nameUUIDFromBytes((quoteId + ":option:" + option.optionId()).getBytes(StandardCharsets.UTF_8)),
+                option.productId(),
+                option.investorId(),
+                option.channel(),
+                option.lockPeriodDays(),
+                option.noteRatePercent(),
+                option.finalPriceBps(),
+                option.totalAdjustmentBps(),
+                option.marginBps(),
+                option.waterfall(),
+                option.rank(),
+                option.rankScore(),
+                option.rankReasons(),
+                option.criterionScores(),
+                option.tieBreakerTrace(),
+                option.warnings(),
+                option.upstreamRefs(),
+                option.expiresAt()
+            ))
+            .toList();
     }
 
     private PricingBatchResult priceCandidates(QuoteCreateRequest request, List<QuoteCandidate> candidates) {

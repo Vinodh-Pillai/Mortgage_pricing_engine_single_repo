@@ -41,7 +41,7 @@ public class EligibilityPersistRepository {
             jdbc.update(
                 "insert into eligibility.eligibility_decision(tenant_id,decision_id,evaluation_id,product_code,investor_code,rule_code,severity,decision,reason_code,message,actual_value,required_value,trace_json) values (?,?,?,?,?,?,?,?,?,?,?,?,?::jsonb)",
                 tenantId, decision.decisionId(), result.evaluationId(), decision.productCode(), decision.investorCode(),
-                decision.ruleCode(), decision.severity(), decision.status(), decision.reasonCode(), decision.message(),
+                decision.ruleCode(), decision.severity(), decision.status(), persistedReasonCode(decision), decision.message(),
                 decision.actualValue(), decision.requiredValue(), json(decision.trace())
             );
         }
@@ -88,7 +88,7 @@ public class EligibilityPersistRepository {
 
         jdbc.update(
             "insert into eligibility.audit_package(audit_package_id,tenant_id,aggregate_id,actor_id,correlation_id,causation_id,request_hash,result_hash,scenario_version,rule_versions_json,created_at_utc) " +
-                "values (?,?,?,?,?,?,?,?,?,?,?)",
+                "values (?,?,?,?,?,?,?,?,?,?::jsonb,?)",
             response.auditPackageId(), tenantId, response.quoteId(), actorId.toString(), response.correlationId(), response.scenarioId().toString(),
             requestHash, response.resultHash(), response.scenarioVersion(), json(Map.of("eligibilityRuleSetVersions", evaluationResults.stream().map(EligibilityResult::eligibilityRuleSetVersion).distinct().toList())), Timestamp.from(now)
         );
@@ -204,7 +204,7 @@ public class EligibilityPersistRepository {
     void audit(UUID tenantId, UUID aggregateId, String action, String replayHash, Object payload) {
         jdbc.update(
             "insert into eligibility.audit_record(tenant_id,audit_id,aggregate_id,action,replay_hash,payload_json,occurred_at) values (?,?,?,?,?,?::jsonb,?)",
-            tenantId, UUID.randomUUID(), aggregateId, action, replayHash, json(payload), Timestamp.from(Instant.now())
+            tenantId, UUID.randomUUID(), aggregateId, action, replayHash == null ? "not-applicable" : replayHash, json(payload), Timestamp.from(Instant.now())
         );
     }
 
@@ -214,6 +214,30 @@ public class EligibilityPersistRepository {
         } catch (Exception ex) {
             throw new IllegalStateException(ex);
         }
+    }
+
+    private String persistedReasonCode(RuleDecision decision) {
+        if (decision.reasonCode() != null && !decision.reasonCode().isBlank()) {
+            return decision.reasonCode();
+        }
+        String status = normalizedReasonCodePart(decision.status(), "STATUS_UNSPECIFIED");
+        String severity = normalizedReasonCodePart(decision.severity(), "SEVERITY_UNSPECIFIED");
+        if ("ELIGIBLE".equals(status) && "PASS".equals(severity)) {
+            return decision.ruleCode() + "_PASS";
+        }
+        if (status.equals(severity)) {
+            return decision.ruleCode() + "_" + status;
+        }
+        String severityPart = "PASS".equals(severity) ? "PASS_SEVERITY" : severity;
+        return decision.ruleCode() + "_" + status + "_" + severityPart;
+    }
+
+    private String normalizedReasonCodePart(String value, String fallback) {
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        String normalized = value.trim().toUpperCase().replaceAll("[^A-Z0-9]+", "_").replaceAll("^_+|_+$", "");
+        return normalized.isBlank() ? fallback : normalized;
     }
 
     <T> T readJson(String value, Class<T> type) {

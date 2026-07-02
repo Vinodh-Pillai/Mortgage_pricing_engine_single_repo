@@ -11,6 +11,7 @@ import {
   type TenantProductStatus,
   type TenantProductsResponse,
 } from '../../lib/api/tenantHome';
+import { displayChannelLabel } from '../../lib/utils/channelDisplay';
 import './TenantHomeScreen.css';
 
 const pageSize = 20;
@@ -295,7 +296,7 @@ function ProductCard({ product, onNavigate, onCompare }: { product: AuthorizedPr
       <dl>
         <dt>Type</dt><dd>{product.productType}</dd>
         <dt>Investor</dt><dd>{product.investorCode}</dd>
-        <dt>Channel</dt><dd>{product.channelCode}</dd>
+        <dt>Channel</dt><dd>{displayChannelLabel(product.channelCode)}</dd>
         <dt>Rate indicator</dt><dd>{rateIndicator(product)}</dd>
         <dt>Authorization</dt><dd>{product.authorizationExpiresAt ?? 'No expiration supplied'}</dd>
       </dl>

@@ -1,0 +1,19 @@
+{
+  "fixtureName": "scenario-missing-fico",
+  "syntheticOnly": true,
+  "tenantId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+  "requestId": "cmd-pii03-missing-fico-001",
+  "scenario": {
+    "productFamily": "CONVENTIONAL",
+    "loanPurpose": "PURCHASE",
+    "occupancyType": "PRIMARY_RESIDENCE",
+    "propertyType": "SINGLE_FAMILY",
+    "loanAmount": "450000.00",
+    "ltvRatio": "80.0000"
+  },
+  "expected": {
+    "quoteStatus": "VALIDATION_FAILED",
+    "optionStatuses": [],
+    "resultHash": "sha256:5d864457f657c972b39a810d4c08d4e35a6d540c1d1cb0da98f477b2fd840001"
+  }
+}

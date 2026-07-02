@@ -7,6 +7,20 @@ import org.junit.jupiter.api.Test;
 
 class QuoteCreateIdempotencyTest {
     @Test
+    void distinctIdempotencyKeysScopeOptionIdsToTheirQuote() {
+        QuoteApplicationService service = QuoteTestSupport.service(QuoteTestSupport.dependenciesWithPolicy(), new InMemoryQuoteCache());
+
+        Quote first = service.createQuote(QuoteTestSupport.request("idem-repeat-first"));
+        Quote second = service.createQuote(QuoteTestSupport.request("idem-repeat-second"));
+
+        assertThat(second.quoteId()).isNotEqualTo(first.quoteId());
+        assertThat(first.options()).extracting(QuoteOption::optionId)
+            .doesNotContainAnyElementsOf(second.options().stream().map(QuoteOption::optionId).toList());
+        assertThat(second.options()).extracting(QuoteOption::productId)
+            .containsExactlyElementsOf(first.options().stream().map(QuoteOption::productId).toList());
+    }
+
+    @Test
     void sameIdempotencyKeyReplaysSameQuoteAndConflictOnDifferentInput() {
         QuoteApplicationService service = QuoteTestSupport.service(QuoteTestSupport.dependenciesWithPolicy(), new InMemoryQuoteCache());
         Quote first = service.createQuote(QuoteTestSupport.request("idem-replay"));

@@ -31,7 +31,7 @@ class OcrRateSheetIntakeTest {
     UUID batchId = UUID.fromString("00000000-0000-0000-0000-000000000701");
     String fileHash = "a".repeat(64);
     UUID profileId = UUID.fromString("00000000-0000-0000-0000-000000000702");
-    when(repository.batchParseSource(tenantId, batchId)).thenReturn(new RateFeedRepository.BatchParseSource(batchId, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "UPLOADED", fileHash));
+    when(repository.batchParseSource(tenantId, batchId)).thenReturn(new RateFeedRepository.BatchParseSource(batchId, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "UPLOADED", fileHash, "local://synthetic/src/test/resources/ratesheets/stored-valid.csv"));
     when(repository.json(any())).thenReturn("{}");
     when(repository.idempotent(eq(tenantId), eq("ocr-key"), any(), eq(OcrExtractionResponse.class), any())).thenAnswer(invocation -> {
       @SuppressWarnings("unchecked") Supplier<OcrExtractionResponse> command = invocation.getArgument(4);

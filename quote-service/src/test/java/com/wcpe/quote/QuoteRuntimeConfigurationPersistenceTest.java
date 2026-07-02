@@ -79,6 +79,25 @@ class QuoteRuntimeConfigurationPersistenceTest {
             });
     }
 
+    @Test
+    void syntheticDependenciesAreOptInForDevQuoteProofOnly() {
+        new ApplicationContextRunner()
+            .withUserConfiguration(QuoteRuntimeConfiguration.class, TestOnlyInMemoryPersistenceConfiguration.class)
+            .withBean(ObjectMapper.class, ObjectMapper::new)
+            .withPropertyValues(
+                "quote.persistence.mode=fail-closed",
+                "quote.synthetic-dependencies.enabled=true"
+            )
+            .run(context -> {
+                assertThat(context).hasNotFailed();
+                assertThat(context.getBean(QuoteDependencies.class)).isInstanceOf(SyntheticQuoteDependencies.class);
+                Quote quote = context.getBean(QuoteApplicationService.class).createQuote(QuoteTestSupport.request("idem-synthetic-config"));
+                assertThat(quote.status()).isEqualTo(QuoteStatus.READY);
+                assertThat(quote.options()).isNotEmpty();
+                assertThat(quote.inputVersionSet().rankingPolicyVersion()).isEqualTo(SyntheticQuoteDependencies.POLICY_VERSION);
+            });
+    }
+
     @TestConfiguration(proxyBeanMethods = false)
     static class TestOnlyInMemoryPersistenceConfiguration {
         @Bean

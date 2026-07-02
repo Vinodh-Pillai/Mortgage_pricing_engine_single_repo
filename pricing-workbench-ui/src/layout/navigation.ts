@@ -49,7 +49,7 @@ const capabilityDefinitions: CapabilityDefinition[] = [
   { id: 'investor-management', label: 'Investor Management', group: 'Products', icon: '◈', moduleId: 'investor-management', route: '/admin/investors' },
   { id: 'stipulations', label: 'Stipulations', group: 'Products', icon: '✦', moduleId: 'product-admin', route: '/admin/products?section=stipulations', badgeTone: 'alert' },
 
-  { id: 'pricing-waterfall', label: 'Pricing Waterfall', group: 'Pricing', icon: '≋', moduleId: 'pricing-waterfall', route: '/pricing/waterfall' },
+  { id: 'pricing-waterfall', label: 'Pricing Waterfall', group: 'Pricing', icon: '≋', moduleId: 'pricing-waterfall' },
   { id: 'rate-feed-pipeline', label: 'Rate Feed Pipeline', group: 'Pricing', icon: '⇄', moduleId: 'rate-feed-pipeline' },
   { id: 'rate-sheet-intake', label: 'Rate Sheet Intake', group: 'Pricing', icon: '▤', moduleId: 'rate-sheet-intake', badgeTone: 'alert' },
   { id: 'pricing-profiles', label: 'Pricing Profiles', group: 'Pricing', icon: '◫', moduleId: 'pricing-profiles', route: '/pricing/profiles' },
@@ -64,7 +64,7 @@ const capabilityDefinitions: CapabilityDefinition[] = [
 
   { id: 'quote-offers', label: 'Quote Comparison', group: 'Quotes', icon: '◉', moduleId: 'quote-offers' },
   { id: 'quote-detail', label: 'Quote Detail', group: 'Quotes', icon: '⌖', moduleId: 'quote-detail' },
-  { id: 'quote-journey-map', label: 'Quote Journey Map', group: 'Quotes', icon: '↷', moduleId: 'quote-journey', route: '/journey-map' },
+  { id: 'quote-journey-map', label: 'Quote Journey Map', group: 'Quotes', icon: '↷', moduleId: 'quote-journey' },
   { id: 'quote-eligibility', label: 'Eligibility', group: 'Quotes', icon: '✓', moduleId: 'quote-eligibility', badgeTone: 'alert' },
   { id: 'lock-workflow', label: 'Lock Workflow', group: 'Quotes', icon: '🔒', moduleId: 'quote-lock', badgeTone: 'alert' },
   { id: 'partner-quotes', label: 'Partner Quotes', group: 'Quotes', icon: '↗', moduleId: 'partner-quotes', badgeTone: 'alert' },
@@ -75,13 +75,15 @@ const capabilityDefinitions: CapabilityDefinition[] = [
   { id: 'rate-feed-ops', label: 'Rate Feed Ops', group: 'Operations', icon: '⇆', moduleId: 'rate-feed-ops', badgeTone: 'alert' },
   { id: 'performance-dashboard', label: 'Performance Dashboard', group: 'Operations', icon: '▧', moduleId: 'performance-dashboard', badgeTone: 'alert' },
   { id: 'ops-cases', label: 'Ops Cases', group: 'Operations', icon: '▣', moduleId: 'ops-cases', badgeTone: 'alert' },
-  { id: 'partner-integrations', label: 'Partner Integrations', group: 'Operations', icon: '⟲', moduleId: 'partner-transport', badgeTone: 'alert' },
+  { id: 'partner-integrations', label: 'Partner Integrations', group: 'Quotes', icon: '⟲', moduleId: 'partner-transport', badgeTone: 'alert' },
 
   { id: 'tenant-home', label: 'Tenant Home', group: 'Tenants', icon: '⌂', moduleId: 'home', route: '/home' },
   { id: 'tenant-onboarding', label: 'Tenant Onboarding', group: 'Tenants', icon: '⧉', moduleId: 'tenant-onboarding' },
   { id: 'tenant-management', label: 'Tenant Management', group: 'Tenants', icon: '◧', moduleId: 'tenant-admin', badgeTone: 'alert' },
 
   { id: 'user-management', label: 'User Management', group: 'Admin', icon: '☻', moduleId: 'user-management', route: '/admin/users' },
+  { id: 'user-profile', label: 'User Profile', group: 'Admin', icon: '◉', moduleId: 'user-management', route: '/user/profile' },
+  { id: 'user-settings', label: 'User Settings', group: 'Admin', icon: '⚙', moduleId: 'user-management', route: '/user/settings' },
   { id: 'feature-flags', label: 'Feature Flags', group: 'Admin', icon: '⚑', moduleId: 'tenant-admin', route: '/admin/tenants?section=feature-flags' },
   { id: 'audit-replay', label: 'Audit Replay', group: 'Admin', icon: '◷', moduleId: 'audit-replay', badgeTone: 'alert' },
   { id: 'compliance', label: 'Compliance', group: 'Admin', icon: '⚖', moduleId: 'compliance-evidence', badgeTone: 'alert' },
@@ -90,6 +92,8 @@ const capabilityDefinitions: CapabilityDefinition[] = [
 ];
 
 function routeFor(module: WorkbenchScreenModule, activeRunId?: string | null) {
+  if (!activeRunId && module.id === 'pricing-waterfall') return '/pricing/waterfall';
+  if (!activeRunId && module.id === 'quote-journey') return '/journey-map';
   return module.routePattern
     .replace(':runId', activeRunId ?? 'run-test')
     .replace(':optionId', 'selected-offer');

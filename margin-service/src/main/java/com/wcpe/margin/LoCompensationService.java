@@ -27,7 +27,7 @@ public final class LoCompensationService {
   private final Store store;
 
   public LoCompensationService(Clock clock) {
-    this(clock, Store.failClosed("LoCompensationService"));
+    this(clock, MarginDurableStores.loCompensationStore());
   }
 
   LoCompensationService(Clock clock, Store store) {

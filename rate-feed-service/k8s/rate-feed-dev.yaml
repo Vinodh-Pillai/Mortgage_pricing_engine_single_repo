@@ -17,6 +17,7 @@ data:
   SPRING_PROFILES_ACTIVE: dev
   SERVER_PORT: "8080"
   MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info,prometheus
+  MANAGEMENT_HEALTH_REDIS_ENABLED: "false"
   WCPE_SYNTHETIC_ONLY: "true"
 ---
 apiVersion: v1
@@ -145,7 +146,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: rate-feed-service
-          image: 192.168.4.102:32061/mortgage-pricing/rate-feed-service:0.1.0-k8s
+          image: 192.168.4.102:32061/mortgage-pricing/rate-feed-service:0.1.0-requirement-increment-5-release-gap-fixes-final-20260701T142236Z-amd64
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080

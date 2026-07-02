@@ -8,24 +8,28 @@ import org.junit.jupiter.api.Test;
 class RiskEventIdempotencyTest {
 
   @Test
-  void idempotencyCannotUseProcessLocalMemoryWhenPersistenceIsUnavailable() {
+  void idempotencyReplaysSameRiskEventFromDurableRepository() {
     ExceptionService service = new ExceptionService(new ExceptionRepository());
     ExceptionModels.MapRiskMonitoringEventCommand source = RiskEventMapperTest.sourceEvent(
       "RISK-IDEMP-REPLAY-001",
       Map.of("concessionStatus", "APPLIED", "amountBucket", "configured-small")
     );
 
-    ExceptionServiceException error = assertThrows(
-      ExceptionServiceException.class,
-      () -> service.publishRiskMonitoringEvent(source, RiskEventMapperTest.mappingVersion(), false)
-    );
+    ExceptionModels.RiskMonitoringEventEnvelope first = service.publishRiskMonitoringEvent(source, RiskEventMapperTest.mappingVersion(), false);
+    ExceptionModels.RiskMonitoringEventEnvelope replay = service.publishRiskMonitoringEvent(source, RiskEventMapperTest.mappingVersion(), false);
 
-    assertEquals("PERSISTENCE_BACKEND_REQUIRED", error.code());
+    assertEquals(first.riskEventId(), replay.riskEventId());
+    assertEquals(first.payloadHash(), replay.payloadHash());
   }
 
   @Test
-  void changedPayloadConflictRequiresDurableStoreAndFailsClosedWithoutIt() {
+  void changedPayloadConflictUsesDurableIdempotencyRecord() {
     ExceptionService service = new ExceptionService(new ExceptionRepository());
+    service.publishRiskMonitoringEvent(
+      RiskEventMapperTest.sourceEvent("RISK-IDEMP-CONFLICT-001", Map.of("concessionStatus", "APPLIED", "amountBucket", "configured-small")),
+      RiskEventMapperTest.mappingVersion(),
+      false
+    );
 
     ExceptionServiceException error = assertThrows(
       ExceptionServiceException.class,
@@ -36,6 +40,6 @@ class RiskEventIdempotencyTest {
       )
     );
 
-    assertEquals("PERSISTENCE_BACKEND_REQUIRED", error.code());
+    assertEquals("IDEMPOTENCY_CONFLICT", error.code());
   }
 }

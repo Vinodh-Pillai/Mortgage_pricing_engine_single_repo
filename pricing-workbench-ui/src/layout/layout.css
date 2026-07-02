@@ -297,10 +297,6 @@
   outline: 0;
 }
 
-.layout-user-menu small {
-  color: var(--ds-color-text-muted);
-}
-
 .layout-badge {
   align-items: center;
   background: var(--ds-color-secondary);
@@ -327,19 +323,10 @@
   background: var(--ds-color-background-raised, #101827);
 }
 
-.layout-user-menu[aria-expanded='true'] .layout-user-menu__arrow {
-  transform: rotate(180deg);
-}
-
 .layout-user-menu[aria-expanded='true'] {
   backdrop-filter: none;
   background: var(--ds-color-background-raised, #101827);
   border-color: var(--ds-color-border-strong, #64748b);
-}
-
-.layout-user-menu__arrow {
-  display: inline-block;
-  transition: transform 250ms var(--ds-ease-standard);
 }
 
 .layout-user-menu__dropdown {

@@ -1,0 +1,20 @@
+{
+  "fixtureName": "scenario-condo-warning",
+  "syntheticOnly": true,
+  "tenantId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+  "requestId": "cmd-pii03-condo-001",
+  "scenario": {
+    "productFamily": "CONVENTIONAL",
+    "loanPurpose": "PURCHASE",
+    "occupancyType": "PRIMARY_RESIDENCE",
+    "propertyType": "CONDOMINIUM",
+    "representativeFico": 740,
+    "loanAmount": "450000.00",
+    "ltvRatio": "80.0000"
+  },
+  "expected": {
+    "quoteStatus": "QUOTED",
+    "optionStatuses": ["ELIGIBLE_WITH_WARNINGS"],
+    "resultHash": "sha256:76f2d34aac7f4919312e097e963f046a9f02e2ed3e968f59f04a35a38cc60001"
+  }
+}

@@ -7,6 +7,8 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -20,11 +22,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class Pii03S10ContractRegressionPackTest {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper().findAndRegisterModules();
-    private static final Path WORKSPACE_ROOT = Path.of(System.getProperty("user.dir")).resolve("..").resolve("..").normalize();
-    private static final Path API_DIR = WORKSPACE_ROOT.resolve("contracts/pii03/api");
-    private static final Path EVENTS_DIR = WORKSPACE_ROOT.resolve("contracts/pii03/events");
-    private static final Path FIXTURES_DIR = WORKSPACE_ROOT.resolve("test-fixtures/pii03");
-    private static final Path UI_DIR = WORKSPACE_ROOT.resolve("ui/e2e/pii03");
+    private static final Path MODULE_ROOT = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
+    private static final Path WORKSPACE_ROOT = MODULE_ROOT.resolve("..").resolve("..").normalize();
+    private static final Path MODULE_REGRESSION_ROOT = MODULE_ROOT.resolve("src/test/resources/pii03");
+    private static final Path API_DIR = resolveRegressionDir(
+        WORKSPACE_ROOT.resolve("contracts/pii03/api"),
+        MODULE_REGRESSION_ROOT.resolve("contracts/api")
+    );
+    private static final Path EVENTS_DIR = resolveRegressionDir(
+        WORKSPACE_ROOT.resolve("contracts/pii03/events"),
+        MODULE_REGRESSION_ROOT.resolve("contracts/events")
+    );
+    private static final Path FIXTURES_DIR = resolveRegressionDir(
+        WORKSPACE_ROOT.resolve("test-fixtures/pii03"),
+        MODULE_REGRESSION_ROOT.resolve("test-fixtures")
+    );
+    private static final Path UI_DIR = resolveRegressionDir(
+        WORKSPACE_ROOT.resolve("ui/e2e/pii03"),
+        MODULE_REGRESSION_ROOT.resolve("ui/e2e")
+    );
 
     @Test
     void validatesAllApiFixtures() throws Exception {
@@ -134,6 +150,35 @@ class Pii03S10ContractRegressionPackTest {
     }
 
     @Test
+    void moduleFallbackFixturesStayInSyncWithWorkspaceAuthoritativeSources() throws Exception {
+        Path sourceNote = MODULE_REGRESSION_ROOT.resolve("source-note.v1.json");
+        assertTrue(Files.exists(sourceNote), "Module fallback source note must exist");
+
+        JsonNode note = readJson(sourceNote);
+        assertEquals("SHA-256", note.path("checksumAlgorithm").asText(), "Source note must declare checksum algorithm");
+        assertFalse(note.path("mirrors").isEmpty(), "Source note must list fixture mirrors");
+
+        for (JsonNode mirror : note.path("mirrors")) {
+            Path workspacePath = WORKSPACE_ROOT.resolve(mirror.path("workspacePath").asText()).normalize();
+            Path modulePath = MODULE_ROOT.resolve(mirror.path("modulePath").asText()).normalize();
+            assertTrue(Files.exists(modulePath), "Module fallback fixture must exist: " + modulePath);
+
+            if (Files.exists(workspacePath)) {
+                assertEquals(
+                    sha256(workspacePath),
+                    sha256(modulePath),
+                    "Module fallback must checksum-match authoritative workspace fixture: " + mirror.path("workspacePath").asText()
+                );
+            } else {
+                assertTrue(
+                    mirror.path("moduleFallbackAllowed").asBoolean(false),
+                    "Module-only validation fallback must be explicit when workspace source is absent: " + modulePath
+                );
+            }
+        }
+    }
+
+    @Test
     void noRealPiiOrForbiddenFixtureFields() throws Exception {
         Set<String> forbiddenFragments = Set.of(
             "ssn",
@@ -190,6 +235,18 @@ class Pii03S10ContractRegressionPackTest {
 
     private static JsonNode readJson(Path path) throws IOException {
         return OBJECT_MAPPER.readTree(Files.readString(path));
+    }
+
+    private static String sha256(Path path) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        return HexFormat.of().formatHex(digest.digest(Files.readAllBytes(path)));
+    }
+
+    private static Path resolveRegressionDir(Path workspacePath, Path modulePath) {
+        if (Files.isDirectory(workspacePath)) {
+            return workspacePath;
+        }
+        return modulePath;
     }
 
     private static void assertContainsText(JsonNode arrayNode, String expected, String message) {

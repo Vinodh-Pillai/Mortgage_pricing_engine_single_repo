@@ -29,7 +29,7 @@ public final class BrokerCompensationService {
   private final Store store;
 
   public BrokerCompensationService(Clock clock) {
-    this(clock, Store.failClosed("BrokerCompensationService"));
+    this(clock, MarginDurableStores.brokerCompensationStore());
   }
 
   BrokerCompensationService(Clock clock, Store store) {

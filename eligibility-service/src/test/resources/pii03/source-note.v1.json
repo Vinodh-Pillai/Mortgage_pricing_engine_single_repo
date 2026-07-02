@@ -1,0 +1,42 @@
+{
+  "name": "pii03-module-fallback-source-note.v1",
+  "purpose": "Module-local PII-03 fallback fixtures must mirror authoritative workspace fixtures when the workspace-level sources are present; module-only Docker validation may fall back to these mirrored files.",
+  "checksumAlgorithm": "SHA-256",
+  "mirrors": [
+    {
+      "workspacePath": "contracts/pii03/api/rule-evaluation-fixtures.v1.json",
+      "modulePath": "src/test/resources/pii03/contracts/api/rule-evaluation-fixtures.v1.json",
+      "moduleFallbackAllowed": true
+    },
+    {
+      "workspacePath": "test-fixtures/pii03/replay-manifest.json",
+      "modulePath": "src/test/resources/pii03/test-fixtures/replay-manifest.json",
+      "moduleFallbackAllowed": true
+    },
+    {
+      "workspacePath": "test-fixtures/pii03/scenario-conventional-purchase-happy.json",
+      "modulePath": "src/test/resources/pii03/test-fixtures/scenario-conventional-purchase-happy.json",
+      "moduleFallbackAllowed": true
+    },
+    {
+      "workspacePath": "test-fixtures/pii03/scenario-loan-limit-fail.json",
+      "modulePath": "src/test/resources/pii03/test-fixtures/scenario-loan-limit-fail.json",
+      "moduleFallbackAllowed": true
+    },
+    {
+      "workspacePath": "test-fixtures/pii03/scenario-missing-fico.json",
+      "modulePath": "src/test/resources/pii03/test-fixtures/scenario-missing-fico.json",
+      "moduleFallbackAllowed": true
+    },
+    {
+      "workspacePath": "test-fixtures/pii03/scenario-condo-warning.json",
+      "modulePath": "src/test/resources/pii03/test-fixtures/scenario-condo-warning.json",
+      "moduleFallbackAllowed": true
+    },
+    {
+      "workspacePath": "test-fixtures/pii03/scenario-investor-overlay-fail.json",
+      "modulePath": "src/test/resources/pii03/test-fixtures/scenario-investor-overlay-fail.json",
+      "moduleFallbackAllowed": true
+    }
+  ]
+}

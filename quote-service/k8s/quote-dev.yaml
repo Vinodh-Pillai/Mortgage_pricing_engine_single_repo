@@ -2,6 +2,8 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: wcpe-dev
+  annotations:
+    wcpe.codefactory/deployment-policy: blocked-without-explicit-non-prod-approval
   labels:
     app.kubernetes.io/part-of: world-class-pricing-engine
     environment: dev
@@ -24,12 +26,13 @@ data:
   WCPE_SYNTHETIC_ONLY: "false"
   WCPE_ADJUSTMENT_SERVICE_BASE_URL: http://adjustment-service.wcpe-dev.svc.cluster.local:8080
   QUOTE_LOANHOUSE_CAPTURE_LOADER_ENABLED: "true"
-  QUOTE_LOANHOUSE_CAPTURE_LOADER_TENANT_ID: 2aba740b-74ee-3068-a456-4df1e64b7c02
+  QUOTE_LOANHOUSE_CAPTURE_LOADER_TENANT_ID: 11111111-1111-1111-1111-111111111111
   QUOTE_LOANHOUSE_CAPTURE_LOADER_RESOURCE: classpath:loanhouse/product-records.json
-  QUOTE_LOANPASS_SYNTHETIC_LOADER_ENABLED: "false"
-  QUOTE_LOANPASS_SYNTHETIC_LOADER_TENANT_ID: 2aba740b-74ee-3068-a456-4df1e64b7c02
+  QUOTE_LOANPASS_SYNTHETIC_LOADER_ENABLED: "true"
+  QUOTE_LOANPASS_SYNTHETIC_LOADER_TENANT_ID: 11111111-1111-1111-1111-111111111111
   QUOTE_LOANPASS_SYNTHETIC_LOADER_PRODUCT_COUNT: "1536"
-  QUOTE_LOANPASS_SYNTHETIC_LOADER_SEED: ui-preview-tenant-dev
+  QUOTE_LOANPASS_SYNTHETIC_LOADER_SEED: PII-17-S07-pricing-load-test-seed-v1
+  QUOTE_SYNTHETIC_DEPENDENCIES_ENABLED: "true"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -58,7 +61,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: quote-service
-          image: 192.168.4.102:32061/mortgage-pricing/quote-service:0.1.0-nextinput-2-final-20260629T153510Z-amd64
+          image: 192.168.4.102:32061/mortgage-pricing/quote-service:0.1.0-inc5-quote-repeat-fix-20260701T150317Z-amd64
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

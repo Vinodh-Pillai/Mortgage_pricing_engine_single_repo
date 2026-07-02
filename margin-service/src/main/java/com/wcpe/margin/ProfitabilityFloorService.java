@@ -31,7 +31,7 @@ public final class ProfitabilityFloorService {
   private final Store store;
 
   public ProfitabilityFloorService(Clock clock) {
-    this(clock, Store.failClosed("ProfitabilityFloorService"));
+    this(clock, MarginDurableStores.profitabilityFloorStore());
   }
 
   ProfitabilityFloorService(Clock clock, Store store) {

@@ -10,11 +10,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.jdbc.BadSqlGrammarException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -36,8 +38,10 @@ import static org.mockito.Mockito.when;
 class PublishWorkflowStateMachineTest {
   private static final UUID TENANT = UUID.fromString("00000000-0000-0000-0000-000000000100");
   private static final UUID VERSION = UUID.fromString("20000000-0000-0000-0000-000000000001");
+  private static final UUID BATCH = UUID.fromString("30000000-0000-0000-0000-000000000001");
   private static final String GRID_HASH = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   private static final String VERSION_HASH = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  private static final String VALIDATION_HASH = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
 
   @Mock
   JdbcTemplate jdbc;
@@ -73,6 +77,7 @@ class PublishWorkflowStateMachineTest {
   @Test
   void publishRequiresCurrentValidationAndVersionHashes() throws Exception {
     mockSheet("APPROVED");
+    mockParserBackedValidation("PASSED", 0, VALIDATION_HASH);
     when(jdbc.queryForObject(eq("select submitted_by from rate_feed.rate_sheet where tenant_id=? and sheet_id=?"), eq(String.class), eq(TENANT), eq(VERSION)))
         .thenReturn("submitter");
 
@@ -87,6 +92,7 @@ class PublishWorkflowStateMachineTest {
   void publishSupersedesExistingActiveWindowAndRecordsBeforeRefs() throws Exception {
     UUID previousActive = UUID.fromString("20000000-0000-0000-0000-000000000099");
     mockSheet("APPROVED");
+    mockParserBackedValidation("PASSED", 0, VALIDATION_HASH);
     when(jdbc.queryForObject(eq("select submitted_by from rate_feed.rate_sheet where tenant_id=? and sheet_id=?"), eq(String.class), eq(TENANT), eq(VERSION)))
         .thenReturn("submitter");
     lenient().when(jdbc.queryForObject(startsWith("select count(*) from rate_feed.rate_sheet"), eq(Integer.class), eq(TENANT), any(), any(), anyString(), eq(VERSION), any(), any()))
@@ -100,11 +106,30 @@ class PublishWorkflowStateMachineTest {
         });
 
     RateFeedModels.PublishWorkflowStateResponse response = service.publishVersion(TENANT, VERSION,
-        new PublishRateSheetRequest(Instant.parse("2026-01-01T00:00:00Z"), GRID_HASH, VERSION_HASH), "idem-publish", "publisher", "corr-1");
+        new PublishRateSheetRequest(Instant.parse("2026-01-01T00:00:00Z"), VALIDATION_HASH, VERSION_HASH), "idem-publish", "publisher", "corr-1");
 
     assertEquals("PUBLISHED", response.status());
     verify(jdbc).update(startsWith("update rate_feed.rate_sheet set status='SUPERSEDED'"), any(), eq(TENANT), any(), any(), anyString(), eq(VERSION));
     verify(jdbc).update(startsWith("insert into rate_feed.published_rate_sheet_read_model"), eq(TENANT), eq(VERSION), any(), any(), any(), any(), eq("ACTIVE"), eq(GRID_HASH), eq("publisher"), anyString());
+  }
+
+  @Test
+  void publishPreservesSourceBatchSchemaFailuresInsteadOfMaskingAsMissingValidation() throws Exception {
+    mockSheet("APPROVED");
+    when(jdbc.queryForObject(eq("select submitted_by from rate_feed.rate_sheet where tenant_id=? and sheet_id=?"), eq(String.class), eq(TENANT), eq(VERSION)))
+        .thenReturn("submitter");
+    BadSqlGrammarException schemaFailure = new BadSqlGrammarException(
+        "source_batch_lookup",
+        "select source_batch_id from rate_feed.rate_sheet where tenant_id=? and sheet_id=?",
+        new SQLException("column source_batch_id does not exist"));
+    when(jdbc.queryForObject(eq("select source_batch_id from rate_feed.rate_sheet where tenant_id=? and sheet_id=?"), eq(UUID.class), eq(TENANT), eq(VERSION)))
+        .thenThrow(schemaFailure);
+
+    BadSqlGrammarException ex = assertThrows(BadSqlGrammarException.class, () -> service.publishVersion(TENANT, VERSION,
+        new PublishRateSheetRequest(Instant.parse("2026-01-01T00:00:00Z"), VALIDATION_HASH, VERSION_HASH), "idem-publish", "publisher", "corr-1"));
+
+    assertEquals(schemaFailure, ex);
+    verify(jdbc, never()).update(startsWith("update rate_feed.rate_sheet set status=?"), any(), any(), any(), any(), any());
   }
 
   private void mockSheet(String status) throws Exception {
@@ -112,6 +137,18 @@ class PublishWorkflowStateMachineTest {
         .thenAnswer(inv -> {
           RowMapper<RateFeedModels.RateSheet> mapper = inv.getArgument(2);
           return mapper.mapRow(sheetResultSet(status), 0);
+        });
+  }
+
+  private void mockParserBackedValidation(String status, int blockers, String resultHash) throws Exception {
+    when(jdbc.queryForObject(eq("select source_batch_id from rate_feed.rate_sheet where tenant_id=? and sheet_id=?"), eq(UUID.class), eq(TENANT), eq(VERSION)))
+        .thenReturn(BATCH);
+    when(jdbc.queryForObject(eq("select count(distinct row_id) from rate_feed.rate_feed_parsed_field where tenant_id=? and batch_id=? and severity <> 'ERROR'"), eq(Long.class), eq(TENANT), eq(BATCH)))
+        .thenReturn(1L);
+    when(jdbc.query(startsWith("select validation_job_id,status,blocking_error_count,result_hash from rate_feed.rate_feed_validation_job"), any(RowMapper.class), eq(TENANT), eq(BATCH)))
+        .thenAnswer(inv -> {
+          RowMapper<?> mapper = inv.getArgument(1);
+          return List.of(mapper.mapRow(validationEvidenceResultSet(status, blockers, resultHash), 0));
         });
   }
 
@@ -152,6 +189,15 @@ class PublishWorkflowStateMachineTest {
     when(rs.getTimestamp("submitted_at")).thenReturn(Timestamp.from(Instant.parse("2026-01-01T00:00:00Z")));
     when(rs.getTimestamp("approved_at")).thenReturn(Timestamp.from(Instant.parse("2026-01-01T00:00:01Z")));
     when(rs.getTimestamp("activated_at")).thenReturn(Timestamp.from(Instant.parse("2026-01-01T00:00:02Z")));
+    return rs;
+  }
+
+  private ResultSet validationEvidenceResultSet(String status, int blockers, String resultHash) throws Exception {
+    ResultSet rs = mock(ResultSet.class);
+    when(rs.getObject("validation_job_id", UUID.class)).thenReturn(UUID.fromString("30000000-0000-0000-0000-000000000099"));
+    when(rs.getString("status")).thenReturn(status);
+    when(rs.getInt("blocking_error_count")).thenReturn(blockers);
+    when(rs.getString("result_hash")).thenReturn(resultHash);
     return rs;
   }
 }

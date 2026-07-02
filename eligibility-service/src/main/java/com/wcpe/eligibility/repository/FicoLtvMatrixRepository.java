@@ -23,7 +23,7 @@ public class FicoLtvMatrixRepository {
     public FicoLtvMatrixConfig resolve(UUID tenantId, String productFamily, String investorCode,
                                         String channel, String loanPurpose, String occupancyType,
                                         String propertyType, Date effectiveDate) {
-        String effectiveDateStr = effectiveDate != null ? effectiveDate.toString() : LocalDate.now().toString();
+        Date effectiveDateParam = effectiveDate != null ? effectiveDate : Date.valueOf(LocalDate.now());
 
         UUID matrixSetId = jdbc.queryForObject(
             "SELECT matrix_set_id FROM eligibility.fico_ltv_matrix_set " +
@@ -34,7 +34,7 @@ public class FicoLtvMatrixRepository {
             "effective_from <= ? AND (effective_to IS NULL OR effective_to >= ?) " +
             "ORDER BY effective_from DESC LIMIT 1",
             UUID.class,
-            tenantId, productFamily, investorCode, channel, effectiveDateStr, effectiveDateStr
+            tenantId, productFamily, investorCode, channel, effectiveDateParam, effectiveDateParam
         );
 
         if (matrixSetId == null) {

@@ -7,6 +7,8 @@ import static org.mockito.Mockito.*;
 
 import com.wcpe.ratefeed.domain.RateFeedModels.*;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -121,6 +123,39 @@ class RateFeedBatchCreateCommandTest {
     assertThat(response.status()).isEqualTo("UPLOADED");
     assertThat(response.batchId()).isNotNull();
     assertThat(response.rawFileId()).isNotNull();
+  }
+
+  @Test
+  void completeUploadSessionPersistsCsvBytesForLocalParserReference() throws Exception {
+    RequestContext.roles("RATE_FEED_UPLOAD");
+    UUID sessionId = session();
+    String csv = "product,note_rate,lock_period,price,investor,channel\n"
+        + "CONVENTIONAL,6.125,30,108.5," + investor() + "," + channel() + "\n";
+    String fileSha256 = Hashing.sha256(csv).replaceFirst("^sha256:", "");
+    CompleteUploadRequest request = new CompleteUploadRequest(fileSha256, "local://rate-feed-upload/" + sessionId, "scan-result-1", "CLEAN", csv);
+    Path storedCsv = Path.of("build/rate-feed-upload", sessionId + ".csv");
+    Files.deleteIfExists(storedCsv);
+
+    when(repository.idempotent(any(), eq("idem-bytes"), any(), eq(CompleteUploadResponse.class), any())).thenAnswer(invocation -> {
+      @SuppressWarnings("unchecked") Supplier<CompleteUploadResponse> command = invocation.getArgument(4);
+      return command.get();
+    });
+    when(repository.session(any(), any())).thenReturn(new RateFeedRepository.UploadSessionRow(
+        sessionId, investor(), channel(), format(), "MANUAL_UPLOAD",
+        Instant.parse("2026-06-01T12:00:00Z"), "America/New_York",
+        "RateSheet.csv", "text/csv", csv.getBytes(java.nio.charset.StandardCharsets.UTF_8).length, null,
+        "OPEN", Instant.now().plusSeconds(3600), "actor", "corr"));
+    when(repository.complete(any(), any(), any(), any(), any(), any())).thenAnswer(invocation ->
+        new CompleteUploadResponse(UUID.randomUUID(), "UPLOADED", UUID.randomUUID(), UUID.randomUUID(), java.util.Map.of(), "result-hash"));
+
+    service.complete(tenant(), sessionId, request, "idem-bytes", "actor", "corr");
+
+    assertThat(Files.readString(storedCsv)).isEqualTo(csv);
+    var completedRequest = org.mockito.ArgumentCaptor.forClass(CompleteUploadRequest.class);
+    verify(repository).complete(any(), any(), completedRequest.capture(), any(), any(), any());
+    assertThat(completedRequest.getValue().storageObjectId()).isEqualTo("local://rate-feed-upload/" + sessionId);
+    assertThat(completedRequest.getValue().csvContent()).isNull();
+    Files.deleteIfExists(storedCsv);
   }
 
   @Test

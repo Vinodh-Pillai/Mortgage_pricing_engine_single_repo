@@ -6,12 +6,15 @@ import com.wcpe.eligibility.domain.models.EligibilityRequest;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -112,6 +115,26 @@ public class EligibilityCacheService {
         );
     }
 
+    public UUID recordInvalidation(UUID tenantId, String namespace, String versionToken, String reason, UUID requestedBy) {
+        if (tenantId == null || requestedBy == null) {
+            throw new IllegalArgumentException("tenantId and requestedBy are required");
+        }
+        String normalizedNamespace = required(namespace, "namespace");
+        String normalizedVersionToken = required(versionToken, "versionToken");
+        String normalizedReason = required(reason, "reason");
+        UUID invalidationId = UUID.randomUUID();
+        jdbc.update("""
+            insert into eligibility.eligibility_cache_invalidation
+              (tenant_id, invalidation_id, namespace, version_token, reason, requested_by, requested_at_utc, status)
+            values (?, ?, ?, ?, ?, ?, ?, 'PENDING')
+            """, tenantId, invalidationId, normalizedNamespace, normalizedVersionToken, normalizedReason, requestedBy, Instant.now());
+        if (redis != null) {
+            applyRedisInvalidation(tenantId, invalidationId, normalizedNamespace);
+        }
+        increment("invalidation_requested", normalizedNamespace);
+        return invalidationId;
+    }
+
     public EligibilityCacheKey decisionKey(UUID tenantId, EligibilityRequest request, String ruleVersionGraphHash) {
         return EligibilityCacheKey.decision(
             tenantId,
@@ -140,6 +163,64 @@ public class EligibilityCacheService {
         } catch (Exception ex) {
             throw new IllegalStateException("Failed to hash cache key material", ex);
         }
+    }
+
+    private static String required(String value, String fieldName) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(fieldName + " is required");
+        }
+        return value.trim();
+    }
+
+    private void applyRedisInvalidation(UUID tenantId, UUID invalidationId, String namespace) {
+        try {
+            long deleted = deleteRedisKeys("eligibility:decision:" + tenantId + ":*")
+                + deleteRedisKeys("eligibility:cfg:" + namespace + ":" + tenantId + ":*");
+            jdbc.update("""
+                update eligibility.eligibility_cache_invalidation
+                set status = 'PROCESSED', processed_at_utc = ?
+                where invalidation_id = ?
+                """, Instant.now(), invalidationId);
+            increment(deleted > 0 ? "invalidation_processed" : "invalidation_no_keys", namespace);
+        } catch (Exception ex) {
+            jdbc.update("""
+                update eligibility.eligibility_cache_invalidation
+                set status = 'FAILED', error_message = ?
+                where invalidation_id = ?
+                """, left(ex.getMessage(), 1000), invalidationId);
+            increment("redis_error", namespace);
+        }
+    }
+
+    private long deleteRedisKeys(String pattern) {
+        long deleted = 0;
+        List<String> batch = new ArrayList<>(500);
+        try (Cursor<String> cursor = redis.scan(ScanOptions.scanOptions().match(pattern).count(500).build())) {
+            while (cursor.hasNext()) {
+                batch.add(cursor.next());
+                if (batch.size() == 500) {
+                    deleted += deleteRedisBatch(batch);
+                    batch.clear();
+                }
+            }
+            deleted += deleteRedisBatch(batch);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Redis cache invalidation scan failed", ex);
+        }
+        return deleted;
+    }
+
+    private long deleteRedisBatch(List<String> keys) {
+        if (keys.isEmpty()) {
+            return 0;
+        }
+        Long deleted = redis.delete(List.copyOf(keys));
+        return deleted == null ? 0 : deleted;
+    }
+
+    private static String left(String value, int maxLength) {
+        String text = value == null || value.isBlank() ? "Redis cache invalidation failed" : value;
+        return text.length() <= maxLength ? text : text.substring(0, maxLength);
     }
 
     private void increment(String name, String namespace) {

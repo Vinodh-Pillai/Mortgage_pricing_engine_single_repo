@@ -1,0 +1,21 @@
+{
+  "fixtureName": "scenario-investor-overlay-fail",
+  "syntheticOnly": true,
+  "tenantId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+  "requestId": "cmd-pii03-investor-overlay-001",
+  "scenario": {
+    "productFamily": "CONVENTIONAL",
+    "loanPurpose": "PURCHASE",
+    "occupancyType": "PRIMARY_RESIDENCE",
+    "propertyType": "SINGLE_FAMILY",
+    "representativeFico": 740,
+    "loanAmount": "450000.00",
+    "ltvRatio": "80.0000",
+    "investorCode": "SYNTH_INVESTOR"
+  },
+  "expected": {
+    "quoteStatus": "ELIGIBILITY_ONLY",
+    "optionStatuses": ["INELIGIBLE"],
+    "resultHash": "sha256:fc30c641a84ca9c9c1d71b9b4a4ab25a416f771ddadff2d73b0cb924250d0001"
+  }
+}

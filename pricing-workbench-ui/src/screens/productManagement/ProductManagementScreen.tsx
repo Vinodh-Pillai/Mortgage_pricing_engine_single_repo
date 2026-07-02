@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ChangeEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { fetchProductAdmin, type ProductAdminMapping, type ProductAdminProduct, type ProductAdminStipulation, type ProductAdminView } from '../../lib/api/products';
+import { displayChannelLabel } from '../../lib/utils/channelDisplay';
 import { usePageActions } from '../../layout/PageActionsContext';
 
 type ProductManagementScreenProps = {
@@ -334,7 +335,7 @@ export function ProductManagementScreen({ fetchImpl = fetch, tenantContext = 'ui
               </div>
               <div className="pm-card-code">{product.productCode}</div>
               <input className="pm-inline-title" value={product.productName} aria-label={`${product.productCode} name`} onClick={(event) => event.stopPropagation()} onChange={(event) => patchProduct(product.productId, { productName: event.target.value })} />
-              <div className="pm-card-meta"><span>{product.investorCode}</span><span>{product.channelCode}</span><span>{product.productType}</span></div>
+              <div className="pm-card-meta"><span>{product.investorCode}</span><span>{displayChannelLabel(product.channelCode)}</span><span>{product.productType}</span></div>
               <div className="pm-rate">{rateRange(product)}</div>
               <div className="pm-quick-row" onClick={(event) => event.stopPropagation()}>
                 <select value={product.status} aria-label={`${product.productCode} status`} onChange={(event) => patchProduct(product.productId, { status: event.target.value })}>

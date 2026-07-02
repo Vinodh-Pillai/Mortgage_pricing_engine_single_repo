@@ -196,8 +196,8 @@ afterEach(() => {
 describe('PipelineIntakeTest', () => {
   it('rendersSplitViewProductFinderWithoutStepNavigation', () => {
     render(<QuoteIntakeFlow metadataState={metadataState} />);
-    expect(screen.getByRole('heading', { name: /^Intake$/i })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: /^Filters$/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /^Pipeline intake$/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /^Product filters$/i })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /^Products$/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Previous/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Next/i })).not.toBeInTheDocument();
@@ -222,7 +222,7 @@ describe('PipelineIntakeTest', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<QuoteIntakeFlow metadataState={metadataState} />);
 
-    const quoteSection = screen.getByRole('heading', { name: /^Quote$/i }).closest('section') as HTMLElement;
+    const quoteSection = screen.getByRole('heading', { name: /^Quote inputs$/i }).closest('section') as HTMLElement;
     const mortgageType = within(quoteSection).getByRole('combobox', { name: /^Mortgage type/i });
     fireEvent.change(mortgageType, { target: { value: 'Conventional' } });
     fireEvent.blur(mortgageType);
@@ -295,8 +295,8 @@ describe('PipelineIntakeTest', () => {
   it('shows concise required indicators and disables launch until the quote is ready', () => {
     render(<QuoteIntakeFlow metadataState={metadataState} />);
 
-    expect(screen.getAllByText('Required').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Required fields').length).toBeGreaterThan(0);
+    expect(screen.getAllByLabelText('required').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Required fields')).not.toBeInTheDocument();
     const launchButton = screen.getByRole('button', { name: /^Launch Quote$/i });
     expect(launchButton).toBeDisabled();
     expect(screen.getByText('Select a product and complete required fields')).toBeInTheDocument();
@@ -765,19 +765,21 @@ describe('PipelineIntakeTest', () => {
 
     expect(screen.getByRole('combobox', { name: /^State$/i })).toHaveDisplayValue('Select state');
     expect(screen.getByRole('combobox', { name: /^Documentation type$/i })).toHaveDisplayValue('Select documentation type');
-    expect(screen.getByRole('spinbutton', { name: /^Decision credit score$/i })).toHaveValue(null);
-    expect(screen.getByRole('spinbutton', { name: /^Base loan amount$/i })).toHaveValue(null);
+    expect(screen.getByRole('spinbutton', { name: /^Decision credit score/i })).toHaveValue(null);
+    expect(screen.getByRole('spinbutton', { name: /^Base loan amount/i })).toHaveValue(null);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('filtersProductResultsFromLeftPanelControls', () => {
     const { container } = render(<QuoteIntakeFlow metadataState={metadataState} />);
-    const filters = container.querySelector('#filters-heading')?.closest('section') as HTMLElement;
+    const filters = container.querySelector('#product-filters-heading')?.closest('section') as HTMLElement;
     const [mortgageTypeFilter, , , statusFilter] = Array.from(filters.querySelectorAll('select')) as HTMLSelectElement[];
 
     expect(container.querySelector('.quote-intake-data-required')).not.toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(/Filters\s*0\s*active|Profile\s*0%\s*complete/i);
     expect(screen.getByText(/5 filtered of 5 total · 3 active · 1 pending · 1 inactive/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Correspondent/).length).toBeGreaterThan(0);
+    expect(document.body).not.toHaveTextContent(/\bCorr\b/);
     expect(container.querySelector('.quote-product-row[aria-label="VA 30-Year Preview ACTIVE"]')).toBeInTheDocument();
     fireEvent.change(mortgageTypeFilter, { target: { value: 'FHA' } });
     expect(document.body).toHaveTextContent(/Filters\s*1\s*active/i);

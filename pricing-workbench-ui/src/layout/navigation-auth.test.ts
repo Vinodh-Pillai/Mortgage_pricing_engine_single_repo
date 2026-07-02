@@ -58,8 +58,8 @@ describe('navigation RBAC filtering', () => {
     expect(labels).toEqual(expect.arrayContaining(['Pipeline Intake', 'New quote', 'Draft Scenarios', 'Lock Workflow']));
     expect(labels).not.toEqual(expect.arrayContaining(['QuickQuote']));
     expect(items).toEqual(expect.arrayContaining([
-      expect.objectContaining({ label: 'Pricing Waterfall', route: '/pricing/waterfall' }),
-      expect.objectContaining({ label: 'Quote Journey Map', route: '/journey-map' }),
+      expect.objectContaining({ label: 'Pricing Waterfall', route: '/quote/run-123/pricing-waterfall' }),
+      expect.objectContaining({ label: 'Quote Journey Map', route: '/quote/run-123/journey' }),
     ]));
     expect(labels).not.toEqual(expect.arrayContaining(['Product Catalog', 'Rate Sheet Intake', 'Tenant Management', 'User Management']));
   });

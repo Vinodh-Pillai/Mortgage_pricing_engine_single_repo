@@ -1,7 +1,21 @@
 {
   "ownerStory": "PII-17-S07",
   "fixtureKind": "synthetic-pricing-load-test",
-  "tenants": ["synthetic-tenant-alpha", "synthetic-tenant-beta"],
+  "tenants": ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"],
+  "quoteApi": {
+    "pathTemplate": "/api/v1/tenants/{tenantId}/quotes",
+    "defaultApiPrefix": "/api/v1",
+    "defaultQuotePath": "/quotes",
+    "openApiServerUrl": "/api/v1",
+    "method": "POST",
+    "service": "quote-service",
+    "expectedResponseStatuses": {
+      "successRanges": [{"min": 200, "max": 299}],
+      "contractRejections": [400, 422],
+      "boundedOperationalResponses": [429, 503],
+      "notes": "Quote-service maps QuoteCreateException validation/policy rejections to 400, and k6 load proof should not fail solely because unseeded local/dev synthetic refs are contract-rejected. Unexpected status rate remains gated separately."
+    }
+  },
   "scenarioMix": {
     "warm-cache-repeat-quotes": 40,
     "cold-cache-unique-quotes": 25,
@@ -16,6 +30,25 @@
     "state-variation-set",
     "channel-investor-product-combination-set"
   ],
+  "syntheticFixtureMetadata": {
+    "seed": "PII-17-S07-pricing-load-test-seed-v1",
+    "source": "repo-local synthetic load-test fixture",
+    "generatorVersion": "pricing-load-test-fixture-v1",
+    "productionValidity": false,
+    "notes": "These values are deterministic test refs only. They do not represent production investors, channels, states, currencies, effective dates, borrower attributes, rates, fees, or eligibility decisions. Local/dev runs must seed matching tenant reference data before using this payload."
+  },
+  "seededQuoteRequestRefs": {
+    "scenarioId": "33333333-3333-3333-3333-333333333333",
+    "scenarioVersion": 7,
+    "requestedLockPeriods": [30, 45],
+    "investors": ["load-test-investor-ref"],
+    "channels": ["retail"],
+    "propertyStates": ["CA"],
+    "presentationCurrency": "USD",
+    "sourceSystem": "observability-load-test",
+    "actorId": "observability-load-test",
+    "effectiveDate": "2026-06-04"
+  },
   "sourceRefs": {
     "pricingConfigRef": "tenant-config-ref-required",
     "referenceDataVersionRef": "reference-data-version-ref-required",
@@ -23,6 +56,6 @@
   },
   "privacy": {
     "containsRealPii": false,
-    "notes": "Fixture stores scenario labels and immutable refs only; concrete mortgage pricing rules, borrower values, rates, and investor decisions must come from seeded tenant configuration."
+    "notes": "Fixture stores scenario labels, UUID tenant ids, immutable refs, and deterministic synthetic quote request refs only; concrete mortgage pricing rules, borrower values, rates, and investor decisions must come from seeded tenant configuration."
   }
 }

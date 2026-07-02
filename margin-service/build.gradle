@@ -20,6 +20,7 @@ tasks.withType(JavaCompile).configureEach {
 dependencies {
   implementation 'org.springframework.boot:spring-boot-starter-web'
   implementation 'org.springframework.boot:spring-boot-starter-actuator'
+  implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jdk8'
   testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
 }
 
@@ -29,4 +30,5 @@ tasks.named('bootJar') {
 
 tasks.named('test') {
   useJUnitPlatform()
+  systemProperty 'spring.profiles.active', 'test'
 }

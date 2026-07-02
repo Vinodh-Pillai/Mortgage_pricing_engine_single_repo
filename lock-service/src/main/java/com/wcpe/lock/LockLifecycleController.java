@@ -1,6 +1,7 @@
 package com.wcpe.lock;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -55,6 +56,14 @@ public class LockLifecycleController {
   ) {
     persistenceGate.requireLifecycleRoutePersistence(LockDetailApi.GET_LOCK_METHOD + " " + LockDetailApi.GET_LOCK_PATH);
     return lockDetailApi.getLock(tenantId, lockId);
+  }
+
+  @GetMapping("/locks")
+  public List<LockSummaryResponse> listLocks(@PathVariable UUID tenantId) {
+    persistenceGate.requireLifecycleRoutePersistence("GET /api/v1/tenants/{tenantId}/locks");
+    return lockService.listLocks(tenantId).stream()
+      .map(lock -> new LockSummaryResponse(lock.lockId(), lock.quoteId(), lock.status().name(), lock.version(), lock.createdAt(), lock.updatedAt(), lock.expiresAt()))
+      .toList();
   }
 
   @PostMapping("/locks/{lockId}/confirmations")
@@ -172,4 +181,14 @@ public class LockLifecycleController {
       );
     }
   }
+
+  public record LockSummaryResponse(
+    String lockId,
+    String quoteId,
+    String status,
+    int version,
+    Instant createdAt,
+    Instant updatedAt,
+    Instant expiresAt
+  ) {}
 }

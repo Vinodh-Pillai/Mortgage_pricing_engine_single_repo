@@ -1,102 +1,232 @@
-import { useState } from 'react';
-import { MajorFunctionalityPage, type EvidenceCapture, type FunctionalityPageConfig } from '../shared/MajorFunctionalityPage';
-import type { ScreenVisualState } from '../contract/ScreenProps';
+import { useEffect, useState } from 'react';
+import { fetchLockManagement, requestLockManagementAction, type LockManagementAction, type LockManagementActionResult, type LockManagementRecord, type LockManagementView } from '../../lib/api/locks';
+import { useOptionalTenantId } from '../../lib/data/tenant';
+import type { EvidenceCapture } from '../shared/MajorFunctionalityPage';
 
-type LockRow = { id: string; borrowerRef: string; delivery: string; status: string };
+type LockManagementState =
+  | { kind: 'loading' }
+  | { kind: 'loaded'; view: LockManagementView }
+  | { kind: 'blocked'; message: string };
 
 export const lockManagementEvidenceTarget = '.local-harness/evidence/PII-25-S04/lock-management.json';
 
-const lockConfig: FunctionalityPageConfig<LockRow> = {
-  screenId: 'lock-management',
-  evidenceTarget: lockManagementEvidenceTarget,
-  breadcrumb: 'Locks / Management',
-  eyebrow: 'Lock service',
-  title: 'Lock Management',
-  summary: 'Tracks lock requests, confirmed locks, expiring work, history, and investor delivery status using local preview data. Connected service actions are disabled until real lock records are available.',
-  dataBoundary: 'lock-service: GET/POST /api/v1/locks',
-  sections: [
-    { id: 'active-locks', eyebrow: 'Active', title: 'Active Locks', summary: 'Confirmed and requested lock records.', status: 'ready', items: ['Confirmed locks', 'Requested locks', 'Owner refs'] },
-    { id: 'lock-requests', eyebrow: 'Requests', title: 'Lock Requests', summary: 'Pending lock request queue.', status: 'needs-attention', items: ['Request ref', 'Approver', 'SLA ref'] },
-    { id: 'expiring-soon', eyebrow: 'Expiring', title: 'Expiring Soon', summary: 'Expiring lock visibility.', status: 'blocked', items: ['Expiration ref', 'Extension owner', 'Investor cutoff ref'] },
-    { id: 'history', eyebrow: 'History', title: 'History', summary: 'Lock event history and audit refs.', status: 'ready', items: ['Created', 'Extended', 'Cancelled'] },
-    { id: 'bulk-actions', eyebrow: 'Bulk', title: 'Bulk Actions', summary: 'Bulk extend, cancel, and deliver actions.', status: 'needs-attention', items: ['Bulk extend', 'Bulk cancel', 'Bulk deliver'] },
-    { id: 'investor-delivery', eyebrow: 'Delivery', title: 'Investor Delivery', summary: 'Investor delivery state and evidence.', status: 'empty', items: ['Delivery package', 'Acknowledgement', 'Exception ref'] },
-  ],
-  metrics: [
-    { label: 'Statuses', value: '5', help: 'requested, confirmed, expired, cancelled, delivered' },
-    { label: 'Bulk ops', value: '3', help: 'extend, cancel, deliver' },
-    { label: 'Data source', value: 'Local preview', help: 'Connected lock-service actions are disabled in this UI preview.' },
-  ],
-  rows: [
-    { id: 'lock-requested', borrowerRef: 'Preview borrower ref A', delivery: 'Not ready', status: 'requested' },
-    { id: 'lock-confirmed', borrowerRef: 'Preview borrower ref B', delivery: 'Pending investor package', status: 'confirmed' },
-    { id: 'lock-expired', borrowerRef: 'Preview borrower ref C', delivery: 'Needs review', status: 'expired' },
-    { id: 'lock-cancelled', borrowerRef: 'Preview borrower ref D', delivery: 'Closed', status: 'cancelled' },
-    { id: 'lock-delivered', borrowerRef: 'Preview borrower ref E', delivery: 'Acknowledged', status: 'delivered' },
-  ],
-  columns: [
-    { key: 'borrowerRef', header: 'Borrower ref' },
-    { key: 'delivery', header: 'Investor delivery' },
-    { key: 'status', header: 'Status', render: (row) => <span className={`functionality-badge functionality-badge--${row.status}`}>{row.status}</span> },
-  ],
-  tableCaption: 'Lock management records',
-  primaryActions: [{ id: 'request-lock-review', label: 'Start Lock Review (preview disabled)', variant: 'primary', disabled: true }],
-  secondaryActions: [{ id: 'extend-expiring-lock-review', label: 'Stage Extension Review (preview disabled)', disabled: true }, { id: 'show-expiry-blockers', label: 'Show Expiry Blockers (preview only)' }, { id: 'extend-locks', label: 'Bulk extend (preview disabled)', disabled: true }, { id: 'cancel-locks', label: 'Bulk cancel (preview disabled)', variant: 'danger', disabled: true }, { id: 'deliver-locks', label: 'Bulk deliver (preview disabled)', disabled: true }],
-  emptyMessage: 'No lock records are available for this workspace.',
-  blockedMessage: 'Lock management is blocked until lock-service expiration and delivery references are available.',
-  attentionMessage: 'Requested and expiring locks need operations review.',
-  renderSpotlight: (onEvidence) => <LockOperationsSpotlight onEvidence={onEvidence} />,
-};
+type LockAction = LockManagementAction;
 
-export function LockManagementScreen({ visualState, onEvidenceCapture }: { visualState?: ScreenVisualState; onEvidenceCapture?: EvidenceCapture }) {
+const lockActions: LockAction[] = ['read', 'detail', 'extend', 'relock', 'cancel', 'deliver'];
+const bulkLockActions: LockAction[] = ['read', 'detail'];
+
+export function LockManagementScreen({ onEvidenceCapture }: { onEvidenceCapture?: EvidenceCapture }) {
+  const tenantId = useOptionalTenantId();
+  const [state, setState] = useState<LockManagementState>(() => tenantId ? { kind: 'loading' } : { kind: 'blocked', message: 'Select a tenant context before loading lock management.' });
+  const [actionResult, setActionResult] = useState<LockManagementActionResult | null>(null);
+  const [selectedLockIds, setSelectedLockIds] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    if (!tenantId) {
+      setState({ kind: 'blocked', message: 'Select a tenant context before loading lock management.' });
+      setSelectedLockIds(new Set());
+      return undefined;
+    }
+    let active = true;
+    setState({ kind: 'loading' });
+    fetchLockManagement(tenantId)
+      .then((view) => { if (active) { setSelectedLockIds(new Set()); setState({ kind: 'loaded', view }); } })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : 'Lock management backend is unavailable.';
+        if (active) setState({ kind: 'blocked', message });
+      });
+    return () => { active = false; };
+  }, [tenantId]);
+
+  useEffect(() => {
+    const refs = state.kind === 'loaded'
+      ? [lockManagementEvidenceTarget, state.view.uiTraceId, ...state.view.locks.flatMap((lock) => [lock.lockId, lock.runId, ...lock.auditRefs])]
+      : [lockManagementEvidenceTarget];
+    onEvidenceCapture?.({
+      screenId: 'lock-management',
+      timestamp: new Date().toISOString(),
+      state: state.kind === 'loaded' ? (state.view.locks.length > 0 ? 'ready' : 'empty') : state.kind === 'loading' ? 'loading' : 'blocked',
+      dataRefs: refs,
+      blockers: state.kind === 'blocked' ? [state.message] : state.kind === 'loaded' ? state.view.locks.flatMap((lock) => lock.blockers) : [],
+      evidenceTarget: lockManagementEvidenceTarget,
+      refs,
+    });
+  }, [onEvidenceCapture, state]);
+
+  async function runAction(lock: LockManagementRecord, action: LockAction) {
+    if (!tenantId) {
+      setActionResult({ status: 'BLOCKED', message: 'Select a tenant context before submitting lock actions.', blockers: ['tenant-context-required'] });
+      return;
+    }
+    if (!lock.availableActions.includes(action)) return;
+    try {
+      setActionResult(await requestLockManagementAction(tenantId, lock.lockId, action));
+    } catch (error: unknown) {
+      setActionResult({ status: 'BLOCKED', message: error instanceof Error ? error.message : `Lock ${action} action failed.`, blockers: ['lock-action-unavailable'] });
+    }
+  }
+
+  function toggleLock(lockId: string) {
+    setSelectedLockIds((current) => {
+      const next = new Set(current);
+      if (next.has(lockId)) next.delete(lockId);
+      else next.add(lockId);
+      return next;
+    });
+  }
+
+  async function runBulkAction(action: LockAction) {
+    if (!tenantId) {
+      setActionResult({ status: 'BLOCKED', message: 'Select a tenant context before submitting bulk lock actions.', blockers: ['tenant-context-required'] });
+      return;
+    }
+    if (state.kind !== 'loaded') return;
+    if (selectedLockIds.size === 0) {
+      setActionResult({ status: 'BLOCKED', message: `Select one or more locks before requesting bulk ${action}.`, blockers: ['lock-selection-required'] });
+      return;
+    }
+    const selectedLocks = state.view.locks.filter((lock) => selectedLockIds.has(lock.lockId));
+    const eligibleLocks = selectedLocks.filter((lock) => lock.availableActions.includes(action));
+    if (eligibleLocks.length === 0) {
+      setActionResult({ status: 'BLOCKED', message: `Selected locks do not advertise the ${action} action from lock-service.`, blockers: ['bulk-action-contract-unavailable'] });
+      return;
+    }
+    try {
+      const results = await Promise.all(eligibleLocks.map((lock) => requestLockManagementAction(tenantId, lock.lockId, action)));
+      const blocked = results.filter((result) => result.status !== 'ACCEPTED');
+      setActionResult({
+        status: blocked.length === 0 ? 'ACCEPTED' : 'BLOCKED',
+        message: blocked.length === 0 ? `Bulk ${action} recorded for ${eligibleLocks.length} lock${eligibleLocks.length === 1 ? '' : 's'}.` : `Bulk ${action} completed with ${blocked.length} blocked lock${blocked.length === 1 ? '' : 's'}.`,
+        auditRef: results.map((result) => result.auditRef).filter(Boolean).join(', ') || null,
+        blockers: blocked.flatMap((result) => result.blockers ?? []),
+      });
+    } catch (error: unknown) {
+      setActionResult({ status: 'BLOCKED', message: error instanceof Error ? error.message : `Bulk ${action} action failed.`, blockers: ['bulk-lock-action-unavailable'] });
+    }
+  }
+
+  if (state.kind === 'loading') {
+    return <main className="functionality-page"><section className="panel"><h1>Lock Management</h1><p role="status">Loading lock-service records...</p></section></main>;
+  }
+
+  if (state.kind === 'blocked') {
+    return (
+      <main className="functionality-page" data-screen-id="lock-management">
+        <section className="hero" aria-labelledby="lock-management-title">
+          <p className="eyebrow">Lock service</p>
+          <h1 id="lock-management-title">Lock Management</h1>
+          <p>Review pending lock requests, expiring locks, investor delivery, and audit records only when lock-service supplies live records.</p>
+        </section>
+        <section className="panel" aria-labelledby="lock-management-blocked-heading">
+          <h2 id="lock-management-blocked-heading">Live backend required</h2>
+          <div className="banner banner--blocked" role="alert">
+            <strong>Lock management blocked</strong>
+            <span>{state.message}</span>
+            <span>The UI is not rendering preview lock rows or disabled workflow copy as real lock management.</span>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
+  const view = state.view;
   return (
-    <>
-      <style>{`
-        #lock-management-heading {
-          position: static !important;
-          display: block !important;
-          width: auto !important;
-          height: auto !important;
-          margin: 0 0 0.5rem !important;
-          overflow: visible !important;
-          clip: auto !important;
-          clip-path: none !important;
-          white-space: normal !important;
-          visibility: visible !important;
-          opacity: 1 !important;
-        }
-      `}</style>
-      <MajorFunctionalityPage config={lockConfig} visualState={visualState} onEvidenceCapture={onEvidenceCapture} />
-    </>
+    <main className="functionality-page" data-screen-id="lock-management" aria-labelledby="lock-management-title">
+      <section className="hero" aria-labelledby="lock-management-title">
+        <p className="eyebrow">Lock-service records</p>
+        <h1 id="lock-management-title">Lock Management</h1>
+        <p>Review live lock requests, expirations, investor delivery status, and audit evidence. Actions are enabled only when lock-service advertises the action for a record.</p>
+      </section>
+
+      <section className="page-metrics" aria-label="Lock management metrics">
+        <div className="page-metric"><span>Workspace</span><strong>{view.tenantContext}</strong><small>{view.dependencyStatus}</small></div>
+        <div className="page-metric"><span>Locks</span><strong>{String(view.locks.length)}</strong><small>lock-service supplied</small></div>
+        <div className="page-metric"><span>Pending</span><strong>{String(view.pendingCount ?? view.locks.filter((lock) => isPendingStatus(lock.status)).length)}</strong><small>live status</small></div>
+        <div className="page-metric"><span>Expiring</span><strong>{String(view.expiringCount ?? view.locks.filter((lock) => lock.expiryStatus === 'EXPIRING_SOON').length)}</strong><small>live expiration</small></div>
+        <div className="page-metric"><span>Support ref</span><strong>{view.uiTraceId}</strong><small>backend trace</small></div>
+      </section>
+
+      {actionResult ? <ActionResult result={actionResult} /> : null}
+
+      <section className="panel" aria-labelledby="bulk-lock-actions-heading">
+        <h2 id="bulk-lock-actions-heading">Bulk lock actions</h2>
+        <p role="status">{selectedLockIds.size} selected. Bulk read/detail actions call the lock-service detail contract for each selected row that advertises the action.</p>
+        <div className="button-row" aria-label="Bulk lock actions">
+          {bulkLockActions.map((action) => <button key={action} type="button" disabled={selectedLockIds.size === 0} onClick={() => void runBulkAction(action)}>Bulk {actionLabel(action)}</button>)}
+        </div>
+      </section>
+
+      <section className="panel" aria-labelledby="lock-records-heading">
+        <h2 id="lock-records-heading">Live lock records</h2>
+        {view.locks.length === 0 ? <p role="status">No lock-service records are available for this workspace.</p> : (
+          <div className="quote-table" role="table" aria-label="Lock management records">
+            <div role="row" className="quote-table__row quote-table__row--head">
+              <span role="columnheader">Select</span>
+              <span role="columnheader">Lock</span>
+              <span role="columnheader">Quote / borrower ref</span>
+              <span role="columnheader">Status</span>
+              <span role="columnheader">Expires</span>
+              <span role="columnheader">Investor delivery</span>
+              <span role="columnheader">Actions</span>
+            </div>
+            {view.locks.map((lock) => <LockRow key={lock.lockId} lock={lock} selected={selectedLockIds.has(lock.lockId)} onToggle={toggleLock} onAction={runAction} />)}
+          </div>
+        )}
+      </section>
+
+      <section className="panel" aria-labelledby="lock-audit-heading">
+        <h2 id="lock-audit-heading">Investor delivery and audit evidence</h2>
+        {view.locks.flatMap((lock) => lock.auditRefs).length === 0 ? <p role="status">No lock audit refs were supplied by lock-service.</p> : (
+          <ul className="offer-list" aria-label="Lock audit refs">
+            {view.locks.map((lock) => <li key={`${lock.lockId}-audit`}><strong>{lock.lockId}</strong><RefList values={lock.auditRefs} /></li>)}
+          </ul>
+        )}
+      </section>
+    </main>
   );
+}
+
+function LockRow({ lock, selected, onToggle, onAction }: { lock: LockManagementRecord; selected: boolean; onToggle: (lockId: string) => void; onAction: (lock: LockManagementRecord, action: LockAction) => void }) {
+  return (
+    <div role="row" className="quote-table__row">
+      <span role="cell"><input type="checkbox" aria-label={`Select lock ${lock.lockId}`} checked={selected} onChange={() => onToggle(lock.lockId)} /></span>
+      <span role="cell"><strong>{lock.lockId}</strong><br /><code>{lock.runId}</code></span>
+      <span role="cell">{lock.borrowerRef}</span>
+      <span role="cell">{lock.status}{lock.expiryStatus ? <><br /><small>{lock.expiryStatus}</small></> : null}{lock.blockers.length > 0 ? <RefList values={lock.blockers} /> : null}</span>
+      <span role="cell">{lock.expiresAt ?? 'Not supplied'}</span>
+      <span role="cell">{lock.investorDeliveryStatus}</span>
+      <span role="cell"><div className="button-row" aria-label={`${lock.lockId} actions`}>{lockActions.map((action) => {
+        const enabled = lock.availableActions.includes(action);
+        const blocker = lock.actionBlockers?.[action];
+        return <button key={action} type="button" disabled={!enabled} title={enabled ? undefined : blocker} aria-label={enabled ? actionLabel(action) : `${actionLabel(action)} disabled: ${blocker ?? 'not supported by lock-service contract'}`} onClick={() => onAction(lock, action)}>{enabled ? actionLabel(action) : `${actionLabel(action)} disabled`}</button>;
+      })}</div></span>
+    </div>
+  );
+}
+
+function ActionResult({ result }: { result: LockManagementActionResult }) {
+  const accepted = result.status === 'ACCEPTED';
+  return (
+    <div className={accepted ? 'banner banner--success' : 'banner banner--blocked'} role={accepted ? 'status' : 'alert'}>
+      <strong>{accepted ? 'Lock action recorded' : 'Lock action blocked'}</strong>
+      <span>{result.message}</span>
+      {result.auditRef ? <code>{result.auditRef}</code> : null}
+      <RefList values={result.blockers ?? []} />
+    </div>
+  );
+}
+
+function RefList({ values }: { values: string[] }) {
+  if (values.length === 0) return null;
+  return <ul>{values.map((value) => <li key={value}><code>{value}</code></li>)}</ul>;
+}
+
+function actionLabel(action: string) {
+  return action[0].toUpperCase() + action.slice(1);
+}
+
+function isPendingStatus(status: string) {
+  return ['REQUESTED', 'PENDING_APPROVAL', 'APPROVED', 'PENDING_INVESTOR_CONFIRMATION'].includes(status);
 }
 
 export default LockManagementScreen;
-
-function LockOperationsSpotlight({ onEvidence }: { onEvidence: (actionId: string) => void }) {
-  const [notice, setNotice] = useState('');
-
-  function stageAction(actionId: string, message: string) {
-    onEvidence(actionId);
-    setNotice(message);
-  }
-
-  return (
-    <section className="panel" aria-labelledby="lock-ops-spotlight-heading">
-      <div className="panel-heading-row">
-        <div>
-            <p className="eyebrow">Lock operations</p>
-          <h2 id="lock-ops-spotlight-heading">Lock lifecycle actions</h2>
-        </div>
-      </div>
-      <p className="quote-intake-status">Preview data is visible for workflow review. Submission, extension, cancellation, and delivery actions are disabled until connected lock records are available.</p>
-      <details className="field-help"><summary aria-label="Lock operation details">?</summary><span>Additional investor delivery and cutoff details are shown only when connected records are available.</span></details>
-      <div className="offer-toolbar" aria-label="Local lock lifecycle actions">
-        <button type="button" disabled onClick={() => stageAction('request-lock-review', 'Connected lock review is disabled until real lock records are available.')}>Start Lock Review (preview disabled)</button>
-        <button type="button" disabled onClick={() => stageAction('extend-expiring-lock-review', 'Connected extension review is disabled until real lock records are available.')}>Stage Extension Review (preview disabled)</button>
-        <button type="button" onClick={() => stageAction('show-expiry-items', 'Expiry items are ready for operations review.')}>Review Expiry Items</button>
-      </div>
-      {notice ? <div className="banner banner--info" role="status">{notice}</div> : null}
-    </section>
-  );
-}

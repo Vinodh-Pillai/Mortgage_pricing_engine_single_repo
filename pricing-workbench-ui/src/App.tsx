@@ -1,4 +1,4 @@
-﻿import { type ReactNode, Suspense, lazy, useEffect, useState } from 'react';
+﻿import { type ReactNode, Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   fetchOfferComparison,
@@ -118,6 +118,7 @@ import { DiagnosticsDetails } from './components/DiagnosticsDetails';
 import { ThemeProvider, useTheme } from './design-system';
 import { Shell } from './layout';
 import { AuthProvider, useAuth } from './lib/auth/AuthContext';
+import { useOptionalTenantId } from './lib/data/tenant';
 import { visibleOfferEvidenceValues } from './screens/quoteOffers/offerComparison';
 import { RouteGuard } from './routing/RouteGuard';
 import { useCurrentRoute } from './routing/hooks';
@@ -141,6 +142,7 @@ const AdminGovernanceScreen = lazy(() => import('./screens/adminGovernance').the
 const RulesEngineScreen = lazy(() => import('./screens/rulesEngine/RulesEngineScreen'));
 const PricingProfilesScreen = lazy(() => import('./screens/pricingProfiles/PricingProfilesScreen'));
 const UserManagementScreen = lazy(() => import('./screens/userManagement/UserManagementScreen'));
+const UserAccountScreen = lazy(() => import('./screens/user/UserAccountScreen'));
 const MlAdvisoryInsightsScreen = lazy(() => import('./screens/mlAdvisoryInsights').then((module) => ({ default: module.MlAdvisoryInsightsScreen })));
 const ModelVersionGovernanceScreen = lazy(() => import('./screens/modelVersionGovernance').then((module) => ({ default: module.ModelVersionGovernanceScreen })));
 const DriftMonitoringScreen = lazy(() => import('./screens/driftMonitoring').then((module) => ({ default: module.DriftMonitoringScreen })));
@@ -223,11 +225,14 @@ function AppRoutes() {
                 <Route path="*" element={<NotFoundRoute />} />
               </Route>
               <Route path="/pricing/adjustments" element={<AdjustmentEvidenceScreen tenantContext={tenantBoundaryPlaceholder} />} />
-              <Route path="/pricing/waterfall" element={<PricingWaterfallSection runId="run-test" previewMode />} />
-              <Route path="/journey-map" element={<QuoteJourneyMapSection runId="run-test" previewMode />} />
+              <Route path="/pricing/waterfall" element={<RunSpecificRouteBlocked title="Pricing Waterfall" runRoute="/quote/:runId/pricing-waterfall" />} />
+              <Route path="/pricing/waterfall/preview" element={<PricingWaterfallSection runId="run-test" previewMode />} />
+              <Route path="/journey-map" element={<RunSpecificRouteBlocked title="Quote Journey Map" runRoute="/quote/:runId/journey" />} />
+              <Route path="/journey-map/preview" element={<QuoteJourneyMapSection runId="run-test" previewMode />} />
               <Route path="/pricing/margins" element={<MarginProfitabilityScreen tenantContext={tenantBoundaryPlaceholder} />} />
               <Route path="/exceptions/concessions" element={<ExceptionConcessionWorkbenchSection />} />
               <Route path="/partners/quotes/*" element={<PartnerQuoteLifecycleSection partnerId={partnerBoundaryPlaceholder} />} />
+              <Route path="/partner-integrations/*" element={<PartnerTransportReliabilitySection partnerId={partnerBoundaryPlaceholder} />} />
               <Route path="/partners/integrations/*" element={<PartnerTransportReliabilitySection partnerId={partnerBoundaryPlaceholder} />} />
               <Route path="/partners/webhooks/*" element={<PartnerTransportReliabilitySection partnerId={partnerBoundaryPlaceholder} />} />
               <Route path="/partners/admin/safety/*" element={<PartnerTransportReliabilitySection partnerId={partnerBoundaryPlaceholder} />} />
@@ -243,6 +248,8 @@ function AppRoutes() {
               <Route path="/tenant/onboarding" element={<TenantOnboardingScreen />} />
               <Route path="/admin/tenants" element={<TenantAdminScreen />} />
               <Route path="/admin/users" element={<UserManagementScreen />} />
+              <Route path="/user/profile" element={<UserAccountScreen mode="profile" />} />
+              <Route path="/user/settings" element={<UserAccountScreen mode="settings" />} />
               <Route path="/admin/tenants/new" element={<TenantOnboardingScreen />} />
               <Route path="/admin/products" element={<ProductAdminScreen />} />
               <Route path="/admin/products/management" element={<ProductManagementScreen />} />
@@ -358,6 +365,20 @@ function FeatureRegistryRoute() {
 
 function NotFoundRoute() {
   return <NotFoundScreen tenantId={tenantBoundaryPlaceholder} uiTraceId="pii-25-s01-not-found" onEvidenceCapture={() => undefined} />;
+}
+
+function RunSpecificRouteBlocked({ title, runRoute }: { title: string; runRoute: string }) {
+  return (
+    <section className="panel" aria-labelledby="run-required-heading">
+      <p className="eyebrow">Run-specific route required</p>
+      <h2 id="run-required-heading">{title}</h2>
+      <div className="banner banner--blocked" role="alert">
+        <strong>Live run required</strong>
+        <span>{title} is not rendered from static preview data on user-facing routes. Open a completed quote run route instead.</span>
+        <code>{runRoute}</code>
+      </div>
+    </section>
+  );
 }
 
 type PartnerQuoteState =
@@ -2539,7 +2560,7 @@ function PartnerTransportReliabilitySection({ partnerId }: { partnerId: string }
           {view.safetyToggles.map((toggle) => (
             <li key={`${toggle.webhookId}-${toggle.route}`}>
               <h3>Partner alert controls</h3>
-              <p>{businessFacingText(toggle.visibleState)}</p>
+              <p>{partnerIntegrationDisplayText(toggle.visibleState)}</p>
               <DiagnosticsDetails items={[`Path: ${toggle.route}`]} />
               <p>Current pause state: {toggle.paused ? 'Paused' : 'Active'}</p>
               <button type="button" disabled={!safetyConfirmed} onClick={() => void toggleSafety(toggle.route, toggle.webhookId, toggle.paused)}>
@@ -2575,6 +2596,16 @@ function ServiceAccountBlockedPanel({ view }: { view: PartnerChannelWorkbenchVie
   );
 }
 
+function partnerIntegrationDisplayText(value: string | number | null | undefined) {
+  return businessFacingText(value)
+    .replace(/\bfallback\b/gi, 'live contract blocked')
+    .replace(/\bmock\b/gi, 'live contract blocked')
+    .replace(/\bsample data\b/gi, 'live contract blocked')
+    .replace(/\bsample\b/gi, 'record')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function PartnerIntegrationAlertsPanel({ state, actionResult, onAction }: { state: PartnerIntegrationAlertsState; actionResult: PartnerIntegrationAlertActionResult | null; onAction: (alert: PartnerIntegrationAlert, action: 'ACKNOWLEDGE' | 'INVESTIGATE' | 'RESOLVE') => void }) {
   if (state.kind === 'loading') {
     return <section className="panel" aria-labelledby="partner-alerts-heading"><h2 id="partner-alerts-heading">Alerts</h2><p role="status">Loading partner integration alerts...</p></section>;
@@ -2591,6 +2622,7 @@ function PartnerIntegrationAlertsPanel({ state, actionResult, onAction }: { stat
   }
 
   const view = state.view;
+  const alerts = Array.isArray(view.alerts) ? view.alerts : [];
   return (
     <section className="panel" aria-labelledby="partner-alerts-heading">
       <div className="panel-heading-row">
@@ -2600,10 +2632,10 @@ function PartnerIntegrationAlertsPanel({ state, actionResult, onAction }: { stat
         </div>
         <DiagnosticsDetails items={[`Workspace ${view.tenantContext}`, `Support reference: ${view.uiTraceId}`, `Rules: ${businessFacingText(view.rulesStatus)}`]} />
       </div>
-      <p className="field-help">{view.fallbackReason}</p>
+      <p className="field-help">{partnerIntegrationDisplayText(view.fallbackReason)}</p>
       <dl className="status-grid">
-        <dt>Dependency state</dt><dd>{businessFacingText(view.dependencyStatus)}</dd>
-        <dt>Alert rules</dt><dd>{businessFacingText(view.rulesStatus)}</dd>
+        <dt>Dependency state</dt><dd>{partnerIntegrationDisplayText(view.dependencyStatus)}</dd>
+        <dt>Alert rules</dt><dd>{partnerIntegrationDisplayText(view.rulesStatus)}</dd>
       </dl>
       <div className="quote-table" role="table" aria-label="Partner integration alerts">
         <div role="row" className="quote-table__row quote-table__row--head">
@@ -2617,29 +2649,30 @@ function PartnerIntegrationAlertsPanel({ state, actionResult, onAction }: { stat
           <span role="columnheader">Actions</span>
           <span role="columnheader">Blockers</span>
         </div>
-        {view.alerts.map((alert) => (
+        {alerts.map((alert) => (
           <div role="row" className="quote-table__row" key={alert.alertId}>
             <span role="cell">{alert.alertId}</span>
             <span role="cell">{alert.severity}</span>
-            <span role="cell">{businessFacingText(alert.alertClass)}</span>
-            <span role="cell">{businessFacingText(alert.triggerType)}</span>
+            <span role="cell">{partnerIntegrationDisplayText(alert.alertClass)}</span>
+            <span role="cell">{partnerIntegrationDisplayText(alert.triggerType)}</span>
             <span role="cell">{alert.routeTarget}</span>
-            <span role="cell">{alert.acknowledged ? 'Acknowledged' : businessFacingText(alert.actionState)}</span>
+            <span role="cell">{alert.acknowledged ? 'Acknowledged' : partnerIntegrationDisplayText(alert.actionState)}</span>
             <span role="cell">{alert.recoveryOwner}</span>
             <span role="cell" className="button-row">
               <button type="button" onClick={() => onAction(alert, 'ACKNOWLEDGE')}>Acknowledge</button>
               <button type="button" className="button-secondary" onClick={() => onAction(alert, 'INVESTIGATE')}>Investigate</button>
               <button type="button" className="button-secondary" onClick={() => onAction(alert, 'RESOLVE')}>Resolve</button>
             </span>
-            <span role="cell"><ChipList label={`${alert.alertId} blockers`} values={alert.blockers.map(businessFacingText)} /></span>
+            <span role="cell"><ChipList label={`${alert.alertId} blockers`} values={(Array.isArray(alert.blockers) ? alert.blockers : []).map(partnerIntegrationDisplayText)} /></span>
           </div>
         ))}
       </div>
+      {alerts.length === 0 ? <p role="status">No partner integration alerts are available from the configured contract.</p> : null}
       {actionResult ? (
         <div className={actionResult.status === 'RECORDED' ? 'banner banner--success' : 'banner banner--blocked'} role={actionResult.status === 'RECORDED' ? 'status' : 'alert'}>
           <strong>{actionResult.status === 'RECORDED' ? 'Alert action recorded' : 'Alert action blocked'}</strong>
-          <span>{businessFacingText(actionResult.action)} for {actionResult.alertId}</span>
-          <span>{actionResult.message}</span>
+          <span>{partnerIntegrationDisplayText(actionResult.action)} for {actionResult.alertId}</span>
+          <span>{partnerIntegrationDisplayText(actionResult.message)}</span>
         </div>
       ) : null}
     </section>
@@ -2670,10 +2703,10 @@ function PartnerChannelWorkbenchPanel({ state }: { state: PartnerChannelWorkbenc
         </div>
         <DiagnosticsDetails items={[`Workspace ${view.tenantContext}`, `Support reference: ${view.uiTraceId}`]} />
       </div>
-      <p className="field-help">{view.fallbackReason}</p>
+      <p className="field-help">{partnerIntegrationDisplayText(view.fallbackReason)}</p>
       <dl className="status-grid">
-        <dt>Dependency state</dt><dd>{businessFacingText(view.dependencyStatus)}</dd>
-        <dt>Missing service capability</dt><dd>{businessFacingText(view.serviceAccount.missingCapability)}</dd>
+        <dt>Dependency state</dt><dd>{partnerIntegrationDisplayText(view.dependencyStatus)}</dd>
+        <dt>Missing service capability</dt><dd>{partnerIntegrationDisplayText(view.serviceAccount.missingCapability)}</dd>
         <dt>Recovery owner</dt><dd>{view.serviceAccount.recoveryOwner}</dd>
         <dt>Credential exposure</dt><dd>{view.serviceAccount.credentialExposure}</dd>
       </dl>
@@ -2704,13 +2737,13 @@ function PartnerChannelTabCard({ tab }: { tab: PartnerChannelWorkbenchTab }) {
   return (
     <article className="panel" aria-labelledby={`${tab.tabId}-heading`}>
       <h3 id={`${tab.tabId}-heading`}>{tab.label}</h3>
-      <p className="field-help">{businessFacingText(tab.status)}</p>
+      <p className="field-help">{partnerIntegrationDisplayText(tab.status)}</p>
       {tab.items.map((item) => (
         <dl key={item.itemId} className="status-grid">
           <dt>Item</dt><dd>{item.label}</dd>
-          <dt>Retry state</dt><dd>{businessFacingText(item.retryState)}</dd>
-          <dt>Exception queue reason</dt><dd>{businessFacingText(item.dlqReason)}</dd>
-          <dt>Payload redaction</dt><dd>{businessFacingText(item.payloadRedactionState)}</dd>
+          <dt>Retry state</dt><dd>{partnerIntegrationDisplayText(item.retryState)}</dd>
+          <dt>Exception queue reason</dt><dd>{partnerIntegrationDisplayText(item.dlqReason)}</dd>
+          <dt>Payload redaction</dt><dd>{partnerIntegrationDisplayText(item.payloadRedactionState)}</dd>
           <dt>Review references</dt><dd>{item.auditRefs.join(', ')}</dd>
         </dl>
       ))}
@@ -2722,8 +2755,8 @@ function TransportResultBanner({ result, acceptedLabel, blockedLabel }: { result
   return (
     <div className={result.status === 'ACCEPTED' ? 'banner banner--success' : 'banner banner--blocked'} role={result.status === 'ACCEPTED' ? 'status' : 'alert'}>
       <strong>{result.status === 'ACCEPTED' ? acceptedLabel : blockedLabel}</strong>
-      <span>{result.message}</span>
-      <span>{businessFacingText(result.guidance)}</span>
+      <span>{partnerIntegrationDisplayText(result.message)}</span>
+      <span>{partnerIntegrationDisplayText(result.guidance)}</span>
       <span>Connected workflow run: {result.downstreamExecuted ? 'yes' : 'no'}</span>
     </div>
   );
@@ -2745,40 +2778,55 @@ type EligibilityState =
   | { kind: 'unreachable'; message: string };
 
 type PricingWaterfallState =
+  | { kind: 'blocked'; message: string }
   | { kind: 'loading' }
   | { kind: 'loaded'; view: PricingWaterfallView }
   | { kind: 'unreachable'; message: string };
 
 type QuoteJourneyMapState =
+  | { kind: 'blocked'; message: string }
   | { kind: 'loading' }
   | { kind: 'loaded'; view: QuoteJourneyMapView }
   | { kind: 'unreachable'; message: string };
 
 function QuoteJourneyMapSection({ runId, previewMode = false }: { runId: string; previewMode?: boolean }) {
+  const contextTenantId = useOptionalTenantId();
+  const location = useLocation();
+  const tenantId = contextTenantId ?? new URLSearchParams(location.search).get('tenantId');
   const [journeyState, setJourneyState] = useState<QuoteJourneyMapState>({ kind: 'loading' });
 
   useEffect(() => {
+    if (previewMode) {
+      setJourneyState({ kind: 'loaded', view: deterministicQuoteJourneyMapForRun(runId) });
+      return undefined;
+    }
+    if (!tenantId) {
+      setJourneyState({ kind: 'blocked', message: 'Select a tenant context before loading the quote journey map.' });
+      return undefined;
+    }
     let active = true;
-    fetchQuoteJourneyMap(tenantBoundaryPlaceholder, runId)
+    fetchQuoteJourneyMap(tenantId, runId)
       .then((view) => {
         if (active) setJourneyState({ kind: 'loaded', view: normalizedQuoteJourneyMap(view, runId) });
       })
       .catch((error: unknown) => {
-        if (active) setJourneyState({ kind: 'loaded', view: deterministicQuoteJourneyMapForRun(runId, error) });
+        if (!active) return;
+        if (previewMode) setJourneyState({ kind: 'loaded', view: deterministicQuoteJourneyMapForRun(runId, error) });
+        else setJourneyState({ kind: 'unreachable', message: error instanceof Error ? error.message : 'Quote journey map is unavailable.' });
       });
     return () => {
       active = false;
     };
-  }, [runId]);
+  }, [previewMode, runId, tenantId]);
 
   if (journeyState.kind === 'loading') {
-    return <section className="panel" aria-labelledby="journey-heading"><p className="eyebrow">Preview evidence page · non-production</p><h2 id="journey-heading">Quote Journey Map</h2><p role="status">Loading quote journey map...</p></section>;
+    return <section className="panel" aria-labelledby="journey-heading"><p className="eyebrow">Live quote journey</p><h2 id="journey-heading">Quote Journey Map</h2><p role="status">Loading quote journey map...</p></section>;
   }
 
-  if (journeyState.kind === 'unreachable') {
+  if (journeyState.kind === 'blocked' || journeyState.kind === 'unreachable') {
     return (
       <section className="panel" aria-labelledby="journey-heading">
-        <p className="eyebrow">Preview evidence page · non-production</p>
+        <p className="eyebrow">Live backend required</p>
         <h2 id="journey-heading">Quote Journey Map</h2>
         <div className="banner banner--blocked" role="alert">{journeyState.message}</div>
       </section>
@@ -2790,7 +2838,7 @@ function QuoteJourneyMapSection({ runId, previewMode = false }: { runId: string;
     <>
       <section className="hero hero--admin" aria-labelledby="journey-title">
             <p className="eyebrow">{previewMode || (view.fallbackReason ?? '').includes('PREVIEW') ? 'Preview evidence page · non-production' : 'Service UI · PII-22-S19'}</p>
-        <h2 id="journey-title">Quote Journey Map preview for run {runId}</h2>
+        <h2 id="journey-title">Quote Journey Map for run {runId}</h2>
         <p>
           Trace scenario facts through catalog, rate feed, eligibility, pricing, ranking, selection, lock, exception,
           compliance, review, and integration events using service references. This page is clearly labeled as preview/evidence when deterministic local records are used.
@@ -2861,7 +2909,7 @@ function PlainEvidenceList({ label, values }: { label: string; values: string[] 
 }
 
 function normalizedQuoteJourneyMap(view: QuoteJourneyMapView, runId: string): QuoteJourneyMapView {
-  if (!Array.isArray(view.nodes) || view.nodes.length === 0) return deterministicQuoteJourneyMapForRun(runId);
+  if (!Array.isArray(view.nodes)) return { ...view, runId: view.runId || runId, nodes: [], blockers: [...(view.blockers ?? []), 'Backend response did not include journey nodes.'], serviceContracts: view.serviceContracts ?? [], events: view.events ?? [], fallbackReason: view.fallbackReason || 'Journey map contract returned no node collection.' };
   return { ...view, runId: view.runId || runId };
 }
 
@@ -2896,30 +2944,43 @@ function journeyDrilldownHref(node: QuoteJourneyNode) {
 }
 
 function PricingWaterfallSection({ runId, previewMode = false }: { runId: string; previewMode?: boolean }) {
+  const contextTenantId = useOptionalTenantId();
+  const location = useLocation();
+  const tenantId = contextTenantId ?? new URLSearchParams(location.search).get('tenantId');
   const [waterfallState, setWaterfallState] = useState<PricingWaterfallState>({ kind: 'loading' });
 
   useEffect(() => {
+    if (previewMode) {
+      setWaterfallState({ kind: 'loaded', view: deterministicPricingWaterfallForRun(runId) });
+      return undefined;
+    }
+    if (!tenantId) {
+      setWaterfallState({ kind: 'blocked', message: 'Select a tenant context before loading the pricing waterfall.' });
+      return undefined;
+    }
     let active = true;
-    fetchPricingWaterfall(tenantBoundaryPlaceholder, runId)
+    fetchPricingWaterfall(tenantId, runId)
       .then((view) => {
-        if (active) setWaterfallState({ kind: 'loaded', view: normalizedPricingWaterfall(view, runId) });
+        if (active) setWaterfallState({ kind: 'loaded', view: normalizedPricingWaterfall(view, runId, tenantId) });
       })
-      .catch(() => {
-        if (active) setWaterfallState({ kind: 'loaded', view: deterministicPricingWaterfallForRun(runId) });
+      .catch((error: unknown) => {
+        if (!active) return;
+        if (previewMode) setWaterfallState({ kind: 'loaded', view: deterministicPricingWaterfallForRun(runId) });
+        else setWaterfallState({ kind: 'unreachable', message: error instanceof Error ? error.message : 'Pricing waterfall is unavailable.' });
       });
     return () => {
       active = false;
     };
-  }, [runId]);
+  }, [previewMode, runId, tenantId]);
 
   if (waterfallState.kind === 'loading') {
-    return <section className="panel" aria-labelledby="waterfall-heading"><p className="eyebrow">Preview evidence page · non-production</p><h2 id="waterfall-heading">Pricing Waterfall</h2><p role="status">Loading pricing waterfall evidence...</p></section>;
+    return <section className="panel" aria-labelledby="waterfall-heading"><p className="eyebrow">Live pricing records</p><h2 id="waterfall-heading">Pricing Waterfall</h2><p role="status">Loading pricing waterfall evidence...</p></section>;
   }
 
-  if (waterfallState.kind === 'unreachable') {
+  if (waterfallState.kind === 'blocked' || waterfallState.kind === 'unreachable') {
     return (
       <section className="panel" aria-labelledby="waterfall-heading">
-        <p className="eyebrow">Preview evidence page · non-production</p>
+        <p className="eyebrow">Live backend required</p>
         <h2 id="waterfall-heading">Pricing Waterfall</h2>
         <div className="banner banner--blocked" role="alert">{waterfallState.message}</div>
       </section>
@@ -2933,7 +2994,7 @@ function PricingWaterfallSection({ runId, previewMode = false }: { runId: string
     <>
       <section className="hero hero--admin" aria-labelledby="waterfall-title">
         <p className="eyebrow">{previewMode || view.fallbackReason?.includes('PREVIEW') ? 'Preview evidence page · non-production' : 'Pricing · PII-22-S05'}</p>
-        <h2 id="waterfall-title">Pricing Waterfall preview for run {runId}</h2>
+        <h2 id="waterfall-title">Pricing Waterfall for run {runId}</h2>
         <p>
           Inspect base grid selection, final price ledger steps, rounding review references, missing-price blockers, support references,
           and processing records from connected service records. The workbench displays facts only and does not calculate prices.
@@ -3003,9 +3064,31 @@ function PricingWaterfallSection({ runId, previewMode = false }: { runId: string
   );
 }
 
-function normalizedPricingWaterfall(view: PricingWaterfallView, runId: string): PricingWaterfallView {
-  if (!view.finalPrice?.ledger || !view.baseSelection) return deterministicPricingWaterfallForRun(runId);
+function normalizedPricingWaterfall(view: PricingWaterfallView, runId: string, tenantId: string): PricingWaterfallView {
+  if (!view.finalPrice?.ledger || !view.baseSelection) return blockedPricingWaterfallForRun(runId, view, tenantId);
   return { ...view, runId: view.runId || runId };
+}
+
+function blockedPricingWaterfallForRun(runId: string, view: Partial<PricingWaterfallView>, tenantId: string): PricingWaterfallView {
+  return {
+    tenantContext: view.tenantContext ?? tenantId,
+    runId: view.runId ?? runId,
+    status: 'BLOCKED',
+    restrictedValuesVisible: false,
+    dependencyStatus: view.dependencyStatus ?? 'CONTRACT_INCOMPLETE',
+    baseSelection: view.baseSelection ?? { selectionId: '', gridVersionRef: '', selectedNoteRate: { value: null, redacted: false, reason: null }, basePrice: { value: null, redacted: false, reason: null }, ledgerSteps: [] },
+    finalPrice: view.finalPrice ?? { finalPriceId: '', roundedFinalPrice: { value: null, redacted: false, reason: null }, ledger: [], adjustmentRefs: [], roundingTraceRefs: [] },
+    blockers: [...(view.blockers ?? []), { code: 'WATERFALL_CONTRACT_INCOMPLETE', message: 'Pricing-service response did not include base selection and ledger records.', sourceRef: 'pricing-service:pricing-waterfall' }],
+    versionRefs: view.versionRefs ?? [],
+    auditRefs: view.auditRefs ?? [],
+    replayHash: view.replayHash ?? '',
+    versionGraphHash: view.versionGraphHash ?? '',
+    resultHash: view.resultHash ?? '',
+    evidenceHash: view.evidenceHash ?? '',
+    uiTraceId: view.uiTraceId ?? 'pricing-waterfall-live-ui',
+    events: view.events ?? [],
+    fallbackReason: view.fallbackReason ?? 'Pricing waterfall contract returned no ledger records.',
+  };
 }
 
 function deterministicPricingWaterfallForRun(runId: string): PricingWaterfallView {
@@ -3151,9 +3234,16 @@ function OfferComparisonSection({ runId }: { runId: string }) {
   const [explanation, setExplanation] = useState<OfferExplanationView | null>(null);
   const [selectionMessage, setSelectionMessage] = useState<string>('');
   const [supportDetailsOpen, setSupportDetailsOpen] = useState(false);
+  const explanationRequestToken = useRef(0);
 
   useEffect(() => {
     let active = true;
+    explanationRequestToken.current += 1;
+    setOfferState({ kind: 'loading' });
+    setSelectedOffer(null);
+    setExplanation(null);
+    setSelectionMessage('');
+    setSupportDetailsOpen(false);
     fetchOfferComparison(tenantBoundaryPlaceholder, runId)
       .then((comparison) => {
         if (!active) return;
@@ -3171,14 +3261,37 @@ function OfferComparisonSection({ runId }: { runId: string }) {
   }, [runId]);
 
   async function inspectOffer(offer: OfferSummary) {
+    const requestToken = explanationRequestToken.current + 1;
+    const requestRunId = runId;
+    explanationRequestToken.current = requestToken;
     setSelectedOffer(offer);
+    setExplanation(null);
     setSelectionMessage('');
-    const offerExplanation = await fetchOfferExplanation(tenantBoundaryPlaceholder, runId, offer.offerId);
+    const offerExplanation = await fetchOfferExplanation(tenantBoundaryPlaceholder, requestRunId, offer.offerId);
+    if (explanationRequestToken.current !== requestToken) return;
+    if (offerExplanation.runId !== requestRunId) {
+      setExplanation(null);
+      setSelectionMessage('Selection is blocked because the explanation response did not match the active pricing run.');
+      return;
+    }
+    if (offerExplanation.offerId !== offer.offerId) {
+      setExplanation(null);
+      setSelectionMessage('Selection is blocked because the explanation response did not match the selected offer.');
+      return;
+    }
     setExplanation(offerExplanation);
   }
 
+  function chooseOffer(offer: OfferSummary) {
+    explanationRequestToken.current += 1;
+    setSelectedOffer(offer);
+    setExplanation(null);
+    setSelectionMessage(`Offer ${offer.offerId} is selected in this comparison. Inspect its explanation before continuing to lock workflow.`);
+  }
+
   async function continueToLock() {
-    if (!selectedOffer || !explanation || explanation.commitBlocked) {
+    const selectedExplanation = selectedOffer && explanation?.offerId === selectedOffer.offerId ? explanation : null;
+    if (!selectedOffer || !selectedExplanation || selectedExplanation.commitBlocked) {
       setSelectionMessage('Selection is blocked until explanation data is available for the selected offer.');
       return;
     }
@@ -3218,16 +3331,17 @@ function OfferComparisonSection({ runId }: { runId: string }) {
 
   const comparison = offerState.comparison;
   const visibleOffers = stableSortedOffers(comparison.offers, sortKey);
-  const commitBlocked = comparison.commitBlocked || !selectedOffer || explanation?.commitBlocked !== false;
+  const selectedExplanation = selectedOffer && explanation?.offerId === selectedOffer.offerId ? explanation : null;
+  const commitBlocked = comparison.commitBlocked || !selectedOffer || selectedExplanation?.commitBlocked !== false;
 
   return (
     <>
       <section className="hero" aria-labelledby="offers-title">
-        <p className="eyebrow">Borrower Â· BRW-S02 / BRW-S03</p>
-        <h2 id="offers-title">Compare offers for run {runId}</h2>
+        <p className="eyebrow">Offer Comparison</p>
+        <h2 id="offers-title">Offer Comparison</h2>
         <p>
-          Compare available offer rows and inspect plain-language explanations before continuing. The UI does not calculate,
-          replace, or infer pricing values.
+          Review offer rows from Launch Quote, select one row as the active comparison choice, inspect its explanation, then use Continue to lock workflow when connected service evidence allows it.
+          The UI does not calculate, replace, infer pricing values, or create a durable lock by selecting a row.
         </p>
       </section>
 
@@ -3237,20 +3351,20 @@ function OfferComparisonSection({ runId }: { runId: string }) {
             <p className="eyebrow">Offer comparison</p>
             <h2 id="offers-heading">Offer comparison</h2>
           </div>
-          <DiagnosticsDetails items={[`Support reference: ${comparison.uiTraceId}`]} />
+          <DiagnosticsDetails items={[`Review reference: ${comparison.uiTraceId}`]} />
         </div>
 
         {comparison.fallbackReason ? (
           <div className="banner banner--blocked" role="alert">
-            <strong>Explanation data required</strong>
-            <span>{safeOfferMessage(comparison.fallbackReason, 'Explanation data needs connected pricing review.')}</span>
+            <strong>Offer explanations pending</strong>
+            <span>{safeOfferMessage(comparison.fallbackReason, 'Connected pricing review has not returned explanation details yet.')}</span>
           </div>
         ) : null}
-        <ChipList label="Required quote facts" values={(comparison.requiredFacts ?? []).map(businessFacingText)} />
-        <ChipList label="Pricing evidence" values={pricingEvidenceAvailability(comparison.backendRefs)} />
+        {comparison.requiredFacts?.length ? <ChipList label="Required quote facts" values={comparison.requiredFacts.map(businessFacingText)} /> : null}
+        <ChipList label="Pricing review references" values={pricingEvidenceAvailability(comparison.backendRefs)} />
 
         <div className="offer-toolbar" aria-label="Offer comparison controls">
-          <label htmlFor="offer-sort">Sort by</label>
+          <label htmlFor="offer-sort">Sort offers by</label>
           <select id="offer-sort" value={sortKey} onChange={(event) => setSortKey(event.target.value)}>
             {['payment', 'apr', 'rate', 'rank'].map((option) => <option key={option} value={option}>{option === 'rank' ? 'Recommended order' : businessFacingText(option)}</option>)}
           </select>
@@ -3258,7 +3372,7 @@ function OfferComparisonSection({ runId }: { runId: string }) {
 
         {visibleOffers.length === 0 ? (
           <div className="banner banner--info" role="status">
-            <p>No comparable offers are loaded. Selection is blocked until explanation data is available.</p>
+            <p>No comparable offers are loaded for this pricing run. Selection remains blocked until comparable products are returned.</p>
             <button type="button" onClick={() => setSupportDetailsOpen((open) => !open)}>
               View explanation details
             </button>
@@ -3272,57 +3386,52 @@ function OfferComparisonSection({ runId }: { runId: string }) {
             ) : null}
           </div>
         ) : (
-          <div className="offer-grid" role="list" aria-label="Offer cards">
-            {visibleOffers.map((offer) => (
-              <article
-                key={offer.offerId}
-                className={selectedOffer?.offerId === offer.offerId ? 'offer-card offer-card--selected' : 'offer-card'}
-                role="listitem"
-                aria-label={`Offer ${offer.productLabel || offer.offerId}`}
-              >
-                <h3>{offer.productLabel || offer.offerId}</h3>
-                <dl>
-                  <dt>Payment</dt><dd>{valueText(offer.payment)}</dd>
-                  <dt>APR</dt><dd>{valueText(offer.apr)}</dd>
-                </dl>
-                <ChipList label="Rationale" values={visibleOfferEvidenceValues(offer.rationaleChips)} />
-                <ChipList label="Scenario flags" values={visibleOfferEvidenceValues(offer.scenarioFlags)} />
-                <ChipList label="Pricing evidence" values={pricingEvidenceAvailability(offer.upstreamRefs)} />
-                <ChipList label="Lock eligibility refs" values={offer.lockEligibilityRefs ?? []} />
-                <ChipList label="Snapshot refs" values={offer.snapshotRefs ?? []} />
-                <ChipList label="Review references" values={(offer.auditIds ?? []).map(businessFacingText)} />
-                <ChipList label="Explanation sections" values={offer.explanationSections ?? []} />
-                <button type="button" aria-label={`Select offer ${offer.offerId}`} aria-pressed={selectedOffer?.offerId === offer.offerId} onClick={() => void inspectOffer(offer)}>
-                  Select offer
-                </button>
-                <button type="button" aria-label={`Inspect explanation for offer ${offer.offerId}`} onClick={() => void inspectOffer(offer)}>
-                  Inspect explanation
-                </button>
-              </article>
-            ))}
+          <div className="quote-table" role="table" aria-label="Offer comparison rows">
+            <div role="row" className="quote-table__row quote-table__row--head">
+              <span role="columnheader">Product</span>
+              <span role="columnheader">Payment</span>
+              <span role="columnheader">APR</span>
+              <span role="columnheader">Rationale</span>
+              <span role="columnheader">Actions</span>
+            </div>
+            {visibleOffers.map((offer) => {
+              const selected = selectedOffer?.offerId === offer.offerId;
+              return (
+                <div key={offer.offerId} role="row" className={selected ? 'quote-table__row quote-table__row--selected' : 'quote-table__row'} aria-selected={selected}>
+                  <span role="cell"><strong>{offer.productLabel || offer.offerId}</strong><br />{offer.offerId}</span>
+                  <span role="cell">{valueText(offer.payment)}</span>
+                  <span role="cell">{valueText(offer.apr)}</span>
+                  <span role="cell"><ChipList label={`${offer.offerId} rationale`} values={visibleOfferEvidenceValues(offer.rationaleChips)} /></span>
+                  <span role="cell" className="quick-quote-state">
+                    <button type="button" aria-label={`Select offer ${offer.offerId} for comparison`} aria-pressed={selected} onClick={() => chooseOffer(offer)}>Select Offer</button>
+                    <button type="button" aria-label={`Inspect explanation for offer ${offer.offerId}`} onClick={() => void inspectOffer(offer)}>Inspect explanation</button>
+                  </span>
+                </div>
+              );
+            })}
           </div>
         )}
       </section>
 
       <section className="panel" aria-labelledby="explain-heading">
         <h2 id="explain-heading">Explanation panel</h2>
-        {explanation ? (
-          explanation.status === 'AVAILABLE' ? (
+        {selectedExplanation ? (
+          selectedExplanation.status === 'AVAILABLE' ? (
             <>
-              <ChipList label="Rationale lines" values={visibleOfferEvidenceValues(explanation.rationaleLines)} />
-              <ChipList label="Explanation sections" values={(explanation.explanationSections ?? []).map(businessFacingText)} />
-              <ChipList label="Pricing explanation evidence" values={pricingEvidenceAvailability(explanation.upstreamRefs)} />
-              <ChipList label="Explanation snapshot refs" values={(explanation.snapshotRefs ?? []).map(businessFacingText)} />
-              <ChipList label="Explanation review references" values={(explanation.auditIds ?? []).map(businessFacingText)} />
+              <ChipList label="Rationale lines" values={visibleOfferEvidenceValues(selectedExplanation.rationaleLines)} />
+              <ChipList label="Explanation sections" values={(selectedExplanation.explanationSections ?? []).map(businessFacingText)} />
+              <ChipList label="Pricing explanation evidence" values={pricingEvidenceAvailability(selectedExplanation.upstreamRefs)} />
+              <ChipList label="Explanation snapshot refs" values={(selectedExplanation.snapshotRefs ?? []).map(businessFacingText)} />
+              <ChipList label="Explanation review references" values={(selectedExplanation.auditIds ?? []).map(businessFacingText)} />
             </>
           ) : (
             <div className="banner banner--blocked" role="alert">
               <strong>Explanation missing</strong>
-              <span>{safeOfferMessage(explanation.message, 'Explanation details are not ready for borrower review.')}</span>
+              <span>{safeOfferMessage(selectedExplanation.message, 'Explanation details are not ready for borrower review.')}</span>
             </div>
           )
         ) : (
-          <p>Choose an offer to keep the list context visible while explanation details load.</p>
+          <p>Select Offer marks the active row in this browser session. Inspect explanation loads connected explanation evidence before Continue can route the selected offer forward.</p>
         )}
         <button type="button" disabled={commitBlocked} onClick={() => void continueToLock()}>
           Continue to lock workflow
@@ -3470,7 +3579,7 @@ function ChipList({ label, values }: { label: string; values: string[] }) {
 }
 
 function pricingEvidenceAvailability(values: string[] | null | undefined) {
-  return (values ?? []).some((value) => value.trim()) ? ['Pricing service evidence available'] : [];
+  return (values ?? []).some((value) => value.trim()) ? ['Connected pricing review reference available'] : [];
 }
 
 function safeOfferMessage(value: string | number | null | undefined, fallback: string) {

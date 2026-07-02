@@ -14,6 +14,8 @@ import org.junit.jupiter.api.Test;
 
 class TenantFieldConfigurationStoreServiceTest {
     private static final Instant NOW = Instant.parse("2026-06-18T16:00:00Z");
+    private static final String TENANT_ALPHA = "11111111-1111-1111-1111-111111111111";
+    private static final String TENANT_BETA = "22222222-2222-2222-2222-222222222222";
 
     @Test
     void storesNativeTenantFieldsWithoutCrossTenantReads() {
@@ -92,12 +94,12 @@ class TenantFieldConfigurationStoreServiceTest {
         TenantFieldConfigurationStoreService service = service();
         TenantFieldConfigurationStoreController controller = new TenantFieldConfigurationStoreController(service, new TenantContextService());
 
-        controller.save("tenant-alpha", contextHeaders("tenant-alpha"), nativeField("tenant-beta", "CLIENT_SETTINGS", "path-owned-field", "Path owned field"));
+        controller.save(TENANT_ALPHA, contextHeaders(TENANT_ALPHA), nativeField(TENANT_BETA, "CLIENT_SETTINGS", "path-owned-field", "Path owned field"));
 
-        assertThat(controller.activeField("tenant-alpha", "CLIENT_SETTINGS", "path-owned-field", contextHeaders("tenant-alpha")).getBody())
+        assertThat(controller.activeField(TENANT_ALPHA, "CLIENT_SETTINGS", "path-owned-field", contextHeaders(TENANT_ALPHA)).getBody())
             .extracting(TenantFieldConfiguration::tenantId)
-            .isEqualTo("tenant-alpha");
-        assertThat(controller.activeField("tenant-beta", "CLIENT_SETTINGS", "path-owned-field", contextHeaders("tenant-beta")).getStatusCode().value()).isEqualTo(404);
+            .isEqualTo(TENANT_ALPHA);
+        assertThat(controller.activeField(TENANT_BETA, "CLIENT_SETTINGS", "path-owned-field", contextHeaders(TENANT_BETA)).getStatusCode().value()).isEqualTo(404);
     }
 
     @Test
@@ -114,12 +116,31 @@ class TenantFieldConfigurationStoreServiceTest {
     void controllerRejectsCrossTenantContextBeforeReturningFieldData() {
         TenantFieldConfigurationStoreService service = service();
         TenantFieldConfigurationStoreController controller = new TenantFieldConfigurationStoreController(service, new TenantContextService());
-        controller.save("tenant-alpha", contextHeaders("tenant-alpha"), nativeField("tenant-alpha", "CLIENT_SETTINGS", "alpha-field", "Alpha field"));
+        controller.save(TENANT_ALPHA, contextHeaders(TENANT_ALPHA), nativeField(TENANT_ALPHA, "CLIENT_SETTINGS", "alpha-field", "Alpha field"));
 
-        assertThatThrownBy(() -> controller.activeForTenantSurface("tenant-alpha", "CLIENT_SETTINGS", contextHeaders("tenant-beta")))
+        assertThatThrownBy(() -> controller.activeForTenantSurface(TENANT_ALPHA, "CLIENT_SETTINGS", contextHeaders(TENANT_BETA)))
             .isInstanceOf(TenantContextValidationException.class)
             .extracting(error -> ((TenantContextValidationException) error).code())
             .isEqualTo("TENANT_ACCESS_DENIED");
+    }
+
+    @Test
+    void overloadedDraftSaveWritesOneTenantAlignedDraftWithConditions() {
+        TenantFieldConfigurationStoreService service = service();
+
+        service.saveDraft(TENANT_ALPHA, "APPLICATION_FORM", List.of(
+            systemField(TENANT_BETA, "APPLICATION_FORM", "borrower-name", "Borrower", "Borrower field", true, false),
+            systemField(TENANT_BETA, "APPLICATION_FORM", "income", "Income", "Income field", true, false)
+        ), Map.of("income", List.of("borrower-name")), "admin-alpha");
+
+        assertThat(service.draftForTenantSurface(TENANT_ALPHA, "APPLICATION_FORM"))
+            .get()
+            .satisfies(draft -> {
+                assertThat(draft.tenantId()).isEqualTo(TENANT_ALPHA);
+                assertThat(draft.configurations()).extracting(TenantFieldConfiguration::tenantId).containsOnly(TENANT_ALPHA);
+                assertThat(draft.conditionFieldRefs()).containsEntry("income", List.of("borrower-name"));
+            });
+        assertThat(service.draftForTenantSurface(TENANT_BETA, "APPLICATION_FORM")).isEmpty();
     }
 
     @Test

@@ -1,0 +1,13 @@
+{
+  "name": "get-eligibility-explanation-success.v1",
+  "method": "GET",
+  "path": "/tenants/{tenantId}/eligibility/{quoteId}/explanation",
+  "requiredHeaders": ["Authorization"],
+  "response": {
+    "body": {
+      "audit": {
+        "resultHash": "sha256:synthetic-explanation-result"
+      }
+    }
+  }
+}

@@ -1,0 +1,118 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: wcpe-dev
+  labels:
+    app.kubernetes.io/part-of: world-class-pricing-engine
+    environment: dev
+  annotations:
+    wcpe.codefactory/deployment-policy: "blocked-without-explicit-non-prod-approval"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: underwriting-service-config
+  namespace: wcpe-dev
+data:
+  SPRING_PROFILES_ACTIVE: dev
+  SERVER_PORT: "8080"
+  MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info,prometheus
+  WCPE_SYNTHETIC_ONLY: "true"
+  SPRING_DATASOURCE_URL: jdbc:postgresql://catalog-postgres.wcpe-dev.svc.cluster.local:5432/catalog
+  SPRING_DATASOURCE_USERNAME: catalog_app
+  SPRING_FLYWAY_ENABLED: "true"
+  SPRING_FLYWAY_LOCATIONS: classpath:db/migration
+  SPRING_FLYWAY_TABLE: underwriting_flyway_schema_history
+  SPRING_FLYWAY_BASELINE_ON_MIGRATE: "true"
+  SPRING_FLYWAY_BASELINE_VERSION: "0"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: underwriting-service
+  namespace: wcpe-dev
+  labels:
+    app: underwriting-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: underwriting-service
+  template:
+    metadata:
+      labels:
+        app: underwriting-service
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: underwriting-service
+          image: 192.168.4.102:32061/mortgage-pricing/underwriting-service:0.1.0-requirement-increment-6-20260701T172415Z-amd64
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: underwriting-service-config
+          env:
+            - name: JAVA_TOOL_OPTIONS
+              value: >-
+                -Dspring.flyway.table=underwriting_flyway_schema_history
+                -Dspring.flyway.baseline-on-migrate=true
+                -Dspring.flyway.baseline-version=0
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: catalog-db-secret
+                  key: POSTGRES_PASSWORD
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 40
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: 750m
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: underwriting-service
+  namespace: wcpe-dev
+spec:
+  type: ClusterIP
+  selector:
+    app: underwriting-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

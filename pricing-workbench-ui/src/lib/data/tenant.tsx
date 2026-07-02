@@ -20,11 +20,19 @@ export function TenantContextProvider({ tenantId, children }: { tenantId: string
 }
 
 export function useTenantId(): string {
+  const tenantId = useOptionalTenantId();
+  if (tenantId) return tenantId;
+
+  throw new Error('Tenant id is required from TenantContextProvider or URL tenantId.');
+}
+
+export function useOptionalTenantId(): string | null {
   const tenantId = useContext(TenantContext);
   if (tenantId) return tenantId;
 
+  if (typeof window === 'undefined') return null;
   const urlTenant = new URLSearchParams(window.location.search).get('tenantId');
   if (urlTenant) return urlTenant;
 
-  throw new Error('Tenant id is required from TenantContextProvider or URL tenantId.');
+  return null;
 }

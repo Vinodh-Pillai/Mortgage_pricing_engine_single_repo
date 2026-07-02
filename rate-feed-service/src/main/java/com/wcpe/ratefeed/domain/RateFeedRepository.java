@@ -192,8 +192,8 @@ class RateFeedRepository {
 
   BatchParseSource batchParseSource(UUID tenantId, UUID batchId) {
     try {
-      return jdbc.queryForObject("select batch_id,investor_id,channel_id,feed_format_id,status,file_sha256 from rate_feed.rate_feed_batch where tenant_id=? and batch_id=?", (rs, row) -> new BatchParseSource(
-          rs.getObject("batch_id", UUID.class), rs.getObject("investor_id", UUID.class), rs.getObject("channel_id", UUID.class), rs.getObject("feed_format_id", UUID.class), rs.getString("status"), rs.getString("file_sha256")), tenantId, batchId);
+      return jdbc.queryForObject("select b.batch_id,b.investor_id,b.channel_id,b.feed_format_id,b.status,b.file_sha256,rf.storage_object_id from rate_feed.rate_feed_batch b left join rate_feed.raw_file rf on rf.tenant_id=b.tenant_id and rf.raw_file_id=b.raw_file_id where b.tenant_id=? and b.batch_id=?", (rs, row) -> new BatchParseSource(
+          rs.getObject("batch_id", UUID.class), rs.getObject("investor_id", UUID.class), rs.getObject("channel_id", UUID.class), rs.getObject("feed_format_id", UUID.class), rs.getString("status"), rs.getString("file_sha256"), rs.getString("storage_object_id")), tenantId, batchId);
     } catch (EmptyResultDataAccessException ex) {
       throw new RateFeedException(HttpStatus.NOT_FOUND, "BATCH_NOT_FOUND", "Rate feed batch was not found.");
     }
@@ -233,8 +233,16 @@ class RateFeedRepository {
 
   // V-004 fix: audit separates request (before_hash) from response (after_hash)
   void audit(UUID tenantId, UUID aggregateId, String eventType, String aggregateType, String actor, String correlationId, String beforeHash, String afterHash, Object payload) {
+    UUID auditEventId = UUID.randomUUID();
+    Instant occurredAt = Instant.now();
+    String resultHash = afterHash != null && !afterHash.isBlank()
+        ? afterHash
+        : (beforeHash != null && !beforeHash.isBlank() ? beforeHash : Hashing.sha256(json(payload)));
     jdbc.update("insert into rate_feed.audit_event(tenant_id,audit_event_id,event_type,aggregate_type,aggregate_id,actor_id,correlation_id,before_hash,after_hash,payload_redacted,result_hash) values (?,?,?,?,?,?,?,?,?,?,?)",
-        tenantId, UUID.randomUUID(), eventType, aggregateType, aggregateId, actor, correlationId, beforeHash, afterHash, jsonb(payload), afterHash);
+        tenantId, auditEventId, eventType, aggregateType, aggregateId, actor, correlationId, beforeHash, afterHash, jsonb(payload), resultHash);
+    jdbc.update("insert into rate_feed.rate_feed_audit_event(tenant_id,audit_event_id,event_type,event_version,aggregate_type,aggregate_id,actor_id,actor_type,correlation_id,causation_id,occurred_at,source_service,before_hash,after_hash,evidence_refs,result_hash,redaction_level,retention_until,payload_redacted) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        tenantId, auditEventId, eventType, 1, aggregateType, aggregateId, actor, "USER", correlationId, aggregateId.toString(), Timestamp.from(occurredAt), "rate-feed-service",
+        beforeHash, afterHash, jsonb(List.of()), resultHash, "STANDARD", Timestamp.from(occurredAt.plus(Duration.ofDays(2555))), jsonb(payload));
   }
 
   String json(Object value) { try { return mapper.writeValueAsString(value); } catch (Exception ex) { throw new IllegalStateException(ex); } }
@@ -253,7 +261,7 @@ class RateFeedRepository {
   }
 
   record UploadSessionRow(UUID uploadSessionId, UUID investorId, UUID channelId, UUID feedFormatId, String sourceType, Instant effectiveAt, String timezone, String fileName, String contentType, long contentLengthBytes, UUID supersedesBatchId, String status, Instant expiresAt, String createdBy, String correlationId) {}
-  record BatchParseSource(UUID batchId, UUID investorId, UUID channelId, UUID feedFormatId, String status, String fileSha256) {}
+  record BatchParseSource(UUID batchId, UUID investorId, UUID channelId, UUID feedFormatId, String status, String fileSha256, String storageObjectId) {}
   record InvestorFeedIntegrationRow(UUID tenantId, UUID investorId, UUID channelId, UUID feedFormatId, String tenantExternalKey, String investorExternalKey, String channelExternalKey, String feedFormat, String schemaVersion) {}
   record PublishedRateSheetVersionRow(UUID tenantId, UUID versionId, UUID investorId, UUID channelId, String productKey, int version, String status, String gridHash, String resultHash, Instant effectiveAt) {}
   record CacheInvalidationRow(UUID tenantId, UUID cacheInvalidationId, UUID versionId, RateFeedModels.CacheInvalidationReason reason, String status, List<String> affectedPatterns, String requestedBy, Instant createdAt, Instant completedAt, int retryCount, String lastErrorCode, String correlationId, String expectedVersionHash, UUID investorId, UUID channelId, Instant effectiveAt, String resultHash) {}

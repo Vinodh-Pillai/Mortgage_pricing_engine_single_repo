@@ -5,6 +5,7 @@ import com.wcpe.eligibility.domain.models.PropertyTypeRuleSetConfig;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import java.sql.Date;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -20,7 +21,7 @@ public class PropertyTypeRuleRepository {
 
     public List<PropertyTypeRuleSetConfig> resolve(UUID tenantId, String productCode, String investorCode,
                                                     String channel, String asOfDate) {
-        String effectiveDateStr = asOfDate != null && !asOfDate.isBlank() ? asOfDate : LocalDate.now().toString();
+        Date effectiveDate = Date.valueOf(asOfDate != null && !asOfDate.isBlank() ? LocalDate.parse(asOfDate) : LocalDate.now());
 
         List<UUID> ruleSetIds = jdbc.query(
             "SELECT rule_set_id FROM eligibility.property_type_rule_set " +
@@ -31,7 +32,7 @@ public class PropertyTypeRuleRepository {
             "effective_from <= ? AND (effective_to IS NULL OR effective_to >= ?) " +
             "ORDER BY version DESC",
             (rs, rowNum) -> rs.getObject("rule_set_id", UUID.class),
-            tenantId, productCode, investorCode, channel, effectiveDateStr, effectiveDateStr
+            tenantId, productCode, investorCode, channel, effectiveDate, effectiveDate
         );
 
         if (ruleSetIds.isEmpty()) {
@@ -121,7 +122,7 @@ public class PropertyTypeRuleRepository {
     }
 
     public List<PropertyTypeRuleSetConfig> findByTenantForCache(UUID tenantId, String asOfDate) {
-        String effectiveDateStr = asOfDate != null && !asOfDate.isBlank() ? asOfDate : LocalDate.now().toString();
+        Date effectiveDate = Date.valueOf(asOfDate != null && !asOfDate.isBlank() ? LocalDate.parse(asOfDate) : LocalDate.now());
 
         List<UUID> ruleSetIds = jdbc.query(
             "SELECT rule_set_id FROM eligibility.property_type_rule_set " +
@@ -129,7 +130,7 @@ public class PropertyTypeRuleRepository {
             "effective_from <= ? AND (effective_to IS NULL OR effective_to >= ?) " +
             "ORDER BY version DESC",
             (rs, rowNum) -> rs.getObject("rule_set_id", UUID.class),
-            tenantId, effectiveDateStr, effectiveDateStr
+            tenantId, effectiveDate, effectiveDate
         );
 
         if (ruleSetIds.isEmpty()) {

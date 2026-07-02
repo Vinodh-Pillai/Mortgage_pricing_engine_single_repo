@@ -130,6 +130,47 @@ export type PartnerIntegrationAlertActionResult = {
   events: string[];
 };
 
+function normalizeStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function blockedPartnerIntegrationAlertsView(partnerId: string, fallbackReason: string): PartnerIntegrationAlertsView {
+  return {
+    partnerId,
+    tenantContext: 'TENANT_CONTEXT_UNAVAILABLE',
+    dependencyStatus: 'PARTNER_INTEGRATION_ALERT_CONTRACT_BLOCKED',
+    alerts: [],
+    rulesStatus: 'ALERT_RULES_CONTRACT_REQUIRED',
+    fallbackReason,
+    uiTraceId: partnerTransportHeaders['X-Ui-Trace-Id'],
+    events: ['PartnerIntegrationAlertsLiveContractBlocked'],
+  };
+}
+
+function normalizePartnerIntegrationAlertsView(partnerId: string, value: unknown): PartnerIntegrationAlertsView {
+  if (!value || typeof value !== 'object') {
+    return blockedPartnerIntegrationAlertsView(partnerId, 'Partner integration alert response was empty or invalid; live alert contract remains blocked.');
+  }
+  const record = value as Partial<PartnerIntegrationAlertsView>;
+  return {
+    partnerId: typeof record.partnerId === 'string' && record.partnerId ? record.partnerId : partnerId,
+    tenantContext: typeof record.tenantContext === 'string' ? record.tenantContext : 'TENANT_CONTEXT_UNAVAILABLE',
+    dependencyStatus: typeof record.dependencyStatus === 'string' ? record.dependencyStatus : 'PARTNER_INTEGRATION_ALERT_CONTRACT_BLOCKED',
+    alerts: Array.isArray(record.alerts)
+      ? record.alerts.map((alert) => ({
+        ...alert,
+        blockers: normalizeStringArray((alert as Partial<PartnerIntegrationAlert>).blockers),
+      }))
+      : [],
+    rulesStatus: typeof record.rulesStatus === 'string' ? record.rulesStatus : 'ALERT_RULES_CONTRACT_REQUIRED',
+    fallbackReason: typeof record.fallbackReason === 'string'
+      ? record.fallbackReason
+      : 'Partner integration alerts require a configured live alert contract; no partner alert records were synthesized.',
+    uiTraceId: typeof record.uiTraceId === 'string' ? record.uiTraceId : partnerTransportHeaders['X-Ui-Trace-Id'],
+    events: normalizeStringArray(record.events),
+  };
+}
+
 const partnerTransportHeaders = {
   Accept: 'application/json',
   'X-Ui-Trace-Id': 'ch-s05-local-trace',
@@ -216,7 +257,14 @@ export async function fetchPartnerIntegrationAlerts(
     headers: partnerTransportHeaders,
   });
   if (response.status >= 500) throw new Error('BFF partner integration alert boundary is temporarily unavailable.');
-  return (await response.json()) as PartnerIntegrationAlertsView;
+  if (!response.ok) {
+    return blockedPartnerIntegrationAlertsView(partnerId, `Partner integration alert route returned ${response.status}; live alert contract remains blocked.`);
+  }
+  try {
+    return normalizePartnerIntegrationAlertsView(partnerId, await response.json());
+  } catch {
+    return blockedPartnerIntegrationAlertsView(partnerId, 'Partner integration alert response was not valid JSON; live alert contract remains blocked.');
+  }
 }
 
 export async function requestPartnerIntegrationAlertAction(

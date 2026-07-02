@@ -37,7 +37,7 @@ public final class MarginVersioningService {
   private final Store store;
 
   public MarginVersioningService(Clock clock) {
-    this(clock, Store.failClosed("MarginVersioningService"));
+    this(clock, MarginDurableStores.marginVersioningStore());
   }
 
   MarginVersioningService(Clock clock, Store store) {

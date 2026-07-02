@@ -223,7 +223,16 @@ public class EligibilityApiController {
                     "ON CONFLICT (tenant_id, idempotency_key) DO NOTHING",
                     tenantId, idempotencyKey, requestHash, "EligibilityResult", responseJson
                 );
+                String persistedResponse = jdbcTemplate.queryForObject(
+                    "SELECT response_json::text FROM eligibility.idempotency_record WHERE tenant_id = ? AND idempotency_key = ?",
+                    String.class, tenantId, idempotencyKey
+                );
+                if (persistedResponse != null) {
+                    result = objectMapper.readValue(persistedResponse, EligibilityResult.class);
+                }
             } catch (JsonProcessingException e) {
+                // Log and continue - idempotency storage is non-critical
+            } catch (Exception e) {
                 // Log and continue - idempotency storage is non-critical
             }
         }

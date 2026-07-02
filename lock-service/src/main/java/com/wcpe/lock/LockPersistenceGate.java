@@ -6,6 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public final class LockPersistenceGate {
   private String mode = "fail-closed";
   private String readinessMessage = "Durable persistence is not enabled; lifecycle routes fail closed.";
+  private boolean jdbcRepositoryAvailable;
 
   public String mode() {
     return mode;
@@ -23,14 +24,21 @@ public final class LockPersistenceGate {
     this.readinessMessage = readinessMessage;
   }
 
+  public void markJdbcRepositoryAvailable(boolean jdbcRepositoryAvailable) {
+    this.jdbcRepositoryAvailable = jdbcRepositoryAvailable;
+  }
+
   public boolean lifecycleRoutesEnabled() {
-    return false;
+    return "jdbc".equalsIgnoreCase(mode) && jdbcRepositoryAvailable;
   }
 
   public void requireLifecycleRoutePersistence(String route) {
+    if (lifecycleRoutesEnabled()) {
+      return;
+    }
     throw new LockServiceException(
       "PERSISTENCE_NOT_DURABLE",
-      "Lock lifecycle route " + route + " is fail-closed because durable JDBC persistence is not wired and process-local storage is disabled. "
+      "Lock lifecycle route " + route + " is fail-closed because durable JDBC persistence is not wired, even when lock.persistence.mode=jdbc is requested, and process-local storage is disabled. "
         + readinessMessage
     );
   }

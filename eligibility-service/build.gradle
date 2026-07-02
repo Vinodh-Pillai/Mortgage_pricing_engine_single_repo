@@ -9,6 +9,11 @@ version = '0.1.0'
 
 java { toolchain { languageVersion = JavaLanguageVersion.of(17) } }
 
+ext {
+  testcontainersVersion = '1.21.3'
+  dockerBackedDockerApiVersion = providers.environmentVariable('DOCKER_API_VERSION').orElse('1.44')
+}
+
 dependencies {
   implementation 'org.springframework.boot:spring-boot-starter-web'
   implementation 'org.springframework.boot:spring-boot-starter-validation'
@@ -21,6 +26,7 @@ dependencies {
   implementation 'org.flywaydb:flyway-database-postgresql'
   runtimeOnly 'org.postgresql:postgresql'
   testImplementation 'org.springframework.boot:spring-boot-starter-test'
+  testImplementation platform("org.testcontainers:testcontainers-bom:${testcontainersVersion}")
   testImplementation 'org.testcontainers:postgresql'
   testImplementation 'org.testcontainers:junit-jupiter'
 
@@ -40,5 +46,6 @@ tasks.register('dockerBackedTest', Test) {
   classpath = sourceSets.test.runtimeClasspath
   useJUnitPlatform()
   systemProperty 'eligibility.enforceDockerTests', 'true'
+  systemProperty 'api.version', dockerBackedDockerApiVersion.get()
   shouldRunAfter tasks.named('test')
 }

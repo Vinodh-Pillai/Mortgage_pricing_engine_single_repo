@@ -233,7 +233,7 @@ class RateFeedController {
   @PostMapping(value = "/rate-sheets/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
   ResponseEntity<RateFeedModels.ImportResponse> importRateSheet(@PathVariable UUID tenantId, @RequestParam("file") MultipartFile file, HttpServletRequest http) {
     Headers h = headers(http);
-    Map<String, String> metadata = extractFileMetadata(file);
+    Map<String, String> metadata = extractFileMetadata(file, http);
     return withAuthorizedHeaders(h, RateFeedRoles.RATE_FEED_UPLOAD, () -> ResponseEntity.status(HttpStatus.CREATED).body(
         service.importRateSheet(tenantId, file, metadata, h.idempotencyKey(), h.actorId(), h.correlationId())));
   }
@@ -364,12 +364,22 @@ class RateFeedController {
 
   private static boolean present(String value) { return value != null && !value.isBlank(); }
 
-  private Map<String, String> extractFileMetadata(org.springframework.web.multipart.MultipartFile file) {
+  private Map<String, String> extractFileMetadata(org.springframework.web.multipart.MultipartFile file, HttpServletRequest request) {
     Map<String, String> m = new LinkedHashMap<>();
     String name = file.getOriginalFilename();
     m.put("fileName", name);
     if (name != null) m.put("fileName", name);
+    copyRequestParam(request, m, "investorId");
+    copyRequestParam(request, m, "channelId");
+    copyRequestParam(request, m, "productCode");
+    copyRequestParam(request, m, "effectiveAt");
+    copyRequestParam(request, m, "notes");
     return m;
+  }
+
+  private static void copyRequestParam(HttpServletRequest request, Map<String, String> target, String name) {
+    String value = request.getParameter(name);
+    if (value != null && !value.isBlank()) target.put(name, value.trim());
   }
 
 record Headers(String idempotencyKey, String actorId, String correlationId, String roles) {}

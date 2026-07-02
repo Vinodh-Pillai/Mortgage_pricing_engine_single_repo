@@ -70,12 +70,39 @@ class PricingLoadTestPlanTest {
         "src/test/resources/loadtest/PII-17-S07/pricing-load-test.k6.js"));
     String runbook = Files.readString(Path.of(
         "src/main/resources/runbooks/PII-17-S07-pricing-load-test.md"));
+    String quoteOpenApi = Files.readString(Path.of(
+        "../quote-service/src/main/resources/openapi/loanpass-quote-api.yml"));
 
     assertTrue(fixture.contains("\"ownerStory\": \"PII-17-S07\""));
-    assertTrue(fixture.contains("synthetic-tenant-alpha"));
+    assertTrue(fixture.contains("11111111-1111-1111-1111-111111111111"));
+    assertTrue(fixture.contains("\"pathTemplate\": \"/api/v1/tenants/{tenantId}/quotes\""));
+    assertTrue(fixture.contains("\"defaultApiPrefix\": \"/api/v1\""));
+    assertTrue(fixture.contains("\"defaultQuotePath\": \"/quotes\""));
+    assertTrue(fixture.contains("\"openApiServerUrl\": \"/api/v1\""));
+    assertTrue(fixture.contains("\"expectedResponseStatuses\""));
+    assertTrue(fixture.contains("\"contractRejections\": [400, 422]"));
     assertTrue(fixture.contains("\"scenarioMix\""));
+    assertTrue(fixture.contains("\"syntheticFixtureMetadata\""));
+    assertTrue(fixture.contains("PII-17-S07-pricing-load-test-seed-v1"));
+    assertTrue(fixture.contains("\"productionValidity\": false"));
+    assertTrue(fixture.contains("\"seededQuoteRequestRefs\""));
     assertTrue(script.contains("__ENV.PRICING_BASE_URL"));
+    assertTrue(script.contains("fixture.quoteApi.defaultApiPrefix"));
+    assertTrue(script.contains("fixture.quoteApi.defaultQuotePath"));
     assertTrue(script.contains("pricing-load-test"));
+    assertTrue(script.contains("${baseUrl}${apiPrefix}/tenants/${tenantId}${quotePath}"));
+    assertTrue(script.contains("PRICING_QUOTE_PATH"));
+    assertTrue(script.contains("const refs = fixture.seededQuoteRequestRefs"));
+    assertTrue(script.contains("quote_unexpected_response_rate"));
+    assertTrue(script.contains("isExpectedResponseStatus(response.status)"));
+    assertTrue(script.contains("syntheticFixtureMetadata: fixture.syntheticFixtureMetadata"));
+    assertTrue(script.contains("endpoint: 'quote-create'"));
+    assertTrue(script.contains("referenceDataVersionRef"));
     assertTrue(runbook.contains("Do not use real borrower PII"));
+    assertTrue(runbook.contains("/api/v1/tenants/{tenantId}/quotes"));
+    assertTrue(runbook.contains("PRICING_API_PREFIX=/api/v1"));
+    assertTrue(runbook.contains("PRICING_QUOTE_PATH=/quotes"));
+    assertTrue(quoteOpenApi.contains("url: /api/v1"));
+    assertTrue(quoteOpenApi.contains("byte-for-byte public LoanPass swagger diff"));
   }
 }

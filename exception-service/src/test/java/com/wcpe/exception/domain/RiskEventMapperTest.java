@@ -11,19 +11,18 @@ import org.junit.jupiter.api.Test;
 class RiskEventMapperTest {
 
   @Test
-  void mappingFailsClosedBeforePersistingWithoutDurableRepository() {
+  void mappingPersistsRiskMonitoringEventInDurableRepository() {
     ExceptionService service = new ExceptionService(new ExceptionRepository());
 
-    ExceptionServiceException error = assertThrows(
-      ExceptionServiceException.class,
-      () -> service.publishRiskMonitoringEvent(
-        sourceEvent("RISK-IDEMP-001", Map.of("concessionStatus", "APPLIED", "amountBucket", "configured-small")),
-        mappingVersion(),
-        false
-      )
+    ExceptionModels.RiskMonitoringEventEnvelope envelope = service.publishRiskMonitoringEvent(
+      sourceEvent("RISK-IDEMP-001", Map.of("concessionStatus", "APPLIED", "amountBucket", "configured-small")),
+      mappingVersion(),
+      false
     );
 
-    assertEquals("PERSISTENCE_BACKEND_REQUIRED", error.code());
+    assertEquals(ExceptionModels.MonitoringSignalType.OVERRIDE_USAGE, envelope.signalType());
+    assertEquals(ExceptionModels.RiskMonitoringEventStatus.READY, envelope.status());
+    assertEquals("pricing.risk-monitoring.events", envelope.topic());
   }
 
   static ExceptionModels.MapRiskMonitoringEventCommand sourceEvent(String idempotencyKey, Map<String, String> payload) {

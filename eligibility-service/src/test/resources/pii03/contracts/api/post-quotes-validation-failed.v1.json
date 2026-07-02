@@ -1,0 +1,12 @@
+{
+  "name": "post-quotes-validation-failed.v1",
+  "method": "POST",
+  "path": "/tenants/{tenantId}/quotes",
+  "requiredHeaders": ["Authorization", "Idempotency-Key"],
+  "response": {
+    "body": {
+      "code": "VALIDATION_FAILED",
+      "type": "https://pricing/errors/validation-failed"
+    }
+  }
+}
