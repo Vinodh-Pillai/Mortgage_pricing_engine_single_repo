@@ -16,19 +16,51 @@ import org.springframework.web.client.RestClient;
 class UiShellControllerReviewFixTest {
 
   @Test
-  void pricingWaterfallBindsSelectedProductWhenMultipleLiveProductsExist() {
-    PricingBffUiFallbackAdapter adapter = adapterWithSummary(summary(
+  void pricingWaterfallUsesExecuteProductWhenSelectedProductEvidenceExists() {
+    PricingBffUiFallbackAdapter adapter = adapterWithSummaryAndProduct(summary(
         product("product-1", List.of(field("rate.noteRate", "5.875"))),
-        product("product-2", List.of(field("rate.noteRate", "6.125"), field("quote-service-price", "101.25")))));
+        product("product-2", List.of(field("rate.noteRate", "5.875")))),
+        productDetail("product-2", List.of(field("rate.noteRate", "6.125"), field("quote-service-price", "101.25"))));
 
     PricingBffUiFallbackAdapter.PricingWaterfallView view =
         adapter.pricingWaterfall("tenant-a", "run-1", "product-2", "trace-review-fix");
 
-    assertThat(view.status()).isEqualTo("QUOTE_SERVICE_LOANPASS_SUMMARY_VISIBLE");
-    assertThat(view.baseSelection().selectionId()).isEqualTo("quote-service-summary:product-2");
+    assertThat(view.status()).isEqualTo("QUOTE_SERVICE_LOANPASS_PRODUCT_VISIBLE");
+    assertThat(view.baseSelection().selectionId()).isEqualTo("quote-service-product:product-2");
     assertThat(view.baseSelection().selectedNoteRate().value()).isEqualTo("6.125");
     assertThat(view.finalPrice().roundedFinalPrice().value()).isEqualTo("101.25");
     assertThat(view.blockers()).isEmpty();
+  }
+
+  @Test
+  void pricingWaterfallFailsClosedWhenExecuteProductReturnsDifferentProductForSelectedOffer() {
+    PricingBffUiFallbackAdapter adapter = adapterWithSummaryAndProduct(summary(
+        product("product-1", List.of(field("rate.noteRate", "5.875"))),
+        product("product-2", List.of(field("rate.noteRate", "5.875")))),
+        productDetail("product-1", List.of(field("rate.noteRate", "6.125"), field("quote-service-price", "101.25"))));
+
+    PricingBffUiFallbackAdapter.PricingWaterfallView view =
+        adapter.pricingWaterfall("tenant-a", "run-1", "product-2", "trace-review-fix");
+
+    assertThat(view.status()).isEqualTo("BLOCKED_SELECTED_PRODUCT_MISMATCH");
+    assertThat(view.restrictedValuesVisible()).isFalse();
+    assertThat(view.blockers()).extracting(PricingBffUiFallbackAdapter.WaterfallBlocker::code)
+        .containsExactly("SELECTED_PRODUCT_MISMATCH");
+    assertThat(view.fallbackReason()).contains("requested selected offer/product product-2");
+  }
+
+  @Test
+  void quoteDetailFailsClosedWhenExecuteProductReturnsDifferentProductForSelectedOffer() {
+    PricingBffUiFallbackAdapter adapter = adapterWithSummaryAndProduct(summary(),
+        productDetail("product-1", List.of(field("rate.noteRate", "6.125"), field("quote-service-price", "101.25"))));
+
+    PricingBffUiFallbackAdapter.QuoteDetailView view =
+        adapter.quoteDetail("tenant-a", "run-1", "product-2", "trace-review-fix");
+
+    assertThat(view.status()).isEqualTo("BLOCKED_SELECTED_PRODUCT_MISMATCH");
+    assertThat(view.waterfall().blockers()).extracting(PricingBffUiFallbackAdapter.WaterfallBlocker::code)
+        .containsExactly("SELECTED_PRODUCT_MISMATCH");
+    assertThat(view.fallbackReason()).contains("requested selected offer/product product-2");
   }
 
   @Test
@@ -122,7 +154,12 @@ class UiShellControllerReviewFixTest {
   }
 
   private static PricingBffUiFallbackAdapter adapterWithSummary(LoanPassExecutionSummaryResponse summary) {
-    return new PricingBffUiFallbackAdapter(new StubQuoteServiceClient(summary));
+    return new PricingBffUiFallbackAdapter(new StubQuoteServiceClient(summary, null));
+  }
+
+  private static PricingBffUiFallbackAdapter adapterWithSummaryAndProduct(LoanPassExecutionSummaryResponse summary,
+      LoanPassProductExecutionResult product) {
+    return new PricingBffUiFallbackAdapter(new StubQuoteServiceClient(summary, product));
   }
 
   private static LoanPassExecutionSummaryResponse summary(LoanPassExecutionProductSummary... products) {
@@ -135,22 +172,36 @@ class UiShellControllerReviewFixTest {
         List.of(), calculatedFields, true, Map.of("type", "approved"), "v-review-fix");
   }
 
+  private static LoanPassProductExecutionResult productDetail(String productId, List<CreditApplicationField> calculatedFields) {
+    return new LoanPassProductExecutionResult(productId, "Product " + productId, "CODE-" + productId, "Investor", null,
+        true, List.of(), calculatedFields, Map.of("type", "approved"), "v-review-fix",
+        Map.of("source", "quote-service.execute-product"));
+  }
+
   private static CreditApplicationField field(String fieldId, String value) {
     return new CreditApplicationField(fieldId, new CreditApplicationValue("string", value, null, null));
   }
 
   private static class StubQuoteServiceClient extends PricingBffQuoteServiceLoanPassClient {
     private final LoanPassExecutionSummaryResponse summary;
+    private final LoanPassProductExecutionResult product;
 
-    StubQuoteServiceClient(LoanPassExecutionSummaryResponse summary) {
+    StubQuoteServiceClient(LoanPassExecutionSummaryResponse summary, LoanPassProductExecutionResult product) {
       super(RestClient.builder(), "https://quote-service.test", null, null);
       this.summary = summary;
+      this.product = product;
     }
 
     @Override
     LoanPassExecutionSummaryResponse executeSummary(String tenantId, String runId, String traceId,
         List<CreditApplicationField> creditApplicationFields) {
       return summary;
+    }
+
+    @Override
+    LoanPassProductExecutionResult executeProduct(String tenantId, String runId, String productId, String traceId,
+        List<CreditApplicationField> creditApplicationFields) {
+      return product;
     }
   }
 }

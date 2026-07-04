@@ -42,9 +42,12 @@
 }
 
 .quickquote-header {
-  position: sticky;
-  top: var(--layout-header-height, 6.1rem);
-  z-index: calc(var(--layout-z-sticky, 1000) - 1);
+  position: static;
+}
+
+.quickquote-header--static {
+  top: auto;
+  z-index: auto;
 }
 
 .quickquote-header__identity,
@@ -2161,6 +2164,15 @@
   padding: 1rem;
   position: fixed;
   z-index: 28;
+}
+
+.quote-product-detail-panel--inline {
+  border: 1px solid color-mix(in srgb, var(--ds-color-border) 78%, transparent);
+  border-radius: var(--ds-radius-xl);
+  inline-size: 100%;
+  inset: auto;
+  position: static;
+  z-index: auto;
 }
 
 .quote-product-detail-panel h3 {

@@ -5,8 +5,9 @@ Scope: project-local instructions and evidence checklist for `NextInput/5.md` co
 ## Contract Compatibility
 
 - Local contract artifact: `projects/quote-service/src/main/resources/openapi/loanpass-quote-api.yml`.
-- External blocker: no approved public LoanPass swagger/schema artifact is committed at `projects/quote-service/src/test/resources/loanpass/public-swagger.json` or another repo-local path. Do not fetch `https://api.loanpass.io/v1/swagger/schema.json` or public docs over the network from this lane.
-- Current evidence allowed in-repo: structural/local compatibility only for `/api/v1/loanpass/execute-summary`, `/api/v1/loanpass/executeSummary`, `/api/v1/loanpass/execute-product`, and `/api/v1/loanpass/executeProduct`.
+- Approved public endpoint semantics for QuickQuote mapping: LoanPass `execute-summary` (`https://api.loanpass.io/v1/swagger/#tag/pricing/post/execute-summary`) is the product-candidate listing boundary; LoanPass `execute-product` (`https://api.loanpass.io/v1/swagger/#tag/pricing/post/execute-product`) is the single-product detail boundary after a product id/selected program is known.
+- Remaining external blocker: no approved public LoanPass swagger/schema artifact is committed at `projects/quote-service/src/test/resources/loanpass/public-swagger.json` or another repo-local path for byte-for-byte field-level diffing. Do not fetch `https://api.loanpass.io/v1/swagger/schema.json` or public docs over the network from this lane.
+- Current evidence allowed in-repo: structural/local compatibility only for `/api/v1/loanpass/execute-summary`, `/api/v1/loanpass/executeSummary`, `/api/v1/loanpass/execute-product`, and `/api/v1/loanpass/executeProduct`, with endpoint roles fixed as summary=list and product=single-product detail.
 - Next unblocked step: commit an approved public LoanPass swagger/schema artifact with provenance, then add an offline structural diff test comparing required request/response fields, operation ids, status codes, and header semantics.
 
 ## Synthetic and Captured Catalog Data

@@ -526,15 +526,15 @@ export function PipelineIntakePage({
   const requiredPricingFields = useMemo(() => mode === 'quickquote' ? mergeRequiredPricingFields(configuredRequiredPricingFields, quickQuotePricingInputFields) : configuredRequiredPricingFields, [configuredRequiredPricingFields, mode, quickQuotePricingInputFields]);
   const quickQuoteDisplayProduct = mode === 'quickquote' ? selectedProduct ?? productRows.find(isProductEligible) ?? tenantHomePreviewProducts.find(isProductEligible) ?? null : selectedProduct;
   const launchReadinessValues = useMemo(() => {
-    if (mode !== 'quickquote' || !quickQuoteDisplayProduct) return values;
+    if (mode !== 'quickquote' || !selectedProduct) return values;
     return {
       ...values,
-      channel: values.channel || quickQuoteDisplayProduct.channelCode,
-      channelCode: values.channelCode || quickQuoteDisplayProduct.channelCode,
-      investorCode: values.investorCode || quickQuoteDisplayProduct.investorCode,
-      mortgageType: values.mortgageType || quickQuoteDisplayProduct.productType,
+      channel: values.channel || selectedProduct.channelCode,
+      channelCode: values.channelCode || selectedProduct.channelCode,
+      investorCode: values.investorCode || selectedProduct.investorCode,
+      mortgageType: values.mortgageType || selectedProduct.productType,
     };
-  }, [mode, quickQuoteDisplayProduct, values]);
+  }, [mode, selectedProduct, values]);
   const quickQuoteDisplayValues = useMemo(() => (mode === 'quickquote' ? launchReadinessValues : values), [launchReadinessValues, mode, values]);
   const missingRequiredFields = useMemo(() => missingConfiguredRequiredFields(requiredPricingFields, mode === 'quickquote' ? quickQuoteDisplayValues : values), [mode, quickQuoteDisplayValues, requiredPricingFields, values]);
   const launchMissingRequiredFields = useMemo(() => missingConfiguredRequiredFields(requiredPricingFields, launchReadinessValues), [requiredPricingFields, launchReadinessValues]);
@@ -569,13 +569,13 @@ export function PipelineIntakePage({
   const quoteReady = launchMissingRequiredFields.length === 0 && (mode === 'quickquote' || Boolean(selectedProduct)) && !quickQuoteRequiresExplicitProductSelection;
   const launchDisabled = flowState.kind === 'submitting' || !quoteReady;
   const launchStatus = quickQuoteRequiresExplicitProductSelection
-    ? 'Select one product before launch; multiple-product launch contract is not available.'
+    ? 'Select one product only for product-detail actions; QuickQuote launch uses LoanPass execute-summary to list eligible products.'
     : quoteReady
     ? mode === 'quickquote' && !quickQuoteProductsVisible
       ? 'Submit details to view product options'
       : selectedProduct || mode !== 'quickquote'
       ? 'Ready to launch quote'
-      : 'Ready to launch quote with unsynced product context'
+      : 'Ready to launch quote with execute-summary product list'
     : selectedProduct && launchMissingRequiredFields.length > 0
       ? 'Data required before pricing refresh'
       : mode === 'quickquote'
@@ -925,9 +925,9 @@ export function PipelineIntakePage({
   function revealQuickQuoteProducts() {
     setSubmitAttempted(true);
     if (mode === 'quickquote' && !selectedProduct && quickQuoteRequiresExplicitProductSelection) {
-      setFlowState({ kind: 'blocked', validation: { passed: false, status: 'BLOCKED', message: 'Select exactly one product before launching QuickQuote. Multiple-product launch requires a backend contract that is not present.', blockers: {} } });
-      setStatusMessage('Select one product before launch; multiple-product launch contract is not available.');
-      capture('quote-launch-blocked', { blockers: ['multiple-product-launch-contract-missing'] });
+      setFlowState({ kind: 'blocked', validation: { passed: false, status: 'BLOCKED', message: 'Select one product only for product-detail actions; QuickQuote launch uses LoanPass execute-summary to list eligible products.', blockers: {} } });
+      setStatusMessage('Select one product only for product-detail actions; QuickQuote launch uses LoanPass execute-summary to list eligible products.');
+      capture('quote-launch-blocked', { blockers: ['product-detail-selection-required'] });
       return;
     }
     setStatusMessage('QuickQuote product options are ready for review.');
@@ -1184,7 +1184,7 @@ export function PipelineIntakePage({
     event?.preventDefault();
     if (event) onSubmit?.(event);
     setSubmitAttempted(true);
-    const productForLaunch = product ?? selectedProduct ?? (mode === 'quickquote' ? quickQuoteDisplayProduct : null);
+    const productForLaunch = product ?? selectedProduct;
     if (product) applyProduct(product);
     const launchValues = productForLaunch ? { ...values, channel: productForLaunch.channelCode, channelCode: productForLaunch.channelCode, investorCode: productForLaunch.investorCode, mortgageType: productForLaunch.productType } : values;
     const validationErrors = validateFields(requiredPricingFields, launchValues);
@@ -1206,7 +1206,6 @@ export function PipelineIntakePage({
         resolvedVersion = 1;
         capture('quote-launch-local-draft-used', { reason: 'draft-persistence-unavailable' });
       }
-      if (mode === 'quickquote' && productForLaunch && !selectedProduct) capture('quote-launch-local-product-context-used', { reason: 'catalog-or-explicit-selection-unavailable', productCode: productForLaunch.productCode });
       if (!resolvedScenarioId) throw new Error('Connected scenario draft is unavailable; quote launch requires backend draft support.');
       const launched = await launchQuoteRun(tenantId, resolvedScenarioId, resolvedVersion, launchValues);
       if (launched.kind === 'blocked') {
@@ -1394,7 +1393,7 @@ export function PipelineIntakePage({
   if (mode === 'quickquote') {
     return (
       <section id="quickquote-workspace" className="quickquote-workspace" aria-labelledby="quickquote-heading" data-loading={quickQuoteLoading ? 'true' : 'false'}>
-        <header className="quickquote-header" aria-label="QuickQuote header">
+        <header className="quickquote-header quickquote-header--static" aria-label="QuickQuote header">
           <div className="quickquote-header__identity">
             <h1 id="quickquote-heading">QuickQuote</h1>
           </div>
@@ -1453,7 +1452,7 @@ export function PipelineIntakePage({
           </section>
         </div>
 
-        {selectedProduct && productDetailOpen ? <ProductDetailPanel product={selectedProduct} values={values} metadata={runtimeMetadata} onBack={() => setProductDetailOpen(false)} onUse={applyProduct} /> : null}
+        {selectedProduct && productDetailOpen ? <ProductDetailPanel product={selectedProduct} values={values} metadata={runtimeMetadata} onBack={() => setProductDetailOpen(false)} onUse={applyProduct} inline /> : null}
         {renderModeSwitchDialog()}
       </section>
     );
@@ -2142,10 +2141,10 @@ const calculationOutputAliases: Record<string, keyof BorrowerIntake> = {
   calcltv: 'loanToValue',
 };
 
-function ProductDetailPanel({ product, values, metadata, onBack, onUse }: { product: AuthorizedProduct; values: BorrowerIntake; metadata: ScenarioIntakeMetadata | null; onBack: () => void; onUse: (product: AuthorizedProduct) => void }) {
+function ProductDetailPanel({ product, values, metadata, onBack, onUse, inline = false }: { product: AuthorizedProduct; values: BorrowerIntake; metadata: ScenarioIntakeMetadata | null; onBack: () => void; onUse: (product: AuthorizedProduct) => void; inline?: boolean }) {
   const traceRefs = productAuditTraceRefs(product, metadata);
   return (
-    <aside className="quote-product-detail-panel" aria-label="Product detail">
+    <aside className={`quote-product-detail-panel${inline ? ' quote-product-detail-panel--inline' : ''}`} aria-label={inline ? 'QuickQuote product detail' : 'Product detail'}>
       <div className="quote-product-detail-panel__header">
         <button type="button" onClick={onBack}>← Back</button>
         <span className={`quote-status-pill quote-status-pill--${statusClass(product.status)}`}>{product.status}</span>

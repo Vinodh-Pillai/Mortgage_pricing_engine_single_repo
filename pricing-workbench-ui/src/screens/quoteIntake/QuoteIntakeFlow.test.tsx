@@ -316,9 +316,10 @@ describe('PipelineIntakeTest', () => {
   }, 30000);
 
   it('rendersFullScreenQuickQuoteShellWithStructuredStatusAndNoPipelineRedirectCopy', () => {
-    render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} />);
+    const { container } = render(<QuoteIntakeFlow mode="quickquote" metadataState={metadataState} />);
 
     expect(screen.getByRole('heading', { name: /^QuickQuote$/i })).toBeInTheDocument();
+    expect(container.querySelector('.quickquote-header')).toHaveClass('quickquote-header--static');
     expect(screen.queryByText(/^Current workspace$/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /^QuickQuote$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: /QuickQuote status strip/i })).not.toBeInTheDocument();
@@ -329,6 +330,9 @@ describe('PipelineIntakeTest', () => {
     revealQuickQuoteProducts();
     expect(screen.queryByRole('button', { name: /^Save QuickQuote draft$/i })).not.toBeInTheDocument();
     expect(screen.getByRole('table', { name: /QuickQuote product eligibility grid/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('row', { name: /Conventional 30-Year Preview ACTIVE/i }));
+    expect(screen.queryByRole('complementary', { name: /^Product detail$/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: /^QuickQuote product detail$/i })).toHaveClass('quote-product-detail-panel--inline');
     expect(screen.queryByText(/Submit details before product options are displayed/i)).not.toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(/Missing\s*0\s*facts/i);
     expect(screen.getByRole('columnheader', { name: /^Actions$/i })).toBeInTheDocument();
@@ -414,7 +418,7 @@ describe('PipelineIntakeTest', () => {
     revealQuickQuoteProducts();
     const launchButton = screen.getByRole('button', { name: /^Launch quote$/i });
     await waitFor(() => expect(launchButton).not.toBeDisabled());
-    expect(screen.getByText(/Ready to launch quote with unsynced product context/i)).toBeInTheDocument();
+    expect(screen.getByText(/Ready to launch quote with execute-summary product list/i)).toBeInTheDocument();
     fireEvent.click(launchButton);
 
     const launchCall = await waitFor(() => {
@@ -422,7 +426,10 @@ describe('PipelineIntakeTest', () => {
       expect(call).toBeDefined();
       return call;
     });
-    expect(JSON.parse(String(launchCall?.[1]?.body))).toMatchObject({ scenarioId: 'local-unsynced-pipeline-draft', scenarioVersion: 1, channelCode: 'RETAIL', mortgageType: 'CONVENTIONAL' });
+    const launchBody = JSON.parse(String(launchCall?.[1]?.body));
+    expect(launchBody).toMatchObject({ scenarioId: 'local-unsynced-pipeline-draft', scenarioVersion: 1 });
+    expect(launchBody.channelCode).not.toBe('RETAIL');
+    expect(launchBody.investorCode).not.toBe('FNMA');
     expect(fetchMock.mock.calls.some(([input, init]) => input.toString().includes('/scenarios') && (init?.method === 'POST' || init?.method === 'PATCH'))).toBe(false);
     expect(capture).toHaveBeenCalledWith(expect.objectContaining({ action: 'quote-launch-local-draft-used', reason: 'draft-persistence-unavailable' }));
     await waitFor(() => expect(onNavigate).toHaveBeenCalledWith('/quote/run-quickquote-live-1/offers'));
@@ -563,13 +570,9 @@ describe('PipelineIntakeTest', () => {
 
     fireEvent.click(referableRow);
     expect(capture).toHaveBeenCalledWith(expect.objectContaining({ action: 'pipeline-row-selected', storyId: 'PII-77-S02' }));
-    const auditDetails = screen.getByLabelText(/Product review details/i);
-    expect(auditDetails).toHaveTextContent(/Referable state is visible/i);
-    expect(auditDetails).toHaveTextContent(/Eligibility/);
-    expect(auditDetails).toHaveTextContent(/Calculation/);
-    expect(auditDetails).toHaveTextContent(/Adjustment/);
-    expect(auditDetails).toHaveTextContent(/Margin/);
-    expect(auditDetails).toHaveTextContent(/Pricing/);
+    expect(referableRow).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByRole('complementary', { name: /^Product detail$/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: /^QuickQuote product detail$/i })).toHaveClass('quote-product-detail-panel--inline');
 
     expect(within(ineligibleRow).queryByRole('button', { name: /^Review status$/i })).not.toBeInTheDocument();
     expect(within(ineligibleRow).getByRole('button', { name: /^Use for quote$/i })).toBeDisabled();
@@ -853,7 +856,7 @@ describe('PipelineIntakeTest', () => {
     const row = screen.getByRole('row', { name: /Conventional 30-Year Preview ACTIVE/i });
     expect(row.querySelector('[aria-label="Payment: Missing data"]')).toBeInTheDocument();
     expect(row.querySelector('[aria-label="DSCR: Missing data"]')).toBeInTheDocument();
-    expect(within(row).getAllByText(/Needs Loan purpose/i).length).toBeGreaterThan(0);
+    expect(within(row).getAllByText(/Needs Channel, Loan purpose/i).length).toBeGreaterThan(0);
     expect(within(row).queryByRole('link', { name: /trace/i })).not.toBeInTheDocument();
   });
 

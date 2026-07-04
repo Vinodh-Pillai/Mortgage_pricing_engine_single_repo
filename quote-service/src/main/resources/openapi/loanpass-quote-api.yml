@@ -17,7 +17,12 @@ paths:
   /loanpass/execute-summary:
     post:
       operationId: executeLoanPassSummary
-      summary: Execute a LoanPass-compatible summary quote request
+      summary: Execute a LoanPass-compatible summary request that lists eligible product candidates
+      description: >-
+        Local structural mapping for the public LoanPass execute-summary concept
+        (`/v1/pricing/execute-summary` in the approved public reference). QuickQuote uses
+        this listing boundary to return the product candidates for the request; product
+        detail hydration belongs to execute-product.
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/RequestHeader'
@@ -30,7 +35,7 @@ paths:
               $ref: '#/components/schemas/LoanPassQuoteRequest'
       responses:
         '200':
-          description: Summary quote request executed synchronously against the active durable catalog snapshot.
+          description: Summary request executed synchronously against the active durable catalog snapshot and returned as a product-candidate listing.
           content:
             application/json:
               schema:
@@ -45,7 +50,7 @@ paths:
     post:
       operationId: executeLoanPassSummaryAlias
       summary: Compatibility alias for executeLoanPassSummary
-      description: Backward-compatible camelCase alias for `/loanpass/execute-summary`.
+      description: Backward-compatible camelCase alias for `/loanpass/execute-summary`; maps to the LoanPass execute-summary product-candidate listing concept.
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/RequestHeader'
@@ -58,7 +63,7 @@ paths:
               $ref: '#/components/schemas/LoanPassQuoteRequest'
       responses:
         '200':
-          description: Summary quote request executed synchronously against the active durable catalog snapshot.
+          description: Summary request executed synchronously against the active durable catalog snapshot and returned as a product-candidate listing.
           content:
             application/json:
               schema:
@@ -72,7 +77,11 @@ paths:
   /loanpass/execute-product:
     post:
       operationId: executeLoanPassProduct
-      summary: Execute a LoanPass-compatible product quote request
+      summary: Execute a LoanPass-compatible product request for one eligible product
+      description: >-
+        Local structural mapping for the public LoanPass execute-product concept
+        (`/v1/pricing/execute-product` in the approved public reference). QuickQuote
+        uses this product-detail boundary only after a product id/selected program is known.
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/RequestHeader'
@@ -85,7 +94,7 @@ paths:
               $ref: '#/components/schemas/LoanPassQuoteRequest'
       responses:
         '200':
-          description: Product quote request executed synchronously against the active durable catalog snapshot.
+          description: Product request executed synchronously against one product in the active durable catalog snapshot.
           content:
             application/json:
               schema:
@@ -106,7 +115,7 @@ paths:
     post:
       operationId: executeLoanPassProductAlias
       summary: Compatibility alias for executeLoanPassProduct
-      description: Backward-compatible camelCase alias for `/loanpass/execute-product`.
+      description: Backward-compatible camelCase alias for `/loanpass/execute-product`; maps to the LoanPass execute-product single-product detail concept.
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/RequestHeader'
@@ -119,7 +128,7 @@ paths:
               $ref: '#/components/schemas/LoanPassQuoteRequest'
       responses:
         '200':
-          description: Product quote request executed synchronously against the active durable catalog snapshot.
+          description: Product request executed synchronously against one product in the active durable catalog snapshot.
           content:
             application/json:
               schema:

@@ -776,6 +776,24 @@ class PricingBffUiFallbackAdapter {
 
   PricingWaterfallView pricingWaterfall(String tenantId, String runId, String selectedOfferId, String uiTraceId) {
     String traceId = normalizeTrace(uiTraceId);
+    if (selectedOfferId != null && !selectedOfferId.isBlank()) {
+      String optionId = selectedOfferId.trim();
+      try {
+        LoanPassProductExecutionResult product = quoteServiceClient.executeProduct(tenantId, runId, optionId, traceId,
+            quoteRunContextFields(tenantId, runId));
+        if (!selectedMatchesProduct(product, optionId)) {
+          return pricingWaterfallBlockedProductSelection(tenantId, runId, traceId, "SELECTED_PRODUCT_MISMATCH",
+              "Quote-service execute-product returned product "
+                  + safeText(product == null ? null : product.productId(), "missing-product-id")
+                  + " for requested selected offer/product " + optionId
+                  + "; BFF kept pricing waterfall fail-closed.",
+              "quote-service.execute-product:selected-offer:" + optionId);
+        }
+        return waterfallFromLoanPassProduct(tenantId, runId, traceId, product);
+      } catch (PricingBffQuoteServiceLoanPassClient.QuoteServiceUnavailableException ex) {
+        return blockedWaterfall(tenantId, runId, traceId, ex.getMessage());
+      }
+    }
     try {
       LoanPassExecutionSummaryResponse response = quoteServiceClient.executeSummary(tenantId, runId, traceId,
           quoteRunContextFields(tenantId, runId));
@@ -935,6 +953,13 @@ class PricingBffUiFallbackAdapter {
     try {
       LoanPassProductExecutionResult result = quoteServiceClient.executeProduct(tenantId, runId, optionId, traceId,
           quoteRunContextFields(tenantId, runId));
+      if (!selectedMatchesProduct(result, optionId)) {
+        return QuoteDetailView.blockedProductMismatch(tenantId, runId, optionId, traceId,
+            "Quote-service execute-product returned product "
+                + safeText(result == null ? null : result.productId(), "missing-product-id")
+                + " for requested selected offer/product " + optionId
+                + "; BFF kept product detail fail-closed.");
+      }
       return QuoteDetailView.fromLoanPassProduct(tenantId, runId, optionId, traceId, result);
     } catch (PricingBffQuoteServiceLoanPassClient.QuoteServiceUnavailableException ex) {
       return QuoteDetailView.blocked(tenantId, runId, optionId, traceId, ex.getMessage());
@@ -1205,6 +1230,13 @@ class PricingBffUiFallbackAdapter {
   }
 
   private static boolean selectedMatchesProduct(LoanPassExecutionProductSummary product, String selected) {
+    if (product == null || selected == null || selected.isBlank()) return false;
+    return selected.equals(product.productId())
+        || selected.equals(product.productCode())
+        || selected.equals(product.productName());
+  }
+
+  private static boolean selectedMatchesProduct(LoanPassProductExecutionResult product, String selected) {
     if (product == null || selected == null || selected.isBlank()) return false;
     return selected.equals(product.productId())
         || selected.equals(product.productCode())
@@ -3229,6 +3261,24 @@ class PricingBffUiFallbackAdapter {
           List.of(), List.of(), List.of("audit:quote-service-product-detail-blocked"),
           "quote-detail-replay-hash-unavailable", "quote-detail-evidence-hash-unavailable", traceId,
           List.of("QuoteServiceProductDetailFailClosed"), reason);
+    }
+
+    static QuoteDetailView blockedProductMismatch(String tenantId, String runId, String offerId, String traceId,
+        String reason) {
+      OfferSummary summary = new OfferSummary(offerId, 0, "Selected product mismatch", null, null,
+          null, null, null, null, "BLOCKED", "N/A", null, "Quote-service selected product mismatch",
+          List.of("quote-service.execute-product"), List.of(reason), List.of("SELECTED_PRODUCT_MISMATCH"), "BLOCKED",
+          runId, 0, List.of("quote-service.execute-product:selected-offer:" + offerId), List.of(), List.of(), List.of(),
+          List.of("product-detail"), List.of(), List.of(), List.of(), List.of());
+      PricingWaterfallView waterfall = pricingWaterfallBlockedProductSelection(tenantId, runId, traceId,
+          "SELECTED_PRODUCT_MISMATCH", reason, "quote-service.execute-product:selected-offer:" + offerId);
+      return new QuoteDetailView(tenantId, runId, offerId, "BLOCKED_SELECTED_PRODUCT_MISMATCH", summary,
+          OfferExplanationView.missing(runId, offerId, traceId), waterfall,
+          List.of(new QuoteDetailPanel("summary", "LoanPass product detail", "BLOCKED",
+              List.of("productId", "productCode"), List.of("quote-service.execute-product"), List.of(reason))),
+          List.of(), List.of(), List.of("audit:quote-service-product-detail-mismatch:" + offerId),
+          "quote-detail-replay-hash-unavailable", "quote-detail-evidence-hash-unavailable", traceId,
+          List.of("QuoteServiceProductDetailProductMismatchFailClosed"), reason);
     }
 
     static QuoteDetailView fromLoanPassProduct(String tenantId, String runId, String offerId, String traceId,
